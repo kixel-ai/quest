@@ -37,14 +37,17 @@ enters the dev shell from the default branch's checkout, and the bot runs no
 checks or tests from the PR's head; confirm how Pullfrog checks out a fork
 PR's head and that the agent's instructions say so.
 
-Open for the implementer, with recommendations:
+Done for rind in kixel-ai/rind#714: steps before the action in
+`pullfrog.yml` (its `nix` and `vectors` actions, then `nix develop --command
+true`). The workflow is dispatch-only from the default branch, so its checkout
+is trusted. `hooks.setup` was not used, since the CLI could not read the
+repository's settings without the maintainer's Pullfrog login.
 
-- Where the step runs. Pullfrog's per-repository `hooks.setup` setting
-  (`pullfrog config set hooks.setup ... --repo moq-dev/<repo>`) or steps
-  before the action in `.github/workflows/pullfrog.yml`, whose header says to
-  edit only where indicated. Recommended: `hooks.setup` if it runs with the
-  privileges a Nix install and a submodule fetch need; check Pullfrog's docs
-  and one run's log.
-- Which repositories. Measure the added setup time on one run; recommended:
-  every repository whose reviews would run its tests (rind first), and none
-  where the fallback alone covers what reviews need.
+Remaining: once #714 merges, measure one review run's added setup time and
+confirm `just test` passes. Then apply the same steps to studio, rust2, quest,
+and web-transport where their reviews would run tests.
+
+## Waiting
+
+- Maintainer: merge kixel-ai/rind#714, then dispatch one Pullfrog review in
+  rind and check its log for the setup time and a passing `just test`
