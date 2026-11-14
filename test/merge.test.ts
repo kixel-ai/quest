@@ -40,7 +40,23 @@ function random(seed: number): (n: number) => number {
  * Lines from a small vocabulary heavy in blank and repeated lines, which is
  * where diffs have ties for git's discards and sliding to break.
  */
-const VOCABULARY = ["", "", "", "a", "b", "c", "d", "- [x](/quest/x.md)", "- [y](/quest/y.md)", "## Required", "}"];
+const VOCABULARY = [
+	"",
+	"",
+	"",
+	"a",
+	"b",
+	"c",
+	"d",
+	"- [x](/quest/x.md)",
+	"- [y](/quest/y.md)",
+	"## Required",
+	"}",
+	// CRLF lines, which decide a conflict's marker endings.
+	"\r",
+	"a\r",
+	"b\r",
+];
 
 function text(next: (n: number) => number, lines: string[]): string {
 	const body = lines.join("\n");
@@ -85,6 +101,16 @@ describe("merge", () => {
 		expect(render(merge(join(o), join(base), join(t)), 7, true)).toBe(git(join(o), join(base), join(t)));
 	});
 
+	test("ends a CRLF file's conflict markers in CRLF as git does, even after a last line without one", () => {
+		const [o, b, t] = ["a\r\nours", "a\r\nbase", "a\r\ntheirs"];
+		expect(merge(o, b, t)).toEqual([
+			["a\r"],
+			{ ours: ["ours\r"], base: ["base\r"], theirs: ["theirs\r"], crlf: true },
+			[""],
+		]);
+		expect(render(merge(o, b, t), 7, true)).toBe(git(o, b, t));
+	});
+
 	test("keeps a file both sides left alone, or changed alike", () => {
 		expect(merge("a\nb\n", "a\nb\n", "a\nb\n")).toEqual([["a", "b", ""]]);
 		expect(merge("a\nx\n", "a\nb\n", "a\nx\n")).toEqual([["a", "x", ""]]);
@@ -94,7 +120,7 @@ describe("merge", () => {
 	test("conflicts on edits that touch, as git does", () => {
 		expect(merge("a\nB\nc\n", "a\nb\nc\n", "a\nb\nC\n")).toEqual([
 			["a"],
-			{ ours: ["B", "c"], base: ["b", "c"], theirs: ["b", "C"] },
+			{ ours: ["B", "c"], base: ["b", "c"], theirs: ["b", "C"], crlf: false },
 			[""],
 		]);
 	});

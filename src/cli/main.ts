@@ -1678,7 +1678,13 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		.option("--base-label <label>", "Ancestor conflict label (git's %S; default: base)")
 		.option("--theirs-label <label>", "Their conflict label (git's %Y; default: theirs)")
 		.action((ours: string, base: string, theirs: string, options: ResolveOptions) => {
-			if (resolveFile(ours, base, theirs, options) > 0) code = 1;
+			try {
+				if (resolveFile(ours, base, theirs, options) > 0) code = 1;
+			} catch (error) {
+				// Exit 1 means conflicts remain; above it sends the driver to git merge-file.
+				warn(error instanceof Error ? error.message : String(error));
+				code = 2;
+			}
 		});
 
 	program

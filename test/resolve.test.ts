@@ -10,7 +10,7 @@ import { describe, expect, test } from "vitest";
 import { check, parse, render, resolveLists } from "../src/core";
 import { DRIVER, OLD_DRIVERS, type ResolveOptions, resolveFile } from "../src/cli/resolve";
 import { heal, init, uninstall } from "../src/cli/setup";
-import { tempDir } from "./fixture";
+import { run, tempDir } from "./fixture";
 
 /** Merge three versions with the driver; the merged text and how many conflicts remain. */
 function merge(
@@ -108,7 +108,12 @@ describe("resolve", () => {
 
 	test("keeps a conflict whose sides reorder the entries they share", () => {
 		const lines = (names: string[]) => names.map((n) => item(n));
-		const conflict = { ours: lines(["b", "a"]), base: lines(["a", "b"]), theirs: lines(["a", "b", "c"]) };
+		const conflict = {
+			ours: lines(["b", "a"]),
+			base: lines(["a", "b"]),
+			theirs: lines(["a", "b", "c"]),
+			crlf: false,
+		};
 		const merged = [["# [S] Quest", "", "## Goal", "", "Goal.", "", "## Required", ""], conflict, [""]];
 		expect(resolveLists("quest/q.md", merged)).toEqual(merged);
 		// Git's line merge keeps a move it can apply, leaving only the inserts to conflict.
@@ -119,7 +124,7 @@ describe("resolve", () => {
 	});
 
 	test("renders a conflict's base only in diff3 style", () => {
-		const chunks = [["a"], { ours: ["b"], base: ["c"], theirs: ["d"] }, ["e", ""]];
+		const chunks = [["a"], { ours: ["b"], base: ["c"], theirs: ["d"], crlf: false }, ["e", ""]];
 		expect(render(chunks, 7, true)).toBe("a\n<<<<<<< ours\nb\n||||||| base\nc\n=======\nd\n>>>>>>> theirs\ne\n");
 		expect(render(chunks, 7, false)).toBe("a\n<<<<<<< ours\nb\n=======\nd\n>>>>>>> theirs\ne\n");
 	});
@@ -133,6 +138,10 @@ describe("resolve", () => {
 		writeFileSync(t, "a\n");
 		expect(() => resolveFile(o, b, t)).toThrow("not UTF-8");
 		expect(readFileSync(o)).toEqual(Buffer.from([0x61, 0xff, 0x0a]));
+		// Exit 1 would tell the driver conflicts remain; only a higher status falls back to git.
+		const result = run("--root", dir, "resolve", o, b, t);
+		expect(result.code).toBe(2);
+		expect(result.stderr).toContain("not UTF-8");
 	});
 
 	test("preserves requested labels and marker length while resolving list conflicts", () => {
@@ -245,8 +254,8 @@ describe("resolve", () => {
 		test("keeps its heading while a conflict in it remains", () => {
 			// Ours removing b against theirs editing it stays a conflict, even with no lines on ours.
 			const head = ["# [S] Quest", "", "## Goal", "", "Goal.", "", "## Required", ""];
-			const kept = { ours: [], base: [item("b")], theirs: [item("b", "edited")] };
-			const merged = [head, { ours: [], base: [item("a")], theirs: [] }, [""], kept, [""]];
+			const kept = { ours: [], base: [item("b")], theirs: [item("b", "edited")], crlf: false };
+			const merged = [head, { ours: [], base: [item("a")], theirs: [], crlf: false }, [""], kept, [""]];
 			expect(resolveLists("quest/README.md", merged)).toEqual([head, [], [""], kept, [""]]);
 		});
 
