@@ -57,12 +57,11 @@ Decided 2026-10-30 (user, /quest-plan), replacing "First public release":
     conflicts (71% of moq's 246 removals); the async fixer now absorbs those.
   - Keep the host queue, serial
 
-  The [queue watcher](/quest/m0/queue-watcher/README.md) ranks first and
-  records the full interview: moq first, self-hosted `merge_group` runners,
-  host-gate work frozen, build concurrency 1, re-enqueue at the back,
-  unlimited attempts while progressing, flaky re-enqueues, and fixing picks
-  GitHub refuses. The land work above now means the watcher first, then the
-  fixer and its host.
+  The queue watcher epic recorded the full interview: moq first, self-hosted
+  `merge_group` runners, host-gate work frozen, build concurrency 1,
+  re-enqueue at the back, unlimited attempts while progressing, and flaky
+  re-enqueues. Its git history keeps it; only
+  [its first flaky-test disable](/quest/m0/queue-watcher/README.md) remains.
 
 Decided while planning m0 (2026-09-26), replacing the earlier copied-files and
 ownership-manifest design:

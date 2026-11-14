@@ -1,7 +1,7 @@
-// Resolving three-way merge conflicts in a quest's link lists, for the
-// `quest resolve` merge driver.
+// Three-way merging of quest files, for the `quest resolve` merge driver and
+// for merge queues that cannot run git.
 //
-// Git's line merge already applies every edit only one side made. What is left
+// The line merge, git's own, already applies every edit only one side made. What is left
 // are conflicts, and the common one in a quest tree is a link list both sides
 // touched: the base branch deleting finished quests' lines while a branch
 // inserts a new quest next to them. Such a conflict merges item by item: keep
@@ -12,6 +12,7 @@
 
 import { parse } from "./doc";
 import { LIST_SECTIONS } from "./rules";
+import { diff, records, regions } from "./xdiff";
 
 /** Lines on which neither side conflicts, without their `\n`. */
 export type Clean = string[];
@@ -21,6 +22,8 @@ export interface Conflict {
 	ours: string[];
 	base: string[];
 	theirs: string[];
+	/** Whether its markers end in `\r\n`, as git decides from the lines around it. */
+	crlf: boolean;
 }
 
 /** A file merged by lines: clean regions and conflicts, in order. */
@@ -36,48 +39,69 @@ interface Item {
 	lines: string[];
 }
 
-/** Labels, in order, that the conflict markers carry; `quest resolve` asks git for these. */
+/** Labels, in order, that conflict markers carry unless the caller names others. */
 export const LABELS: Record<Side, string> = { ours: "ours", base: "base", theirs: "theirs" };
 
 /**
- * Split `git merge-file --diff3` output, written with `size`-character
- * markers and the supplied labels (defaulting to `LABELS`), into chunks.
+ * Merge `theirs` into `ours` from their common `base` by lines, exactly as
+ * `git merge-file --diff3` does, into clean regions and conflicts.
  */
-export function chunks(text: string, size: number, labels = LABELS): Chunk[] {
-	const marker = (char: string, label?: string) => char.repeat(size) + (label === undefined ? "" : ` ${label}`);
-	const start = marker("<", labels.ours);
-	const base = marker("|", labels.base);
-	const split = marker("=");
-	const end = marker(">", labels.theirs);
-
+export function merge(ours: string, base: string, theirs: string): Chunk[] {
+	const [o, b, t] = [ours, base, theirs].map(records);
 	const out: Chunk[] = [];
-	let clean: Clean = [];
-	let conflict: Conflict | null = null;
-	let side: Side = "ours";
-	for (const line of text.split("\n")) {
-		// Git writes markers with the file's own line ending.
-		const bare = line.endsWith("\r") ? line.slice(0, -1) : line;
-		if (conflict === null && bare === start) {
-			if (clean.length > 0) out.push(clean);
-			clean = [];
-			conflict = { ours: [], base: [], theirs: [] };
-			side = "ours";
-		} else if (conflict !== null && side === "ours" && bare === base) {
-			side = "base";
-		} else if (conflict !== null && side === "base" && bare === split) {
-			side = "theirs";
-		} else if (conflict !== null && side === "theirs" && bare === end) {
-			out.push(conflict);
-			conflict = null;
-		} else if (conflict !== null) {
-			conflict[side].push(line);
+	// Clean text since the last conflict, copied as git copies it.
+	let clean = "";
+	let i = 0;
+	for (const m of regions(o, t, b.length, diff(b, o), diff(b, t))) {
+		clean += o.slice(i, m.i1).join("");
+		if (m.mode === 1) {
+			clean += o.slice(m.i1, m.i1 + m.chg1).join("");
+		} else if (m.mode === 2) {
+			clean += t.slice(m.i2, m.i2 + m.chg2).join("");
 		} else {
-			clean.push(line);
+			// A conflict starts on a line of its own, so the clean text before it ends with a newline.
+			if (clean !== "") out.push(side(clean, false));
+			clean = "";
+			// is_cr_needed: the line before the conflict on each side, or the first, then the base's first line.
+			let crlf = eol(o, m.i1 > 0 ? m.i1 - 1 : 0);
+			if (crlf !== 0) crlf = eol(t, m.i2 > 0 ? m.i2 - 1 : 0);
+			if (crlf !== 0) crlf = eol(b, 0);
+			const cr = crlf === 1;
+			out.push({
+				ours: side(o.slice(m.i1, m.i1 + m.chg1).join(""), cr),
+				base: side(b.slice(m.i0, m.i0 + m.chg0).join(""), cr),
+				theirs: side(t.slice(m.i2, m.i2 + m.chg2).join(""), cr),
+				crlf: cr,
+			});
 		}
+		i = m.i1 + m.chg1;
 	}
-	if (conflict !== null) throw new Error("unterminated conflict in merge output");
-	out.push(clean);
+	out.push((clean + o.slice(i).join("")).split("\n"));
 	return out;
+}
+
+/**
+ * The lines of text a marker follows. Git ends it with a newline, adding one
+ * if missing, with a `\r` before it when the conflict's markers take one.
+ */
+function side(text: string, crlf: boolean): string[] {
+	if (text === "") return [];
+	if (!text.endsWith("\n")) text += crlf ? "\r\n" : "\n";
+	return text.slice(0, -1).split("\n");
+}
+
+/**
+ * xdiff's is_eol_crlf: 1 when line `i` of `file` ends in `\r\n`, 0 when in a
+ * bare `\n`, and -1 when it cannot tell. A last line without a newline takes
+ * the line before it.
+ */
+function eol(file: string[], i: number): -1 | 0 | 1 {
+	const crlf = (line: string) => (line.endsWith("\r\n") ? 1 : 0);
+	if (i < file.length - 1) return crlf(file[i]);
+	if (file.length === 0) return -1;
+	if (file[i].endsWith("\n")) return crlf(file[i]);
+	if (i === 0) return -1;
+	return crlf(file[i - 1]);
 }
 
 /**
@@ -91,8 +115,7 @@ export function render(chunks: Chunk[], size: number, diff3: boolean, labels = L
 			lines.push(...chunk);
 			continue;
 		}
-		// A conflict's lines keep their own `\r`, so its markers take the same ending.
-		const eol = [...chunk.ours, ...chunk.base, ...chunk.theirs].some((line) => line.endsWith("\r")) ? "\r" : "";
+		const eol = chunk.crlf ? "\r" : "";
 		lines.push(`${"<".repeat(size)} ${labels.ours}${eol}`, ...chunk.ours);
 		if (diff3) lines.push(`${"|".repeat(size)} ${labels.base}${eol}`, ...chunk.base);
 		lines.push(`${"=".repeat(size)}${eol}`, ...chunk.theirs, `${">".repeat(size)} ${labels.theirs}${eol}`);
