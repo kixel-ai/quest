@@ -419,7 +419,7 @@
 						{
 							"file": "src/cli/gate.ts",
 							"from": 681,
-							"to": 692
+							"to": 686
 						},
 						{
 							"file": "src/cli/main.ts",

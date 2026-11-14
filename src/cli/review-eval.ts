@@ -288,7 +288,8 @@ async function resolveCase(
 	const base = git(root, ["merge-base", tip, head]);
 	const own = recorded(typeof row.body === "string" ? row.body : "");
 	const named = own.sizes.find((size) => (SIZES as readonly string[]).includes(size)) as Size | undefined;
-	const size = reviewSize(root, base, branch, undefined, named ?? null).size;
+	// The quest's size at the base's tip, as quest review reads it.
+	const size = reviewSize(root, tip, branch, undefined, named ?? null).size;
 	const writer = own.implementers.at(-1)?.fields?.model ?? null;
 	const dir = evalDir(root);
 	const { value } = await classify({
