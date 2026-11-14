@@ -83,7 +83,7 @@ export {
 	planInit,
 	questReadme,
 } from "./init";
-export { type Chunk, type Clean, type Conflict, LABELS, chunks, render, resolveLists } from "./merge";
+export { type Chunk, type Clean, type Conflict, LABELS, merge, render, resolveLists } from "./merge";
 
 export {
 	HOLD_PREFIX,

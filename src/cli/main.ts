@@ -1776,7 +1776,8 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"place, ours before theirs, and an entry only one side changed takes that change. Entries match by " +
 				"their opening link. Any other conflict, including prose, a heading, an entry both sides changed, or a " +
 				"reordered list, keeps standard conflict markers, showing the base when merge.conflictStyle is diff3 " +
-				"or zdiff3. Exits 1 when a conflict remains.\n\n" +
+				"or zdiff3. Exits 1 when a conflict remains. A binary or non-UTF-8 file fails, leaving <ours> as it " +
+				"was, so the driver falls back to git merge-file.\n\n" +
 				"quest init registers it for quest/** as the merge.quest driver. Any other command registers the driver " +
 				"in the clone's config when .gitattributes names merge=quest and no config sets it, or the one set is a " +
 				"driver an older quest registered; a custom driver stays. Without quest on " +
@@ -1791,7 +1792,13 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		.option("--base-label <label>", "Ancestor conflict label (git's %S; default: base)")
 		.option("--theirs-label <label>", "Their conflict label (git's %Y; default: theirs)")
 		.action((ours: string, base: string, theirs: string, options: ResolveOptions) => {
-			if (resolveFile(ours, base, theirs, options) > 0) code = 1;
+			try {
+				if (resolveFile(ours, base, theirs, options) > 0) code = 1;
+			} catch (error) {
+				// Exit 1 means conflicts remain; above it sends the driver to git merge-file.
+				warn(error instanceof Error ? error.message : String(error));
+				code = 2;
+			}
 		});
 
 	program
