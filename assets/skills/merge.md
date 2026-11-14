@@ -30,6 +30,7 @@ Read `quest status <pr>`'s `review-record` line rather than comparing diffs your
 Otherwise, the changes since the reviewed head need no new review only when they are conflict-free merges from the base branch, a reviewer's suggested patch applied unchanged, the fixes of a round whose findings were all low severity, a land fixer's recorded mechanical fix that changes no behavior, or the pick round's answers recorded in the PR's follow-ups.
 The repository's review policy decides whose record counts and may require more, such as a maintainer's review.
 Where it says nothing, only a record on a PR whose author has write access counts: anyone else writes their own PR body, so their head needs a local review that rewrites the record.
+A trivial dependency bump, as `/quest-run` defines it, needs no review unless that policy requires one.
 
 Queue the head with `quest merge <pr> --land <full 40-character head SHA>`, adding `--squash` or `--rebase` when the repository's root instructions name that method for the PR's base.
 Run a `quest` the PR cannot modify, such as an installed release rather than a build from the head's checkout: it refuses a head that leaves its quest inaccurate, a check the head's own code could skip.

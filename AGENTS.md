@@ -21,9 +21,9 @@ Do not edit `CONTRIBUTING.md`, `assets/CONTEXT.md`, `assets/AGENTS.md`, or
   shims, or cleanup of what earlier versions wrote.
 - Starting or spawning quests stops at PR creation. It merges only on a
   /quest-merge pick: the user's, the one /quest-plan's interview gives its own
-  PR, or the standing one /quest-run gives a PR with no user-facing behavior
-  change that adds or expands no quests; and only after repository checks and
-  reviews pass.
+  PR, or the standing one /quest-run gives a trivial dependency bump or a PR
+  with no user-facing behavior change that adds or expands no quests; and only
+  after repository checks and reviews pass.
 - Pull requests land as squash merges.
 - Do not comment on repositories outside kixelated/moq-dev without approval.
 

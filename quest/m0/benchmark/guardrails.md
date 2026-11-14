@@ -15,7 +15,8 @@ refuses one that does not. The tier replaces `/quest-run`'s standing pick:
 the classes that merge on their own are a list in the repository's risk
 file, starting with what the standing pick covers today, and only a PR the
 maintainer picks changes that list. Automatic merging stays limited to
-authors with write access.
+authors with write access, and the trivial dependency bumps of the forge's
+Dependabot and Renovate apps that the standing pick covers.
 
 Each guardrail's cost and catches reach the PR's records: what each review
 found, what the full suite failed that the scoped checks passed, and how
@@ -36,6 +37,12 @@ Decided 2026-11-13 (user, /quest-plan):
   breaker that tightens on its own; automatic both ways.
 - Customer-facing changes get "rollbacks and higher quality" (user): the
   high tier's stated undo and second review.
+
+Decided 2026-11-14 (user, /quest-run): trivial dependency bumps merge on
+their own. The standing pick now covers a Dependabot or Renovate PR whose
+every bump is a patch or only changes lockfiles, so the starting list holds
+that class too. Unlike the diff classes below, it also names an author: the
+bot's account, with every commit its own.
 
 This quest edits the shipped skills and rules, which the maintainer asked
 for by planning it.
