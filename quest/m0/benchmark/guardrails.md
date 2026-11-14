@@ -77,7 +77,10 @@ Open question for the maintainer, asked before the list is written: the
 standing pick covers CI changes today, but the post requires a person for
 "any CI workflow file", and `quest review` holds workflow files always
 high. Recommended: keep them high, which takes CI changes out of
-automatic merging.
+automatic merging. That would also take out a Dependabot or Renovate patch
+bump of a GitHub Action, which edits a workflow file: recommended to keep
+that class automatic, since the actions are pinned by SHA and Dependabot
+waits out a cooldown.
 
 ## Required
 
