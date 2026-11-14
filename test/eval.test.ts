@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, expect, test, vi } from "vitest";
 
@@ -185,6 +185,9 @@ test("the cost sums the run's sessions token-max priced, a lower bound when one 
 			scored,
 		),
 	).toEqual({ usd: 4.5, complete: true, priced: 2, sessions: 2 });
+	// A sub-session naming no ID is counted, but claims no top session as its child.
+	const anonymous = { ...child("c1", "s1", 2), id: null };
+	expect(priced([session("s1", 1), anonymous, session("x", 9)], scored)).toMatchObject({ usd: 3, priced: 1 });
 });
 
 /**
@@ -242,6 +245,18 @@ fakes(
 		const s = setup(null);
 		const { heads, local } = onGitHub(s.repo);
 		const set = join(s.repo, "review-eval.json");
+		// token-max lists the fake Codex seats' session, the sub-session it reviews in, and another session, so the cost
+		// does not depend on whether the host has token-max installed.
+		const listed = (session: string, parent: string | null, costUsd: number) =>
+			JSON.stringify({
+				...{ host: null, harness: "codex", session, parent, review: false, cwd: null, repositories: null },
+				...{ branches: [], start: "2026-11-14T00:00:00Z", end: "2026-11-14T00:01:00Z", models: [], costUsd },
+				...{ complete: true, skippedLines: 0, files: [] },
+			});
+		const tokenMax = [listed("thread-1", null, 0.25), listed("review-1", "thread-1", 0.5), listed("x", null, 9)];
+		writeFileSync(join(s.bin, "token-max"), `#!/bin/sh\nprintf '%s\\n' '${tokenMax.join("' '")}'\n`, {
+			mode: 0o755,
+		});
 
 		const added = await quest(
 			"--root",
@@ -277,6 +292,19 @@ fakes(
 		).toMatchObject({
 			code: 2,
 			stderr: `error: src/lib.ts ends at line 1 at ${heads[7]}\n`,
+		});
+		// Both are checked before GitHub is asked about #6, which it does not have.
+		const typo = ["--fix", "9", "--what"];
+		expect(
+			await quest("--root", s.repo, "eval", "add", "6", "--defect", "src/lib.ts:2-1", ...typo, "x"),
+		).toMatchObject({
+			code: 2,
+			stderr: "error: --defect takes path:from-to or path:line, not src/lib.ts:2-1\n",
+		});
+		expect(
+			await quest("--root", s.repo, "eval", "add", "6", "--defect", "src/lib.ts:1", ...typo, ""),
+		).toMatchObject({
+			code: 2,
 		});
 		expect(await quest("--root", s.repo, "eval", "add", "6")).toMatchObject({
 			code: 2,
@@ -321,7 +349,7 @@ fakes(
 			noise: { high: 2, medium: 0, low: 0 },
 		});
 		expect(report.rules).toEqual({ sha: git(s.repo, "rev-parse", "HEAD") });
-		expect(report.cost).toBeNull();
+		expect(report.cost).toEqual({ usd: 0.75, complete: true, priced: 4, sessions: 4 });
 		expect(run.stderr).toContain("case 1/2: #7");
 
 		// Two seats, each a review turn and a findings turn, at each case's head in a checkout since removed.

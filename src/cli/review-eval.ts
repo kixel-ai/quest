@@ -224,6 +224,8 @@ export async function addCase(options: AddOptions, deps: ClaimDependencies): Pro
 	const path = options.set ?? join(root, EVAL_FILE);
 	if (Boolean(options.clean) === (options.defect !== undefined))
 		throw new ReviewInputError("pass either --clean or --defect with --fix and --what");
+	// Before anything costs a request or a classifier session.
+	const places = options.defect?.at.map(defectLines);
 	// A new set is the repository's that origin's fork chain leads to, as quest start claims there.
 	const up = await upstream(root, requireRemote(root, "origin"), deps);
 	if (up.github === null) throw new ReviewInputError("origin is not on GitHub");
@@ -241,11 +243,10 @@ export async function addCase(options: AddOptions, deps: ClaimDependencies): Pro
 		if (options.clean) entry.clean = true;
 		set.cases.push(entry);
 	}
-	if (options.defect !== undefined) {
-		const { fix, what, at } = options.defect;
+	if (options.defect !== undefined && places !== undefined) {
+		const { fix, what } = options.defect;
 		// A culprit from the set may be squash-merged, its head in no clone yet.
 		fetch(root, from, [entry.head]);
-		const places = at.map(defectLines);
 		for (const place of places) {
 			const lines = fileLines(root, entry.head, place.file);
 			if (place.to > lines) throw new ReviewInputError(`${place.file} ends at line ${lines} at ${entry.head}`);
@@ -556,7 +557,8 @@ export function priced(exported: Session[] | null, scored: Scored[]): EvalReport
 				(ours.has(id(each.harness, each.id)) || ours.has(id(each.harness, each.parent)))
 			) {
 				matched.add(each);
-				ours.add(id(each.harness, each.id));
+				// A session naming no ID has no children to find, and adding it would claim every top session.
+				if (each.id !== null) ours.add(id(each.harness, each.id));
 				grew = true;
 			}
 	}

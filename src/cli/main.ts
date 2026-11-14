@@ -1684,7 +1684,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 			(value: string, previous: string[] = []) => [...previous, value],
 		)
 		.option("--fix <number>", "The PR whose ## Caused by names it", positiveInteger("--fix"))
-		.option("--what <text>", "One sentence on what was wrong")
+		.option("--what <text>", "One sentence on what was wrong", nonEmpty)
 		.action(
 			(
 				pr: number,
