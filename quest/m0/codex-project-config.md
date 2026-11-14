@@ -40,6 +40,7 @@ untrusted directory's project config and MCP servers off in `codex exec`:
   to mark one run's directory untrusted, that holds when the user's config
   trusts the directory. Check #49333 (open on 2026-11-14) and Codex release
   notes each time ready work is triaged; a note that only covers untrusted
-  directories does not qualify. Verify by dropping `--ignore-user-config`
-  from `codexFlags` in `src/cli/review.ts` and running
-  `just review-sandbox -t codex`, whose trusted-home case must pass.
+  directories does not qualify. Verify by replacing `--ignore-user-config`
+  in `codexFlags` in `src/cli/review.ts` with the release's flag or setting,
+  if it needs one, and running `just review-sandbox -t codex`, whose
+  trusted-home case must pass.
