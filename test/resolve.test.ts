@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 
 import { describe, expect, test } from "vitest";
 
-import { check, chunks, parse, render, resolveLists } from "../src/core";
+import { check, parse, render, resolveLists } from "../src/core";
 import { DRIVER, OLD_DRIVERS, type ResolveOptions, resolveFile } from "../src/cli/resolve";
 import { heal, init, uninstall } from "../src/cli/setup";
 import { tempDir } from "./fixture";
@@ -118,10 +118,21 @@ describe("resolve", () => {
 		});
 	});
 
-	test("diff3 output round trips through chunks and render", () => {
-		const text = "a\n<<<<<<< ours\nb\n||||||| base\nc\n=======\nd\n>>>>>>> theirs\ne\n";
-		expect(render(chunks(text, 7), 7, true)).toBe(text);
-		expect(render(chunks(text, 7), 7, false)).toBe("a\n<<<<<<< ours\nb\n=======\nd\n>>>>>>> theirs\ne\n");
+	test("renders a conflict's base only in diff3 style", () => {
+		const chunks = [["a"], { ours: ["b"], base: ["c"], theirs: ["d"] }, ["e", ""]];
+		expect(render(chunks, 7, true)).toBe("a\n<<<<<<< ours\nb\n||||||| base\nc\n=======\nd\n>>>>>>> theirs\ne\n");
+		expect(render(chunks, 7, false)).toBe("a\n<<<<<<< ours\nb\n=======\nd\n>>>>>>> theirs\ne\n");
+	});
+
+	test("refuses a binary or non-UTF-8 file, for the driver to hand to git", () => {
+		expect(() => merge("a\0\n", "a\n", "a\n")).toThrow("cannot merge binary file");
+		const dir = tempDir();
+		const [o, b, t] = ["ours", "base", "theirs"].map((name) => join(dir, name));
+		writeFileSync(o, Buffer.from([0x61, 0xff, 0x0a]));
+		writeFileSync(b, "a\n");
+		writeFileSync(t, "a\n");
+		expect(() => resolveFile(o, b, t)).toThrow("not UTF-8");
+		expect(readFileSync(o)).toEqual(Buffer.from([0x61, 0xff, 0x0a]));
 	});
 
 	test("preserves requested labels and marker length while resolving list conflicts", () => {
