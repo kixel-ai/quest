@@ -19,9 +19,27 @@ Decided 2026-10-28 (user, /quest-plan of the follow-ups from [moq-dev/quest#271]
 - Do not post upstream, on #49333 or a new issue; the maintainer declined.
   Only watch for the change.
 
+Checked 2026-11-14 against Codex 0.169.0, whose
+[openai/codex#60041](https://github.com/openai/codex/pull/60041) keeps an
+untrusted directory's project config and MCP servers off in `codex exec`:
+
+- That is no way to skip the layer, since a reviewed checkout is often
+  trusted, such as a worktree or clone the user's config trusts. Without
+  `--ignore-user-config`, `just review-sandbox -t codex` fails its trusted-home
+  case: the planted `.codex/config.toml` MCP server and SessionStart and
+  UserPromptSubmit hooks all ran. Its untrusted-checkout case passed.
+- A per-run `-c 'projects."<checkout>".trust_level="untrusted"'` does not
+  override the user config's trust either: the same case ran the same plants.
+- With `--ignore-user-config`, 0.169.0 still passes the codex cases.
+- `--trust` only grants trust, and refuses to combine with
+  `--ignore-user-config`.
+
 ## Waiting
 
-- openai/codex: a release offers a supported way to skip a project's
-  `.codex/` layer. Check #49333 (open on 2026-11-02) and Codex release notes
-  each time ready work is triaged; the live sandbox test,
-  `just review-sandbox`, catches a release that changes the behavior first.
+- openai/codex: a release offers a way to skip a project's `.codex/` layer, or
+  to mark one run's directory untrusted, that holds when the user's config
+  trusts the directory. Check #49333 (open on 2026-11-14) and Codex release
+  notes each time ready work is triaged; a note that only covers untrusted
+  directories does not qualify. Verify by dropping `--ignore-user-config`
+  from `codexFlags` in `src/cli/review.ts` and running
+  `just review-sandbox -t codex`, whose trusted-home case must pass.
