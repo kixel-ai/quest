@@ -4,7 +4,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path/posix";
 
-import { type ShellCall, type ShellGroup, commandName } from "../core";
+import { type Runs, type ShellCall, type ShellGroup, commandName } from "../core";
 import { cgroupUsage, members } from "./supervise";
 import { appendLog, logDays, logDirectory, readDays } from "./waits";
 
@@ -42,9 +42,12 @@ export function logCall(line: CallLine, env: NodeJS.ProcessEnv = process.env, no
 	appendLog(callsDirectory(env), line, now, "shell call");
 }
 
-/** A start line for `command`, as a record keeps it: the programs it runs, without arguments. */
-export function startLine(caller: Caller, call: string, command: string, sample: Sample): CallLine {
-	return { kind: "start", ...caller, call, command: commandName(command), ...sample };
+/**
+ * A start line for `command`, as a record keeps it: the programs it runs, without arguments, each one `runs` says
+ * the host can run.
+ */
+export function startLine(caller: Caller, call: string, command: string, runs: Runs, sample: Sample): CallLine {
+	return { kind: "start", ...caller, call, command: commandName(command, runs), ...sample };
 }
 
 /**

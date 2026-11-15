@@ -1,6 +1,15 @@
 import { expect, test } from "vitest";
 
 import { COMMAND_LIMIT, argvName, commandName, isCommandName } from "../src/core";
+import { runs } from "../src/cli/program";
+
+/** The programs a host in these tests can run, by name or path. */
+const installed = new Set(
+	"bun cargo cat curl date gh git just ls make node quest tail /usr/bin/time ./target/release/quest /bin/sh".split(
+		" ",
+	),
+);
+const host = (program: string) => installed.has(program);
 
 test.each([
 	["cargo build --release", "cargo build"],
@@ -26,19 +35,24 @@ test.each([
 	['echo "a $(git log --format="%H (x)") b"', "git log; echo"],
 	["cat <<'EOF'\n  EOF\nhunter2\nEOF\nls", "cat; ls"],
 	["cat <<-EOF\n\thunter2\n\tEOF\nls", "cat; ls"],
+	["printf '%s' $(cat <<'EOF'\n)\nhunter2\nEOF\n)", "cat; printf"],
+	["x=$(ls # a ) comment\n)", "ls"],
+	// A word misread as a program, or one the host cannot run, stays a `?`.
+	["hunter2; gh pr view", "?; gh pr"],
+	["./hunter2 x", "?"],
 ])("%j is kept as %j", (script, name) => {
-	expect(commandName(script)).toBe(name);
+	expect(commandName(script, host)).toBe(name);
 	expect(isCommandName(name)).toBe(true);
 });
 
 test("an argument vector keeps its program and subcommand, reading a shell's script", () => {
-	expect(argvName(["cargo", "build", "--release"])).toBe("cargo build");
-	expect(argvName(["/bin/sh", "-c", "cd x && bun test secret"])).toBe("cd; bun test");
-	expect(argvName(["node", "-e", "spin()"])).toBe("node");
+	expect(argvName(["cargo", "build", "--release"], host)).toBe("cargo build");
+	expect(argvName(["/bin/sh", "-c", "cd x && bun test secret"], host)).toBe("cd; bun test");
+	expect(argvName(["node", "-e", "spin()"], host)).toBe("node");
 });
 
 test("a name stops at the limit, whole programs at a time", () => {
-	const name = commandName(Array.from({ length: 100 }, (_, i) => `p${i}`).join("; "));
+	const name = commandName(Array.from({ length: 100 }, (_, i) => `p${i}`).join("; "), () => true);
 	expect(name.length).toBeLessThanOrEqual(COMMAND_LIMIT);
 	expect(name.endsWith(";")).toBe(false);
 	expect(isCommandName(name)).toBe(true);
@@ -48,3 +62,12 @@ test.each(["", "cargo build --release", "gh pr view 1", "-f x", "a\nb", "cargo B
 	"%j is no command name",
 	(name) => expect(isCommandName(name)).toBe(false),
 );
+
+test("a host runs a name on PATH or a path to a launchable file, from its directory", () => {
+	const on = runs({ PATH: "/bin:/usr/bin" }, "/");
+	expect(on("sh")).toBe(true);
+	expect(on("bin/sh")).toBe(true);
+	expect(on("hunter2")).toBe(false);
+	expect(on("./hunter2")).toBe(false);
+	expect(on("etc/passwd")).toBe(false);
+});

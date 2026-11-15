@@ -16,6 +16,7 @@ import { CONTEXT } from "./skills";
 import { HOOK_EVENTS } from "./worktree-hook";
 import { queue } from "./send";
 import { type Sample, logCall, sessionSample, startLine } from "./calls";
+import { runs } from "./program";
 
 /** The command the rule hooks run. */
 export const HOOK_COMMAND = "quest hook";
@@ -344,7 +345,13 @@ export function hook(input: unknown, deps: HookDependencies = { env: process.env
 			if (rules.length === 0) {
 				if (value.tool_name === "Bash" && typeof value.tool_input.command === "string")
 					logCall(
-						startLine(caller(value), callId(value), value.tool_input.command, sample(deps, value)),
+						startLine(
+							caller(value),
+							callId(value),
+							value.tool_input.command,
+							runs(deps.env, value.cwd),
+							sample(deps, value),
+						),
 						deps.env,
 					);
 				return "";

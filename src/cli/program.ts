@@ -66,6 +66,24 @@ export function which(name: string, env: NodeJS.ProcessEnv): string | undefined 
 	return undefined;
 }
 
+/**
+ * Whether a command's program word runs something on this host: a name on PATH, or a path, resolved from `cwd`, to
+ * a launchable file. Each answer is cached, since one script often names a program many times.
+ */
+export function runs(env: NodeJS.ProcessEnv, cwd: string): (program: string) => boolean {
+	const cache = new Map<string, boolean>();
+	return (program) => {
+		let found = cache.get(program);
+		if (found === undefined) {
+			found = program.includes("/")
+				? launchable(posix.resolve(cwd, program), process.platform)
+				: which(program, env) !== undefined;
+			cache.set(program, found);
+		}
+		return found;
+	};
+}
+
 /** `which`, or an error naming the missing program. */
 export function requireProgram(name: string, env: NodeJS.ProcessEnv): string {
 	const found = which(name, env);

@@ -105,7 +105,7 @@ export {
 	breakageKey,
 	parseBreakage,
 } from "./breakage";
-export { COMMAND_LIMIT, argvName, commandName, isCommandName } from "./command";
+export { COMMAND_LIMIT, type Runs, argvName, commandName, isCommandName } from "./command";
 export {
 	type GatedRun,
 	type ModelSpend,

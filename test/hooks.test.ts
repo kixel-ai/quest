@@ -223,7 +223,7 @@ test("SessionStart adds nothing where the repository does not use Quest", () => 
 
 /** Hook dependencies writing to a fresh state directory, sampling a fixed counter. */
 function sampled(usage = 5_000) {
-	const env = { XDG_STATE_HOME: tempDir(), XDG_CONFIG_HOME: tempDir() };
+	const env = { XDG_STATE_HOME: tempDir(), XDG_CONFIG_HOME: tempDir(), PATH: "/bin:/usr/bin" };
 	const sample = () => ({ at: "2026-11-15T10:00:00.000Z", cgroup: "/app.slice/agent.scope", usage });
 	return { env, sample, lines: () => readCalls(Date.parse("2026-11-15T00:00:00Z"), env) };
 }
@@ -268,9 +268,9 @@ test("the tool hooks sample each shell call's start and return, naming its sessi
 		),
 	).toBe("");
 	const codex = { cwd, session_id: "c1", turn_id: "u1", tool_use_id: "t2", tool_name: "Bash" };
-	hook({ ...codex, hook_event_name: "PreToolUse", tool_input: { command: "cargo test" } }, deps);
+	hook({ ...codex, hook_event_name: "PreToolUse", tool_input: { command: "ls -la hunter2" } }, deps);
 	hook(
-		{ ...codex, hook_event_name: "PostToolUse", tool_input: { command: "cargo test" }, tool_response: "ok" },
+		{ ...codex, hook_event_name: "PostToolUse", tool_input: { command: "ls -la hunter2" }, tool_response: "ok" },
 		deps,
 	);
 	// Edits are no shell calls.
@@ -287,7 +287,7 @@ test("the tool hooks sample each shell call's start and return, naming its sessi
 			...sample,
 		},
 		{ kind: "end", harness: "claude", session: "s1", agent: "a1", call: "t1", task: "b7", ...sample },
-		{ kind: "start", harness: "codex", session: "c1", agent: null, call: "t2", command: "cargo test", ...sample },
+		{ kind: "start", harness: "codex", session: "c1", agent: null, call: "t2", command: "ls", ...sample },
 		{ kind: "end", harness: "codex", session: "c1", agent: null, call: "t2", task: null, ...sample },
 	]);
 	expect(() =>

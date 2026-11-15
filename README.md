@@ -1839,8 +1839,10 @@ latest upload, since one sender sends a session's uploads in order. The type is
   never arguments, assignments, redirections, or here-document bodies, since
   a command line can carry a secret and records leave the host. Programs
   such as `git`, `cargo`, `just`, `nix`, and `npm` keep their subcommand;
-  any other's first argument is data and stays. A program written as a
-  variable is `?`.
+  any other's first argument is data and stays. A program counts only as a
+  shell builtin or one the host can run, on `PATH` or by its path, so a
+  variable, or a word Quest's reading of the script mistook for a program,
+  is `?`.
 - `split` is where the rest of its time went, as the next section describes;
   null until every step is labeled, and for a session on another host.
 

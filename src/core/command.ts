@@ -2,7 +2,9 @@
 // as `cd; cargo build; tail`. Arguments, assignments, redirections, and quoted text stay on the host, since a
 // command line can carry a secret, such as an inline token, and records leave it. That is still enough for the
 // mistake audit to tell a cheap command from a heavy one: `cargo check` from `cargo build`, `just check` from `just
-// test`.
+// test`. A shell script is no easy grammar, so the parse below is not what keeps a secret on the host: a program
+// counts only where it is a shell builtin or the host can run it, as the caller's `runs` decides, and any other
+// word read as one, such as a password a misread here-document gave, becomes `?`.
 
 /** The longest name a record keeps, in characters; names past it are left out. */
 export const COMMAND_LIMIT = 200;
@@ -44,6 +46,39 @@ const SUBCOMMANDS = new Set([
 	"yarn",
 ]);
 
+/** Shell builtins, which name no file on PATH yet run as programs. */
+const BUILTINS = new Set([
+	".",
+	":",
+	"alias",
+	"cd",
+	"declare",
+	"echo",
+	"eval",
+	"exit",
+	"export",
+	"local",
+	"popd",
+	"printf",
+	"pushd",
+	"pwd",
+	"read",
+	"return",
+	"set",
+	"shift",
+	"source",
+	"test",
+	"trap",
+	"type",
+	"ulimit",
+	"umask",
+	"unset",
+	"wait",
+]);
+
+/** Whether a command's program word, a name or a path, runs on the host that ran it. */
+export type Runs = (program: string) => boolean;
+
 /** Words that open a compound command or a wrapper of the next one, skipped to reach the program it runs. */
 const KEYWORDS = new Set(["if", "then", "else", "elif", "do", "while", "until", "!", "{", "}"]);
 /** Words that run the command after them, with flags and a number, such as a priority or timeout, between. */
@@ -68,17 +103,17 @@ export function isCommandName(name: string): boolean {
 }
 
 /** The programs a shell command line runs, in order and each once, as a record keeps them. */
-export function commandName(script: string): string {
-	return join(words(script).map(simple));
+export function commandName(script: string, runs: Runs): string {
+	return join(words(script).map((command) => simple(command, runs)));
 }
 
 /** The program an argument vector runs, as a record keeps it, reading a shell's `-c` script as `commandName` does. */
-export function argvName(argv: string[]): string {
+export function argvName(argv: string[], runs: Runs): string {
 	const program = argv[0]?.split("/").pop() ?? "";
 	if (["sh", "bash", "zsh", "dash"].includes(program) && argv[1] === "-c" && argv[2] !== undefined) {
-		return commandName(argv[2]);
+		return commandName(argv[2], runs);
 	}
-	return join([simple(argv)]);
+	return join([simple(argv, runs)]);
 }
 
 function join(names: (string | null)[]): string {
@@ -95,7 +130,7 @@ function join(names: (string | null)[]): string {
 }
 
 /** One simple command's program and subcommand, or null for one that names no program. */
-function simple(command: string[]): string | null {
+function simple(command: string[], runs: Runs): string | null {
 	let i = 0;
 	const assignment = (word: string) => /^[A-Za-z_][A-Za-z0-9_]*=/.test(word);
 	for (;;) {
@@ -113,8 +148,9 @@ function simple(command: string[]): string | null {
 		}
 		break;
 	}
-	const base = command[i]!.split("/").pop()!;
-	const program = PROGRAM.test(base) ? base : "?";
+	const first = command[i]!;
+	const base = first.split("/").pop()!;
+	const program = PROGRAM.test(base) && ((!first.includes("/") && BUILTINS.has(first)) || runs(first)) ? base : "?";
 	const sub = SUBCOMMANDS.has(program) ? command[i + 1] : undefined;
 	return sub !== undefined && sub.length <= SUBCOMMAND_LIMIT && SUBCOMMAND.test(sub) ? `${program} ${sub}` : program;
 }
@@ -248,11 +284,16 @@ function words(script: string): string[][] {
 	return commands;
 }
 
-/** The index of the `)` closing the substitution whose text starts at `from`, past nested ones and quotes, or -1. */
+/**
+ * The index of the `)` closing the substitution whose text starts at `from`, past nested ones, quotes, comments, and
+ * here-document bodies, where a parenthesis is data; or -1.
+ */
 function closing(script: string, from: number): number {
 	let depth = 1;
+	const heredocs: { delimiter: string; tabs: boolean }[] = [];
 	for (let i = from; i < script.length; i++) {
 		const c = script[i]!;
+		const wordStart = i === from || /[\s;&|()]/.test(script[i - 1]!);
 		if (c === "\\") i++;
 		else if (c === "'") {
 			const close = script.indexOf("'", i + 1);
@@ -266,6 +307,27 @@ function closing(script: string, from: number): number {
 					if (i === -1) return -1;
 				}
 			}
+		} else if (c === "#" && wordStart) {
+			while (i + 1 < script.length && script[i + 1] !== "\n") i++;
+		} else if (c === "<" && script.startsWith("<<", i) && script[i + 2] !== "<") {
+			const tabs = script[i + 2] === "-";
+			const match = /^[ \t]*(?:'([^']*)'|"([^"]*)"|([^\s;&|()<>]+))/.exec(script.slice(i + (tabs ? 3 : 2)));
+			if (match) {
+				heredocs.push({ delimiter: (match[1] ?? match[2] ?? match[3]!).replace(/\\/g, ""), tabs });
+				i += (tabs ? 3 : 2) + match[0].length - 1;
+			}
+		} else if (c === "\n" && heredocs.length) {
+			// Skip each pending body, up to and including its delimiter's line.
+			let at = i + 1;
+			while (heredocs.length && at < script.length) {
+				const eol = script.indexOf("\n", at);
+				const line = script.slice(at, eol === -1 ? script.length : eol);
+				at = eol === -1 ? script.length : eol + 1;
+				const { delimiter, tabs } = heredocs[0]!;
+				if ((tabs ? line.replace(/^\t+/, "") : line) === delimiter) heredocs.shift();
+			}
+			if (heredocs.length) return -1;
+			i = at - 1;
 		} else if (c === "(") depth++;
 		else if (c === ")" && --depth === 0) return i;
 	}
