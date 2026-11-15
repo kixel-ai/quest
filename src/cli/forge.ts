@@ -71,16 +71,20 @@ export class KixelQuest {
 		private readonly deps: ForgeDependencies,
 	) {}
 
-	/** The person the token names, and the repositories Kixel Quest serves them; read once, by `deadline`. */
+	/** The person the token names, and the repositories Kixel Quest serves them, by `deadline`; kept once read. */
 	info(deadline = Infinity): Promise<ForgeInfo> {
-		this.#info ??= this.#send("GET", "/forge", undefined, deadline).then((json) => {
+		const read = (this.#info ??= this.#send("GET", "/forge", undefined, deadline).then((json) => {
 			try {
 				return parseForgeInfo(json);
 			} catch (error) {
 				throw this.#failed("GET", "/forge", (error as Error).message);
 			}
+		}));
+		// A failure, such as a deadline passing, is asked again next time.
+		read.catch(() => {
+			if (this.#info === read) this.#info = undefined;
 		});
-		return this.#info;
+		return read;
 	}
 
 	/** Whether Kixel Quest answers `repository`'s reads for this person. */

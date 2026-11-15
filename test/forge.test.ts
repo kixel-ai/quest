@@ -387,6 +387,30 @@ describe("wait deadlines and arguments", () => {
 		expect(fixture.sleeps.reduce((sum, ms) => sum + ms, 0)).toBeLessThanOrEqual(60_000);
 	});
 
+	test("a viewer or Kixel Quest read that failed is read again, not kept", async () => {
+		let viewers = 0;
+		const github: GitHubDependencies = {
+			...claimsGitHub(),
+			fetch: async () =>
+				++viewers === 1
+					? Response.json({ message: "Bad gateway" }, { status: 400 })
+					: Response.json({ data: { viewer: { login: "kixelated" } } }),
+		};
+		const forge = new GitHubForge(github);
+		await expect(forge.viewer()).rejects.toThrow("Bad gateway");
+		expect(await forge.viewer()).toBe("kixelated");
+		expect(await forge.viewer()).toBe("kixelated");
+		expect(viewers).toBe(2);
+		const server = kixelQuest(unreachableGitHub);
+		let now = 0;
+		const kixel = new KixelQuest(URL_, TOKEN, { ...dependencies(server.fetch, unreachableGitHub), now: () => now });
+		now = 10;
+		await expect(kixel.info(5)).rejects.toThrow("its deadline passed");
+		expect((await kixel.info()).login).toBe("waiter");
+		await kixel.info();
+		expect(server.requests).toHaveLength(1);
+	});
+
 	test("Kixel Quest's refusal of a bad wait point is a usage error, as GitHub's is", async () => {
 		const bad = { since: "yesterday" };
 		const direct = wait.setup([]);

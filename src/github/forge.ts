@@ -33,12 +33,15 @@ export class GitHubForge implements Forge {
 		return this.#viewerOn(new GitHub(this.deps));
 	}
 
-	/** The viewer, read once on `github`, whose deadline then bounds the read. */
+	/** The viewer, read on `github`, whose deadline then bounds the read; kept once read, and read again after a failure. */
 	#viewerOn(github: GitHub): Promise<string> {
-		this.#viewer ??= github
+		const read = (this.#viewer ??= github
 			.graphql("query { viewer { login } }", {})
-			.then((data) => string(object(data.viewer).login));
-		return this.#viewer;
+			.then((data) => string(object(data.viewer).login)));
+		read.catch(() => {
+			if (this.#viewer === read) this.#viewer = undefined;
+		});
+		return read;
 	}
 
 	async status(pull: PullRequest): Promise<Answer<Status>> {
