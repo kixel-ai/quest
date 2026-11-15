@@ -22,7 +22,8 @@ Do not edit `CONTRIBUTING.md`, `assets/CONTEXT.md`, `assets/AGENTS.md`, or
 - Starting or spawning quests stops at PR creation. It merges only on a
   /quest-merge pick: the user's, the one /quest-plan's interview gives its own
   PR, or the standing one /quest-run gives a PR with no user-facing behavior
-  change that adds or expands no quests; and only after repository checks and
+  change that adds or expands no quests, or a trivial PR such as a dependency
+  bump once Pullfrog approves its head; and only after repository checks and
   reviews pass.
 - A change to the reviewers in `src/cli/models.ts`, the review prompts in
   `src/cli/review.ts`, or a `REVIEW.md` runs `quest eval run` with the base's

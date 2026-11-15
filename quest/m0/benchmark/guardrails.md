@@ -15,7 +15,9 @@ refuses one that does not. The tier replaces `/quest-run`'s standing pick:
 the classes that merge on their own are a list in the repository's risk
 file, starting with what the standing pick covers today, and only a PR the
 maintainer picks changes that list. Automatic merging stays limited to
-authors with write access.
+authors with write access, and to the trivial PRs of any author, such as
+dependency bumps, that the standing pick covers once Pullfrog approves
+their head.
 
 Each guardrail's cost and catches reach the PR's records: what each review
 found, what the full suite failed that the scoped checks passed, and how
@@ -36,6 +38,16 @@ Decided 2026-11-13 (user, /quest-plan):
   breaker that tightens on its own; automatic both ways.
 - Customer-facing changes get "rollbacks and higher quality" (user): the
   high tier's stated undo and second review.
+
+Decided 2026-11-15 (user, /quest-run, moq-dev/quest#738): trivial PRs
+merge on their own, so the starting list holds that class too.
+
+- Which PRs? ✅ Any trivial PR, such as a dependency bump, whatever its
+  author, judged by its diff (rejected: only Dependabot's and Renovate's
+  patch or lockfile-only bumps whose every commit is the bot's).
+- What review? ✅ Pullfrog's approval of the head, in place of the local
+  review an author without write access needs (rejected: a local
+  `quest review`; no review).
 
 This quest edits the shipped skills and rules, which the maintainer asked
 for by planning it.
@@ -70,7 +82,10 @@ Open question for the maintainer, asked before the list is written: the
 standing pick covers CI changes today, but the post requires a person for
 "any CI workflow file", and `quest review` holds workflow files always
 high. Recommended: keep them high, which takes CI changes out of
-automatic merging.
+automatic merging. That would also take out a trivial bump of a GitHub
+Action, which edits a workflow file: recommended to keep that class
+automatic, since the actions are pinned by SHA, Dependabot waits out a
+cooldown, and Pullfrog approves the head.
 
 ## Required
 
