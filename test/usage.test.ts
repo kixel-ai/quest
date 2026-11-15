@@ -805,6 +805,7 @@ describe("usage", () => {
 				now: Date.now,
 				sleep: async () => {},
 				token: "t",
+				quota: "wait" as const,
 				warn: () => {},
 			}),
 			warn: () => {},

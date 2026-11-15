@@ -189,6 +189,7 @@ function removalPage(pull: Pull, since: string, after: unknown) {
 function deps(world: World): GitHubDependencies {
 	return {
 		token: "fake",
+		quota: "wait",
 		now: () => world.now,
 		sleep: async () => {},
 		warn: () => {},

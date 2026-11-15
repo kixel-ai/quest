@@ -150,6 +150,7 @@ class FakeGitHub {
 			now: () => this.clock,
 			sleep: async () => undefined,
 			token: "token",
+			quota: "wait",
 			warn: () => undefined,
 		};
 	}

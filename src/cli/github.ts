@@ -120,8 +120,14 @@ export function githubRepository(url: string): Repository | null {
 	return match ? { owner: match[1], repo: match[2] } : null;
 }
 
-/** The CLI's client dependencies: global `fetch`, a token from `GH_TOKEN`, `GITHUB_TOKEN`, or `gh auth token`, and `warn`. */
-export function gitHubDependencies(warn: (message: string) => void): GitHubDependencies {
+/**
+ * The CLI's client dependencies: global `fetch`, a token from `GH_TOKEN`, `GITHUB_TOKEN`, or `gh auth token`,
+ * `warn`, and `quota`, which only a command whose job is to wait sets to `wait`.
+ */
+export function gitHubDependencies(
+	warn: (message: string) => void,
+	quota: GitHubDependencies["quota"] = "fail",
+): GitHubDependencies {
 	let token = process.env.GH_TOKEN || process.env.GITHUB_TOKEN;
 	if (!token) {
 		try {
@@ -134,5 +140,5 @@ export function gitHubDependencies(warn: (message: string) => void): GitHubDepen
 		}
 	}
 	if (!token) throw new Error("GitHub authentication returned an empty token");
-	return { fetch, now: Date.now, sleep, token, warn };
+	return { fetch, now: Date.now, sleep, token, warn, quota };
 }

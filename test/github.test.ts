@@ -34,13 +34,14 @@ const cut = (status = 200) =>
 	);
 
 /** A client whose fetch answers each request with the next reply, on a clock only its sleeps advance. */
-function fixture(replies: Reply[], deadline = Infinity) {
+function fixture(replies: Reply[], deadline = Infinity, quota: GitHubDependencies["quota"] = "wait") {
 	let now = Date.parse("2026-10-31T12:00:00Z");
 	const calls: Call[] = [];
 	const sleeps: number[] = [];
 	const warnings: string[] = [];
 	const deps: GitHubDependencies = {
 		token: "token",
+		quota,
 		now: () => now,
 		sleep: async (milliseconds) => {
 			sleeps.push(milliseconds);
@@ -363,6 +364,37 @@ describe("GraphQL", () => {
 		await github.graphql(addComment, { id: "PR_1" });
 		expect(calls.map(({ body }) => body?.query)).toEqual([addComment, addComment]);
 		expect(sleeps).toEqual([30_000]);
+	});
+
+	test("a spent quota fails at once without waiting when the client may not wait", async () => {
+		const reset = Date.parse("2026-10-31T12:22:30Z") / 1000;
+		const spent = { "x-ratelimit-remaining": "0", "x-ratelimit-reset": `${reset}` };
+		const rest = fixture(
+			[json({ message: "API rate limit exceeded" }, 403, { ...spent, "x-ratelimit-resource": "core" })],
+			Infinity,
+			"fail",
+		);
+		await expect(rest.github.request(`${repo}/pulls`)).rejects.toThrow(
+			"GitHub's core rate limit for this token is spent until 2026-10-31T12:22:30.000Z, 23 minutes from now",
+		);
+		expect(rest.sleeps).toEqual([]);
+
+		const graphql = fixture([limited(spent)], Infinity, "fail");
+		await expect(graphql.github.graphql("query { viewer { login } }", {})).rejects.toThrow("API rate limit");
+		expect(graphql.sleeps).toEqual([]);
+	});
+
+	test("a secondary limit is still waited out when the client may not wait on a spent quota", async () => {
+		const { github, sleeps } = fixture(
+			[
+				json({ message: "secondary rate limit" }, 403, { "retry-after": "60", "x-ratelimit-remaining": "0" }),
+				json({ ok: true }),
+			],
+			Infinity,
+			"fail",
+		);
+		await github.request(`${repo}/pulls`);
+		expect(sleeps).toEqual([60_000]);
 	});
 
 	test("a persistent RATE_LIMITED fails loudly, and the deadline cuts its wait", async () => {

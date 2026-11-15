@@ -91,6 +91,7 @@ class FakePull {
 			now: () => this.clock,
 			sleep: async () => undefined,
 			token: "token",
+			quota: "wait",
 			warn: (message) => warnings.push(message),
 		};
 	}

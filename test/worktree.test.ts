@@ -896,7 +896,17 @@ describe("merged PR heads on GitHub", () => {
 			sent.push(JSON.parse(String(init?.body)).variables);
 			return Response.json({ data: { repository: { object: found } } });
 		}) as typeof globalThis.fetch;
-		return { sent, client: new GitHub({ fetch, now: Date.now, sleep: async () => {}, token: "test", warn() {} }) };
+		return {
+			sent,
+			client: new GitHub({
+				fetch,
+				now: Date.now,
+				sleep: async () => {},
+				token: "test",
+				warn() {},
+				quota: "wait",
+			}),
+		};
 	}
 	const repository = { owner: "example", repo: "project" };
 	const pulls = (...nodes: unknown[]) => ({ associatedPullRequests: { nodes } });
