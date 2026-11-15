@@ -3,12 +3,20 @@ import { join } from "node:path";
 
 import { describe, expect, test } from "vitest";
 
-import { type CallLine, type Sample, logCall, readCalls, sessionSample, shellGroups } from "../src/cli/calls";
+import {
+	type CallLine,
+	type Sample,
+	logCall,
+	readCalls,
+	sessionGroup,
+	sessionSample,
+	shellGroups,
+} from "../src/cli/calls";
 import { tempDir } from "./fixture";
 
 describe.skipIf(process.platform !== "linux")("sessionSample", () => {
 	const scope = "/app.slice/agent.scope";
-	/** A fake /proc and cgroup tree: each process's parent, and which are in the session's scope. */
+	/** A fake /proc and cgroup tree: each process's parent, which are in the session's scope, and the name of 10. */
 	function host(parents: Record<number, number>, scoped: number[], self: number) {
 		const proc = tempDir();
 		const cgroups = tempDir();
@@ -16,6 +24,7 @@ describe.skipIf(process.platform !== "linux")("sessionSample", () => {
 			mkdirSync(join(proc, pid));
 			// The command name may hold spaces and parentheses.
 			writeFileSync(join(proc, pid, "stat"), `${pid} (a (b) c) S ${parent} 1 1 0\n`);
+			writeFileSync(join(proc, pid, "comm"), pid === "10" ? "codex\n" : "bash\n");
 			writeFileSync(join(proc, pid, "cgroup"), `0::${scoped.includes(Number(pid)) ? scope : "/other.scope"}\n`);
 		}
 		mkdirSync(join(cgroups, scope), { recursive: true });
@@ -32,23 +41,27 @@ describe.skipIf(process.platform !== "linux")("sessionSample", () => {
 		// daemon 40 whose parent left.
 		const parents = { 10: 1, 20: 10, 30: 20, 11: 10, 12: 10, 13: 12, 40: 1 };
 		const each = host(parents, [10, 20, 30, 11, 12, 13, 40], 30);
-		expect(sessionSample(at, each)).toEqual(counted);
-		expect(sessionSample(at, { ...each, harness: 10 })).toEqual(counted);
-		// A harness that names itself elsewhere is not this scope's top.
-		expect(sessionSample(at, { ...each, harness: 20 })).toEqual(none);
+		expect(sessionSample(at, { ...each, harness: { pid: 10 } })).toEqual(counted);
+		expect(sessionSample(at, { ...each, harness: { name: "codex" } })).toEqual(counted);
+		// A harness that names itself, or runs under a name, elsewhere is not this scope's top.
+		expect(sessionSample(at, { ...each, harness: { pid: 20 } })).toEqual(none);
+		expect(sessionSample(at, { ...each, harness: { name: "claude" } })).toEqual(none);
 	});
 
-	test("refuses a terminal's scope, where the harness hangs below the terminal's shell", () => {
-		const parents = { 5: 1, 10: 5, 20: 10, 30: 20, 11: 10 };
-		expect(sessionSample(at, host(parents, [5, 10, 20, 30, 11], 30))).toEqual(none);
-		// Another tab's work beside the session in one terminal's scope.
-		const shared = { 5: 1, 10: 5, 20: 10, 30: 20, 6: 5 };
-		expect(sessionSample(at, { ...host(shared, [5, 10, 20, 30, 6], 30), harness: 10 })).toEqual(none);
+	test("refuses a terminal's scope, whose top is the terminal's shell", () => {
+		// The shell 5 runs the harness 10 and a background job 6, which hangs from the top as the harness's would.
+		const parents = { 5: 1, 10: 5, 20: 10, 30: 20, 6: 5 };
+		const each = host(parents, [5, 10, 20, 30, 6], 30);
+		expect(sessionSample(at, { ...each, harness: { name: "codex" } })).toEqual(none);
+		expect(sessionSample(at, { ...each, harness: { pid: 10 } })).toEqual(none);
+		// A branch below the hook's chain but not from its top shares the cgroup too.
+		const below = { 10: 1, 20: 10, 30: 20, 21: 20 };
+		expect(sessionSample(at, { ...host(below, [10, 20, 30, 21], 30), harness: { pid: 10 } })).toEqual(none);
 	});
 
 	test("refuses a hook outside the cgroup it reads", () => {
 		const each = host({ 10: 1, 30: 10 }, [10], 30);
-		expect(sessionSample(at, each)).toEqual(none);
+		expect(sessionSample(at, { ...each, harness: { pid: 10 } })).toEqual(none);
 	});
 });
 
@@ -102,18 +115,25 @@ describe("shellGroups", () => {
 			// Denied or interrupted: it never returned.
 			start("d", 12, 3_300_000),
 		]);
-		expect(groups.map((g) => g.group)).toEqual([
-			{
-				calls: [
-					{ command: "run a", start: t(0), end: t(2) },
-					{ command: "run b", start: t(1), end: t(3) },
+		expect(groups.map((g) => [g.calls.map((c) => [c.session, c.call]), g.cpu, g.start])).toEqual([
+			[
+				[
+					["claude\0s", { command: "run a", start: t(0), end: t(2) }],
+					["claude\0sub", { command: "run b", start: t(1), end: t(3) }],
 				],
-				cpu: 1000,
-			},
-			{ calls: [{ command: "run c", start: t(10), end: t(11) }], cpu: 250 },
+				1000,
+				Date.parse(t(0)),
+			],
+			[[["claude\0s", { command: "run c", start: t(10), end: t(11) }]], 250, Date.parse(t(10))],
 		]);
-		expect(groups.map((g) => [...g.sessions])).toEqual([["claude\0s", "claude\0sub"], ["claude\0s"]]);
-		expect(groups[1]!.end).toBe(Date.parse(t(11)));
+		// Each session's record holds its own calls, and says another's shared the group's CPU.
+		expect(sessionGroup(groups[0]!, "claude\0sub")).toEqual({
+			calls: [{ command: "run b", start: t(1), end: t(3) }],
+			cpu: 1000,
+			shared: true,
+		});
+		expect(sessionGroup(groups[1]!, "claude\0s")).toMatchObject({ shared: false });
+		expect(sessionGroup(groups[1]!, "claude\0sub")).toBeNull();
 	});
 
 	test("a background call runs until a turn end no longer lists its task", () => {
@@ -125,11 +145,9 @@ describe("shellGroups", () => {
 			end("fg", 7, 70_000),
 			stop(9, [], 90_000),
 		];
-		expect(shellGroups(lines).map((g) => [g.group.calls.map((c) => c.end), g.group.cpu])).toEqual([
-			[[t(9), t(7)], 90],
-		]);
+		expect(shellGroups(lines).map((g) => [g.calls.map((c) => c.call.end), g.cpu])).toEqual([[[t(9), t(7)], 90]]);
 		// Still running at the last sample: it runs until then.
-		expect(shellGroups(lines.slice(0, 3)).map((g) => [g.group.calls[0]!.end, g.group.cpu])).toEqual([[t(5), 50]]);
+		expect(shellGroups(lines.slice(0, 3)).map((g) => [g.calls[0]!.call.end, g.cpu])).toEqual([[t(5), 50]]);
 	});
 
 	test("a call outside a counted cgroup, or across a counter that changed, has no CPU", () => {
@@ -144,7 +162,7 @@ describe("shellGroups", () => {
 			start("d", 5, 9_000),
 			end("d", 6, 1_000),
 		]);
-		expect(groups.map((g) => [g.group.calls.length, g.group.cpu])).toEqual([
+		expect(groups.map((g) => [g.calls.length, g.cpu])).toEqual([
 			[1, null],
 			[1, null],
 			[1, null],
@@ -153,7 +171,7 @@ describe("shellGroups", () => {
 	});
 });
 
-test("the call log keeps whole lines and reads from the day before a window", () => {
+test("the call log keeps whole lines and reads from a window's day", () => {
 	const env = { XDG_STATE_HOME: tempDir() };
 	const line: CallLine = {
 		kind: "stop",
@@ -165,9 +183,9 @@ test("the call log keeps whole lines and reads from the day before a window", ()
 		usage: null,
 	};
 	logCall(line, env, Date.parse(line.at));
-	expect(readCalls(Date.parse("2026-11-15T00:30:00Z"), env)).toEqual([line]);
-	expect(readCalls(Date.parse("2026-11-16T00:30:00Z"), env)).toEqual([]);
+	expect(readCalls(Date.parse("2026-11-14T20:00:00Z"), env)).toEqual([line]);
+	expect(readCalls(Date.parse("2026-11-15T00:30:00Z"), env)).toEqual([]);
 	logCall({ ...line, running: [""] }, env, Date.parse(line.at));
 	logCall(line, env, Date.parse(line.at));
-	expect(() => readCalls(Date.parse("2026-11-15T00:30:00Z"), env)).toThrow("is not a shell call quest logged");
+	expect(() => readCalls(Date.parse("2026-11-14T20:00:00Z"), env)).toThrow("is not a shell call quest logged");
 });

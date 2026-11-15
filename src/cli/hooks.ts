@@ -424,13 +424,17 @@ function callId(value: Partial<HookInput>): string {
 /** The session's sample now; Claude Code names its own process, which an agent it starts inherits. */
 function sample(deps: HookDependencies, value: Partial<HookInput>): Sample {
 	if (deps.sample) return deps.sample();
-	const harness = typeof value.turn_id === "string" ? NaN : Number(deps.env.CLAUDE_PID);
-	return sessionSample(Date.now(), {
-		proc: "/proc",
-		cgroups: "/sys/fs/cgroup",
-		self: process.pid,
-		...(Number.isSafeInteger(harness) && harness > 0 ? { harness } : {}),
-	});
+	const now = Date.now();
+	const pid = Number(deps.env.CLAUDE_PID);
+	// Without its process ID, Claude Code runs under no name a shell could not share, so nothing is counted.
+	const harness =
+		typeof value.turn_id === "string"
+			? { name: "codex" }
+			: Number.isSafeInteger(pid) && pid > 0
+				? { pid }
+				: undefined;
+	if (!harness) return { at: new Date(now).toISOString(), cgroup: null, usage: null };
+	return sessionSample(now, { proc: "/proc", cgroups: "/sys/fs/cgroup", self: process.pid, harness });
 }
 
 /**

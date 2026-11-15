@@ -68,13 +68,15 @@ export interface ShellCall {
 /**
  * Shell calls that overlapped in one cgroup, and the CPU milliseconds it used from the first one's start to the
  * last one's end: what ran outside `quest gate`, and the harness itself meanwhile. A group shared by sessions in
- * one cgroup, as a sub-agent's with its parent's, is in each of their records.
+ * one cgroup, as a sub-agent's with its parent's, is in each of their records, listing only that session's calls.
  */
 export interface ShellGroup {
-	/** Its calls, oldest first. */
+	/** The session's calls in it, oldest first. */
 	calls: ShellCall[];
 	/** Null where the cgroup held more than the session, as a terminal's may, or none counts it, as on macOS. */
 	cpu: number | null;
+	/** Whether calls of other sessions in its cgroup ran in it too, sharing its CPU. */
+	shared: boolean;
 }
 
 /** One model and effort's tokens in a session, and their cost at API list price in USD. */
@@ -178,7 +180,10 @@ export interface SessionRecord {
 	waits: SessionWait[] | null;
 	/** Its outermost `quest gate` runs, oldest first; null for a session on another host. */
 	gated: GatedRun[] | null;
-	/** Its other shell calls, grouped where they overlapped, oldest first; null for a session on another host. */
+	/**
+	 * Its shell calls, grouped where they overlapped, from the groups that started since the window's start, oldest
+	 * first; null for a session on another host.
+	 */
 	shell: ShellGroup[] | null;
 	/** Where the rest of its time went; null until every step is classified, and for a session on another host. */
 	split: TimeSplit | null;
@@ -317,7 +322,7 @@ function parseGated(value: unknown): GatedRun {
 /** A shell group, failing on one without calls or a call that ends before it starts. */
 function parseGroup(value: unknown): ShellGroup {
 	if (!isObject(value)) return fail("a shell group");
-	exact(value, ["calls", "cpu"], "a shell group");
+	exact(value, ["calls", "cpu", "shared"], "a shell group");
 	if (!Array.isArray(value.calls) || value.calls.length === 0) return fail("a shell group's calls");
 	return {
 		calls: value.calls.map((c: unknown) => {
@@ -332,6 +337,7 @@ function parseGroup(value: unknown): ShellGroup {
 			return call;
 		}),
 		cpu: cpu(value.cpu, "a shell group's CPU"),
+		shared: flag(value.shared, "whether a shell group is shared"),
 	};
 }
 

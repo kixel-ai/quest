@@ -1,6 +1,6 @@
 // Each session's record, as `quest usage` prints it and the stop hook sends it: its PRs, role, spend, and waits.
 import { type GatedRun, type Role, type SessionRecord, type SessionWait, type TimeSplit, branchQuest } from "../core";
-import { type CallLine, shellGroups } from "./calls";
+import { type CallLine, sessionGroup, shellGroups } from "./calls";
 import { type TranscriptFacts, transcriptFacts } from "./transcript";
 import type { Pull, Session } from "./usage";
 import type { LoggedWait } from "./waits";
@@ -129,7 +129,7 @@ export function buildRecords(input: RecordInput): Map<Session, SessionRecord> {
 	};
 
 	const waits = assignWaits(named, input.waits, parentOf, input.since);
-	const groups = shellGroups(input.calls).filter((g) => g.end >= input.since);
+	const groups = shellGroups(input.calls).filter((g) => g.start >= input.since);
 	const records = new Map<Session, SessionRecord>();
 	for (const s of input.sessions) {
 		const { pulls, via } = pullsOf(s);
@@ -184,7 +184,7 @@ export function buildRecords(input: RecordInput): Map<Session, SessionRecord> {
 			gated: s.host === null ? gated : null,
 			shell:
 				s.host === null && s.id !== null
-					? groups.filter((g) => g.sessions.has(id(s.harness, s.id!))).map((g) => g.group)
+					? groups.flatMap((g) => sessionGroup(g, id(s.harness, s.id!)) ?? [])
 					: s.host === null
 						? []
 						: null,

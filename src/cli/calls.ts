@@ -47,12 +47,9 @@ export function startLine(caller: Caller, call: string, command: string, sample:
 	return { kind: "start", ...caller, call, command: commandLine(command), ...sample };
 }
 
-/**
- * The call lines logged on this host from the UTC day before `since`'s on, so a call that started before it still
- * has its start, failing on a line it cannot read.
- */
+/** The call lines logged on this host from `since`'s UTC day on, failing on a line it cannot read. */
 export function readCalls(since: number, env: NodeJS.ProcessEnv = process.env): CallLine[] {
-	return readLog(callsDirectory(env), since - 86_400_000, parseCall, "a shell call");
+	return readLog(callsDirectory(env), since, parseCall, "a shell call");
 }
 
 function parseCall(line: string): CallLine | null {
@@ -89,21 +86,21 @@ export interface Host {
 	proc: string;
 	cgroups: string;
 	self: number;
-	/** The harness's process, where it names it, as Claude Code does in `CLAUDE_PID`. */
-	harness?: number;
+	/**
+	 * The harness's process, where it names it, as Claude Code does in `CLAUDE_PID`, else the name it runs under, as
+	 * Codex's `codex`.
+	 */
+	harness: { pid: number } | { name: string };
 }
 
 /**
  * The cgroup holding this process and its CPU counter now, or nulls where it holds more than the hook's session.
  * Such a cgroup holds one tree of processes, whose top is the harness: the hook's topmost ancestor in the cgroup, from
  * which every other branch hangs, as when an app starts each agent session in a scope of its own. A terminal's scope
- * fails, since the harness hangs below the terminal's shell, as does one shared with other work. A process whose
- * parent left, as a daemonized one's does, is the session's leftover and counts.
+ * fails, since its top is the terminal's shell, as does one shared with other work. A process whose parent left, as
+ * a daemonized one's does, is the session's leftover and counts.
  */
-export function sessionSample(
-	now: number,
-	host: Host = { proc: "/proc", cgroups: "/sys/fs/cgroup", self: process.pid },
-): Sample {
+export function sessionSample(now: number, host: Host): Sample {
 	const at = new Date(now).toISOString();
 	const none = { at, cgroup: null, usage: null };
 	if (process.platform !== "linux") return none;
@@ -125,7 +122,7 @@ export function sessionSample(
 		chain.add(pid);
 		top = pid;
 	}
-	if (!chain.has(host.self) || (host.harness !== undefined && host.harness !== top)) return none;
+	if (!chain.has(host.self) || !harnessIs(host, top)) return none;
 	for (const pid of inside) {
 		if (chain.has(pid)) continue;
 		// The chain member this process hangs from, or undefined for a tree whose root's parent left the cgroup.
@@ -135,6 +132,17 @@ export function sessionSample(
 	}
 	const usage = cgroupUsage(group);
 	return usage === null ? none : { at, cgroup: path, usage };
+}
+
+/** Whether `pid` is the harness `host` names, by its process ID or its name. */
+function harnessIs(host: Host, pid: number): boolean {
+	if ("pid" in host.harness) return host.harness.pid === pid;
+	try {
+		return readFileSync(join(host.proc, String(pid), "comm"), "utf8").trim() === host.harness.name;
+	} catch (error) {
+		if (["ENOENT", "ESRCH"].includes((error as NodeJS.ErrnoException).code ?? "")) return false;
+		throw error;
+	}
 }
 
 /** Field 4 of /proc/<pid>/stat, or undefined once the process is gone. */
@@ -149,12 +157,19 @@ function parentOf(proc: string, pid: number): number | undefined {
 	return Number(stat.slice(stat.lastIndexOf(")") + 2).split(" ")[1]);
 }
 
-/** A shell group, and the sessions, as `harness\0session` with a Claude sub-agent's agent ID, that ran its calls. */
+/** Calls that overlapped in one cgroup, each with its session, and what the cgroup used meanwhile. */
 export interface OwnedGroup {
-	group: ShellGroup;
-	sessions: Set<string>;
-	/** Its last call's end, epoch ms. */
-	end: number;
+	/** Each call, oldest first, with its session as `harness\0session`, a Claude sub-agent's being its agent ID. */
+	calls: { session: string; call: ShellCall }[];
+	cpu: number | null;
+	/** Its first call's start, epoch ms. */
+	start: number;
+}
+
+/** `group` as `session`'s record holds it: only its own calls, and whether others ran in it too. */
+export function sessionGroup(group: OwnedGroup, session: string): ShellGroup | null {
+	const own = group.calls.filter((c) => c.session === session).map((c) => c.call);
+	return own.length ? { calls: own, cpu: group.cpu, shared: own.length < group.calls.length } : null;
 }
 
 type Start = Extract<CallLine, { kind: "start" }>;
@@ -216,12 +231,12 @@ export function shellGroups(lines: CallLine[]): OwnedGroup[] {
 			end.usage !== null &&
 			end.usage >= first.usage;
 		return {
-			group: {
-				calls: grouped.map((c): ShellCall => ({ command: c.start.command, start: c.start.at, end: c.end.at })),
-				cpu: counted ? Math.round((end.usage! - first.usage!) / 1000) : null,
-			},
-			sessions: new Set(grouped.map((c) => `${c.start.harness}\0${c.start.agent ?? c.start.session}`)),
-			end: ms(end),
+			calls: grouped.map((c) => ({
+				session: `${c.start.harness}\0${c.start.agent ?? c.start.session}`,
+				call: { command: c.start.command, start: c.start.at, end: c.end.at },
+			})),
+			cpu: counted ? Math.round((end.usage! - first.usage!) / 1000) : null,
+			start: ms(first),
 		};
 	});
 }

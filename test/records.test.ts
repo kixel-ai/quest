@@ -58,6 +58,7 @@ const record = (extra: Partial<SessionRecord> = {}): SessionRecord => ({
 		{
 			calls: [{ command: "git status", start: "2026-11-06T10:31:00.000Z", end: "2026-11-06T10:31:01.000Z" }],
 			cpu: 40,
+			shared: false,
 		},
 	],
 	split: null,
@@ -168,7 +169,7 @@ describe("parseRecord", () => {
 			}),
 			"one short line",
 		],
-		["a shell group without calls", record({ shell: [{ calls: [], cpu: 1 }] }), "calls"],
+		["a shell group without calls", record({ shell: [{ calls: [], cpu: 1, shared: false }] }), "calls"],
 		[
 			"a shell command longer than a record keeps",
 			record({
@@ -182,6 +183,7 @@ describe("parseRecord", () => {
 							},
 						],
 						cpu: null,
+						shared: false,
 					},
 				],
 			}),
@@ -700,15 +702,24 @@ describe("buildRecords", () => {
 				cpu: null,
 			},
 		]);
-		const group = {
-			calls: [
-				{ command: "cargo build", start: "2026-11-06T10:10:00.000Z", end: "2026-11-06T10:10:30.000Z" },
-				{ command: "ls", start: "2026-11-06T10:10:01.000Z", end: "2026-11-06T10:10:02.000Z" },
+		// Each holds its own calls, so no session's commands reach another's record, and the group's CPU.
+		expect(of(main).shell).toEqual([
+			{
+				calls: [{ command: "cargo build", start: "2026-11-06T10:10:00.000Z", end: "2026-11-06T10:10:30.000Z" }],
+				cpu: 8000,
+				shared: true,
+			},
+		]);
+		expect(of(sub)).toMatchObject({
+			gated: [],
+			shell: [
+				{
+					calls: [{ command: "ls", start: "2026-11-06T10:10:01.000Z", end: "2026-11-06T10:10:02.000Z" }],
+					cpu: 8000,
+					shared: true,
+				},
 			],
-			cpu: 8000,
-		};
-		expect(of(main).shell).toEqual([group]);
-		expect(of(sub)).toMatchObject({ gated: [], shell: [group] });
+		});
 		expect(of(remote)).toMatchObject({ gated: null, shell: null });
 		expect(() => parseRecord(JSON.parse(JSON.stringify(of(main))))).not.toThrow();
 	});
