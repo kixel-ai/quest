@@ -42,7 +42,7 @@ import {
 } from "./agent";
 import { held, openDrafts, reach, target, upstream, upstreamRefs } from "./claims";
 import { PENDING_MS } from "./admission";
-import { gate, QUICK_MS } from "./gate";
+import { gate } from "./gate";
 import { gitHubDependencies, GitHubInputError, pullRequest, readRemote, remoteRepository } from "./github";
 import { mergedHolds } from "../github/client";
 import { type Hold, finish, land, release, take } from "./hold";
@@ -171,8 +171,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"quest review, long-running servers, and quick tools such as formatters out of the gate. Nested gate " +
 				"calls run immediately. Limits come from the host; there is " +
 				"no configuration.\n\n" +
-				`--quick waits at most ${QUICK_MS / 1000} seconds, then starts the command anyway; pass it only for ` +
-				"cheap commands such as formatters. With QUEST_GATE_PRIORITY=1 in the environment, as a check " +
+				"With QUEST_GATE_PRIORITY=1 in the environment, as a check " +
 				"that lands PRs should set, the command waits for memory but never for load, and gets " +
 				"MBX_SCHEDULER_PRIORITY=normal unless it sets its own.\n\n" +
 				"Once the command exits, or is cancelled and exits, its remaining descendants are killed; a second " +
@@ -190,11 +189,10 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"its time queued and running under $XDG_STATE_HOME/quest/waits for the session's record; a log it cannot " +
 				"write fails the gate.",
 		)
-		.option("--quick", `Start a cheap command after at most ${QUICK_MS / 1000} seconds of waiting`)
 		.argument("<command>", "Executable to run")
 		.argument("[args...]", "Arguments forwarded verbatim")
-		.action((command: string, args: string[], options: { quick?: boolean }) => {
-			pending = gate([command, ...args], options).catch((error: unknown) => {
+		.action((command: string, args: string[]) => {
+			pending = gate([command, ...args]).catch((error: unknown) => {
 				warn(error instanceof Error ? error.message : String(error));
 				return 1;
 			});
@@ -2005,19 +2003,19 @@ function positiveSeconds(value: string): number {
 
 /**
  * Stop option parsing before a gated executable, keeping its own flags intact.
- * Quest's global options still apply on either side of `gate`, and its own `--quick` after it.
+ * Quest's global options still apply on either side of `gate`.
  */
 export function gateBoundary(argv: string[]): string[] {
-	const skip = (index: number, own: string[] = []) => {
+	const skip = (index: number) => {
 		for (;;) {
 			if (argv[index] === "--root") index += 2;
-			else if (argv[index]?.startsWith("--root=") || own.includes(argv[index])) index += 1;
+			else if (argv[index]?.startsWith("--root=")) index += 1;
 			else return index;
 		}
 	};
 	const index = skip(0);
 	if (argv[index] !== "gate") return argv;
-	const command = skip(index + 1, ["--quick"]);
+	const command = skip(index + 1);
 	if (!argv[command] || argv[command].startsWith("-")) return argv;
 	return [...argv.slice(0, command), "--", ...argv.slice(command)];
 }
