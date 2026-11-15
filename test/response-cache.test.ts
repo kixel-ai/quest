@@ -140,6 +140,35 @@ describe("ETag revalidation", () => {
 		expect(sent).toEqual([null, null, null, null, null, null]);
 	});
 
+	test("a failing cache warns once and leaves reads uncached", async () => {
+		const warnings: string[] = [];
+		const sent: (string | null)[] = [];
+		const broken: ResponseCache = {
+			get: async () => {
+				throw new Error("EACCES: permission denied");
+			},
+			set: async () => {
+				throw new Error("ENOSPC: no space left on device");
+			},
+		};
+		const github = new GitHub({
+			token: "token",
+			quota: "fail",
+			now: () => 0,
+			sleep: async () => {},
+			warn: (text) => warnings.push(text),
+			cache: broken,
+			fetch: (async (_input, init) => {
+				sent.push(new Headers(init?.headers).get("If-None-Match"));
+				return json({ id: 1 }, { etag: '"a"' });
+			}) as typeof fetch,
+		});
+		for (let round = 0; round < 2; round++)
+			expect(await (await github.request(`${repo}/pulls/1`)).json()).toEqual({ id: 1 });
+		expect(sent).toEqual([null, null]);
+		expect(warnings).toEqual(["GitHub response cache failed, reading uncached: EACCES: permission denied"]);
+	});
+
 	test("a 304 to a request that sent no ETag fails", async () => {
 		const { github } = client(diskResponseCache(directory()), [notModified()]);
 		await expect(github.request(`${repo}/pulls/1`)).rejects.toThrow("unexpected GitHub 304");
@@ -186,6 +215,18 @@ describe("disk cache", () => {
 		// An entry over an eighth of the bound is not kept.
 		await cache.set(key(99), entry("y".repeat(limit / 8)));
 		expect(await cache.get(key(99))).toBeUndefined();
+	});
+
+	test("processes sharing the cache count each other's writes", async () => {
+		const path = directory();
+		const limit = 80_000;
+		const writers = [diskResponseCache(path, limit), diskResponseCache(path, limit)];
+		const body = "x".repeat(9000);
+		for (let n = 0; n < 40; n++) await writers[n % 2].set(key(n), entry(body));
+		const size = readdirSync(path).reduce((sum, name) => sum + statSync(join(path, name)).size, 0);
+		// Each writer sums the directory after every eighth of the bound it writes, so together they pass it by at most that each.
+		expect(size).toBeLessThanOrEqual(limit + limit / 4);
+		expect(readdirSync(path).length).toBeLessThan(20);
 	});
 
 	test("a damaged entry is a miss, and is removed", async () => {

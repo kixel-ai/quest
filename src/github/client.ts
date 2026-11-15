@@ -109,11 +109,30 @@ function limited(response: Response, body: string): boolean {
 export class GitHub {
 	/** The longest X-Poll-Interval GitHub asked for since the caller last set this, in milliseconds. */
 	pollInterval = 0;
+	/** The response cache, dropped after its first failure. */
+	private cache: ResponseCache | undefined;
 
 	constructor(
 		private readonly deps: GitHubDependencies,
 		private readonly deadline = Infinity,
-	) {}
+	) {
+		this.cache = deps.cache;
+	}
+
+	/**
+	 * A cache operation's result, or undefined once it fails: the cache only saves quota, so a full
+	 * or unwritable disk warns once and leaves the client reading GitHub uncached.
+	 */
+	private async cached<T>(operation: () => Promise<T>): Promise<T | undefined> {
+		if (!this.cache) return undefined;
+		try {
+			return await operation();
+		} catch (error) {
+			this.cache = undefined;
+			this.deps.warn(`GitHub response cache failed, reading uncached: ${message(error)}`);
+			return undefined;
+		}
+	}
 
 	/** Sleep, cut short by the deadline. */
 	async pause(milliseconds: number): Promise<void> {
@@ -139,8 +158,9 @@ export class GitHub {
 		const repeat = options.repeat ?? (await this.repeatable(url, options, started));
 		const accept = options.accept ?? "application/vnd.github+json";
 		const get = options.body === undefined && options.method === undefined;
-		const key = get && this.deps.cache ? await cacheKey(this.deps.token, accept, url.href) : undefined;
-		const cached = key === undefined ? undefined : await this.deps.cache!.get(key);
+		const cache = get ? this.cache : undefined;
+		const key = cache && (await cacheKey(this.deps.token, accept, url.href));
+		const cached = key === undefined ? undefined : await this.cached(() => cache!.get(key));
 		let limits = 0;
 		let failures = 0;
 		for (;;) {
@@ -194,7 +214,7 @@ export class GitHub {
 						etag &&
 						settled(response, url, read.text)
 					)
-						await this.deps.cache!.set(key, { etag, headers: [...headers], body: read.text });
+						await this.cached(() => cache!.set(key, { etag, headers: [...headers], body: read.text }));
 					if ("text" in read)
 						return new Response(NULL_BODY.includes(status) ? null : read.text, {
 							status,

@@ -16,11 +16,14 @@ export function responseCacheDirectory(env: NodeJS.ProcessEnv = process.env): st
 /**
  * A {@link ResponseCache} of one file per entry in `directory`, private to its user. Writes rename
  * a finished file into place, so concurrent processes never read a partial entry. Each process sums
- * the directory once, then again whenever its count passes `limit`, evicting the least recently used
- * down to three quarters of it; an entry over an eighth of `limit` is not kept.
+ * the directory on its first write, whenever its writes since would pass `limit`, and after every
+ * eighth of `limit` it writes, so other processes' writes are counted too, evicting the least recently
+ * used down to three quarters of `limit` once past it. An entry over an eighth of `limit` is not kept.
  */
 export function diskResponseCache(directory: string, limit = LIMIT): ResponseCache {
-	let total: number | undefined;
+	/** The directory's size at this process's last sum, undefined before the first, and bytes written since. */
+	let summed: number | undefined;
+	let written = 0;
 	const path = (key: string) => {
 		if (!/^[0-9a-f]{64}$/.test(key)) throw new Error(`invalid response cache key: ${key}`);
 		return join(directory, key);
@@ -32,14 +35,17 @@ export function diskResponseCache(directory: string, limit = LIMIT): ResponseCac
 			const info = await stat(file).catch(missing);
 			if (info) entries.push({ file, size: info.size, used: info.mtimeMs });
 		}
-		total = entries.reduce((sum, entry) => sum + entry.size, 0);
-		if (total <= limit) return;
-		entries.sort((a, b) => a.used - b.used);
-		for (const entry of entries) {
-			if (total <= (limit * 3) / 4) break;
-			await unlink(entry.file).catch(missing);
-			total -= entry.size;
+		let total = entries.reduce((sum, entry) => sum + entry.size, 0);
+		if (total > limit) {
+			entries.sort((a, b) => a.used - b.used);
+			for (const entry of entries) {
+				if (total <= (limit * 3) / 4) break;
+				await unlink(entry.file).catch(missing);
+				total -= entry.size;
+			}
 		}
+		summed = total;
+		written = 0;
 	};
 	return {
 		async get(key) {
@@ -66,7 +72,8 @@ export function diskResponseCache(directory: string, limit = LIMIT): ResponseCac
 			await writeFile(temporary, text, { mode: 0o600 });
 			// Another process's eviction may take the file first; the entry is then just not kept.
 			await rename(temporary, file).catch(missing);
-			if (total === undefined || (total += size) > limit) await evict();
+			written += size;
+			if (summed === undefined || summed + written > limit || written > limit / 8) await evict();
 		},
 	};
 }
