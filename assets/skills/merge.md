@@ -15,7 +15,7 @@ The head is landable when:
 
 - the PR is not a draft;
 - a review counts for it, as below;
-- every review finding posted on it, including automated reviewers' such as CodeRabbit or Codex, is fixed on the head or answered with a refutation, and no decision is open;
+- every review finding posted on it, including automated reviewers' such as CodeRabbit or Codex, is fixed on the head or answered with a refutation, no decision is open, and `quest status` prints no `signal` line;
 - no check failed on it, required or not, its required checks passed, other than the gate's own `quest land` check, which never reports on a head, and it does not conflict with its base;
 - no review requests changes; an approval its base requires may still be to come, since the queue waits for it.
 
@@ -30,6 +30,7 @@ Read `quest status <pr>`'s `review-record` line rather than comparing diffs your
 Otherwise, the changes since the reviewed head need no new review only when they are conflict-free merges from the base branch, a reviewer's suggested patch applied unchanged, the fixes of a round whose findings were all low severity, a land fixer's recorded mechanical fix that changes no behavior, or the pick round's answers recorded in the PR's follow-ups.
 The repository's review policy decides whose record counts and may require more, such as a maintainer's review.
 Where it says nothing, only a record on a PR whose author has write access counts: anyone else writes their own PR body, so their head needs a local review that rewrites the record.
+On a trivial PR that `/quest-run`'s standing pick covers, Pullfrog's approval of the head stands in for that record unless that policy requires more.
 
 Queue the head with `quest merge <pr> --land <full 40-character head SHA>`, adding `--squash` or `--rebase` when the repository's root instructions name that method for the PR's base.
 Run a `quest` the PR cannot modify, such as an installed release rather than a build from the head's checkout: it refuses a head that leaves its quest inaccurate, a check the head's own code could skip.

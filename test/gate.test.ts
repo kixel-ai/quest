@@ -30,6 +30,7 @@ import {
 	type Admission,
 	type Host,
 	hostLimits,
+	LEDGER_VERSION,
 	linuxMemory,
 	measure,
 	type Owner,
@@ -279,6 +280,31 @@ test("a gate records the most CPUs its command kept busy in the last minute", as
 test("a gate records its command's burst before the first sample", async () => {
 	const { published } = await measured([4, ...Array(RECENT_MS / SETTLE_MS).fill(0)]);
 	expect(published).toEqual([`4 at ${SETTLE_MS}`, `0 at ${SETTLE_MS + RECENT_MS}`]);
+});
+
+test("a gate records its admission again once another gate drops it, even while its cores hold", async () => {
+	const state = { now: 0, load: 0, memory: Infinity };
+	const host = testHost(tempDir(), state);
+	host.publish(host.ledger(), [{ id: "build", at: 0, ...me }]);
+	host.usage = () => 0;
+	const stop = new AbortController();
+	let samples = 3;
+	host.sleep = async () => {
+		if (samples-- === 0) {
+			stop.abort();
+			throw stop.signal.reason;
+		}
+		state.now += SETTLE_MS;
+		// Before the second sample, a gate in another PID namespace drops it as gone.
+		if (samples === 1) host.publish(host.ledger(), [{ id: "other", at: state.now, ...me }]);
+	};
+	const lost: string[] = [];
+	await measure(host, { id: "build", unit: "quest-gate-build.scope" }, stop.signal, (id) => lost.push(id));
+	expect(lost).toEqual(["build"]);
+	expect(host.ledger().admissions).toEqual([
+		{ id: "other", at: 2 * SETTLE_MS, ...me },
+		{ id: "build", at: 0, ...me, cores: 0 },
+	]);
 });
 
 test("a priority caller waits for memory, never for load, even while a gated command runs", async () => {
@@ -680,8 +706,11 @@ test("Linux memory reads the container cgroup mounted as the root", () => {
 
 test("every caller on this host shares one ledger, whatever its environment or sessions", () => {
 	// A home directory shared between machines keeps each host's admissions apart.
-	expect(claimDirectory("/home/u", "a")).toBe(join("/home/u", ".cache", "quest", "admissions", "a"));
+	const ledger = `admissions-v${LEDGER_VERSION}`;
+	expect(claimDirectory("/home/u", "a", 1, "/tmp", null)).toBe(join("/home/u", ".cache", "quest", ledger, "a"));
 	expect(claimDirectory("/home/u", "b")).not.toBe(claimDirectory("/home/u", "a"));
+	// So does a PID namespace, such as a sandbox's, whose gates cannot see the others' processes.
+	expect(claimDirectory("/home/u", "a", 1, "/tmp", "7")).toBe(join("/home/u", ".cache", "quest", ledger, "a-pid7"));
 	// A login session's runtime directory comes and goes; an overridden HOME is still this
 	// account. Runtimes may read both once at startup, so each caller is a new process.
 	const gate = fileURLToPath(new URL("../src/cli/gate.ts", import.meta.url));
@@ -702,9 +731,9 @@ test.skipIf(process.platform === "win32")("an account without a home shares a pr
 	const uid = process.getuid!();
 	const tmp = tempDir();
 	const root = join(tmp, `quest-${uid}`);
-	expect(claimDirectory(null, "a", uid, tmp)).toBe(join(root, "admissions", "a"));
+	expect(claimDirectory(null, "a", uid, tmp, null)).toBe(join(root, `admissions-v${LEDGER_VERSION}`, "a"));
 	expect(statSync(root).mode & 0o777).toBe(0o700);
-	expect(claimDirectory(null, "a", uid, tmp)).toBe(join(root, "admissions", "a"));
+	expect(claimDirectory(null, "a", uid, tmp, null)).toBe(join(root, `admissions-v${LEDGER_VERSION}`, "a"));
 	// Another user may create the name first, writable by them or owned by them.
 	chmodSync(root, 0o777);
 	expect(() => claimDirectory(null, "a", uid, tmp)).toThrow("only UID");
@@ -746,6 +775,18 @@ test("a nested gate runs at once and keeps the exact exit status", async () => {
 	// A gated recipe that calls another one must not wait for admission twice.
 	vi.stubEnv("QUEST_GATE_ADMITTED", "1");
 	expect(await gate([process.execPath, "-e", "process.exit(23)"])).toBe(23);
+});
+
+test("a priority gate schedules mbx at normal priority unless the command sets its own", async () => {
+	vi.stubEnv("QUEST_GATE_ADMITTED", "1");
+	vi.stubEnv("QUEST_GATE_PRIORITY", undefined);
+	vi.stubEnv("MBX_SCHEDULER_PRIORITY", undefined);
+	const exits = "process.exit({ normal: 3, low: 4 }[process.env.MBX_SCHEDULER_PRIORITY] ?? 5)";
+	expect(await gate([process.execPath, "-e", exits])).toBe(5);
+	vi.stubEnv("QUEST_GATE_PRIORITY", "1");
+	expect(await gate([process.execPath, "-e", exits])).toBe(3);
+	vi.stubEnv("MBX_SCHEDULER_PRIORITY", "low");
+	expect(await gate([process.execPath, "-e", exits])).toBe(4);
 });
 
 // Bun 1.4.2 marked the gate's own piped output O_NONBLOCK, a flag its command shares, and uv
@@ -1490,4 +1531,150 @@ test("gate rejects unknown options before the executable and forwards flags afte
 	expect(result.stderr).toContain("unknown option '--host'");
 	expect(gateBoundary(["gate", "--unknown", "ls"])).toEqual(["gate", "--unknown", "ls"]);
 	expect(gateBoundary(["gate", "--", "-command"])).toEqual(["gate", "--", "-command"]);
+});
+
+describe.skipIf(process.platform === "win32")("the run record", () => {
+	/** A ledger of the test's own that admits at once, or never when `full`. */
+	const ledger = (full = false): Host => ({
+		...fileHost(tempDir()),
+		load: () => 0,
+		memory: () => (full ? 0 : Infinity),
+	});
+
+	/** An outermost gate recording to `file`. */
+	function outermost(file: string) {
+		vi.stubEnv("QUEST_GATE_ADMITTED", undefined);
+		vi.stubEnv("QUEST_GATE_PRIORITY", undefined);
+		vi.stubEnv("QUEST_GATE_RECORD", file);
+	}
+
+	const lines = (file: string) =>
+		readFileSync(file, "utf8")
+			.split("\n")
+			.filter(Boolean)
+			.map((line) => JSON.parse(line));
+
+	/** Cancel the newest gate with `name`, as its own signal handler would on receiving it. */
+	function interrupt(name: NodeJS.Signals) {
+		(process.listeners(name).at(-1) as () => void)();
+	}
+
+	test("an outermost run appends one line with its wait, scope, and exit", async () => {
+		const dir = tempDir();
+		const file = join(dir, "record.jsonl");
+		const cgroup = join(dir, "cgroup");
+		outermost(file);
+		const scoped = owner(process.env).unit !== undefined;
+		const command = ["/bin/sh", "-c", `cat /proc/self/cgroup > ${quote(cgroup)} 2>/dev/null; exit 3`];
+		const before = Date.now();
+		expect(await gate(command, { host: ledger() })).toBe(3);
+		const after = Date.now();
+		const [line, ...rest] = lines(file);
+		expect(rest).toEqual([]);
+		expect(statSync(file).mode & 0o777).toBe(0o600);
+		expect(line).toMatchObject({ command, directory: process.cwd(), exit: 3, cancelled: false, error: null });
+		const times = [before, Date.parse(line.started), Date.parse(line.admitted), after];
+		expect(times).toEqual([...times].sort((a, b) => a - b));
+		// The unit names the scope the command actually ran in, so a reader can find its journal lines.
+		if (scoped)
+			expect(readFileSync(cgroup, "utf8").trim()).toMatch(new RegExp(`/${line.unit.replaceAll(".", "\\.")}$`));
+		else expect(line.unit).toBeNull();
+	});
+
+	test("a nested gate records nothing, and an empty variable is unset", async () => {
+		const dir = tempDir();
+		const file = join(dir, "record.jsonl");
+		vi.stubEnv("QUEST_GATE_RECORD", file);
+		vi.stubEnv("QUEST_GATE_ADMITTED", "1");
+		expect(await gate([process.execPath, "-e", "process.exit(5)"])).toBe(5);
+		expect(existsSync(file)).toBe(false);
+		outermost("");
+		expect(await gate([process.execPath, "-e", "process.exit(6)"], { host: ledger() })).toBe(6);
+		expect(readdirSync(dir)).toEqual([]);
+	});
+
+	test("a run cancelled while queued is recorded with no admission or scope", async () => {
+		const dir = tempDir();
+		const file = join(dir, "record.jsonl");
+		const ran = join(dir, "ran");
+		outermost(file);
+		const host = ledger(true);
+		const result = gate(["/bin/sh", "-c", `: > ${quote(ran)}`], { host });
+		await until(() => host.ledger().admissions.length > 0);
+		interrupt("SIGHUP");
+		expect(await result).toBe(128 + constants.signals.SIGHUP);
+		expect(existsSync(ran)).toBe(false);
+		expect(lines(file)).toEqual([
+			expect.objectContaining({
+				admitted: null,
+				unit: null,
+				exit: 128 + constants.signals.SIGHUP,
+				cancelled: true,
+				error: null,
+			}),
+		]);
+	});
+
+	test("a record it cannot open refuses to run the command", async () => {
+		const dir = tempDir();
+		const ran = join(dir, "ran");
+		const command = ["/bin/sh", "-c", `: > ${quote(ran)}`];
+		outermost(join(dir, "missing", "record.jsonl"));
+		await expect(gate(command, { host: ledger() })).rejects.toThrow(/cannot record its run in .*missing/);
+		outermost("record.jsonl");
+		await expect(gate(command, { host: ledger() })).rejects.toThrow("must be an absolute path");
+		const link = join(dir, "link.jsonl");
+		symlinkSync(join(dir, "target.jsonl"), link);
+		outermost(link);
+		await expect(gate(command, { host: ledger() })).rejects.toThrow(/cannot record its run in .*link\.jsonl/);
+		expect(existsSync(join(dir, "target.jsonl"))).toBe(false);
+		expect(existsSync(ran)).toBe(false);
+	});
+
+	// /dev/full opens for appending, then fails every write.
+	test.runIf(process.platform === "linux")(
+		"a line it cannot write fails the gate, and a cancelled one keeps its status",
+		async () => {
+			outermost("/dev/full");
+			await expect(gate(["true"], { host: ledger() })).rejects.toThrow("cannot record its run in /dev/full");
+			const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+			try {
+				const host = ledger(true);
+				const result = gate(["true"], { host });
+				await until(() => host.ledger().admissions.length > 0);
+				interrupt("SIGINT");
+				expect(await result).toBe(128 + constants.signals.SIGINT);
+				expect(stderr).toHaveBeenCalledWith(expect.stringContaining("cannot record its run in /dev/full"));
+			} finally {
+				stderr.mockRestore();
+			}
+		},
+	);
+
+	test("concurrent gates leave only whole lines", async () => {
+		const dir = tempDir();
+		const file = join(dir, "record.jsonl");
+		const script = join(dir, "gates.ts");
+		const gatePath = fileURLToPath(new URL("../src/cli/gate.ts", import.meta.url));
+		// Long arguments make each line span many pages, so an interleaved write would show.
+		writeFileSync(
+			script,
+			`import { fileHost, gate } from ${JSON.stringify(gatePath)};
+			const host = { ...fileHost(process.argv[2]), load: () => 0, memory: () => Infinity };
+			process.exit(await gate(["true", process.argv[3].repeat(64 * 1024)], { host }));`,
+		);
+		const env: NodeJS.ProcessEnv = { ...process.env, QUEST_GATE_RECORD: file };
+		delete env.QUEST_GATE_ADMITTED;
+		const gates = "abcdefgh".split("").map((letter) => {
+			const child = spawn(process.execPath, [config, script, join(dir, `ledger-${letter}`), letter], {
+				env,
+				stdio: "inherit",
+			});
+			return once(child, "exit");
+		});
+		expect((await Promise.all(gates)).map(([code]) => code)).toEqual(Array(8).fill(0));
+		const recorded = lines(file).map((line) => line.command[1]);
+		expect(recorded.map((argument: string) => argument[0]).sort()).toEqual("abcdefgh".split(""));
+		for (const argument of recorded) expect(argument).toBe(argument[0].repeat(64 * 1024));
+	});
 });

@@ -1,8 +1,9 @@
 import { describe, expect, test } from "vitest";
 
-import type { GitHubDependencies } from "../src/cli/github";
+import { GitHub, type GitHubDependencies } from "../src/github/client";
 import { main } from "../src/cli/main";
-import { pullRequestStatus, statusLines } from "../src/cli/status";
+import { statusLines } from "../src/cli/status";
+import { pullRequestStatus, requiredOf } from "../src/github/status";
 
 const A = "a".repeat(40);
 const B = "b".repeat(40);
@@ -118,6 +119,8 @@ function setup(
 		warnings?: string[];
 		/** The base-to-head diff per compared head, or the status GitHub refuses it with. */
 		diffs?: Record<string, string | number>;
+		/** The PR's reviews, threads, and comments as the signal reader reads them; none by default. */
+		signals?: Node;
 		/** The base's active ruleset rules. */
 		rules?: Node[];
 		/** The base branch is gone, so reading it fails. */
@@ -136,6 +139,7 @@ function setup(
 	const activityRequests: string[] = [];
 	const deps: GitHubDependencies = {
 		token: "test-token",
+		quota: "wait",
 		now: () => options.now ?? 0,
 		sleep: async () => {},
 		warn: (message) => options.warnings?.push(message),
@@ -179,6 +183,25 @@ function setup(
 				return Response.json(page.rows, { headers: page.next ? { Link: `<${page.next}>; rel="next"` } : {} });
 			}
 			const request = JSON.parse(String(init?.body));
+			if (request.query.includes("p1: pullRequest(number: 1)")) {
+				if (!last) throw new Error("signals read before PR state");
+				const head = last.data.repository.pullRequest.headRefOid;
+				const empty = { pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] };
+				return Response.json({
+					data: {
+						repository: {
+							p1: {
+								headRefOid: head,
+								commits: { nodes: [{ commit: { oid: head, committedDate: "2026-10-16T00:00:00Z" } }] },
+								reviews: empty,
+								reviewThreads: empty,
+								comments: empty,
+								...options.signals,
+							},
+						},
+					},
+				});
+			}
 			if (request.query.includes("query HoldOwnership(")) {
 				holdQueries.push(request.variables);
 				if (!last) throw new Error("ownership read before PR state");
@@ -260,6 +283,7 @@ test("reports checks by requiredness, each reviewer's latest review against the 
 		"merge-state blocked",
 		"review-decision review_required",
 		"review-record -",
+		"risk -",
 		"auto-merge -",
 		"merge-queue -",
 		"landing-stopped -",
@@ -280,6 +304,30 @@ test("reports checks by requiredness, each reviewer's latest review against the 
 	]);
 });
 
+test("lists the signals that hold the head: unanswered online findings and newer maintainer decisions", async () => {
+	const body = pull({ checks: null, reviews: page([]), threads: page([]) });
+	const decision = `${URL_}#issuecomment-9`;
+	const status = await pullRequestStatus(
+		pr,
+		setup([body], {
+			signals: {
+				comments: page([
+					{
+						author: { __typename: "User", login: "kixelated" },
+						authorAssociation: "OWNER",
+						body: "Maintainer decision: raise the timeout.",
+						createdAt: "2026-10-16T01:00:00Z",
+						url: decision,
+					},
+				]),
+			},
+		}).deps,
+	);
+	expect(statusLines(status)).toContain(
+		`signal decision ${decision} kixelated: Maintainer decision: raise the timeout.`,
+	);
+});
+
 test("a queued PR with auto-merge and no checks reports both, and JSON is deterministic", async () => {
 	const body = pull({
 		state: "OPEN",
@@ -296,13 +344,14 @@ test("a queued PR with auto-merge and no checks reports both, and JSON is determ
 		threads: page([]),
 	});
 	const status = await pullRequestStatus(pr, setup([body]).deps);
-	expect(statusLines(status).slice(2, 12)).toEqual([
+	expect(statusLines(status).slice(2, 13)).toEqual([
 		"draft true",
 		`head ${A}`,
 		"mergeable mergeable",
 		"merge-state blocked",
 		"review-decision -",
 		"review-record -",
+		"risk -",
 		"auto-merge squash kixelated 2026-10-07T12:00:00Z -",
 		"merge-queue awaiting_checks 2 2026-10-07T12:01:00Z",
 		"landing-stopped -",
@@ -559,6 +608,54 @@ test("a required check or workflow nothing reports is pending, except the gate's
 	// With no checks on the head at all, the requirements still leave it pending.
 	const empty = setup([pull({ checks: null, reviews: page([]), threads: page([]) })], { rules });
 	expect((await pullRequestStatus(pr, empty.deps)).checks.state).toBe("pending");
+});
+
+test("a base's requirements read once give the status a read of its own would, and another base's are refused", async () => {
+	const rules = [
+		{ type: "required_status_checks", parameters: { required_status_checks: [{ context: "lint" }] } },
+		{ type: "workflows", parameters: { workflows: [{ path: ".github/workflows/pr.yml", repository_id: 1 }] } },
+	];
+	const body = () =>
+		pull({ checks: page([run("test", "COMPLETED", "SUCCESS", false)]), reviews: page([]), threads: page([]) });
+	/** The fixture, recording each request for the base's rules. */
+	const counted = () => {
+		const fixture = setup([body()], { rules });
+		const reads: string[] = [];
+		const fetch = fixture.deps.fetch;
+		fixture.deps.fetch = (url, init) => {
+			const path = new URL(String(url)).pathname;
+			if (/\/(branches|rules\/branches|repositories)\//.test(path)) reads.push(path);
+			return fetch(url, init);
+		};
+		return { deps: fixture.deps, reads };
+	};
+	const own = counted();
+	const expected = await pullRequestStatus(pr, own.deps);
+	expect(own.reads).not.toEqual([]);
+
+	const shared = counted();
+	const needs = await requiredOf(new GitHub(shared.deps), pr, "main");
+	const before = shared.reads.length;
+	expect(await pullRequestStatus(pr, shared.deps, { ...pr, branch: "main", needs })).toEqual(expected);
+	expect(shared.reads).toHaveLength(before);
+	expect(expected.checks.pending.map((check) => check.name)).toEqual([
+		"lint",
+		"example/project:.github/workflows/pr.yml",
+	]);
+
+	// The PR moved to another base after its requirements were read.
+	await expect(pullRequestStatus(pr, counted().deps, { ...pr, branch: "release", needs })).rejects.toThrow(
+		"the PR's base is main, not the release whose requirements were read",
+	);
+	// Another repository's requirements are refused, whatever their branch; names ignore case.
+	const other = counted();
+	await expect(
+		pullRequestStatus(pr, other.deps, { owner: "example", repo: "policies", branch: "main", needs }),
+	).rejects.toThrow("the requirements passed for example/project#1 were read for example/policies");
+	expect(other.reads).toEqual([]);
+	expect(
+		await pullRequestStatus(pr, counted().deps, { owner: "Example", repo: "Project", branch: "main", needs }),
+	).toEqual(expected);
 });
 
 test("a required check from another app than its requirement names stays pending, and a closed PR reads no requirements", async () => {
@@ -957,6 +1054,48 @@ describe("the review record", () => {
 
 	test("reads only the Review section, so a SHA elsewhere names no review", async () => {
 		expect(await line(`Fixes ${A}.\n\n## Review\n\nSkipped.\n\n## Models\n\n${C}`)).toBe("review-record -");
+	});
+});
+
+describe("the risk tier", () => {
+	const risk = async (body: string, options: Parameters<typeof setup>[1] = {}) => {
+		const fixture = setup([pull({ body, checks: null, reviews: page([]), threads: page([]) })], options);
+		const status = await pullRequestStatus(pr, fixture.deps);
+		return { line: statusLines(status).find((l) => l.startsWith("risk ")), risk: status.risk };
+	};
+	const record = (head: string, extra = "") =>
+		`## Review\n\n- Head: ${head}\n- Base: origin/main at bbbbbbbbbbbb\n- Risk: high, \`it rewrites the wire format\`\n` +
+		`- Classified: medium by Claude Code, claude-haiku-5-5, low effort, session \`s-1\`${extra}`;
+
+	test("names the record's tier, the classifier's, and whether it covers the head", async () => {
+		expect(await risk(record(A))).toEqual({
+			line: "risk high current medium it rewrites the wire format",
+			risk: { tier: "high", reason: "it rewrites the wire format", classified: "medium", state: "current" },
+		});
+		// A record with an open finding names its head by 12 characters, and no full SHA.
+		expect((await risk(record(A.slice(0, 12)))).line).toBe("risk high current medium it rewrites the wire format");
+		expect((await risk(record(B.slice(0, 12)))).line).toBe("risk high stale medium it rewrites the wire format");
+	});
+
+	test("carries to a later head as the review record does", async () => {
+		expect((await risk(record(B, `\n- Low findings fixed at ${A}`))).line).toMatch(/^risk high current /);
+		expect((await risk(record(B), { diffs: { [A]: "same", [B]: "same" } })).line).toMatch(
+			/^risk high diff-identical /,
+		);
+		expect((await risk(record(B), { diffs: { [A]: "new", [B]: "old" } })).line).toMatch(/^risk high stale /);
+	});
+
+	test("is absent from a record without one, and fails on a malformed one", async () => {
+		expect((await risk(`## Review\n\n- Head: ${A}`)).line).toBe("risk -");
+		const fixture = setup([
+			pull({
+				body: `## Review\n\n- Head: ${A}\n- Risk: dire`,
+				checks: null,
+				reviews: page([]),
+				threads: page([]),
+			}),
+		]);
+		await expect(pullRequestStatus(pr, fixture.deps)).rejects.toThrow("risk is malformed");
 	});
 });
 

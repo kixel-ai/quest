@@ -17,6 +17,14 @@
       url = "github:moq-dev/quest";
       flake = false;
     };
+    # token-max, which reads and prices `quest usage`'s sessions; the lock pins it so its JSON stays what the
+    # parser reads. Its own quest input follows this flake, so the lock never chains older quest pins.
+    token-max = {
+      url = "github:kixel-ai/token-max";
+      inputs.nixpkgs.follows = "nixpkgs";
+      inputs.flake-utils.follows = "flake-utils";
+      inputs.quest.follows = "";
+    };
   };
 
   outputs =
@@ -26,6 +34,7 @@
       nixpkgs-bun,
       flake-utils,
       quest-pinned,
+      token-max,
       ...
     }:
     # The pinned nixpkgs no longer evaluates on x86_64-darwin; Intel Macs use the release binary.
@@ -42,8 +51,15 @@
             inherit system;
             overlays = [ (_: _: { inherit (nixpkgs-bun.legacyPackages.${system}) bun; }) ];
           };
-          quest = pkgs.callPackage ./nix/package.nix { };
-          questPinned = pkgs.callPackage "${quest-pinned}/nix/package.nix" { };
+          # A flake build cannot see tags, so it reports its commit.
+          quest = pkgs.callPackage ./nix/package.nix { rev = self.shortRev or self.dirtyShortRev or null; };
+          # A pin from before builds took `rev` reads its version from package.json instead.
+          pinnedPackage = "${quest-pinned}/nix/package.nix";
+          questPinned = pkgs.callPackage pinnedPackage (
+            pkgs.lib.optionalAttrs (pkgs.lib.functionArgs (import pinnedPackage) ? rev) {
+              rev = quest-pinned.shortRev;
+            }
+          );
           manifest = pkgs.lib.importJSON ./package.json;
           # package.json's packageManager pins Bun for CI runners without Nix.
           bunVersion = pkgs.lib.removePrefix "bun@" manifest.packageManager;
@@ -66,8 +82,8 @@
                 jq
                 git
                 gh
-                # Prices `quest usage`'s sessions, pinned with the lock so its JSON stays what the parser reads.
-                ccusage
+                # Exports and prices `quest usage`'s sessions.
+                token-max.packages.${system}.default
                 direnv
                 actionlint
                 shellcheck
@@ -75,16 +91,10 @@
                 nixfmt
                 # GNU time, which the gate's cancellation tests put between Bash and their leaf.
                 time
-                # `srt`, which an opencode review runs its commands under, with its seccomp helper on Linux.
-                (callPackage ./nix/sandbox-runtime.nix { })
               ]
               # `flock` (the land daemon's repository lock) and `script` (the tests' terminal), which
-              # self-hosted NixOS runners don't otherwise provide, and the bubblewrap and socat srt runs.
-              ++ pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux [
-                pkgs.util-linux
-                pkgs.bubblewrap
-                pkgs.socat
-              ];
+              # self-hosted NixOS runners don't otherwise provide.
+              ++ pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux [ pkgs.util-linux ];
           };
           formatter = pkgs.nixfmt;
           checks = {

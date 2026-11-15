@@ -29,7 +29,7 @@ and `/reflect`):
   - Rejected: forge records only; transcripts through a script each run
 - What gates each run?
   - ✅ A week since the last run, the way
-    [the release cut](/quest/m1/release-cut.md) waits. The decision named a
+    the release cut waited. The decision named a
     `## Waiting` item because quests could not yet be held until a date;
     since `## Scheduled` exists, the run holds the date there (agent,
     2026-11-11).
@@ -47,11 +47,10 @@ Agent's choices, for the implementer to revisit. Each run:
   of those culprits and their fixes; and the typed messages from
   `quest messages --since <date> --json`.
 - Read each culprit pair's `## Caused by` line before counting it. On
-  2026-11-11 only 7 of 20 pairs were escapes: `fixedBy` takes every link
-  in the section, including "No single PR" lines and unmerged PRs, until
-  [the token-max attribution](/quest/m0/routing-evidence/usage-token-max.md)
-  lands; the rest named a PR that left the work to a planned follow-up
-  or kept older behavior.
+  2026-11-11 only 7 of 20 pairs were escapes. `fixedBy` now counts only a
+  merged fix's bullet that opens with the culprit's link, but a culprit
+  can still name a PR that left the work to a planned follow-up or kept
+  older behavior.
 - `quest messages` returns every human turn as a `kind: "message"` entry,
   beside the `kind: "answer"` entries tallied below, so set aside machine-written
   ones yourself: bare skill invocations, pasted relays and logs, accepted
@@ -67,6 +66,11 @@ Agent's choices, for the implementer to revisit. Each run:
   owns that gate, so it goes in the run PR's `## Follow-ups` for
   `/quest-plan` there, as the guide's Creation section says (user,
   2026-11-11, [routing evidence](/quest/m0/routing-evidence/README.md)).
+- Add each escape classified catchable or maybe to its repository's eval
+  set with `quest eval add`, its defect located at the culprit's head from
+  the fix's diff and confirmed against the culprit's own diff, so `quest
+  eval run` scores reviewers on it. A private repository's set stays in
+  that repository.
 - Before proposing a fix, find the quest, check, or rule that already owns
   the class, and report whether its count fell since that landed. A rule
   whose class still recurs is the case for moving it up a level.
@@ -107,7 +111,11 @@ Check first next run:
   [moq-dev/quest#625](https://github.com/moq-dev/quest/pull/625) landed
   2026-11-11T18:43Z: no data yet.
 - Heads that landed past a finding or decision, after
-  [late signals](/quest/m0/late-signals.md) lands.
+  [moq-dev/quest#652](https://github.com/moq-dev/quest/pull/652) lands.
+- Gating mistakes, after `quest context` said on 2026-11-15 to gate by
+  CPU, not run time: `quest gate quest review` ran 591 times in the 14
+  days before, 126 of them on 11-12. Count it from transcripts until
+  [gating records](/quest/m0/benchmark/gating.md) land, then from them.
 - Whether moq-dev/moq and moq-dev/moq.pro planned the runtime follow-ups
   of moq-dev/quest's 2026-11-11 run PR, and whether their escapes recurred.
 
@@ -124,7 +132,7 @@ messages 2026-10-26 to 11-11, classed by one sub-agent, approximate):
   and 7, with 5 races.
 - Landed past an open signal: 3 in moq-dev/moq, 2 catchable and 1
   maybe. A review finding posted after enqueue, a recorded decision the
-  head lacked, and a red platform run. [Late signals](/quest/m0/late-signals.md) takes the
+  head lacked, and a red platform run. [moq-dev/quest#652](https://github.com/moq-dev/quest/pull/652) takes the
   first two; `quest merge`'s refusal of failed checks
   ([moq-dev/quest#601](https://github.com/moq-dev/quest/pull/601)) covers
   none of them.

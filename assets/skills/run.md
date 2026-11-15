@@ -16,7 +16,7 @@ A brief gives the task, its reason and context, such as the quest or PR and the 
 
 Starting quests asks the user nothing: each agent works headless, and its decisions surface in its PR.
 
-`quest unblocked --unclaimed --json` ranks the unclaimed ready quests, reading the upstream tree afresh; start them in that order, as many at once as the harness allows.
+`quest unblocked --unclaimed --json` ranks the unclaimed ready quests, reading the upstream tree afresh; start them in that order, each once `quest agent admit` admits it, as the guide's Coordination section describes.
 It lists each skipped claim on stderr, with how long ago it was last active when it has an open PR; name any that look stale in the summary, for the user to take over.
 
 Start every quest you would recommend: well planned, with no blockers, and no conflict with work already started. For one waiting on an outside condition, first check whether it has cleared.
@@ -27,6 +27,7 @@ Skip a quest a match already implements; one that only touches the same files is
 Each agent runs `/quest-start`; its `quest start` refusing a quest claimed since is a skip, not a failure.
 
 Start each on the first entry of its `models` that can run.
+When it has an `arm` and runs that first entry, its brief says to end its `Implementer:` line with the arm, as `(arm B)`.
 Fall to the next when `quest agent` reports its CLI missing or logged out, or the agent stops on a usage limit with nothing written beyond the claim commit, continuing in that checkout and claim PR.
 Once a model has written anything, the PR is its: keep its worktree and session id to resume after the reset.
 Skip a quest whose list runs out, and report each harness's outage once.
@@ -44,6 +45,7 @@ Leave a PR whose required checks are still running for a later round; an automat
 
 A PR whose author has write access and that changes no user-facing behavior carries a standing `/quest-merge` pick, unless the repository's `CONTRIBUTING.md` opts out: run `/quest-merge` on it without asking, and name it as auto-picked in the summary.
 That covers only tests, benchmarks, CI, internal docs or comments, and behavior-preserving code. Anything users or other repositories get, such as CLI behavior or output, shipped skills or rules, user-facing docs, dependencies, or release artifacts, needs the user's pick, as does adding or expanding quests.
+A trivial PR, such as a dependency bump, carries it too whatever its author, under the same opt-out, but merges only once Pullfrog has approved its head; in a repository without Pullfrog, it needs the user's pick.
 Judge the diff, not the title, before every `/quest-merge` run, and ask when unsure: the standing pick ends at the first head that does not qualify, or once a person takes the PR out of the queue.
 
 Ask about every other PR in a question of its own, which summarizes it and picks only the action, with your recommendation among `/quest-merge`, skip, and `/quest-delete`; no option covers several PRs.
@@ -57,7 +59,8 @@ A `/quest-merge` pick covers the PR until it lands or needs the user: when `/que
 Order merges that would otherwise conflict.
 A PR that left the queue unmerged shows why under `landing-stopped` in `quest status <pr>`.
 Where the queue runs a fixer, such as `quest land`, it hands back only a decision: ask the user, with its handback comment's diagnosis and recommendation.
-Without one, after `merge_conflict`, `failed_checks`, `changes_requested`, or `unresolved_conversations` the pick holds, even from an earlier session: dispatch `/quest-iterate`. After `checks_timed_out`, run `/quest-merge` again once; a second timeout of the same head is the user's call.
+An `unanswered_signal`, which no fixer takes, holds the pick even with one: dispatch `/quest-iterate`.
+Without a fixer, after `merge_conflict`, `failed_checks`, `changes_requested`, or `unresolved_conversations` the pick holds, even from an earlier session: dispatch `/quest-iterate`. After `checks_timed_out`, run `/quest-merge` again once; a second timeout of the same head is the user's call.
 Any other reason, such as a person removing it, is the user's call.
 
 ## Loop

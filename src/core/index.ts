@@ -2,9 +2,8 @@
 // documents, validating them, whether a given quest can be started, and its
 // dependencies.
 //
-// The core is pure: no filesystem, process, or Node APIs, so the CLI, the
-// Worker, and the site share one implementation. Callers load the documents
-// and say which paths exist.
+// The core is pure: no filesystem, process, or Node APIs, so it runs wherever
+// JavaScript does. Callers load the documents and say which paths exist.
 
 export {
 	type Doc,
@@ -17,6 +16,8 @@ export {
 	entries,
 	has,
 	holds,
+	type Host,
+	hosts,
 	isQuest,
 	isEpic,
 	owner,
@@ -34,6 +35,22 @@ export {
 } from "./doc";
 export { type ClosedPull, handBackWaits, handedBack, landed, withoutHandBack } from "./claim";
 export { reviewSection } from "./review";
+export {
+	ALWAYS_HIGH,
+	DEFAULT,
+	type HighPath,
+	PATHS,
+	RISK_FILE,
+	type RecordedRisk,
+	type RiskFile,
+	TIERS,
+	type Tier,
+	matches,
+	parseRiskFile,
+	patternError,
+	recordedRisk,
+	riskier,
+} from "./risk";
 export { type Missed, type Moved, type Source, move, promote, relocate, remove } from "./edit";
 export { comparePaths, normalize } from "./path";
 export { type Blocker, blockers, label, lookup, ready, renderBlocker } from "./ready";
@@ -66,7 +83,7 @@ export {
 	planInit,
 	questReadme,
 } from "./init";
-export { type Chunk, type Clean, type Conflict, LABELS, chunks, render, resolveLists } from "./merge";
+export { type Chunk, type Clean, type Conflict, LABELS, merge, render, resolveLists } from "./merge";
 
 export {
 	HOLD_PREFIX,
@@ -77,3 +94,29 @@ export {
 	latestHold,
 	heldToken,
 } from "./hold";
+export {
+	type BreakageRecord,
+	type Culprit,
+	FINDERS,
+	type Finder,
+	type Seat,
+	breakageKey,
+	parseBreakage,
+} from "./breakage";
+export {
+	type ModelSpend,
+	type RecordUpload,
+	ROLES,
+	type Role,
+	type SessionRecord,
+	type SessionWait,
+	SPLIT_CATEGORIES,
+	type SplitCategory,
+	type SplitUsage,
+	type TimeSplit,
+	NOTE_LIMIT,
+	WAIT_KINDS,
+	type WaitKind,
+	parseRecord,
+	parseUpload,
+} from "./record";

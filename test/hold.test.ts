@@ -2,7 +2,7 @@
 
 import { describe, expect, test, vi } from "vitest";
 
-import type { GitHubDependencies, ObjectValue } from "../src/cli/github";
+import type { GitHubDependencies, ObjectValue } from "../src/github/client";
 import { finish, land, release, take } from "../src/cli/hold";
 import { withoutHandBack } from "../src/core";
 import { type Output, main } from "../src/cli/main";
@@ -35,6 +35,8 @@ class FakePull {
 	body = "Summary.";
 	head = HEAD;
 	mergeState = "BLOCKED";
+	/** GitHub's review decision, null when the base requires no review. */
+	reviewDecision: string | null = null;
 	queue = false;
 	allowAutoMerge: boolean | null = true;
 	/** The repository's merge method settings, hidden from the token when null. */
@@ -43,6 +45,8 @@ class FakePull {
 	/** Runs after each pull request read, to change it between reads. */
 	afterRead?: () => void;
 	comparison = "ahead";
+	/** Runs on each base comparison, the last request before landing. */
+	afterCompare?: () => void;
 	base = BASE;
 	readonly comparisons: string[] = [];
 	/** Check names the base branch's rulesets require. */
@@ -51,6 +55,9 @@ class FakePull {
 	rules: ObjectValue[] = [];
 	/** The head's check runs, as its `statusCheckRollup` lists them. */
 	checks: ObjectValue[] = [];
+	/** The PR's reviews, threads, and comments as the signal reader reads them, and its head's commit time. */
+	activity: ObjectValue = {};
+	committed = "2026-10-21T11:00:00Z";
 	/** The head's workflow runs, as `GET /actions/runs` lists them. */
 	runs: ObjectValue[] = [];
 	autoMerge: ObjectValue | null = null;
@@ -84,6 +91,7 @@ class FakePull {
 			now: () => this.clock,
 			sleep: async () => undefined,
 			token: "token",
+			quota: "wait",
 			warn: (message) => warnings.push(message),
 		};
 	}
@@ -120,6 +128,7 @@ class FakePull {
 			return json(200, { total_count: this.runs.length, workflow_runs: this.runs });
 		if (url.pathname === `/repos/example/project/compare/main...${this.head}`) {
 			this.comparisons.push(`${url.pathname}${url.search}`);
+			this.afterCompare?.();
 			return json(200, { status: this.comparison, base_commit: { sha: this.base } });
 		}
 		if (url.pathname === "/repos/example/project/rules/branches/main") {
@@ -163,6 +172,23 @@ class FakePull {
 			}
 			return { data: { [name]: { clientMutationId: null } } };
 		}
+		if (query.includes("p7: pullRequest(number: 7)")) {
+			const empty = { pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] };
+			return {
+				data: {
+					repository: {
+						p7: {
+							headRefOid: this.head,
+							commits: { nodes: [{ commit: { oid: this.head, committedDate: this.committed } }] },
+							reviews: empty,
+							reviewThreads: empty,
+							comments: empty,
+							...this.activity,
+						},
+					},
+				},
+			};
+		}
 		if (query.includes("node(id: $id)")) return { data: { node: { autoMergeRequest: this.autoMerge } } };
 		if (query.includes("statusCheckRollup"))
 			return {
@@ -198,6 +224,7 @@ class FakePull {
 						headRefName: "quest/m0/example",
 						headRefOid: this.head,
 						mergeStateStatus: this.mergeState,
+						reviewDecision: this.reviewDecision,
 						isMergeQueueEnabled: this.queue,
 						autoMergeRequest: this.autoMerge,
 						mergeQueueEntry: this.queueEntry,
@@ -368,6 +395,91 @@ describe("merge --land", () => {
 		pull.runs.push({ id: 2, workflow_id: 7, check_suite_id: 20, run_started_at: "2026-11-12T23:42:56Z" });
 		await land(PR, { sha: HEAD, method: "merge", check: clean }, pull.deps());
 		expect(pull.writes).not.toEqual([]);
+	});
+
+	test("refuses a head an unanswered online finding or a newer maintainer decision holds", async () => {
+		const pull = new FakePull();
+		const empty = { pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] };
+		const decision = `${URL_}#issuecomment-9`;
+		pull.activity = {
+			comments: {
+				...empty,
+				nodes: [
+					{
+						author: { __typename: "User", login: "maintainer" },
+						authorAssociation: "OWNER",
+						body: "Maintainer decision: add the timeout.",
+						createdAt: "2026-10-21T11:30:00Z",
+						url: decision,
+					},
+				],
+			},
+		};
+		expect(await refused(land(PR, { sha: HEAD, method: "merge", check: clean }, pull.deps()))).toContain(
+			`head ${HEAD} is held by decision by maintainer: Maintainer decision: add the timeout. (${decision})`,
+		);
+		expect(pull.writes).toEqual([]);
+		// A head committed after it may apply it.
+		pull.committed = "2026-10-21T11:45:00Z";
+		await land(PR, { sha: HEAD, method: "merge", check: clean }, pull.deps());
+		expect(pull.writes).not.toEqual([]);
+	});
+
+	test("rechecks signals right before a direct merge", async () => {
+		const pull = new FakePull();
+		pull.allowAutoMerge = false;
+		const empty = { pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] };
+		pull.afterCompare = () => {
+			pull.activity = {
+				comments: {
+					...empty,
+					nodes: [
+						{
+							author: { __typename: "User", login: "maintainer" },
+							authorAssociation: "OWNER",
+							body: "Maintainer decision: late.",
+							createdAt: "2026-10-21T11:30:00Z",
+							url: `${URL_}#issuecomment-9`,
+						},
+					],
+				},
+			};
+		};
+		expect(
+			await refused(land(PR, { sha: HEAD, method: "merge", direct: true, check: clean }, pull.deps())),
+		).toContain("Maintainer decision: late.");
+		expect(pull.writes).toEqual([]);
+	});
+
+	test.each([
+		["a merge queue", (pull: FakePull) => (pull.queue = true)],
+		["the quest land gate", (pull: FakePull) => (pull.required = ["quest land"])],
+	])("rechecks signals after the quest check before queueing on %s", async (_, gate) => {
+		const pull = new FakePull();
+		gate(pull);
+		const empty = { pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] };
+		// A decision posted while the quest check fetched and read the head.
+		const check = async () => {
+			pull.activity = {
+				comments: {
+					...empty,
+					nodes: [
+						{
+							author: { __typename: "User", login: "maintainer" },
+							authorAssociation: "OWNER",
+							body: "Maintainer decision: during the check.",
+							createdAt: "2026-10-21T11:30:00Z",
+							url: `${URL_}#issuecomment-10`,
+						},
+					],
+				},
+			};
+			return [];
+		};
+		expect(await refused(land(PR, { sha: HEAD, method: "merge", check }, pull.deps()))).toContain(
+			"Maintainer decision: during the check.",
+		);
+		expect(pull.writes).toEqual([]);
 	});
 
 	test("refuses when the token cannot see the auto-merge setting", async () => {
@@ -854,4 +966,71 @@ test("iterate and release exit 0 when stdout returns a value", async () => {
 		vi.unstubAllEnvs();
 		vi.unstubAllGlobals();
 	}
+});
+
+describe("merge --land on a base that requires an approval the head lacks", () => {
+	// An admin's token sees such a PR as mergeable past the requirement, so only auto-merge may pick it.
+	test.each(["REVIEW_REQUIRED", "CHANGES_REQUESTED"])(
+		"arms auto-merge in a merge queue, never enqueueing (%s)",
+		async (decision) => {
+			const pull = new FakePull();
+			pull.queue = true;
+			pull.mergeState = "CLEAN";
+			pull.reviewDecision = decision;
+			await land(PR, { sha: HEAD, check: clean }, pull.deps());
+			expect(pull.writes).toEqual([`enablePullRequestAutoMerge ${HEAD} MERGE`]);
+			pull.reviewDecision = "APPROVED";
+			pull.autoMerge = null;
+			pull.writes.length = 0;
+			await land(PR, { sha: HEAD, check: clean }, pull.deps());
+			expect(pull.writes).toEqual([`enqueuePullRequest ${HEAD}`]);
+		},
+	);
+
+	test("never enqueues when GitHub refuses auto-merge as clean, which an admin's enqueue would bypass", async () => {
+		const pull = new FakePull();
+		pull.queue = true;
+		pull.reviewDecision = "REVIEW_REQUIRED";
+		pull.beforeAutoMerge = () => "Pull request is in clean status";
+		expect(await refused(land(PR, { sha: HEAD, check: clean }, pull.deps()))).toContain(
+			"GitHub refused to enqueue",
+		);
+		// The refused attempt is all: no enqueue follows.
+		expect(pull.writes).toEqual([`enablePullRequestAutoMerge ${HEAD} MERGE`]);
+	});
+
+	test("decides on the last read, so an approval dismissed while it checks still holds", async () => {
+		const pull = new FakePull();
+		pull.mergeState = "CLEAN";
+		pull.reviewDecision = "APPROVED";
+		pull.afterRead = () => {
+			pull.reviewDecision = "REVIEW_REQUIRED";
+		};
+		await land(PR, { sha: HEAD, method: "squash", check: clean }, pull.deps());
+		expect(pull.writes).toEqual([`enablePullRequestAutoMerge ${HEAD} SQUASH`]);
+		expect(pull.state).toBe("OPEN");
+	});
+
+	test("arms auto-merge rather than merging at once", async () => {
+		const pull = new FakePull();
+		pull.mergeState = "CLEAN";
+		pull.reviewDecision = "REVIEW_REQUIRED";
+		await land(PR, { sha: HEAD, method: "squash", check: clean }, pull.deps());
+		expect(pull.writes).toEqual([`enablePullRequestAutoMerge ${HEAD} SQUASH`]);
+		expect(pull.state).toBe("OPEN");
+	});
+
+	test("refuses --direct with auto-merge off, which would merge past it", async () => {
+		const pull = new FakePull();
+		pull.allowAutoMerge = false;
+		pull.mergeState = "CLEAN";
+		pull.reviewDecision = "REVIEW_REQUIRED";
+		expect(await refused(land(PR, { sha: HEAD, method: "squash", direct: true, check: clean }, pull.deps()))).toBe(
+			`${URL_} lacks the approval its base requires, which a merge now would bypass; land it once it is approved`,
+		);
+		expect(pull.writes).toEqual([]);
+		pull.reviewDecision = "APPROVED";
+		await land(PR, { sha: HEAD, method: "squash", direct: true, check: clean }, pull.deps());
+		expect(pull.state).toBe("MERGED");
+	});
 });

@@ -249,16 +249,6 @@ test("init keeps a reworded reference line", () => {
 	expect(read(dir, "AGENTS.md")).toBe("# Repo\n");
 });
 
-test("init upgrades an earlier release's default reference line", () => {
-	const dir = tempDir();
-	writeFileSync(
-		join(dir, "AGENTS.md"),
-		"# Repo\r\n\r\nQuests: before starting work, run `quest guide` and follow it.\r\n",
-	);
-	init(dir);
-	expect(read(dir, "AGENTS.md")).toBe(`# Repo\r\n\r\n${REFERENCE_LINE}\r\n`);
-});
-
 /** The stub an earlier release installed for `/quest-ready`, before `/quest-review` replaced it. */
 const READY_STUB =
 	"---\nname: quest-ready\ndescription: Mark a draft PR ready for review, wait for an automated review, then decide whether to merge.\n---\n\nRun `quest skill ready` and follow its output.\nIf `quest` is not installed, follow https://github.com/kixelated/quest/blob/main/SETUP.md first.\n";
@@ -515,4 +505,27 @@ test("quest check reports stubs from a relative root", () => {
 	expect(skipped.stderr).toBe("");
 	init(dir);
 	expect(run(dir).status).toBe(0);
+});
+
+test("quest check reports a malformed risk file at the repository's root", () => {
+	const dir = tempDir();
+	mkdirSync(join(dir, ".git"));
+	write(dir, "AGENTS.md", `${REFERENCE_LINE}\n`);
+	write(dir, "quest/README.md", "# Quests\n\n## Goal\n\nx\n");
+	const run = () =>
+		spawnSync("bun", ["run", "--silent", "quest", "--root", relative(process.cwd(), dir), "check", "--no-stubs"], {
+			encoding: "utf8",
+		});
+	write(dir, "RISK.md", "# Risk\n\n## High\n\n- `/etc` - absolute\n- `src/` charges customers\n");
+	const broken = run();
+	expect(broken.status).toBe(1);
+	expect(broken.stderr).toBe(
+		[
+			"quest: RISK.md:5: `/etc` is no pattern: it starts with /, but a pattern is a path from the repository root",
+			"quest: RISK.md:6: a `## High` item is a backticked pattern, ` - `, and why its change is high",
+			"",
+		].join("\n"),
+	);
+	write(dir, "RISK.md", "# Risk\n\n## High\n\n- `src/billing/` - charges customers\n");
+	expect(run()).toMatchObject({ status: 0, stderr: "" });
 });

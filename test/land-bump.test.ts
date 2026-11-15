@@ -6,7 +6,7 @@ import { delimiter, join } from "node:path";
 
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
-import { type GitHubDependencies, requirements } from "../src/cli/github";
+import { GitHub, type GitHubDependencies, requirements } from "../src/github/client";
 import { land } from "../src/cli/hold";
 import { readRemote } from "../src/cli/land";
 import {
@@ -15,6 +15,8 @@ import {
 	type BumpTools,
 	bumpBody,
 	bumpPass,
+	latestRelease,
+	discoverTargets,
 	hostTools,
 	latestRuns,
 	questInput,
@@ -28,6 +30,9 @@ const landed = vi.mocked(land);
 const SOURCE = { owner: "moq-dev", repo: "quest" };
 const OLD = "1".repeat(40);
 const NEW = "2".repeat(40);
+
+/** A release whose tag `v1.0.0` names `sha`. */
+const release = (sha: string) => ({ tag: "v1.0.0", sha });
 
 /** A flake.lock whose root input `quest` locks the source at `rev`, pinned in its URL when `pinned`. */
 function lockFile(rev: string, pinned: boolean): string {
@@ -100,6 +105,7 @@ function deps(world: World): GitHubDependencies {
 	const json = (value: unknown, status = 200) => Response.json(value, { status });
 	return {
 		token: "test",
+		quota: "wait",
 		now: () => 0,
 		sleep: async () => {},
 		warn: () => {},
@@ -129,12 +135,18 @@ function deps(world: World): GitHubDependencies {
 				if (mutation === "markPullRequestReadyForReview") pull.draft = false;
 				return json({ data: {} });
 			}
+			if (url.pathname === "/installation/repositories")
+				return json({ repositories: [{ owner: { login: world.target.owner }, name: world.target.repo }] });
 			if (url.pathname === path) return json({ default_branch: "main", allow_auto_merge: world.allowAutoMerge });
 			if (url.pathname === `${path}/git/ref/heads/main`) return json({ object: { sha: world.base } });
 			if (url.pathname === `${path}/contents/flake.lock`) {
 				const text =
 					world.lock ??
-					git(world.remote.slice("file://".length), "show", `${url.searchParams.get("ref")}:flake.lock`);
+					git(
+						world.remote.slice("file://".length),
+						"show",
+						`${url.searchParams.get("ref") ?? "main"}:flake.lock`,
+					);
 				return json({ content: Buffer.from(text).toString("base64") });
 			}
 			if (url.pathname === `${path}/actions/runs`) {
@@ -215,7 +227,7 @@ function tools(findings?: string): BumpTools & { locks: string[] } {
 function context(world: World, faked = tools()): BumpContext {
 	return {
 		source: SOURCE,
-		targets: [world.target],
+		installations: async () => [deps(world)],
 		state: tempDir(),
 		reader: async () => "reader",
 		tools: faked,
@@ -260,6 +272,12 @@ describe("questInput", () => {
 		});
 	});
 
+	test("reports a tag in the URL as a pin, which `nix flake update` would resolve again", () => {
+		const lock = JSON.parse(lockFile(OLD, false));
+		lock.nodes.quest_2.original.ref = "v1.0.0";
+		expect(questInput(lock, SOURCE)).toEqual({ input: "quest", locked: OLD, pinned: "v1.0.0" });
+	});
+
 	test("fails on a lock with no such input, or more than one", () => {
 		expect(() => questInput(JSON.parse(lockFile(OLD, false)), { owner: "moq-dev", repo: "other" })).toThrow(
 			"0 root inputs",
@@ -275,6 +293,17 @@ describe("unpin", () => {
 		expect(unpin(flakeNix(OLD), SOURCE, OLD)).toBe(flakeNix());
 	});
 
+	test("drops a tag from the source's URL", () => {
+		expect(unpin(flakeNix("v1.0.0"), SOURCE, "v1.0.0")).toBe(flakeNix());
+	});
+
+	test("drops a ref from the source's query", () => {
+		const url = (query: string) => flakeNix().replace('"github:moq-dev/quest"', `"github:moq-dev/quest${query}"`);
+		expect(unpin(url("?ref=main"), SOURCE, "main")).toBe(flakeNix());
+		expect(unpin(url("?dir=nix&ref=main"), SOURCE, "main")).toBe(url("?dir=nix"));
+		expect(unpin(url("?ref=main&dir=nix"), SOURCE, "main")).toBe(url("?dir=nix"));
+	});
+
 	test("matches the source's name in any case", () => {
 		expect(unpin(flakeNix(OLD).replace("moq-dev/quest", "Moq-Dev/Quest"), SOURCE, OLD)).toBe(flakeNix());
 	});
@@ -286,7 +315,16 @@ describe("unpin", () => {
 });
 
 test("bumpBody waits on a maintainer only for findings", () => {
-	const options = { source: SOURCE, input: "quest", from: OLD, to: NEW, unpinned: false, changed: ["flake.lock"] };
+	const options = {
+		source: SOURCE,
+		input: "quest",
+		from: OLD,
+		to: NEW,
+		tag: "v1.0.0",
+		unpinned: false,
+		changed: ["flake.lock"],
+	};
+	expect(bumpBody(options)).toContain("to release v1.0.0 (`2222222`)");
 	expect(bumpBody(options)).not.toContain("## Waiting");
 	expect(bumpBody(options)).toContain("## Review\n\nSkipped: pin bump");
 	expect(bumpBody({ ...options, findings: "quest/a.md: <bad>" })).toContain(
@@ -295,11 +333,37 @@ test("bumpBody waits on a maintainer only for findings", () => {
 	expect(bumpBody({ ...options, findings: "quest/a.md: <bad>" })).toContain("&lt;bad>");
 });
 
+describe("latestRelease", () => {
+	const github = (releases: Record<string, string>) =>
+		new GitHub({
+			...deps(world()),
+			fetch: (async (input: string | URL | Request) => {
+				const path = new URL(String(input instanceof Request ? input.url : input)).pathname;
+				if (path === "/repos/moq-dev/quest/releases/latest") {
+					const [tag] = Object.keys(releases);
+					return tag === undefined ? new Response("{}", { status: 404 }) : Response.json({ tag_name: tag });
+				}
+				const commit = /^\/repos\/moq-dev\/quest\/commits\/(.+)$/.exec(path);
+				if (commit) return Response.json({ sha: releases[decodeURIComponent(commit[1])] });
+				return new Response("{}", { status: 500 });
+			}) as typeof fetch,
+		});
+
+	test("names the latest release's tag and the commit it tags", async () => {
+		expect(await latestRelease(github({ "v1.0.0": NEW }), SOURCE)).toEqual({ tag: "v1.0.0", sha: NEW });
+	});
+
+	test("is undefined before the first release", async () => {
+		expect(await latestRelease(github({}), SOURCE)).toBeUndefined();
+	});
+});
+
 describe("requirements", () => {
 	test("reads no rules from a private repository on GitHub Free", async () => {
 		const free = world({ rules: "free" });
 		expect(
-			(await requirements(new (await import("../src/cli/github")).GitHub(deps(free)), free.target, "main")).rules,
+			(await requirements(new (await import("../src/github/client")).GitHub(deps(free)), free.target, "main"))
+				.rules,
 		).toEqual([]);
 	});
 });
@@ -308,7 +372,10 @@ describe("bumpPass", () => {
 	test("opens a bump PR on a gated base, unpinning the URL, and queues it once", async () => {
 		const target = world();
 		const ctx = context(target);
-		expect(await bumpPass(ctx, NEW)).toEqual([`bump moq-dev/widget 7 ${NEW}`, "bump landing moq-dev/widget 7"]);
+		expect(await bumpPass(ctx, release(NEW))).toEqual([
+			`bump moq-dev/widget 7 v1.0.0 ${NEW}`,
+			"bump landing moq-dev/widget 7",
+		]);
 
 		const head = git(bare(target), "rev-parse", BUMP_BRANCH);
 		expect(git(bare(target), "show", "-s", "--format=%P %an", head)).toBe(`${target.base} moq-bot`);
@@ -326,19 +393,22 @@ describe("bumpPass", () => {
 
 		// The next pass at the same commit asks GitHub nothing.
 		target.requests.length = 0;
-		expect(await bumpPass(ctx, NEW)).toEqual([]);
+		expect(await bumpPass(ctx, release(NEW))).toEqual([]);
 		expect(target.requests).toEqual([]);
 	});
 
 	test("moves an open bump PR forward with a merge, disarming its auto-merge first", async () => {
 		const target = world();
 		const ctx = context(target);
-		await bumpPass(ctx, OLD.replace(/1/g, "3"));
+		await bumpPass(ctx, release(OLD.replace(/1/g, "3")));
 		const first = git(bare(target), "rev-parse", BUMP_BRANCH);
 		target.pulls[0].auto_merge = { enabled_at: "now" };
 		landed.mockClear();
 
-		expect(await bumpPass(ctx, NEW)).toEqual([`bump moq-dev/widget 7 ${NEW}`, "bump landing moq-dev/widget 7"]);
+		expect(await bumpPass(ctx, release(NEW))).toEqual([
+			`bump moq-dev/widget 7 v1.0.0 ${NEW}`,
+			"bump landing moq-dev/widget 7",
+		]);
 		const head = git(bare(target), "rev-parse", BUMP_BRANCH);
 		expect(git(bare(target), "show", "-s", "--format=%P", head)).toBe(`${first} ${target.base}`);
 		expect(JSON.parse(git(bare(target), "show", `${head}:flake.lock`)).nodes.quest_2.locked.rev).toBe(NEW);
@@ -349,8 +419,8 @@ describe("bumpPass", () => {
 
 	test("leaves findings --fix cannot resolve as a draft for a maintainer", async () => {
 		const target = world();
-		expect(await bumpPass(context(target, tools("quest/a.md: broken")), NEW)).toEqual([
-			`bump moq-dev/widget 7 ${NEW} waiting`,
+		expect(await bumpPass(context(target, tools("quest/a.md: broken")), release(NEW))).toEqual([
+			`bump moq-dev/widget 7 v1.0.0 ${NEW} waiting`,
 		]);
 		expect(target.pulls[0]).toMatchObject({ draft: true });
 		expect(target.pulls[0].body).toContain("## Waiting");
@@ -361,17 +431,17 @@ describe("bumpPass", () => {
 	test("closes an open bump PR once the base already pins the commit", async () => {
 		const target = world({ lock: lockFile(NEW, false) });
 		target.pulls.push({ number: 3, head: target.base, state: "open", draft: false, auto_merge: null });
-		expect(await bumpPass(context(target), NEW)).toEqual(["bump closed moq-dev/widget 3"]);
+		expect(await bumpPass(context(target), release(NEW))).toEqual(["bump closed moq-dev/widget 3"]);
 		expect(target.pulls[0].state).toBe("closed");
 	});
 
 	test("on an ungated base, waits for every check to pass, then merges directly without auto-merge", async () => {
 		const target = world({ rules: "free", allowAutoMerge: false });
 		const ctx = context(target);
-		expect(await bumpPass(ctx, NEW)).toEqual([`bump moq-dev/widget 7 ${NEW}`]);
+		expect(await bumpPass(ctx, release(NEW))).toEqual([`bump moq-dev/widget 7 v1.0.0 ${NEW}`]);
 		const head = git(bare(target), "rev-parse", BUMP_BRANCH);
 		target.checks[head] = [{ __typename: "CheckRun", databaseId: 1, name: "check", status: "IN_PROGRESS" }];
-		expect(await bumpPass(ctx, NEW)).toEqual([]);
+		expect(await bumpPass(ctx, release(NEW))).toEqual([]);
 		expect(landed).not.toHaveBeenCalled();
 
 		// A workflow whose later job has not started yet shows only its passing first job.
@@ -382,16 +452,16 @@ describe("bumpPass", () => {
 			{ status: "in_progress", latest_check_runs_count: 1, app: { slug: "ci-app" } },
 			{ status: "queued", latest_check_runs_count: 0, app: { slug: "never-reports" } },
 		];
-		expect(await bumpPass(ctx, NEW)).toEqual([]);
+		expect(await bumpPass(ctx, release(NEW))).toEqual([]);
 		target.suites[head][0].status = "completed";
 		// A queued workflow with no check run yet still holds it.
 		target.suites[head].push({ status: "queued", latest_check_runs_count: 0, app: { slug: "github-actions" } });
 		target.runs[head] = [{ ...STARTED, status: "queued", conclusion: null }];
-		expect(await bumpPass(ctx, NEW)).toEqual([]);
+		expect(await bumpPass(ctx, release(NEW))).toEqual([]);
 		expect(landed).not.toHaveBeenCalled();
 
 		target.runs[head] = [{ ...STARTED, status: "completed", conclusion: "success" }];
-		expect(await bumpPass(ctx, NEW)).toEqual(["bump landing moq-dev/widget 7"]);
+		expect(await bumpPass(ctx, release(NEW))).toEqual(["bump landing moq-dev/widget 7"]);
 		expect(landed).toHaveBeenCalledExactlyOnceWith(
 			{ ...target.target, number: 7 },
 			{ sha: head, direct: true, check: expect.any(Function) },
@@ -402,7 +472,7 @@ describe("bumpPass", () => {
 	test("on an ungated base, a run a newer run cancelled counts as replaced, not failed", async () => {
 		const target = world({ rules: "free", allowAutoMerge: false });
 		const ctx = context(target);
-		await bumpPass(ctx, NEW);
+		await bumpPass(ctx, release(NEW));
 		const head = git(bare(target), "rev-parse", BUMP_BRANCH);
 		// Push and pull_request share a cancel-in-progress group: the pull_request run cancelled the push run,
 		// whose later job reported cancelled before the newer run started it.
@@ -437,7 +507,7 @@ describe("bumpPass", () => {
 			run(100, 2, "later", "COMPLETED", "CANCELLED"),
 			run(200, 3, "check", "IN_PROGRESS"),
 		];
-		expect(await bumpPass(ctx, NEW)).toEqual([]);
+		expect(await bumpPass(ctx, release(NEW))).toEqual([]);
 		expect(landed).not.toHaveBeenCalled();
 
 		target.runs[head][1] = { ...newer, status: "completed", conclusion: "success" };
@@ -447,7 +517,7 @@ describe("bumpPass", () => {
 			run(200, 3, "check", "COMPLETED", "SUCCESS"),
 			run(200, 4, "later", "COMPLETED", "SUCCESS"),
 		];
-		expect(await bumpPass(ctx, NEW)).toEqual(["bump landing moq-dev/widget 7"]);
+		expect(await bumpPass(ctx, release(NEW))).toEqual(["bump landing moq-dev/widget 7"]);
 	});
 
 	test("latestRuns keeps each workflow's latest run per event, and drops a cancelled run a newer one replaced", () => {
@@ -467,15 +537,15 @@ describe("bumpPass", () => {
 	test("a failed check on an ungated base is left for a maintainer", async () => {
 		const target = world({ rules: [] });
 		const ctx = context(target);
-		await bumpPass(ctx, NEW);
+		await bumpPass(ctx, release(NEW));
 		const head = git(bare(target), "rev-parse", BUMP_BRANCH);
 		target.checks[head] = [
 			{ __typename: "CheckRun", databaseId: 1, name: "check", status: "COMPLETED", conclusion: "FAILURE" },
 		];
-		expect(await bumpPass(ctx, NEW)).toEqual(["bump failed moq-dev/widget 7"]);
+		expect(await bumpPass(ctx, release(NEW))).toEqual(["bump failed moq-dev/widget 7"]);
 		expect(target.requests).toContain("POST /repos/moq-dev/widget/issues/7/comments");
 		target.requests.length = 0;
-		expect(await bumpPass(ctx, NEW)).toEqual([]);
+		expect(await bumpPass(ctx, release(NEW))).toEqual([]);
 		expect(target.requests).toEqual([]);
 		expect(landed).not.toHaveBeenCalled();
 	});
@@ -493,7 +563,9 @@ describe("bumpPass", () => {
 		git(work, "commit", "--quiet", "-m", "link");
 		git(work, "push", "--quiet", "origin", "HEAD:main");
 		target.base = git(work, "rev-parse", "HEAD");
-		await expect(bumpPass(context(target), NEW)).rejects.toThrow("AGENTS.md is a symlink out of the repository");
+		await expect(bumpPass(context(target), release(NEW))).rejects.toThrow(
+			"AGENTS.md is a symlink out of the repository",
+		);
 		expect(target.pulls).toEqual([]);
 	});
 
@@ -509,7 +581,9 @@ describe("bumpPass", () => {
 		git(work, "commit", "--quiet", "-m", "link");
 		git(work, "push", "--quiet", "origin", "HEAD:main");
 		target.base = git(work, "rev-parse", "HEAD");
-		await expect(bumpPass(context(target), NEW)).rejects.toThrow("escape.md is a symlink out of the repository");
+		await expect(bumpPass(context(target), release(NEW))).rejects.toThrow(
+			"escape.md is a symlink out of the repository",
+		);
 	});
 
 	test("runs quest check --fix on the base's whole history, which names deleted quests", async () => {
@@ -530,30 +604,30 @@ describe("bumpPass", () => {
 			return run(quest, checkout, args);
 		};
 		const ctx = context(target, faked);
-		await bumpPass(ctx, NEW);
+		await bumpPass(ctx, release(NEW));
 		expect(counts).toEqual(["2"]);
 	});
 
 	test("starts over when the open bump PR closes while the bump is prepared", async () => {
 		const target = world();
 		const ctx = context(target);
-		await bumpPass(ctx, OLD.replace(/1/g, "3"));
+		await bumpPass(ctx, release(OLD.replace(/1/g, "3")));
 		const first = git(bare(target), "rev-parse", BUMP_BRANCH);
 		const lock = ctx.tools.lock;
 		ctx.tools.lock = (...args) => {
 			target.pulls[0].state = "closed";
 			lock(...args);
 		};
-		await expect(bumpPass(ctx, NEW)).rejects.toThrow("bump PR 7 closed while the bump was prepared");
+		await expect(bumpPass(ctx, release(NEW))).rejects.toThrow("bump PR 7 closed while the bump was prepared");
 		expect(git(bare(target), "rev-parse", BUMP_BRANCH)).toBe(first);
 	});
 
 	test("retargets an open bump PR at the target's current default branch", async () => {
 		const target = world();
 		const ctx = context(target);
-		await bumpPass(ctx, OLD.replace(/1/g, "3"));
+		await bumpPass(ctx, release(OLD.replace(/1/g, "3")));
 		target.pulls[0].base = "old";
-		await bumpPass(ctx, NEW);
+		await bumpPass(ctx, release(NEW));
 		expect(target.pulls[0].base).toBe("main");
 	});
 
@@ -588,15 +662,137 @@ describe("bumpPass", () => {
 		});
 		const good = world();
 		const ctx = context(good);
-		ctx.targets = [broken.target, good.target];
+		ctx.discovered = { sha: NEW, targets: [broken.target, good.target] };
 		ctx.connect = (target) =>
 			target.repo === "broken"
 				? { remote: broken.remote, deps: deps(broken), token: async () => "push", read: readRemote }
 				: { remote: good.remote, deps: deps(good), token: async () => "push", read: readRemote };
-		await expect(bumpPass(ctx, NEW)).rejects.toThrow("moq-dev/broken: flake.lock has 0 root inputs");
+		await expect(bumpPass(ctx, release(NEW))).rejects.toThrow("moq-dev/broken: flake.lock has 0 root inputs");
 		expect(good.pulls).toHaveLength(1);
 		expect(JSON.parse(readFileSync(join(ctx.state, "bump.json"), "utf8"))).toEqual({
-			"moq-dev/widget": { sha: NEW, pr: 7, head: git(bare(good), "rev-parse", BUMP_BRANCH), status: "done" },
+			"moq-dev/widget": {
+				sha: NEW,
+				tag: "v1.0.0",
+				pr: 7,
+				head: git(bare(good), "rev-parse", BUMP_BRANCH),
+				status: "done",
+			},
 		});
+	});
+});
+
+describe("discoverTargets", () => {
+	/** An installation listing `repositories`, each serving its flake.lock, or none when undefined. */
+	function installation(repositories: Record<string, string | undefined>, requests: string[]): GitHubDependencies {
+		return {
+			token: "test",
+			quota: "wait",
+			now: () => 0,
+			sleep: async () => {},
+			warn: () => {},
+			fetch: (async (input: URL) => {
+				const url = new URL(input);
+				requests.push(`${url.pathname}${url.search}`);
+				if (url.pathname === "/installation/repositories")
+					return Response.json({
+						repositories: Object.keys(repositories).map((key) => {
+							const [owner, name] = key.split("/");
+							return { owner: { login: owner }, name };
+						}),
+					});
+				const lock = /^\/repos\/([^/]+\/[^/]+)\/contents\/flake.lock$/.exec(url.pathname);
+				if (lock && repositories[lock[1]] === "forbidden")
+					return Response.json({ message: "Forbidden" }, { status: 403 });
+				if (lock && repositories[lock[1]] !== undefined)
+					return Response.json({ content: Buffer.from(repositories[lock[1]]!).toString("base64") });
+				if (lock) return Response.json({ message: "Not Found" }, { status: 404 });
+				throw new Error(`unexpected request ${url.pathname}`);
+			}) as typeof fetch,
+		};
+	}
+
+	test("keeps the repositories locking the source once, across installations, skipping the source", async () => {
+		const requests: string[] = [];
+		const twice = lockFile(OLD, false).replace('"follows": [', '"again": "quest_2",\n        "follows": [');
+		const output: string[] = [];
+		const targets = await discoverTargets(
+			SOURCE,
+			[
+				installation(
+					{
+						"moq-dev/widget": lockFile(OLD, false),
+						"moq-dev/quest": lockFile(OLD, false),
+						"moq-dev/plain": undefined,
+						"moq-dev/broken": "{}",
+						"moq-dev/other": lockFile(OLD, false).replace(/moq-dev/g, "other"),
+					},
+					requests,
+				),
+				installation({ "kixelated/twice": twice, "kixelated/gadget": lockFile(OLD, true) }, requests),
+			],
+			output,
+			[],
+		);
+		expect(targets).toEqual([
+			{ owner: "moq-dev", repo: "widget" },
+			{ owner: "kixelated", repo: "gadget" },
+		]);
+		expect(output).toEqual([
+			"bump skips moq-dev/broken: its flake.lock cannot be read: invalid GitHub response: expected an object",
+			"bump skips kixelated/twice: flake.lock locks github:moq-dev/quest through 2 root inputs",
+		]);
+		expect(requests).not.toContain("/repos/moq-dev/quest/contents/flake.lock");
+	});
+
+	test("an unreadable repository or a failing installation does not stop the others", async () => {
+		const failing: GitHubDependencies = {
+			...installation({}, []),
+			fetch: (async () => Response.json({ message: "Forbidden" }, { status: 403 })) as typeof fetch,
+		};
+		const output: string[] = [];
+		const failures: string[] = [];
+		const targets = await discoverTargets(
+			SOURCE,
+			[failing, installation({ "moq-dev/locked": "forbidden", "moq-dev/widget": lockFile(OLD, false) }, [])],
+			output,
+			failures,
+		);
+		expect(targets).toEqual([{ owner: "moq-dev", repo: "widget" }]);
+		expect(output).toEqual([]);
+		expect(failures).toHaveLength(2);
+		expect(failures[0]).toMatch(/^discovery in installation 1:/);
+		expect(failures[1]).toMatch(/^discovery of moq-dev\/locked:/);
+	});
+});
+
+describe("bumpPass discovery", () => {
+	test("never clones a repository that does not lock the source", async () => {
+		const plain = world({ lock: lockFile(OLD, false).replace(/moq-dev/g, "other") });
+		const ctx = context(plain);
+		ctx.connect = () => {
+			throw new Error("connected to a repository that is no target");
+		};
+		await expect(bumpPass(ctx, release(NEW))).resolves.toEqual([]);
+		expect(plain.pulls).toHaveLength(0);
+	});
+
+	test("rediscovers once the base moves, so an uninstalled repository is not bumped again", async () => {
+		const enrolled = world();
+		const ctx = context(enrolled);
+		let installed = true;
+		let listings = 0;
+		ctx.installations = async () => {
+			listings++;
+			return installed ? [deps(enrolled)] : [];
+		};
+		await bumpPass(ctx, release(NEW));
+		await bumpPass(ctx, release(NEW));
+		expect(listings).toBe(1);
+		expect(enrolled.pulls).toHaveLength(1);
+		installed = false;
+		const before = enrolled.requests.length;
+		await bumpPass(ctx, release("3".repeat(40)));
+		expect(listings).toBe(2);
+		expect(enrolled.requests.slice(before)).toEqual([]);
 	});
 });

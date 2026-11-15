@@ -18,7 +18,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { type Owner, Retained, type Scopes, currentOwner, kill, killable } from "../src/cli/supervise";
-import { GitHub, mergedHolds } from "../src/cli/github";
+import { GitHub, mergedHolds } from "../src/github/client";
 import { REFERENCE_LINE } from "../src/core";
 import { main } from "../src/cli/main";
 import { Worktrees, canonical, derivedDefaults, diskUsage } from "../src/cli/worktree";
@@ -896,7 +896,17 @@ describe("merged PR heads on GitHub", () => {
 			sent.push(JSON.parse(String(init?.body)).variables);
 			return Response.json({ data: { repository: { object: found } } });
 		}) as typeof globalThis.fetch;
-		return { sent, client: new GitHub({ fetch, now: Date.now, sleep: async () => {}, token: "test", warn() {} }) };
+		return {
+			sent,
+			client: new GitHub({
+				fetch,
+				now: Date.now,
+				sleep: async () => {},
+				token: "test",
+				warn() {},
+				quota: "wait",
+			}),
+		};
 	}
 	const repository = { owner: "example", repo: "project" };
 	const pulls = (...nodes: unknown[]) => ({ associatedPullRequests: { nodes } });

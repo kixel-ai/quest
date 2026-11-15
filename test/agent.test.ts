@@ -12,14 +12,20 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { delimiter, join } from "node:path";
-import { afterEach, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
+import { admission } from "../src/cli/admission";
 import { boundedLines, spawnDirectory, strippedEnvironment } from "../src/cli/agent";
 import { batchArgument, programCommand, programEnvironment, signalProcess, which } from "../src/cli/program";
 import { type Output, main } from "../src/cli/main";
 import { tempDir } from "./fixture";
 import { systemdScopes } from "../src/cli/supervise";
 import { Worktrees } from "../src/cli/worktree";
+
+// Launches here are admitted at once, whatever the host running the tests carries.
+beforeEach(() => {
+	vi.spyOn(admission, "admit").mockResolvedValue();
+});
 
 afterEach(() => {
 	vi.unstubAllEnvs();
@@ -253,7 +259,7 @@ test("the agent environment holds no session credentials or harness state", () =
 		ANTHROPIC_BASE_URL: "https://proxy",
 		QUEST_GATE_ADMITTED: "1",
 		QUEST_GATE_PRIORITY: "1",
-		QUEST_LAND_BASE: "0123456789abcdef0123456789abcdef01234567",
+		MBX_SCHEDULER_PRIORITY: "normal",
 		OP_SERVICE_ACCOUNT_TOKEN: "t",
 		OP_SESSION_me: "s",
 		OPENAI_API_KEY: "o",
@@ -267,6 +273,13 @@ test("the agent environment holds no session credentials or harness state", () =
 		HOME: "/home/me",
 		CODEX_HOME: "/home/me/.codex",
 		CLAUDE_CONFIG_DIR: "/home/me/.claude-work",
+	});
+});
+
+test("outside a priority gate, the agent keeps its mbx priority", () => {
+	expect(strippedEnvironment({ PATH: "/bin", MBX_SCHEDULER_PRIORITY: "low" })).toEqual({
+		PATH: "/bin",
+		MBX_SCHEDULER_PRIORITY: "low",
 	});
 });
 
@@ -284,6 +297,13 @@ test("on Windows, the agent environment drops credentials whatever their case", 
 	expect(env).toEqual({ Path: "C:\\bin", Claude_Config_Dir: "C:\\claude", Codex_Home: "C:\\codex" });
 	// POSIX names are case-sensitive, so only the exact names are credentials there.
 	expect(strippedEnvironment({ op_token: "t" }, "linux")).toEqual({ op_token: "t" });
+});
+
+test("start refuses max effort before launching anything", async () => {
+	const args = launch("claude").map((arg) => (arg === "high" ? "max" : arg));
+	const result = await quest("agent", "start", ...args, ".", "go");
+	expect(result.code).toBe(2);
+	expect(result.stderr).toContain("max is never run");
 });
 
 test("start runs claude with every launch setting on its own login", async () => {
@@ -355,6 +375,29 @@ test("an account at its usage limit exits 3, and the session resumes once it res
 	expect(call.argv).toContain(session);
 	expect(call.argv).not.toContain("--session-id");
 	expect(call.stdin).toBe("continue");
+});
+
+test("a launch waits for admission before it claims the worktree", async () => {
+	const s = setup();
+	vi.spyOn(admission, "admit").mockImplementation(async (deps, signal, held) => {
+		expect([held, signal.aborted]).toEqual([process.pid, false]);
+		// Nothing holds the worktree while the launch waits.
+		const state = join(s.runtime, "quest", "agent");
+		expect(readdirSync(join(state, readdirSync(state)[0], "agents"))).toEqual([]);
+		deps.notice("waiting for the load average to fall before starting an agent");
+	});
+	const started = await quest("agent", "start", ...launch("claude"), s.worktree, "go");
+	expect(started).toMatchObject({
+		code: 0,
+		stderr: "quest: waiting for the load average to fall before starting an agent\n",
+	});
+});
+
+test("agent admit exits 0 once admitted", async () => {
+	const admit = vi.spyOn(admission, "admit").mockResolvedValue();
+	expect(await quest("agent", "admit")).toEqual({ code: 0, stdout: "", stderr: "" });
+	// No process runs a coordinator's own sub-agent, so nothing holds its admission.
+	expect(admit.mock.calls[0][2]).toBeUndefined();
 });
 
 test("a spent free usage allowance exits 3 as limited", async () => {
@@ -743,8 +786,4 @@ posix("a Codex release failure is reported instead of a finished outcome", async
 	expect(result.stdout).not.toContain("outcome finished");
 	expect(existsSync(join(s.worktree, "cache", "tracked"))).toBe(true);
 	expect(s.worktrees.status().records[0]).toMatchObject({ phase: "active", runs: [] });
-});
-
-test("a land check's base never reaches a launched agent", () => {
-	expect(strippedEnvironment({ PATH: "/bin", QUEST_LAND_BASE: "0".repeat(40) })).toEqual({ PATH: "/bin" });
 });

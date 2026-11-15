@@ -3,13 +3,28 @@
 // the command's descendants until they stop, and holds nothing else while it runs.
 import { spawn, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { linkSync, lstatSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import {
+	closeSync,
+	constants as fs,
+	linkSync,
+	lstatSync,
+	mkdirSync,
+	openSync,
+	readlinkSync,
+	readdirSync,
+	readFileSync,
+	rmSync,
+	statSync,
+	writeFileSync,
+	writeSync,
+} from "node:fs";
 import { availableParallelism, constants, cpus, hostname, loadavg, totalmem, userInfo } from "node:os";
-import { dirname, join, relative, resolve, sep } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { Readable } from "node:stream";
 import { setTimeout as sleep } from "node:timers/promises";
 import { type Cancellation, cancelled, follow, forwards, GROUP, interrupts, received, requested } from "./interrupt";
 import { stubbed } from "./job";
+import { envSessions, logWait } from "./waits";
 import { questScope, scopeGroup, startTime, systemdScopes } from "./supervise";
 
 /**
@@ -214,19 +229,42 @@ export function accountHome(): string | null {
 }
 
 /**
- * Every caller of one user on one host shares this directory, whatever its
- * environment or login sessions. It is named for the host, since a home
- * directory may be shared between machines. An account missing from the user
- * database, as in arbitrary-UID containers, has no home of its own, so it
- * shares one in `tmp` keyed by its UID.
+ * The Linux PID namespace this process runs in, such as a sandbox's own, or undefined elsewhere.
+ * A gate only sees the process IDs of its namespace, so it cannot tell whether a gate in another
+ * one still runs, and would drop that gate's admission a minute after it was admitted.
+ */
+export function pidNamespace(): string | undefined {
+	if (process.platform !== "linux") return undefined;
+	try {
+		return /^pid:\[(\d+)\]$/.exec(readlinkSync("/proc/self/ns/pid"))?.[1];
+	} catch {
+		return undefined;
+	}
+}
+
+/**
+ * The format version of the gate and agents ledgers, part of their paths, so builds whose ledgers disagree never share one.
+ * Bump it with any change to what an admission records or how a gate keeps one.
+ */
+export const LEDGER_VERSION = 2;
+
+/**
+ * Every caller of one user on one host and PID namespace shares this directory, whatever its
+ * environment or login sessions. It is named for the host, since a home directory may be shared
+ * between machines, and for the namespace, since a gate judges another's admission by its
+ * process ID (see `pidNamespace`). An account missing from the user database, as in arbitrary-UID
+ * containers, has no home of its own, so it shares one in `tmp` keyed by its UID.
  */
 export function claimDirectory(
 	home = accountHome(),
 	host = hostname(),
 	uid = process.getuid?.(),
 	tmp = "/tmp",
+	namespace: string | null = pidNamespace() ?? null,
 ): string {
-	if (home !== null) return join(home, ".cache", "quest", "admissions", host);
+	const name = namespace === null ? host : `${host}-pid${namespace}`;
+	const ledger = `admissions-v${LEDGER_VERSION}`;
+	if (home !== null) return join(home, ".cache", "quest", ledger, name);
 	// Other users can create this name first, so it must be a directory only this UID can write.
 	const root = join(tmp, `quest-${uid}`);
 	try {
@@ -237,7 +275,7 @@ export function claimDirectory(
 	const stat = lstatSync(root);
 	if (!stat.isDirectory() || stat.uid !== uid || (stat.mode & 0o022) !== 0)
 		throw new Error(`gate cannot trust ${root}: it must be a directory that only UID ${uid} can write`);
-	return join(root, "admissions", host);
+	return join(root, ledger, name);
 }
 
 /** A version cut short, as by power loss, is read as empty: its commands ended with the host. */
@@ -414,6 +452,44 @@ export function fileHost(directory: string, now = Date.now): Host {
 }
 
 /**
+ * The load and memory a caller is admitted against while the `running` admissions hold the host:
+ * the load counts as at least the CPUs they kept busy, and without one the raw load counts as
+ * having room (see `admit`). A priority caller counts no load.
+ */
+function standing(limits: Limits, host: Host, running: Admission[], priority = false) {
+	const used = priority ? 0 : running.reduce((sum, admission) => sum + (admission.cores ?? 0), 0);
+	const load = priority ? 0 : running.length > 0 ? Math.max(host.load(), used) : Math.min(host.load(), limits.load);
+	return { used, load, memory: host.memory() };
+}
+
+/**
+ * Why a command arriving now would wait, or null when the gate would admit it at once even with
+ * `reserved` more recent admissions counted against the headroom: work admitted elsewhere that has
+ * not reached the gate yet, such as an agent still reading (see admission.ts). It counts every
+ * queued caller as ahead, and never the spaced admissions `admit` grants on raw room, which would
+ * pass the reserved work one by one. Like the gate, it admits a lone arrival whatever the load:
+ * with nothing gated running, recent, queued, or reserved, the load is work no gate can wait out.
+ */
+export function room(limits: Limits, host: Host, reserved: number): Waiting | null {
+	const ledger = host.ledger();
+	const now = host.now();
+	const live = ledger.admissions.filter((admission) => host.running(admission));
+	const queued = live.filter(
+		(admission) => admission.queued && (admission.start !== undefined || admission.at > now - RECENT_MS),
+	).length;
+	const admissions = ledger.admissions.filter((admission) => !admission.queued);
+	const running = admissions.filter((admission) => live.includes(admission));
+	const recent = admissions.filter((admission) => admission.at > now - RECENT_MS).length;
+	const { used, load, memory } = standing(limits, host, running);
+	if (load > limits.load || used >= limits.load) return "load";
+	if (memory < limits.memory) return "memory";
+	const taken = recent + queued + reserved;
+	if (running.length === 0 && taken === 0) return null;
+	if (load + taken >= limits.load) return queued > 0 ? "queue" : "load";
+	return memory - taken * limits.memory >= limits.memory ? null : queued > 0 ? "queue" : "memory";
+}
+
+/**
  * Wait until the host has room for a command, then record its admission. The
  * load average and available memory lag new work, so each admission from the
  * last minute counts as one more unit of load and as one command's memory
@@ -510,13 +586,7 @@ export async function admit(
 		// Recorded like any admission, so it still counts against the others' headroom.
 		if (now >= deadline) return admitted(now);
 		// Priority ignores load, whether or not a gated command runs; memory still applies.
-		const used = precedence.priority ? 0 : [...running].reduce((sum, admission) => sum + (admission.cores ?? 0), 0);
-		const load = precedence.priority
-			? 0
-			: running.size > 0
-				? Math.max(host.load(), used)
-				: Math.min(host.load(), limits.load);
-		const memory = host.memory();
+		const { used, load, memory } = standing(limits, host, [...running], precedence.priority);
 		let wait = SETTLE_MS;
 		if (load > limits.load || used >= limits.load) waiting?.("load");
 		else if (memory < limits.memory) waiting?.("memory");
@@ -566,11 +636,17 @@ export async function admit(
  * SETTLE_MS, and keep its admission's `cores` at the most CPUs it kept busy over one sample in the
  * last RECENT_MS, rounded, so other callers count it at its busiest rather than at a lull.
  */
-export async function measure(host: Host, admission: { id: string; unit: string }, signal: AbortSignal) {
+export async function measure(
+	host: Host,
+	admission: { id: string; unit: string },
+	signal: AbortSignal,
+	lost?: (id: string) => void,
+) {
 	const samples: { at: number; cores: number }[] = [];
 	// The command's scope starts with no CPU use, so a burst before the first sample still counts.
 	let previous = { at: host.now(), usage: 0 };
-	let recorded = 0;
+	// The admission as last read, to record again should another gate drop it.
+	let known: Admission = { id: admission.id, at: host.now(), pid: process.pid, start: processStart(process.pid) };
 	for (;;) {
 		try {
 			await host.sleep(SETTLE_MS, signal);
@@ -587,11 +663,19 @@ export async function measure(host: Host, admission: { id: string; unit: string 
 		}
 		while (samples.length > 0 && samples[0].at <= at - RECENT_MS) samples.shift();
 		const cores = Math.round(Math.max(0, ...samples.map((sample) => sample.cores)));
-		for (let ledger = host.ledger(); cores !== recorded; ledger = host.ledger()) {
+		// Checked every sample, so an admission another gate dropped counts again within one.
+		for (let ledger = host.ledger(); ; ledger = host.ledger()) {
 			const mine = ledger.admissions.find(({ id }) => id === admission.id);
-			if (mine === undefined) throw new Error(`gate lost its admission ${admission.id} from the ledger`);
-			const updated = ledger.admissions.map((entry) => (entry === mine ? { ...mine, cores } : entry));
-			if (host.publish(ledger, updated)) recorded = cores;
+			if (mine !== undefined) known = mine;
+			if (mine !== undefined && (mine.cores ?? 0) === cores) break;
+			const updated =
+				mine === undefined
+					? [...ledger.admissions, { ...known, cores }]
+					: ledger.admissions.map((other) => (other === mine ? { ...mine, cores } : other));
+			if (host.publish(ledger, updated)) {
+				if (mine === undefined) lost?.(admission.id);
+				break;
+			}
 		}
 	}
 }
@@ -788,55 +872,190 @@ const notices: Record<Waiting, string> = {
 };
 
 /**
+ * Names a file to which every outermost gate appends one JSON line describing its run, however it
+ * ends (see `gate`). A nested gate runs inside a command its outermost gate already covers.
+ */
+const RECORD = "QUEST_GATE_RECORD";
+
+/** Open the file `RECORD` names for appending, before anything runs; undefined while it is unset or empty. */
+function recordFile(env: NodeJS.ProcessEnv): { path: string; fd: number } | undefined {
+	const path = env[RECORD];
+	if (!path) return undefined;
+	// Windows has no O_NOFOLLOW, and no reader there yet.
+	if (process.platform === "win32") throw new Error(`gate cannot record its run on Windows (${RECORD})`);
+	// The command's shells change directory, so a relative path would scatter one reader's lines.
+	if (!isAbsolute(path)) throw new Error(`${RECORD} must be an absolute path: ${path}`);
+	try {
+		// Private to the user, and never through a symlink someone else planted at a shared path.
+		const flags = fs.O_WRONLY | fs.O_APPEND | fs.O_CREAT | fs.O_NOFOLLOW;
+		return { path, fd: openSync(path, flags, 0o600) };
+	} catch (error) {
+		throw new Error(`gate cannot record its run in ${path}: ${message(error)}`);
+	}
+}
+
+const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
+
+/** How `gate` admits its command. */
+export interface GateOptions {
+	/** Wait at most QUICK_MS (see `Precedence`). */
+	quick?: boolean;
+	/** The admission ledger and host measures; this user's on this host when omitted. */
+	host?: Host;
+}
+
+/** What one gate observed of its run, for its record. */
+interface Observed {
+	/** Wall-clock milliseconds when the command was admitted. */
+	admitted?: number;
+	/** The systemd scope the command ran in, whose journal lines hold its CPU time and peak memory. */
+	unit?: string;
+}
+
+/**
  * Run from the CLI. A failure to measure the command is fatal even when the command succeeded,
  * since every other gate on the host relies on that accounting; a cancelled command still
- * reports its cancellation.
+ * reports its cancellation. With `RECORD` set, an outermost gate appends its run's line in one
+ * write, so concurrent gates leave only whole lines; a line it cannot write fails the gate, except
+ * that a cancelled run keeps its cancelled status.
  */
-export async function gate(command: string[], options: { quick?: boolean } = {}): Promise<number> {
+export async function gate(command: string[], options: GateOptions = {}): Promise<number> {
+	const outermost = process.env[ADMITTED] !== "1";
+	const record = outermost ? recordFile(process.env) : undefined;
+	// An outermost gate in an agent session logs its waits for the session's record.
+	const waits = outermost && envSessions().length > 0;
+	const started = Date.now();
+	// Read now: the command may remove its own directory.
+	const directory = record || waits ? process.cwd() : "";
 	const cancel = interrupts();
+	const observed: Observed = {};
 	try {
-		const { run, unit } = owner();
-		let admitted: { host: Host; id: string } | undefined;
-		// A nested invocation executes inside the already admitted command.
-		if (process.env[ADMITTED] !== "1") {
-			const shown = new Set<Waiting>();
+		let status: number;
+		let failure: unknown;
+		try {
+			status = await gated(command, options, outermost, cancel, observed);
+		} catch (error) {
+			failure = error;
+			// The status the CLI exits with for a gate's own failure.
+			status = 1;
+		}
+		if (waits) {
+			const ended = Date.now();
+			const iso = (ms: number) => new Date(ms).toISOString();
 			try {
-				const notice = (reason: Waiting) => {
-					if (shown.has(reason)) return;
-					shown.add(reason);
-					process.stderr.write(`${notices[reason]}\n`);
-				};
-				const precedence = {
-					priority: process.env[PRIORITY] === "1",
-					quick: options.quick,
-				};
-				const host = fileHost(claimDirectory());
-				admitted = { host, id: await admit(hostLimits(), host, cancel.signal, notice, precedence) };
+				// A run cancelled before admission waited in the queue until it ended.
+				const admitted = observed.admitted ?? ended;
+				logWait(
+					{ kind: "gate-queue", start: iso(started), end: iso(admitted), until: null },
+					{ cwd: directory },
+				);
+				if (observed.admitted !== undefined)
+					logWait(
+						{ kind: "gate-run", start: iso(admitted), end: iso(ended), until: null },
+						{ cwd: directory },
+					);
 			} catch (error) {
-				if (cancel.signal.aborted) return cancelled(cancel.signal);
-				throw error;
+				// A cancelled run exits as it would have, logged or not.
+				if (cancel.signal.aborted) process.stderr.write(`quest gate: ${message(error)}\n`);
+				else {
+					failure = failure === undefined ? error : new Error(`${message(failure)}; ${message(error)}`);
+					status = 1;
+				}
 			}
 		}
-		const stop = new AbortController();
-		// Held as a value until the command ends, so a failure never goes unhandled meanwhile.
-		const measuring =
-			admitted !== undefined && unit !== undefined
-				? measure(admitted.host, { id: admitted.id, unit }, stop.signal).then(
-						() => undefined,
-						(error: unknown) => ({ error }),
-					)
-				: undefined;
-		let result: number;
-		try {
-			result = await run(command, { ...process.env, [ADMITTED]: "1" }, cancel);
-		} finally {
-			stop.abort();
+		if (!record) {
+			if (failure !== undefined) throw failure;
+			return status;
 		}
-		const failed = await measuring;
-		if (cancel.signal.aborted) return cancelled(cancel.signal);
-		if (failed) throw failed.error;
-		return result;
+		const iso = (ms: number) => new Date(ms).toISOString();
+		const line = Buffer.from(
+			`${JSON.stringify({
+				command,
+				directory,
+				started: iso(started),
+				admitted: observed.admitted === undefined ? null : iso(observed.admitted),
+				unit: observed.unit ?? null,
+				exit: status,
+				cancelled: cancel.signal.aborted,
+				error: failure === undefined ? null : message(failure),
+			})}\n`,
+		);
+		try {
+			const written = writeSync(record.fd, line);
+			if (written !== line.length) throw new Error(`wrote ${written} of ${line.length} bytes`);
+		} catch (error) {
+			const unrecorded = `gate cannot record its run in ${record.path}: ${message(error)}`;
+			// A cancelled run exits as it would have, recorded or not.
+			if (cancel.signal.aborted) {
+				process.stderr.write(`quest ${unrecorded}\n`);
+				if (failure !== undefined) throw failure;
+				return status;
+			}
+			throw new Error(failure === undefined ? unrecorded : `${message(failure)}; ${unrecorded}`);
+		} finally {
+			closeSync(record.fd);
+		}
+		if (failure !== undefined) throw failure;
+		return status;
 	} finally {
 		cancel.close();
 	}
+}
+
+/** Admit the command unless nested, then run it, noting what the record needs in `observed`. */
+async function gated(
+	command: string[],
+	options: GateOptions,
+	outermost: boolean,
+	cancel: ReturnType<typeof interrupts>,
+	observed: Observed,
+): Promise<number> {
+	const { run, unit } = owner();
+	let admitted: { host: Host; id: string } | undefined;
+	// A nested invocation executes inside the already admitted command.
+	if (outermost) {
+		const shown = new Set<Waiting>();
+		try {
+			const notice = (reason: Waiting) => {
+				if (shown.has(reason)) return;
+				shown.add(reason);
+				process.stderr.write(`${notices[reason]}\n`);
+			};
+			const precedence = {
+				priority: process.env[PRIORITY] === "1",
+				quick: options.quick,
+			};
+			const host = options.host ?? fileHost(claimDirectory());
+			admitted = { host, id: await admit(hostLimits(), host, cancel.signal, notice, precedence) };
+			observed.admitted = Date.now();
+		} catch (error) {
+			if (cancel.signal.aborted) return cancelled(cancel.signal);
+			throw error;
+		}
+	}
+	const stop = new AbortController();
+	// Held as a value until the command ends, so a failure never goes unhandled meanwhile.
+	const measuring =
+		admitted !== undefined && unit !== undefined
+			? measure(admitted.host, { id: admitted.id, unit }, stop.signal, (id) =>
+					process.stderr.write(`quest gate: recorded admission ${id} again after another gate dropped it\n`),
+				).then(
+					() => undefined,
+					(error: unknown) => ({ error }),
+				)
+			: undefined;
+	const env: NodeJS.ProcessEnv = { ...process.env, [ADMITTED]: "1" };
+	// mbx otherwise takes its configured priority, which agents' hosts may lower.
+	if (process.env[PRIORITY] === "1") env.MBX_SCHEDULER_PRIORITY ??= "normal";
+	observed.unit = unit;
+	let result: number;
+	try {
+		result = await run(command, env, cancel);
+	} finally {
+		stop.abort();
+	}
+	const failed = await measuring;
+	if (cancel.signal.aborted) return cancelled(cancel.signal);
+	if (failed) throw failed.error;
+	return result;
 }

@@ -1,18 +1,21 @@
 import { execFileSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { afterEach, expect, test, vi } from "vitest";
 
-import { type Output, main } from "../src/cli/main";
 import { REVIEWERS } from "../src/cli/models";
-import { SIZES } from "../src/core";
+import { SIZES, recordedRisk } from "../src/core";
 import {
 	type Finding,
 	type Round,
 	type Settled,
 	type Tally,
+	UnansweredError,
+	ask,
 	authored,
 	baseInstructions,
+	claudeFlags,
+	codexFlags,
 	nextStep,
 	pickReviewer,
 	review,
@@ -24,358 +27,25 @@ import {
 	verdict,
 } from "../src/cli/review";
 import { withReview } from "../src/cli/review-record";
-import { implementer, recorded } from "../src/github/models";
+import { implementer, recorded } from "../src/cli/models-record";
 import { tempDir } from "./fixture";
+import {
+	CLAUDE_LOGGED_OUT,
+	CODEX_LOGGED_OUT,
+	FINDING,
+	type Call,
+	at,
+	effortOf,
+	fakes,
+	git,
+	quest,
+	setup,
+	write,
+} from "./review-fakes";
 
 afterEach(() => {
 	vi.unstubAllEnvs();
 });
-
-/** The fake CLIs are shebang scripts found on a POSIX PATH, which Windows cannot run. */
-const fakes = test.skipIf(process.platform === "win32");
-
-const FINDING = { file: "src/lib.ts", line: 2, severity: "high", title: "Off by one", body: "average([3]) is 0." };
-
-const CODEX_LOGGED_OUT = "codex is not logged in to its default profile (CODEX_HOME is unset); run `codex login`";
-const CLAUDE_LOGGED_OUT =
-	"claude is not logged in to its default profile (CLAUDE_CONFIG_DIR is unset); run `claude auth login`";
-
-/**
- * The findings turn's reply, `reply`: FAKE_REPLY, or one finding. A JSON reply without `earlier` settles
- * each earlier finding the prompt numbers as FAKE_DISPOSITION says, `fixed` by default.
- */
-const REPLY = `
-const listed = /<earlier-findings>\\n([\\s\\S]*?)\\n<\\/earlier-findings>/.exec(stdin)?.[1] ?? "";
-const earlier = [...listed.matchAll(/^(\\d+)\\. /gm)].map((m) => ({
-	finding: Number(m[1]),
-	disposition: process.env.FAKE_DISPOSITION ?? "fixed",
-	reason: "Checked against the head.",
-}));
-let reply = process.env.FAKE_REPLY ?? JSON.stringify({ score: 8, rationale: "Lands once the off-by-one is fixed.", findings: [${JSON.stringify(FINDING)}] });
-try {
-	const parsed = JSON.parse(reply);
-	if (parsed && typeof parsed === "object" && !("earlier" in parsed)) reply = JSON.stringify({ ...parsed, earlier });
-} catch {}
-`;
-
-/**
- * Fake reviewer CLIs. Each logs its argv, stdin, and the variables it was
- * given, then answers as the FAKE_* variables say. FAKE_LOGGED_OUT removes the
- * stored login, so only a credential variable the real CLI reads, or Claude
- * Code's switch to a cloud provider, authenticates; like the real ones,
- * `claude auth status` counts such a variable, and `codex login status` counts
- * CODEX_ACCESS_TOKEN but not CODEX_API_KEY. FAKE_REJECTED has the API
- * reject the login in each turn with the real CLI's error, in the style it
- * names. FAKE_LIMITED fails a turn on the account's usage limit with the real
- * CLI's error, naming its reset unless set to `unknown`. FAKE_REPLY replaces
- * the findings reply.
- */
-const FAKES: Record<string, string> = {
-	claude: `
-const fs = require("node:fs");
-const argv = process.argv.slice(2);
-const stdin = fs.readFileSync(0, "utf8");
-const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => /^(CLAUDE|CODEX|ANTHROPIC|FAKE_HOST|PATH$)/.test(k)));
-fs.appendFileSync(process.env.FAKE_LOG, JSON.stringify({ argv, stdin, env, cwd: process.cwd() }) + "\\n");
-const credential = ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN"].some((k) => process.env[k]);
-const provider = Object.entries(process.env).some(([k, v]) => k.startsWith("CLAUDE_CODE_USE_") && v === "1");
-const loggedIn = !process.env.FAKE_LOGGED_OUT || credential || provider;
-if (argv[0] === "auth") process.exit(loggedIn ? 0 : 1);
-const at = (flag) => argv[argv.indexOf(flag) + 1];
-const result = (fields) => console.log(JSON.stringify({ type: "result", is_error: false, ...fields }));
-const rejected = process.env.FAKE_REJECTED ?? (loggedIn ? undefined : "status");
-if (rejected) {
-	const session_id = at("--session-id") ?? at("--resume");
-	if (rejected === "status") {
-		result({ session_id, is_error: true, api_error_status: 401, result: "Failed to authenticate. API Error: 401 Invalid bearer token" });
-	} else if (rejected === "stderr") {
-		console.error("Login expired · Please run /login");
-	} else {
-		result({ session_id, is_error: true, result: "OAuth token revoked · Please run /login" });
-	}
-	process.exit(1);
-}
-// The limit hits the findings turn, after the review turn passed.
-if (process.env.FAKE_LIMITED && argv.includes("--resume")) {
-	if (process.env.FAKE_LIMITED !== "unknown") {
-		console.log(JSON.stringify({ type: "rate_limit_event", rate_limit_info: { status: "rejected", resetsAt: 1900000000 } }));
-	}
-	result({ session_id: at("--resume"), is_error: true, result: "You've hit your weekly limit · resets Nov 5, 3pm (UTC)" });
-	process.exit(1);
-}
-const usage = { input_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, output_tokens: 0 };
-if (argv.includes("--session-id")) {
-	result({
-		session_id: at("--session-id"),
-		result: "Found an off-by-one.",
-		usage,
-		modelUsage: {
-			"claude-small": { inputTokens: 1, outputTokens: 1, cacheReadInputTokens: 0, cacheCreationInputTokens: 0 },
-			"claude-big": { inputTokens: 10, outputTokens: 50, cacheReadInputTokens: 0, cacheCreationInputTokens: 90 },
-		},
-	});
-} else {
-	${REPLY}
-	result({
-		session_id: at("--resume"),
-		result: reply,
-		structured_output: process.env.FAKE_REPLY ? undefined : JSON.parse(reply),
-		usage: { ...usage, input_tokens: 5, cache_read_input_tokens: 80, cache_creation_input_tokens: 15, output_tokens: 7 },
-		modelUsage: { "claude-big": { inputTokens: 15, outputTokens: 57 } },
-	});
-}
-`,
-	codex: `
-const fs = require("node:fs");
-const argv = process.argv.slice(2);
-const stdin = fs.readFileSync(0, "utf8");
-const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => /^(CLAUDE|CODEX|ANTHROPIC|FAKE_HOST|PATH$)/.test(k)));
-fs.appendFileSync(process.env.FAKE_LOG, JSON.stringify({ argv, stdin, env, cwd: process.cwd() }) + "\\n");
-if (argv[0] === "login") process.exit(process.env.FAKE_LOGGED_OUT && !process.env.CODEX_ACCESS_TOKEN ? 1 : 0);
-if (process.env.FAKE_HANG) {
-	// It takes a while to exit when asked to, as a CLI saving its session does.
-	process.on("SIGTERM", () => setTimeout(() => process.exit(143), 300));
-	fs.writeFileSync(process.env.FAKE_HANG, String(process.pid));
-	setInterval(() => {}, 1000);
-	return;
-}
-const event = (value) => console.log(JSON.stringify(value));
-const loggedIn = !process.env.FAKE_LOGGED_OUT || process.env.CODEX_API_KEY || process.env.CODEX_ACCESS_TOKEN;
-const rejected = process.env.FAKE_REJECTED ?? (loggedIn ? undefined : "turn");
-if (rejected === "turn") {
-	const message = "unexpected status 401 Unauthorized: Missing bearer or basic authentication in header, url: https://api.openai.com/v1/responses";
-	event({ type: "thread.started", thread_id: "thread-1" });
-	event({ type: "error", message: "Reconnecting... 1/5 (" + message + ")" });
-	event({ type: "turn.failed", error: { message } });
-	process.exit(1);
-}
-if (rejected) {
-	console.error("Error: Your access token could not be refreshed because your refresh token was revoked. Please log out and sign in again.");
-	process.exit(1);
-}
-if (process.env.FAKE_LIMITED) {
-	const message = process.env.FAKE_LIMITED === "retried"
-		? "exceeded retry limit, last status: 429 Too Many Requests"
-		: process.env.FAKE_LIMITED === "unknown"
-		? "You've hit your usage limit."
-		: "You've hit your usage limit. Visit https://chatgpt.com/settings/usage to purchase more credits or try again at Nov 5th, 2026 3:15 PM.";
-	event({ type: "thread.started", thread_id: "thread-1" });
-	event({ type: "error", message });
-	event({ type: "turn.failed", error: { message } });
-	process.exit(1);
-}
-const message = (text) => event({ type: "item.completed", item: { type: "agent_message", text } });
-const zero = { input_tokens: 0, cached_input_tokens: 0, output_tokens: 0 };
-if (argv[1] === "review") {
-	event({ type: "thread.started", thread_id: "thread-1" });
-	message("Found an off-by-one.");
-	event({ type: "turn.completed", usage: zero });
-} else {
-	event({ type: "thread.started", thread_id: argv[argv.length - 2] });
-	message("Checking the findings.");
-	${REPLY}
-	message(reply);
-	event({ type: "turn.completed", usage: { input_tokens: 100, cached_input_tokens: 80, output_tokens: 7 } });
-}
-`,
-	// Logs the config each turn gets, with its instructions file's text, which is gone once the round ends, apart
-	// from the other CLIs, since it reviews beside them. Its own FAKE_OPENCODE_* variables fail it: LOGGED_OUT lists
-	// only a free model, REJECTED fails a turn on authentication, and LIMITED has the findings turn retry a spent
-	// limit until it is stopped. REPLY replaces FAKE_REPLY for it alone. The findings reply comes in a code fence.
-	opencode: `
-const fs = require("node:fs");
-const argv = process.argv.slice(2);
-const stdin = fs.readFileSync(0, "utf8");
-const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => /^(OPENCODE|PWD$)/.test(k)));
-const config = process.env.OPENCODE_CONFIG_CONTENT && JSON.parse(process.env.OPENCODE_CONFIG_CONTENT);
-const instructions = config && fs.readFileSync(config.instructions[0], "utf8");
-fs.appendFileSync(process.env.FAKE_LOG + ".opencode", JSON.stringify({ argv, stdin, env, config, instructions, cwd: process.cwd() }) + "\\n");
-if (argv[0] === "models") {
-	console.log("opencode/free");
-	if (!process.env.FAKE_OPENCODE_LOGGED_OUT) console.log("opencode-go/deepseek-v4.1-flash\\nopencode-go/kimi");
-	process.exit(0);
-}
-const session = argv.includes("--session") ? argv[argv.indexOf("--session") + 1] : "ses_1";
-const event = (type, fields) => console.log(JSON.stringify({ type, timestamp: 1900000000000, sessionID: session, ...fields }));
-if (process.env.FAKE_OPENCODE_REJECTED) {
-	event("error", { error: { type: "provider.auth", message: "Invalid API key" } });
-	process.exit(1);
-}
-if (process.env.FAKE_OPENCODE_LIMITED && argv.includes("--session")) {
-	const body = process.env.FAKE_OPENCODE_LIMITED === "unknown" ? "{}" : JSON.stringify({ resetsAt: "2030-03-17T17:46:40Z" });
-	event("retry", { attempt: 1, error: { type: "provider.go-limit", message: "Usage limit reached", response: { body } } });
-	setInterval(() => {}, 1000);
-	return;
-}
-const tokens = (input, read, output) => ({ part: { type: "step-finish", tokens: { input, output, reasoning: 1, cache: { read, write: 0 } } } });
-event("step_start", { part: { type: "step-start" } });
-if (!argv.includes("--session")) {
-	event("text", { part: { type: "text", text: "Found an off-by-one." } });
-	event("step_finish", tokens(10, 0, 5));
-} else {
-	event("text", { part: { type: "text", text: "Checking the findings." } });
-	event("tool_use", { part: { type: "tool", tool: "shell", state: { status: "completed" } } });
-	event("step_finish", tokens(10, 5, 2));
-	if (process.env.FAKE_OPENCODE_REPLY) process.env.FAKE_REPLY = process.env.FAKE_OPENCODE_REPLY;
-	${REPLY}
-	event("text", { part: { type: "text", text: "\`\`\`json\\n" + reply.slice(0, 20) } });
-	event("text", { part: { type: "text", text: reply.slice(20) + "\\n\`\`\`" } });
-	event("step_finish", tokens(20, 15, 3));
-}
-`,
-	// sandbox-runtime, whose seccomp filter refuses the Unix socket its probe makes.
-	srt: `
-const { execFileSync } = require("node:child_process");
-const command = process.argv[process.argv.indexOf("-c") + 1];
-if (command.includes("socat")) {
-	console.error("2026/11/09 socat[1] E socket(1, 1, 0): Operation not permitted");
-	process.exit(1);
-}
-execFileSync("/bin/sh", ["-c", command], { stdio: "inherit" });
-`,
-};
-
-const git = (dir: string, ...args: string[]) =>
-	execFileSync("git", ["-C", dir, "-c", "user.name=Fixture", "-c", "user.email=fixture@localhost", ...args], {
-		encoding: "utf8",
-	}).trim();
-
-function write(dir: string, path: string, text: string) {
-	mkdirSync(join(dir, path, ".."), { recursive: true });
-	writeFileSync(join(dir, path), text);
-}
-
-interface Setup {
-	repo: string;
-	bin: string;
-	/** Every logged invocation of the fake Codex and Claude Code. */
-	calls(): Call[];
-	/** Every logged invocation of the fake opencode. */
-	opencodeCalls(): Call[];
-}
-
-interface Call {
-	argv: string[];
-	stdin: string;
-	env: Record<string, string>;
-	cwd: string;
-	// opencode's config, and the text of its instructions file.
-	config?: { shell: string; permissions: unknown };
-	instructions?: string;
-}
-
-/** Credentials and routes the running session may hold, cleared so each test sets its own. */
-const HOST_CREDENTIALS = [
-	"ANTHROPIC_API_KEY",
-	"ANTHROPIC_AUTH_TOKEN",
-	"ANTHROPIC_AWS_API_KEY",
-	"ANTHROPIC_BASE_URL",
-	"ANTHROPIC_CUSTOM_HEADERS",
-	"ANTHROPIC_FOUNDRY_API_KEY",
-	"ANTHROPIC_FOUNDRY_AUTH_TOKEN",
-	"CLAUDE_CODE_OAUTH_TOKEN",
-	...["BEDROCK", "VERTEX", "FOUNDRY", "MANTLE", "ANTHROPIC_AWS", "ANTHROPIC_GOOGLE_CLOUD"].map(
-		(provider) => `CLAUDE_CODE_USE_${provider}`,
-	),
-	"CODEX_API_KEY",
-	"CODEX_ACCESS_TOKEN",
-	"CODEX_CA_CERTIFICATE",
-];
-
-/**
- * A clone whose origin's main holds instructions and review rules, checked out
- * on a branch that edits its own AGENTS.md and a file in `src/`.
- */
-function setup(host: "CLAUDECODE" | "CODEX_THREAD_ID" | null = "CLAUDECODE"): Setup {
-	const dir = tempDir();
-	const bin = join(dir, "bin");
-	mkdirSync(bin);
-	for (const [name, body] of Object.entries(FAKES)) {
-		writeFileSync(join(bin, name), `#!${process.execPath}\n${body}`);
-		chmodSync(join(bin, name), 0o755);
-	}
-	const origin = join(dir, "origin.git");
-	execFileSync("git", ["init", "-q", "--bare", "-b", "main", origin]);
-	const repo = join(dir, "repo");
-	execFileSync("git", ["init", "-q", "-b", "main", repo]);
-	write(repo, "AGENTS.md", "BASE-ROOT rule\n");
-	write(repo, "src/AGENTS.md", "BASE-SRC rule\n");
-	write(repo, "docs/AGENTS.md", "BASE-DOCS rule\n");
-	write(repo, "REVIEW.md", "BASE-REVIEW rule\n");
-	write(repo, "src/lib.ts", "export const x = 1;\n");
-	write(repo, ".gitignore", ".tmp/\n");
-	git(repo, "add", ".");
-	git(repo, "commit", "-qm", "base");
-	git(repo, "remote", "add", "origin", origin);
-	git(repo, "push", "-q", "origin", "main");
-	git(repo, "checkout", "-qb", "feature");
-	write(repo, "AGENTS.md", "HEAD-ROOT rule\n");
-	write(repo, "src/lib.ts", "export const x = 2;\n");
-	git(repo, "commit", "-qam", "change");
-
-	const log = join(dir, "calls.log");
-	vi.stubEnv("PATH", `${bin}:${process.env.PATH}`);
-	vi.stubEnv("FAKE_LOG", log);
-	// The session's own profile would change the logged-out errors.
-	const unset = [
-		...HOST_CREDENTIALS,
-		"CLAUDECODE",
-		"CODEX_THREAD_ID",
-		"CLAUDE_CONFIG_DIR",
-		"CODEX_HOME",
-		"XDG_DATA_HOME",
-	];
-	for (const name of [
-		...unset,
-		"FAKE_LOGGED_OUT",
-		"FAKE_REJECTED",
-		"FAKE_LIMITED",
-		"FAKE_OPENCODE_LOGGED_OUT",
-		"FAKE_OPENCODE_REJECTED",
-		"FAKE_OPENCODE_LIMITED",
-		"FAKE_OPENCODE_REPLY",
-		"FAKE_HANG",
-		"FAKE_DISPOSITION",
-	]) {
-		vi.stubEnv(name, undefined);
-	}
-	if (host === "CLAUDECODE") vi.stubEnv("CLAUDECODE", "1");
-	if (host === "CODEX_THREAD_ID") vi.stubEnv("CODEX_THREAD_ID", "parent");
-	const read = (path: string) =>
-		existsSync(path)
-			? readFileSync(path, "utf8")
-					.trim()
-					.split("\n")
-					.map((line) => JSON.parse(line))
-			: [];
-	return { repo, bin, calls: () => read(log), opencodeCalls: () => read(`${log}.opencode`) };
-}
-
-/** The effort a Codex or Claude Code turn runs at, or null for a status check. */
-function effortOf(call: Call): string | null {
-	const flag = call.argv.indexOf("--effort");
-	if (flag >= 0) return call.argv[flag + 1]!;
-	const setting = call.argv.find((arg) => arg.startsWith("model_reasoning_effort="));
-	return setting ? JSON.parse(setting.slice("model_reasoning_effort=".length)) : null;
-}
-
-/** The turns at `effort`, so the size's pick and its shadow, which run at once on the same CLI, read apart. */
-const at = (calls: Call[], effort: string) => calls.filter((call) => effortOf(call) === effort);
-
-async function quest(...args: string[]): Promise<{ code: number; stdout: string; stderr: string }> {
-	let stdout = "";
-	let stderr = "";
-	const out: Output = {
-		stdout: (text) => {
-			stdout += text;
-		},
-		stderr: (text) => {
-			stderr += text;
-		},
-	};
-	const code = await main(args, out);
-	return { code, stdout, stderr };
-}
 
 test("the reviewer is the harness this command is not running under", () => {
 	expect(runningHarness({ CLAUDECODE: "1" })).toBe("claude");
@@ -454,8 +124,6 @@ fakes("a quest branch is reviewed at its quest's size on the base, which its own
 	expect(result.stderr).toBe("");
 	expect(result.stdout).toMatch(/^size L quest\/m0\/big.md\n/);
 	expect(result.stdout).toContain("\nreviewer codex gpt-6.1-sol xhigh\n");
-	// The second reviewer runs at its own effort, whatever the size.
-	expect(result.stdout).toContain("\nreviewer opencode opencode-go/deepseek-v4.1-flash high\n");
 
 	// --size overrides the quest's.
 	const sized = await quest("--root", s.repo, "review", "--size", "S", "--new");
@@ -487,7 +155,7 @@ fakes("--exclude-model picks the reviewer from the PR's implementers instead of 
 	const s = setup(null);
 	const result = await quest("--root", s.repo, "review", "--exclude-model", "gpt-6.1-sol", "--json");
 	expect(result.stderr).toBe("");
-	const [round, second] = JSON.parse(result.stdout).rounds;
+	const [round] = JSON.parse(result.stdout).rounds;
 	expect([round.reviewer, round.model, round.effort, round.size, round.sizeFrom]).toEqual([
 		"claude",
 		"claude-opus-5-5",
@@ -495,16 +163,11 @@ fakes("--exclude-model picks the reviewer from the PR's implementers instead of 
 		"M",
 		"default",
 	]);
-	expect(second.model).toBe("opencode-go/deepseek-v4.1-flash");
 
 	const both = ["--exclude-model", "gpt-6.1-sol", "--exclude-model", "claude-opus-5-5"];
 	const none = await quest("--root", s.repo, "review", ...both, "--new");
 	expect(none.code).toBe(2);
 	expect(none.stderr).toContain("every M reviewer (gpt-6.1-sol, claude-opus-5-5) is avoided");
-	// Nor does the second reviewer review a change it is named as writing.
-	const deepseek = await quest("--root", s.repo, "review", "--exclude-model", "opencode-go/deepseek-v4.1-flash");
-	expect(deepseek.code).toBe(2);
-	expect(deepseek.stderr).toContain("opencode-go/deepseek-v4.1-flash is avoided; pass --harness");
 });
 
 fakes("an unknown harness is an error, never a same-model review", async () => {
@@ -571,9 +234,13 @@ fakes.each([
 		const result = await quest("--root", s.repo, "review");
 		expect(result.stderr).toContain(message);
 		expect(result.code).toBe(2);
-		// Both seats' status checks passed, and the first turn to fail stopped the other's before it resumed.
+		// The failing seat's status check passed, and the first turn to fail stopped the other seat before it
+		// resumed. That seat runs its own status check concurrently, so the abort may stop it before its CLI
+		// logs, or before it spawns at all.
 		const calls = s.calls();
-		expect(calls.filter((c) => effortOf(c) === null)).toHaveLength(2);
+		const checks = calls.filter((c) => effortOf(c) === null).length;
+		expect(checks).toBeGreaterThanOrEqual(1);
+		expect(checks).toBeLessThanOrEqual(2);
 		const turns = calls.filter((c) => effortOf(c) !== null);
 		expect(turns.length).toBeGreaterThanOrEqual(1);
 		expect(turns.every((c) => !c.argv.includes("--resume") && !c.argv.includes("resume"))).toBe(true);
@@ -927,24 +594,6 @@ fakes("a detached checkout continues the session of the branch --branch names", 
 	expect(at(s.calls(), "high").filter((c) => c.argv[1] === "review")).toHaveLength(1);
 });
 
-fakes("another worktree resumes Codex's session, and starts opencode's anew in its own checkout", async () => {
-	const s = setup();
-	vi.stubEnv("FAKE_OPENCODE_REPLY", JSON.stringify({ score: 10, rationale: "Lands as is.", findings: [] }));
-	expect((await quest("--root", s.repo, "review")).code).toBe(0);
-	const other = join(s.repo, ".tmp", "other");
-	git(s.repo, "worktree", "add", "-q", "--detach", other);
-	write(other, ".tmp/responses.md", "1. Refuted: src/lib.ts:1 sets it.\n");
-	const responses = join(other, ".tmp", "responses.md");
-	const round = await quest("--root", other, "review", "--branch", "feature", "--responses", responses);
-	expect(round.stderr).toBe("");
-	const [picked, deepseek] = round.stdout.split("\nreviewer opencode ");
-	expect(picked).toContain("session thread-1\nround 2\n");
-	expect(deepseek).toContain("round 1\n");
-	const runs = s.opencodeCalls().filter((call) => call.argv[0] === "run");
-	expect(runs.at(-2)!.argv).not.toContain("--session");
-	expect(runs.at(-1)!.cwd).toBe(other);
-});
-
 fakes("a differently named branch continues the session --branch names, and without it has its own", async () => {
 	const s = setup();
 	expect((await quest("--root", s.repo, "review")).stdout).toContain("round 1\n");
@@ -1027,6 +676,9 @@ fakes("codex reviews read-only with the base's instructions, then reports in the
 			"size M default",
 			`base ${base} origin/main`,
 			`head ${head}`,
+			// The fixture's base has no RISK.md, so no model classifies the change.
+			"risk medium the base has no RISK.md to name what is always high or customer-facing, so every change is medium",
+			"classified medium default the base has no RISK.md to name what is always high or customer-facing, so every change is medium",
 			"",
 			"reviewer codex gpt-6.1-sol high",
 			"session thread-1",
@@ -1038,18 +690,6 @@ fakes("codex reviews read-only with the base's instructions, then reports in the
 			"1. high src/lib.ts:2 Off by one",
 			"  average([3]) is 0.",
 			"",
-			// The second reviewer reviews the same head, its findings numbered after the first's.
-			"reviewer opencode opencode-go/deepseek-v4.1-flash high",
-			"session ses_1",
-			"round 1",
-			"usage review input 10 cached 0 output 6",
-			"usage findings input 50 cached 20 output 7",
-			"score 8 Lands once the off-by-one is fixed.",
-			"findings 1",
-			"",
-			"2. high src/lib.ts:2 Off by one",
-			"  average([3]) is 0.",
-			"",
 			// The shadow, the pick one effort lower, reviews it too, in its own session.
 			"reviewer codex gpt-6.1-sol medium shadow",
 			"session thread-1",
@@ -1058,7 +698,7 @@ fakes("codex reviews read-only with the base's instructions, then reports in the
 			"score 8 Lands once the off-by-one is fixed.",
 			"findings 1",
 			"",
-			"3. high src/lib.ts:2 Off by one",
+			"2. high src/lib.ts:2 Off by one",
 			"  average([3]) is 0.",
 			// The fixture's origin is a local path, which can have no PR.
 			"record skipped: origin is not on GitHub",
@@ -1100,14 +740,16 @@ fakes("codex reviews read-only with the base's instructions, then reports in the
 	expect(second.stdin).not.toContain("BASE-REVIEW rule");
 	expect(second.stdin).toContain("Read no files and run no commands");
 	expect(second.stdin).toContain(head);
+	// The report turn gives the classified tier, which the reviewer may raise and never lower.
+	expect(second.stdin).toContain("<classified-reason>\nthe base has no RISK.md");
+	expect(second.stdin).toContain("Never report a lower tier.");
+	expect(first.stdin).not.toContain("classified");
 	const schema = second.argv[second.argv.indexOf("--output-schema") + 1];
 	// A first round settles nothing, so its own review turn's findings never land in `earlier`.
 	const replySchema = JSON.parse(readFileSync(schema, "utf8"));
-	expect(replySchema.required).toEqual(["score", "rationale", "findings"]);
+	expect(replySchema.required).toEqual(["score", "rationale", "risk", "findings"]);
+	expect(replySchema.properties.risk.properties.tier.enum).toEqual(["low", "medium", "high"]);
 	expect(replySchema.properties.earlier).toBeUndefined();
-	const deepseek = s.opencodeCalls().filter((call) => call.argv[0] === "run");
-	expect(deepseek).toHaveLength(2);
-	for (const call of deepseek) expect(call.argv).toContain("opencode-go/deepseek-v4.1-flash#high");
 });
 
 fakes("--base reviews against another branch, fetched first, with that branch's instructions", async () => {
@@ -1134,6 +776,12 @@ fakes("--base reviews against another branch, fetched first, with that branch's 
 	const unknown = await quest("--root", s.repo, "review", "--base", "upstream/release", "--new");
 	expect(unknown.code).toBe(2);
 	expect(unknown.stderr).toContain("--base must be <remote>/<branch>");
+});
+
+test("review refuses max effort", async () => {
+	const result = await quest("review", "--harness", "claude", "--model", "opus", "--effort", "max");
+	expect(result.code).toBe(2);
+	expect(result.stderr).toContain("max is never run");
 });
 
 fakes("claude reviews read-only with the base's instructions, then reports in the schema", async () => {
@@ -1178,107 +826,6 @@ fakes("claude reviews read-only with the base's instructions, then reports in th
 	}
 });
 
-const OPENCODE = ["review", "--harness", "opencode", "--model", "opencode-go/kimi", "--effort", "high"];
-
-fakes(
-	"opencode reviews with only its sandboxed shell and the base's instructions, then reports in the schema",
-	async () => {
-		const s = setup();
-		const result = await quest("--root", s.repo, ...OPENCODE, "--json");
-		expect(result.code, result.stderr).toBe(0);
-		const [round] = JSON.parse(result.stdout).rounds;
-		expect(round.reviewer).toBe("opencode");
-		expect(round.session).toBe("ses_1");
-		expect(round.usage).toEqual([
-			{ turn: "review", input: 10, cached: 0, output: 6 },
-			{ turn: "findings", input: 50, cached: 20, output: 7 },
-		]);
-		expect(round.findings).toEqual([FINDING]);
-
-		const [status, first, second] = s.opencodeCalls();
-		expect(status.argv).toEqual(["models", "--standalone"]);
-		expect(first.stdin).toMatch(/^Review this change for bugs/);
-		expect(first.stdin).toContain("BASE-REVIEW rule");
-		expect(first.argv).not.toContain("--session");
-		expect(second.argv.slice(-2)).toEqual(["--session", "ses_1"]);
-		for (const call of [status, first, second]) {
-			expect(call.env.OPENCODE_DISABLE_PROJECT_CONFIG).toBe("1");
-			expect(call.env.OPENCODE_DISABLE_CLAUDE_CODE).toBe("1");
-			// opencode runs in PWD, not its working directory.
-			expect(call.env.PWD).toBe(s.repo);
-		}
-		for (const call of [first, second]) {
-			expect(call.argv.slice(0, 8)).toEqual(
-				["run", "--standalone", "--format", "json", "--archived", "--model", "opencode-go/kimi#high"].concat(
-					call === first ? [] : ["--session"],
-				),
-			);
-			expect(call.config!.permissions).toEqual([
-				{ action: "*", resource: "*", effect: "deny" },
-				{ action: "skill", resource: "*", effect: "deny" },
-				{ action: "shell", resource: "*", effect: "allow" },
-			]);
-			expect(call.config).toMatchObject({ lsp: false, formatter: false, snapshot: false, share: "disabled" });
-			expect(call.instructions).toContain("BASE-ROOT rule");
-			expect(call.instructions).not.toContain("HEAD-ROOT rule");
-			// The sandbox is gone once the round ends.
-			expect(existsSync(call.config!.shell)).toBe(false);
-		}
-	},
-);
-
-fakes("opencode names no default model, so --harness opencode needs --model and --effort", async () => {
-	const s = setup();
-	const result = await quest("--root", s.repo, "review", "--harness", "opencode");
-	expect(result.code).toBe(2);
-	expect(result.stderr).toContain("no opencode reviewer for size M; pass --model and --effort");
-});
-
-fakes("opencode counts as logged out when it lists no such model, or its provider rejects the login", async () => {
-	const s = setup();
-	vi.stubEnv("FAKE_OPENCODE_LOGGED_OUT", "1");
-	const out = await quest("--root", s.repo, ...OPENCODE);
-	expect(out.code).toBe(2);
-	expect(out.stderr).toContain(
-		"opencode lists no model opencode-go/kimi for its default profile (XDG_DATA_HOME is unset); run `opencode auth login` for its provider",
-	);
-	vi.stubEnv("FAKE_OPENCODE_LOGGED_OUT", undefined);
-	vi.stubEnv("FAKE_OPENCODE_REJECTED", "1");
-	const rejected = await quest("--root", s.repo, ...OPENCODE);
-	expect(rejected.code).toBe(2);
-	expect(rejected.stderr).toContain(
-		"opencode is not logged in to its default profile (XDG_DATA_HOME is unset); run `opencode auth login`",
-	);
-});
-
-fakes.for([
-	["reset", "opencode hit its usage limit; resets 2030-03-17T17:46:40Z"],
-	["unknown", "opencode hit its usage limit; resets unknown"],
-] as const)("opencode stops retrying a spent usage limit and exits 3 (%s)", async ([variant, message]) => {
-	const s = setup();
-	vi.stubEnv("FAKE_OPENCODE_LIMITED", variant);
-	const result = await quest("--root", s.repo, ...OPENCODE);
-	expect(result.stderr).toBe(`error: ${message}\n`);
-	expect(result.code).toBe(3);
-});
-
-test.runIf(process.platform === "linux")("opencode refuses an srt that lets commands make Unix sockets", async () => {
-	const s = setup();
-	const unfiltered = join(s.bin, "..", "unfiltered");
-	mkdirSync(unfiltered);
-	writeFileSync(
-		join(unfiltered, "srt"),
-		`#!/bin/sh\necho 'socat[1] E connect(5, AF=1 "/tmp/missing", 15): No such file or directory' >&2\nexit 1\n`,
-	);
-	chmodSync(join(unfiltered, "srt"), 0o755);
-	vi.stubEnv("PATH", `${unfiltered}:${process.env.PATH}`);
-	const result = await quest("--root", s.repo, ...OPENCODE);
-	expect(result.code).toBe(2);
-	expect(result.stderr).toContain("lets commands make Unix sockets");
-	// Only the status check ran.
-	expect(s.opencodeCalls()).toHaveLength(1);
-});
-
 fakes("a later round resumes the session with the new head and the author's responses", async () => {
 	const s = setup();
 	expect((await quest("--root", s.repo, "review")).code).toBe(0);
@@ -1301,28 +848,22 @@ fakes("a later round resumes the session with the new head and the author's resp
 	expect(later.stdout).toContain(
 		`earlier 1 ${first}\n\n1. fixed high src/lib.ts:2 Off by one\n  Checked against the head.\n`,
 	);
-	// The second reviewer's finding came after the first's, so it keeps that number.
+	// The shadow had a finding to settle, so it reruns, settling its own after the pick's.
 	expect(later.stdout).toContain(
 		`earlier 1 ${first}\n\n2. fixed high src/lib.ts:2 Off by one\n  Checked against the head.\n`,
 	);
-	const deepseek = s.opencodeCalls().at(-1)!;
-	expect(deepseek.argv).toContain("--session");
-	expect(deepseek.stdin).toContain("<earlier-findings>\n2. high src/lib.ts:2 Off by one\n</earlier-findings>");
-	expect(deepseek.stdin).toContain("Fixed at src/lib.ts:1.");
-	// The shadow had a finding to settle, so it reruns, settling its own after the second reviewer's.
-	expect(later.stdout).toContain(
-		`earlier 1 ${first}\n\n3. fixed high src/lib.ts:2 Off by one\n  Checked against the head.\n`,
-	);
 	const shadow = at(s.calls(), "medium").at(-1)!;
 	expect(shadow.argv.slice(0, 2)).toEqual(["exec", "resume"]);
-	expect(shadow.stdin).toContain("<earlier-findings>\n3. high src/lib.ts:2 Off by one\n</earlier-findings>");
+	expect(shadow.stdin).toContain("<earlier-findings>\n2. high src/lib.ts:2 Off by one\n</earlier-findings>");
 
 	const calls = at(s.calls(), "high");
 	const resumed = calls.at(-1)!;
 	expect(resumed.argv.slice(0, 2)).toEqual(["exec", "resume"]);
 	expect(resumed.argv.at(-2)).toBe("thread-1");
 	const bounded = JSON.parse(readFileSync(resumed.argv[resumed.argv.indexOf("--output-schema") + 1], "utf8"));
-	expect(bounded.required).toEqual(["score", "rationale", "findings", "earlier"]);
+	expect(bounded.required).toEqual(["score", "rationale", "risk", "findings", "earlier"]);
+	// The new head is classified again before the round, which gives it to the reviewer.
+	expect(resumed.stdin).toContain("the change was classified medium risk");
 	expect(resumed.stdin).toContain("Fixed at src/lib.ts:1.");
 	expect(resumed.stdin).toContain("<earlier-findings>\n1. high src/lib.ts:2 Off by one\n</earlier-findings>");
 	// The session was given the rules already, and they have not changed.
@@ -1348,10 +889,9 @@ fakes("--new starts over, and a first round takes no responses", async () => {
 		JSON.parse(restarted.stdout).tallies.map((t: Tally) => [t.reviewer, t.rounds, t.findings.high, t.fixed]),
 	).toEqual([
 		["codex", 2, 1, 0],
-		["opencode", 2, 1, 0],
 		["codex", 2, 1, 0],
 	]);
-	expect(JSON.parse(restarted.stdout).tallies.map((t: Tally) => t.shadow)).toEqual([undefined, undefined, true]);
+	expect(JSON.parse(restarted.stdout).tallies.map((t: Tally) => t.shadow)).toEqual([undefined, true]);
 });
 
 /** Commit `edit` to origin's `next` branch, leaving the checkout on `feature`; no flags change. */
@@ -1388,10 +928,8 @@ fakes.each([
 		const base = flags.includes("--base") ? [] : ["--base", "origin/next"];
 		const round = await quest("--root", s.repo, "review", ...base, ...flags);
 		expect(round.code, round.stderr).toBe(0);
-		// --effort sets only the size pick's, so only the second reviewer may repeat its round.
-		const [picked] = round.stdout.split("\nreviewer opencode ");
-		expect(picked).toContain("round 1\n");
-		expect(picked).not.toContain("unchanged");
+		expect(round.stdout).toContain("round 1\n");
+		expect(round.stdout).not.toContain("unchanged");
 		const effort = flags.includes("--effort") ? "xhigh" : "high";
 		expect(at(s.calls(), effort).at(-2)!.argv[1]).toBe("review");
 		// A pick at another effort leaves the shadow two steps below it, so the shadow at one step reruns.
@@ -1516,19 +1054,14 @@ fakes("each round rewrites the Review section of the branch's open PR, keeping t
 				// The land gate counts a full SHA, which a head with an open finding does not earn.
 				`- Head: ${head.slice(0, 12)}, named in full once no reviewer reports a finding`,
 				`- Base: origin/main at ${base.slice(0, 12)}`,
+				"- Risk: medium, `the base has no RISK.md to name what is always high or customer-facing, so every change is medium`",
+				"- Classified: medium by default",
 				"",
 				// The body's `## Models` record sizes the PR S.
 				"- Reviewer: Codex, gpt-6.1-sol, medium effort",
 				"- Session: `thread-1`, round 1",
 				"- Score: 8/10, `Lands once the off-by-one is fixed.`",
-				"- Rounds: 1; findings 1 (high 1): fixed 0, refuted 0, open 1",
-				"- Findings, open until the next round settles them:",
-				"  - High, `src/lib.ts:2`: `Off by one`",
-				"",
-				"- Reviewer: opencode, opencode-go/deepseek-v4.1-flash, high effort",
-				"- Session: `ses_1`, round 1",
-				"- Score: 8/10, `Lands once the off-by-one is fixed.`",
-				"- Rounds: 1; findings 1 (high 1): fixed 0, refuted 0, open 1",
+				"- Rounds: 1; first round 1 (high 1); findings 1 (high 1): fixed 0, refuted 0, open 1",
 				"- Findings, open until the next round settles them:",
 				"  - High, `src/lib.ts:2`: `Off by one`",
 				"",
@@ -1536,7 +1069,7 @@ fakes("each round rewrites the Review section of the branch's open PR, keeping t
 				"- Reviewer: Codex, gpt-6.1-sol, low effort, shadow",
 				"- Session: `thread-1`, round 1",
 				"- Score: 8/10, `Lands once the off-by-one is fixed.`",
-				"- Rounds: 1; findings 1 (high 1): fixed 0, refuted 0, open 1",
+				"- Rounds: 1; first round 1 (high 1); findings 1 (high 1): fixed 0, refuted 0, open 1",
 				"- Findings, open until the next round settles them:",
 				"  - High, `src/lib.ts:2`: `Off by one`",
 				"",
@@ -1569,7 +1102,9 @@ fakes("each round rewrites the Review section of the branch's open PR, keeping t
 		expect(record).toContain("- Session: `thread-1`, round 2\n");
 		expect(record).toContain("- Score: 9/10, `Fixes #3.`\n");
 		// The refuted finding counts beside the new one, across both rounds.
-		expect(record).toContain("- Rounds: 2; findings 2 (high 2): fixed 0, refuted 1, open 1\n");
+		expect(record).toContain(
+			"- Rounds: 2; first round 1 (high 1); findings 2 (high 2): fixed 0, refuted 1, open 1\n",
+		);
 		expect(record).toContain(
 			`  - High, \`src/lib.ts\`: \`\`Ping @someone about \`${base.slice(0, 12)}\` in #12\`\`\n`,
 		);
@@ -1582,6 +1117,300 @@ fakes("each round rewrites the Review section of the branch's open PR, keeping t
 	} finally {
 		vi.unstubAllGlobals();
 	}
+});
+
+/** A risk file whose `## High` list holds `high`, after a line of prose the classifier reads. */
+const riskFile = (high: string[]) =>
+	[
+		"# Risk",
+		"",
+		"CUSTOMER-PROSE: the averaging library ships to paying customers.",
+		"",
+		"## High",
+		"",
+		...high,
+		"",
+	].join("\n");
+
+/** The turns that ran the classifier, Haiku, rather than a reviewer. */
+const classifying = (calls: Call[]) => calls.filter((call) => call.argv.includes("claude-haiku-5-5"));
+
+fakes(
+	"a change to a path held high is high without a model, even a file moved out of it",
+	async () => {
+		const s = setup();
+		moveBase(s.repo, (dir) => write(dir, "RISK.md", riskFile(["- `src/` - customers' averages run on it"])));
+		const listed = await quest("--root", s.repo, "review");
+		expect(listed.code, listed.stderr).toBe(0);
+		const reason = "it changes src/lib.ts, which is always high: customers' averages run on it";
+		expect(listed.stdout).toContain(`\nrisk high ${reason}\nclassified high paths ${reason}\n\nreviewer codex`);
+		expect(classifying(s.calls())).toEqual([]);
+
+		// Workflows are high in every repository, whatever its risk file lists, and a rename out of them counts.
+		const t = setup();
+		const base = moveBase(t.repo, (dir) => {
+			write(dir, "RISK.md", riskFile([]));
+			write(dir, ".github/workflows/ci.yml", "on: push\n");
+		});
+		git(t.repo, "fetch", "-q", "origin");
+		git(t.repo, "merge", "-q", "--no-edit", "origin/main");
+		git(t.repo, "mv", ".github/workflows/ci.yml", "ci.yml");
+		git(t.repo, "commit", "-qm", "retire the workflow");
+		const moved = await quest("--root", t.repo, "review");
+		expect(moved.code, moved.stderr).toBe(0);
+		expect(moved.stdout).toContain(`base ${base} origin/main\n`);
+		expect(moved.stdout).toContain(
+			"\nrisk high it changes .github/workflows/ci.yml, which is always high: workflows run with the repository's secrets and decide what merges and ships\n",
+		);
+	},
+	20_000,
+);
+
+fakes(
+	"the classifier sets the tier from the diff and the base's risk file, once per head",
+	async () => {
+		const s = setup();
+		moveBase(s.repo, (dir) => write(dir, "RISK.md", riskFile(["- `billing/**/*.ts` - charges customers"])));
+		vi.stubEnv("FAKE_RISK", JSON.stringify({ tier: "low", reason: "Only a constant\nchanges." }));
+		vi.stubEnv("FAKE_REPLY", JSON.stringify({ score: 10, rationale: "Lands as is.", findings: [] }));
+		const first = await quest("--root", s.repo, "review");
+		expect(first.code, first.stderr).toBe(0);
+		const [call, ...more] = classifying(s.calls());
+		expect(more).toEqual([]);
+		const session = call!.argv[call!.argv.indexOf("--session-id") + 1];
+		expect(first.stdout).toContain(
+			[
+				"risk low Only a constant changes.",
+				"classified low model Only a constant changes.",
+				`classifier claude claude-haiku-5-5 low ${session}`,
+				"usage classify input 40 cached 0 output 3",
+				"",
+			].join("\n"),
+		);
+		// One read-only turn with its own instructions, never the repository's, that replies in the schema.
+		expect(call!.argv[call!.argv.indexOf("--effort") + 1]).toBe("low");
+		expect(call!.argv).toContain("dontAsk");
+		const schema = JSON.parse(call!.argv[call!.argv.indexOf("--json-schema") + 1]!);
+		expect(schema.required).toEqual(["tier", "reason"]);
+		const instructions = call!.argv[call!.argv.indexOf("--append-system-prompt") + 1]!;
+		expect(instructions).toContain("You set a pull request's risk tier from its change alone");
+		expect(instructions).not.toContain("BASE-ROOT rule");
+		// The prompt holds the base's risk file and the whole diff, by its merge base.
+		expect(call!.stdin).toContain("CUSTOMER-PROSE");
+		expect(call!.stdin).toContain("-export const x = 1;\n+export const x = 2;");
+		expect(call!.stdin).toContain(
+			`\`git diff --stat --patch ${git(s.repo, "merge-base", "HEAD", "origin/main")}..`,
+		);
+		// The reviewer is told the tier it may raise.
+		expect(at(s.calls(), "high").at(-1)!.stdin).toContain(
+			"<classified-reason>\nOnly a constant changes.\n</classified-reason>",
+		);
+
+		// The same head and risk file reuse the tier, so no model runs again.
+		const again = await quest("--root", s.repo, "review");
+		expect(again.code, again.stderr).toBe(0);
+		expect(again.stdout).toContain(`classifier claude claude-haiku-5-5 low ${session}\n\nreviewer`);
+		expect(classifying(s.calls())).toHaveLength(1);
+		// --new classifies again.
+		expect((await quest("--root", s.repo, "review", "--new")).code).toBe(0);
+		expect(classifying(s.calls())).toHaveLength(2);
+	},
+	20_000,
+);
+
+fakes("without a logged-in Claude Code, Codex classifies", async () => {
+	const s = setup();
+	moveBase(s.repo, (dir) => write(dir, "RISK.md", riskFile([])));
+	// Only git and the fake Codex are on PATH, so no Claude Code install outside the fakes is found either.
+	const only = join(s.bin, "..", "codex-only");
+	mkdirSync(only);
+	symlinkSync(execFileSync("which", ["git"], { encoding: "utf8" }).trim(), join(only, "git"));
+	symlinkSync(join(s.bin, "codex"), join(only, "codex"));
+	vi.stubEnv("PATH", only);
+	const result = await quest("--root", s.repo, "review");
+	expect(result.code, result.stderr).toBe(0);
+	expect(result.stdout).toContain("classifier codex gpt-6.1-sol low thread-classify\n");
+	const call = s.calls().find((each) => each.argv[1] === "--json")!;
+	expect(call.argv.slice(0, 2)).toEqual(["exec", "--json"]);
+	expect(call.argv).toContain('model_reasoning_effort="low"');
+	expect(call.argv).toContain('sandbox_mode="read-only"');
+	// The classifier may read the diff in parts, so only the user's connected apps are off.
+	expect(call.argv).toContain("features.apps=false");
+	expect(call.argv).not.toContain("features.shell_tool=false");
+	const file = call.argv[call.argv.indexOf("--output-schema") + 1]!;
+	expect(JSON.parse(readFileSync(file, "utf8")).required).toEqual(["tier", "reason"]);
+	// Each schema has a file named by its content, since every worktree of the clone, on any release, writes there.
+	const report = s.calls().find((each) => each.argv[1] === "resume")!;
+	const reportFile = report.argv[report.argv.indexOf("--output-schema") + 1]!;
+	expect(dirname(reportFile)).toBe(dirname(file));
+	expect([basename(file), basename(reportFile)]).toEqual([
+		expect.stringMatching(/^schema-[0-9a-f]{16}\.json$/),
+		expect.stringMatching(/^schema-[0-9a-f]{16}\.json$/),
+	]);
+	expect(reportFile).not.toBe(file);
+	expect(JSON.parse(readFileSync(reportFile, "utf8")).required).toContain("risk");
+});
+
+fakes(
+	"a classifier whose turn fails on its login or usage limit, or replies unusably, passes the turn to the next",
+	async () => {
+		const s = setup();
+		moveBase(s.repo, (dir) => write(dir, "RISK.md", riskFile([])));
+		vi.stubEnv("FAKE_REPLY", JSON.stringify({ score: 10, rationale: "Lands as is.", findings: [] }));
+		const run = async (failing: string) => {
+			vi.stubEnv("FAKE_CLASSIFY", failing);
+			return quest("--root", s.repo, "review", "--new");
+		};
+		// An unusable reply passes the turn on too.
+		for (const failing of ["claude-rejected", "claude-limited", "claude-unusable"]) {
+			const passed = await run(failing);
+			expect(passed.code, passed.stderr).toBe(0);
+			expect(passed.stdout).toContain("classifier codex gpt-6.1-sol low thread-classify\n");
+		}
+		// With every classifier out of usage, the run fails on the limit that resets first.
+		expect(await run("claude-limited,codex-limited")).toMatchObject({
+			code: 3,
+			stdout: "",
+			stderr: `error: codex hit its usage limit; resets ${codexReset}\n`,
+		});
+		// Otherwise it names why each failed.
+		const failed = await run("claude-rejected,codex-limited");
+		expect(failed.code).toBe(2);
+		expect(failed.stderr).toMatch(
+			/^error: no classifier could set the risk tier: claude is not logged in .*; codex hit its usage limit; resets /,
+		);
+		const unusable = await run("claude-unusable,codex-unusable");
+		expect(unusable.code).toBe(2);
+		expect(unusable.stderr).toBe(
+			"error: no classifier could set the risk tier: claude claude-haiku-5-5: the classifier's reply has no risk tier with a reason; codex gpt-6.1-sol: the classifier's reply is not JSON\n",
+		);
+	},
+	20_000,
+);
+
+fakes("a question no model answers usably throws with what each reply took", async () => {
+	const s = setup();
+	const entries = [
+		{ harness: "claude" as const, model: "claude-haiku-5-5", effort: "low" },
+		{ harness: "codex" as const, model: "gpt-6.1-sol", effort: "low" },
+	];
+	const error = await ask(entries, {
+		cwd: s.repo,
+		dir: tempDir(),
+		env: process.env,
+		instructions: "i",
+		schema: {},
+		prompt: "p",
+		tools: "",
+		who: "time splitter",
+		task: "split the session's time",
+		parse: () => {
+			throw new Error("unusable");
+		},
+	}).catch((each: unknown) => each);
+	expect(error).toBeInstanceOf(UnansweredError);
+	expect((error as UnansweredError).spent).toEqual([
+		{ entry: entries[0], usage: { input: 40, cached: 0, output: 3 } },
+		{ entry: entries[1], usage: { input: 40, cached: 0, output: 3 } },
+	]);
+});
+
+fakes("a reviewer raises the tier, and the record keeps the classifier's beside it", async () => {
+	const s = setup();
+	moveBase(s.repo, (dir) => write(dir, "RISK.md", riskFile([])));
+	const pull = { number: 7, body: "Fixes averaging.\n\n## Models\n\n- Size: S\n" };
+	onGitHub(s.repo, [pull]);
+	vi.stubEnv("FAKE_RAISE", "high");
+	try {
+		const result = await quest("--root", s.repo, "review");
+		expect(result.code, result.stderr).toBe(0);
+		expect(result.stdout).toContain("\nrisk high It rewrites the wire format peers read.\n");
+		expect(result.stdout).toContain("\nclassified medium model It changes what the library returns.\n");
+		expect(result.stdout).toContain("\nscore 8 Lands once the off-by-one is fixed.\nraised high It rewrites");
+		const session = classifying(s.calls())[0]!.argv.find((arg) => /^[0-9a-f-]{36}$/.test(arg));
+		expect(pull.body).toContain(
+			[
+				"- Risk: high, `It rewrites the wire format peers read.`",
+				`- Classified: medium by Claude Code, claude-haiku-5-5, low effort, session \`${session}\``,
+				"",
+				"- Reviewer: Codex, gpt-6.1-sol, medium effort",
+				"- Session: `thread-1`, round 1",
+				"- Score: 8/10, `Lands once the off-by-one is fixed.`",
+				"- Raised the risk to high: `It rewrites the wire format peers read.`",
+			].join("\n"),
+		);
+		expect(recordedRisk(pull.body)).toEqual({
+			tier: "high",
+			reason: "It rewrites the wire format peers read.",
+			classified: "medium",
+			by: "model",
+			session,
+			head: git(s.repo, "rev-parse", "HEAD").slice(0, 12),
+		});
+
+		// A reviewer never lowers it.
+		vi.stubEnv("FAKE_RAISE", "low");
+		write(s.repo, ".tmp/responses.md", "1. Fixed.\n2. Fixed.\n");
+		const lower = await quest("--root", s.repo, "review", "--responses", join(s.repo, ".tmp", "responses.md"));
+		expect(lower.code, lower.stderr).toBe(0);
+		expect(lower.stdout).toContain("\nrisk medium It changes what the library returns.\n");
+		expect(lower.stdout).not.toContain("\nraised ");
+	} finally {
+		vi.unstubAllGlobals();
+	}
+});
+
+fakes("a raise from a reviewer the run leaves out holds while its last round reviewed the head", async () => {
+	const s = setup();
+	const pull = { number: 7, body: "Fixes averaging.\n\n## Models\n\n- Size: S\n" };
+	onGitHub(s.repo, [pull]);
+	vi.stubEnv("FAKE_REPLY", JSON.stringify({ score: 10, rationale: "Lands as is.", findings: [] }));
+	// Only the shadow, Sol at low effort for an S PR, raises the tier.
+	vi.stubEnv("FAKE_RAISE", "high@low");
+	const raised = "\nrisk high It rewrites the wire format peers read.\n";
+	const block = [
+		"- Reviewer: Codex, gpt-6.1-sol, low effort, shadow",
+		"- Session: `thread-1`",
+		"- Raised the risk to high: `It rewrites the wire format peers read.`",
+		"- Rounds: 1;",
+	].join("\n");
+	try {
+		const first = await quest("--root", s.repo, "review");
+		expect(first.code, first.stderr).toBe(0);
+		expect(first.stdout).toContain(raised);
+		expect(first.stdout).toContain(" low shadow\n");
+
+		// The same head repeats the pick's clean round and leaves out the shadow, whose raise still covers it.
+		vi.stubEnv("FAKE_RAISE", undefined);
+		const again = await quest("--root", s.repo, "review");
+		expect(again.code, again.stderr).toBe(0);
+		expect(again.stdout).not.toContain(" shadow\n");
+		expect(again.stdout).toContain(raised);
+		expect(pull.body).toContain(block);
+		expect(recordedRisk(pull.body)).toMatchObject({ tier: "high", classified: "medium" });
+
+		// A new head is the pick's alone to judge.
+		write(s.repo, "src/lib.ts", "export const x = 3;\n");
+		git(s.repo, "commit", "-qam", "another constant");
+		const moved = await quest("--root", s.repo, "review");
+		expect(moved.code, moved.stderr).toBe(0);
+		expect(moved.stdout).toContain("\nrisk medium the base has no RISK.md");
+		expect(pull.body).not.toContain("- Raised the risk");
+	} finally {
+		vi.unstubAllGlobals();
+	}
+});
+
+fakes("a malformed risk file on the base fails before any model runs", async () => {
+	const s = setup();
+	moveBase(s.repo, (dir) => write(dir, "RISK.md", riskFile(["- `/etc/` - absolute", "- src/ without a reason"])));
+	const result = await quest("--root", s.repo, "review");
+	expect(result.code).toBe(2);
+	expect(result.stderr).toContain(
+		"the base's RISK.md cannot be read: RISK.md:7: `/etc/` is no pattern: it starts with /",
+	);
+	expect(result.stderr).toContain("RISK.md:8: a `## High` item is a backticked pattern");
+	expect(s.calls()).toEqual([]);
 });
 
 fakes("a branch with no open PR, or a body without a Review section, is reported as such", async () => {
@@ -1631,40 +1460,33 @@ fakes("a round on the head the last round passed runs no reviewer and repeats th
 	const again = await quest("--root", s.repo, "review", "--json", "--size", "S");
 	expect(again.code, again.stderr).toBe(0);
 	expect(s.calls()).toHaveLength(calls);
-	expect(s.opencodeCalls()).toHaveLength(3);
 	// The shadow found nothing on the branch's first run, so it never runs again.
 	const all: Round[] = JSON.parse(first.stdout).rounds;
 	expect(all.map((round) => [round.effort, round.shadow])).toEqual([
 		["medium", undefined],
-		["high", undefined],
 		["low", true],
 	]);
-	const rounds = all.slice(0, 2);
+	const rounds = all.slice(0, 1);
 	expect(JSON.parse(again.stdout).rounds).toEqual(
 		rounds.map((round: object) => ({ ...round, usage: [], unchanged: true })),
 	);
-	// XS picks the same reviewers as S, so its rounds repeat and report the size given.
+	// XS picks the same reviewer as S, so its round repeats and reports the size given.
 	const resized = await quest("--root", s.repo, "review", "--json", "--size", "XS");
 	expect(s.calls()).toHaveLength(calls);
 	expect(JSON.parse(resized.stdout).rounds).toMatchObject(rounds.map(() => ({ size: "XS", sizeFrom: "--size" })));
 	const repeated = (await quest("--root", s.repo, "review", "--size", "XS")).stdout;
-	expect(repeated.split("unchanged round 1 reviewed this head and found nothing; no reviewer ran\n")).toHaveLength(3);
+	expect(repeated.split("unchanged round 1 reviewed this head and found nothing; no reviewer ran\n")).toHaveLength(2);
 
-	// A round with findings to settle runs on the same head, since a refutation needs no new commit, while a
-	// reviewer with none repeats its round.
+	// A round with findings to settle runs on the same head, since a refutation needs no new commit.
 	vi.stubEnv("FAKE_REPLY", undefined);
 	const t = setup();
-	vi.stubEnv("FAKE_OPENCODE_REPLY", JSON.stringify({ score: 10, rationale: "Lands as is.", findings: [] }));
 	expect((await quest("--root", t.repo, "review")).code).toBe(0);
-	const opencode = t.opencodeCalls().length;
 	write(t.repo, ".tmp/responses.md", "1. Refuted: src/lib.ts:1 sets it.\n");
 	const refuted = await quest("--root", t.repo, "review", "--responses", join(t.repo, ".tmp", "responses.md"));
 	expect(refuted.code, refuted.stderr).toBe(0);
-	const [picked, second] = refuted.stdout.split("\nreviewer opencode ");
-	expect(picked).toContain("round 2\n");
-	expect(second).toContain("unchanged round 1");
+	expect(refuted.stdout).toContain("session thread-1\nround 2\n");
+	expect(refuted.stdout).not.toContain("unchanged");
 	expect(at(t.calls(), "high").at(-1)!.stdin).toContain("Refuted: src/lib.ts:1 sets it.");
-	expect(t.opencodeCalls()).toHaveLength(opencode);
 });
 
 fakes("a later round checks only what changed since the reviewed head, and the open findings", async () => {
@@ -1754,11 +1576,11 @@ test("a Models record reads its size and every implementing model", () => {
 		implementers: [
 			{
 				item: "Implementer: Claude Code, claude-opus-5-5, high effort",
-				fields: { harness: "Claude Code", model: "claude-opus-5-5", effort: "high", size: null },
+				fields: { harness: "Claude Code", model: "claude-opus-5-5", effort: "high", size: null, arm: null },
 			},
 			{
 				item: "Implementer: Codex, unknown, unknown effort",
-				fields: { harness: "Codex", model: "unknown", effort: "unknown", size: null },
+				fields: { harness: "Codex", model: "unknown", effort: "unknown", size: null, arm: null },
 			},
 		],
 	});
@@ -1776,6 +1598,7 @@ test("an Implementer line reads as agents write it", () => {
 		model: "claude-opus-5-5",
 		effort,
 		size: null,
+		arm: null,
 	});
 	expect(read("Claude Code, Opus 5.5, high effort")).toEqual(opus("high"));
 	expect(read("Claude Code, Claude Opus 5.5, xhigh effort")).toEqual(opus("xhigh"));
@@ -1786,24 +1609,34 @@ test("an Implementer line reads as agents write it", () => {
 		model: "claude-haiku-5-5",
 		effort: "low",
 		size: null,
+		arm: null,
 	});
 	expect(read("claude-haiku-5-5, effort not reported")).toEqual({
 		harness: "unknown",
 		model: "claude-haiku-5-5",
 		effort: "unknown",
 		size: null,
+		arm: null,
 	});
 	expect(read("Codex, GPT-6.1 Sol, medium effort (iterate, XS)")).toEqual({
 		harness: "Codex",
 		model: "gpt-6.1-sol",
 		effort: "medium",
 		size: "XS",
+		arm: null,
 	});
 	expect(read("Claude Code, Opus 5.5, low effort (iterate, flow fix)")).toEqual(opus("low"));
-	expect(read("Claude Code, Opus 5.5, high effort (iterate, XS, arm B)")).toEqual({ ...opus("high"), size: "XS" });
+	expect(read("Claude Code, Opus 5.5, high effort (iterate, XS, arm B)")).toEqual({
+		...opus("high"),
+		size: "XS",
+		arm: "B",
+	});
+	expect(read("Claude Code, Opus 5.5, high effort (arm A)")).toEqual({ ...opus("high"), arm: "A" });
+	// Only an arm the A/B runs reads as one.
+	expect(read("Claude Code, Opus 5.5, high effort (arm C)")).toEqual(opus("high"));
 	expect(read("unknown, Opus 5.5, high effort")).toEqual(opus("high", "unknown"));
 	expect(read("Claude Code, Fable 5.2, medium effort")?.model).toBe("claude-fable-5-2");
-	expect(read("opencode, DeepSeek V4.1 Flash, high effort")?.model).toBe("opencode-go/deepseek-v4.1-flash");
+	expect(read("Codex, openai/gpt-6.1-sol, high effort")?.model).toBe("gpt-6.1-sol");
 	expect(read("Codex, gpt-6.1-sol, high")?.effort).toBe("high");
 	expect(read("unknown")).toBeNull();
 	// A lone field reads as a listed display name or an ID, keeping the size its notes give.
@@ -1814,8 +1647,8 @@ test("an Implementer line reads as agents write it", () => {
 	expect(read("Claude Code")).toBeNull();
 	expect(read("claude-opus-5-5, unknown")).toEqual(opus("unknown", "unknown"));
 	expect(read("Claude Code, Opus 5.5,")).toEqual(opus("unknown"));
-	expect(read("opencode, opencode-go/kimi, high effort")?.model).toBe("opencode-go/kimi");
-	expect(read("opencode-go/kimi")).toBeNull();
+	expect(read("OpenRouter, openrouter/kimi, high effort")?.model).toBe("openrouter/kimi");
+	expect(read("openrouter/kimi")).toBeNull();
 	expect(read(", claude-opus-5-5, high effort")).toEqual(opus("high", "unknown"));
 	// An ID no list names still reads, so a new model is counted before the lists add it.
 	expect(read("Codex, gpt-7, high effort")?.model).toBe("gpt-7");
@@ -1894,7 +1727,8 @@ fakes("a reply that does not match the schema fails rather than reads as clean",
 });
 
 test("the verdict is checked field by field, settling each earlier finding once", () => {
-	const scored = { score: 7, rationale: "Fix the finding.", earlier: [] };
+	const risk = { tier: "medium", reason: "It changes what the library returns." };
+	const scored = { score: 7, rationale: "Fix the finding.", risk, earlier: [] };
 	expect(verdict({ structured: { ...scored, findings: [{ ...FINDING, line: null }] } }, 0)).toEqual({
 		...scored,
 		findings: [{ ...FINDING, line: null }],
@@ -1907,6 +1741,14 @@ test("the verdict is checked field by field, settling each earlier finding once"
 		expect(() => verdict({ structured: { ...scored, score, findings: [] } }, 0)).toThrow("no score from 0 to 10");
 	}
 	expect(() => verdict({ structured: { ...scored, rationale: " ", findings: [] } }, 0)).toThrow("no rationale");
+	// The reviewer's tier is one of the three, with a reason, which a reply puts on one line.
+	for (const bad of [undefined, { tier: "critical", reason: "x" }, { tier: "high", reason: " " }]) {
+		expect(() => verdict({ structured: { ...scored, risk: bad, findings: [] } }, 0)).toThrow("no risk tier");
+	}
+	expect(
+		verdict({ structured: { ...scored, risk: { tier: "high", reason: "Peers\n read it." }, findings: [] } }, 0)
+			.risk,
+	).toEqual({ tier: "high", reason: "Peers read it." });
 
 	const fixed = { finding: 1, disposition: "fixed", reason: "src/lib.ts:2 divides by the length." };
 	const refuted = { finding: 2, disposition: "refuted", reason: "The maintainer decided it." };
@@ -1998,7 +1840,7 @@ test("the shadow is the size's pick one effort lower, and none below low", () =>
 		"claude claude-opus-5-5 medium",
 		"claude claude-opus-5-5 high",
 	]);
-	expect(shadowOf({ harness: "claude", model: "m", effort: "max" })!.effort).toBe("xhigh");
+	expect(shadowOf({ harness: "claude", model: "m", effort: "xhigh" })!.effort).toBe("high");
 	// No step below an effort off the ladder is known, so an --effort such as Codex's minimal runs no shadow.
 	expect(shadowOf({ harness: "codex", model: "m", effort: "minimal" })).toBeNull();
 });
@@ -2009,13 +1851,12 @@ fakes("no shadow runs below low, though one settles a shadow's findings the pick
 	expect(opusLow.code, opusLow.stderr).toBe(0);
 	expect(JSON.parse(opusLow.stdout).rounds.map((r: Round) => [r.reviewer, r.effort, r.shadow])).toEqual([
 		["claude", "low", undefined],
-		["opencode", "high", undefined],
 	]);
 
-	// Sol medium's shadow, Sol low, leaves a finding open, and a --harness run leaves it to the pair.
+	// Sol medium's shadow, Sol low, leaves a finding open, and a --harness run leaves it to the size's pick.
 	const t = setup();
 	expect((await quest("--root", t.repo, "review", "--size", "S")).code).toBe(0);
-	write(t.repo, ".tmp/responses.md", "1. Fixed.\n2. Fixed.\n3. Fixed.\n");
+	write(t.repo, ".tmp/responses.md", "1. Fixed.\n2. Fixed.\n");
 	const responses = join(t.repo, ".tmp", "responses.md");
 	const alone = await quest(
 		"--root",
@@ -2030,7 +1871,7 @@ fakes("no shadow runs below low, though one settles a shadow's findings the pick
 	);
 	expect(alone.code).toBe(2);
 	expect(alone.stderr).toContain(
-		"opencode and codex (shadow) still have findings to settle on this branch; settle them in a run of the pair, or of that reviewer with --harness, with --responses",
+		"codex (shadow) still has findings to settle on this branch; settle them in a run of the size's pick, or of that reviewer with --harness, with --responses",
 	);
 	// Opus low then replaces Sol, with no step below it, so a shadow at Opus low settles the old shadow's finding.
 	const sol = ["--size", "S", "--exclude-model", "gpt-6.1-sol"];
@@ -2039,8 +1880,7 @@ fakes("no shadow runs below low, though one settles a shadow's findings the pick
 	const rounds: Round[] = JSON.parse(settled.stdout).rounds;
 	expect(rounds.map((r) => [r.reviewer, r.effort, r.shadow, r.earlier?.findings.map((f) => f.number)])).toEqual([
 		["claude", "low", undefined, [1]],
-		["opencode", "high", undefined, [2]],
-		["claude", "low", true, [3]],
+		["claude", "low", true, [2]],
 	]);
 });
 
@@ -2063,7 +1903,6 @@ test("saved sessions are read only in the current format, or refused naming --ne
 	const session = {
 		reviewer: "codex",
 		session: "thread-1",
-		root: "/repo",
 		rounds: [{ head: "a", mergeBase: "m", findings: [finding] }],
 		last: {},
 		given: { instructions: "i", rules: null },
@@ -2086,16 +1925,24 @@ test("saved sessions are read only in the current format, or refused naming --ne
 		tallies: [tally, { ...tally, shadow: true }],
 	};
 	expect(parseState(shadowed)).toEqual(shadowed);
+	// A retired reviewer's tally is dropped so the record never names it; its session stays for the run's numbering.
+	const retired = { ...session, reviewer: "opencode", session: "ses_1" };
+	expect(
+		parseState({
+			branch: "feature",
+			sessions: [session, retired],
+			tallies: [tally, { ...tally, reviewer: "opencode" }],
+		}),
+	).toEqual({ ...current, sessions: [session, retired] });
 	for (const older of [
 		null,
-		// One reviewer's session, as quest saved it before the second reviewer.
+		// One reviewer's session alone, outside a sessions list.
 		{ branch: "feature", ...session },
 		{ sessions: [{ ...session, rounds: [{ head: "a", findings: 1 }] }] },
 		{ sessions: [{ ...session, rounds: [] }] },
 		{ sessions: [{ ...session, last: undefined }] },
 		{ sessions: [{ ...session, given: undefined }] },
 		{ sessions: [{ ...session, session: undefined }] },
-		{ sessions: [{ ...session, root: undefined }] },
 		// Saved before tallies, or with a session no tally counts.
 		{ branch: "feature", sessions: [session] },
 		{ branch: "feature", sessions: [session], tallies: [] },
@@ -2106,6 +1953,39 @@ test("saved sessions are read only in the current format, or refused naming --ne
 		{ ...shadowed, sessions: [...shadowed.sessions, { ...session, shadow: true }] },
 	])
 		expect(() => parseState(older)).toThrow(/--new/);
+});
+
+fakes("a retired reviewer's open findings are dropped, keeping the numbers of the rest", async () => {
+	const s = setup();
+	expect((await quest("--root", s.repo, "review")).code).toBe(0);
+	// An opencode session from before its removal, numbered between the pick's finding and the shadow's.
+	const path = sessionFile(join(s.repo, ".git"), "feature");
+	const saved = JSON.parse(readFileSync(path, "utf8"));
+	const [pick, shadow] = saved.sessions;
+	const opencode = { ...pick, reviewer: "opencode", session: "ses_1" };
+	writeFileSync(
+		path,
+		JSON.stringify({
+			...saved,
+			sessions: [pick, opencode, shadow],
+			tallies: [...saved.tallies, { ...saved.tallies[0], reviewer: "opencode" }],
+		}),
+	);
+
+	write(s.repo, "src/lib.ts", "export const x = 4;\n");
+	git(s.repo, "commit", "-qam", "fix");
+	write(s.repo, ".tmp/responses.md", "1. Fixed at src/lib.ts:1.\n2. Refuted.\n3. Fixed at src/lib.ts:1.\n");
+	vi.stubEnv("FAKE_REPLY", JSON.stringify({ score: 10, rationale: "Lands as is.", findings: [] }));
+	const later = await quest("--root", s.repo, "review", "--responses", join(s.repo, ".tmp", "responses.md"));
+	expect(later.code, later.stderr).toBe(0);
+	// The shadow settles its finding by the number the author answered, not by #2, the dropped one's.
+	expect(at(s.calls(), "medium").at(-1)!.stdin).toContain(
+		"<earlier-findings>\n3. high src/lib.ts:2 Off by one\n</earlier-findings>",
+	);
+	expect(later.stdout).not.toContain("opencode");
+	const after = JSON.parse(readFileSync(path, "utf8"));
+	expect(after.sessions.map((each: { reviewer: string }) => each.reviewer)).toEqual(["codex", "codex"]);
+	expect(after.tallies.map((each: { reviewer: string }) => each.reviewer)).not.toContain("opencode");
 });
 
 fakes("a session saved by an older quest is refused before the reviewer runs", async () => {
@@ -2126,53 +2006,24 @@ fakes("a session saved by an older quest is refused before the reviewer runs", a
 	expect((await quest("--root", s.repo, "review", "--new")).code).toBe(0);
 });
 
-fakes("a reviewer's failure stops the other and saves neither round", async () => {
+fakes("--harness reviews alone, keeping the size pick's session for its next run", async () => {
 	const s = setup();
-	vi.stubEnv("FAKE_OPENCODE_LIMITED", "reset");
-	const result = await quest("--root", s.repo, "review");
-	expect(result.stderr).toBe("error: opencode hit its usage limit; resets 2030-03-17T17:46:40Z\n");
-	expect(result.code).toBe(3);
-	expect(existsSync(sessionFile(join(s.repo, ".git"), "feature"))).toBe(false);
-	vi.stubEnv("FAKE_OPENCODE_LIMITED", undefined);
-	// No round was saved, so the next one needs no responses.
+	vi.stubEnv("FAKE_REPLY", JSON.stringify({ score: 10, rationale: "Lands as is.", findings: [] }));
 	expect((await quest("--root", s.repo, "review")).code).toBe(0);
-});
-
-fakes("--harness reviews alone, keeping the other reviewer's session unless it has findings to settle", async () => {
-	const s = setup();
-	const clean = JSON.stringify({ score: 10, rationale: "Lands as is.", findings: [] });
-	vi.stubEnv("FAKE_REPLY", clean);
-	expect((await quest("--root", s.repo, "review")).code).toBe(0);
-	const opencode = s.opencodeCalls().length;
 	write(s.repo, "src/lib.ts", "export const x = 4;\n");
 	git(s.repo, "commit", "-qam", "more");
-	const alone = await quest("--root", s.repo, "review", "--harness", "codex");
+	const claude = ["--harness", "claude", "--model", "opus", "--effort", "low"];
+	const alone = await quest("--root", s.repo, "review", ...claude, "--json");
 	expect(alone.code, alone.stderr).toBe(0);
-	expect(alone.stdout).not.toContain("reviewer opencode");
-	expect(s.opencodeCalls()).toHaveLength(opencode);
-	// The pair's next run resumes the kept session on the new head.
-	const pair = await quest("--root", s.repo, "review", "--json");
-	expect(pair.code, pair.stderr).toBe(0);
-	expect(JSON.parse(pair.stdout).rounds.map((r: Round) => [r.reviewer, r.round])).toEqual([
-		["codex", 2],
-		["opencode", 2],
-	]);
-
-	// Its open findings keep a head from passing the size's pick alone.
-	const t = setup();
-	vi.stubEnv("FAKE_REPLY", clean);
-	vi.stubEnv("FAKE_OPENCODE_REPLY", JSON.stringify({ score: 8, rationale: "One gap.", findings: [FINDING] }));
-	expect((await quest("--root", t.repo, "review")).code).toBe(0);
-	const calls = t.calls().length;
-	const refused = await quest("--root", t.repo, "review", "--harness", "codex");
-	expect(refused.code).toBe(2);
-	expect(refused.stderr).toContain("opencode still has findings to settle on this branch");
-	expect(t.calls()).toHaveLength(calls);
+	expect(JSON.parse(alone.stdout).rounds.map((r: Round) => r.reviewer)).toEqual(["claude"]);
+	// The size pick's next run resumes its kept session on the new head.
+	const picked = await quest("--root", s.repo, "review", "--json");
+	expect(picked.code, picked.stderr).toBe(0);
+	expect(JSON.parse(picked.stdout).rounds.map((r: Round) => [r.reviewer, r.round])).toEqual([["codex", 2]]);
 });
 
 fakes("a new size pick, and its shadow, settle the open findings of the reviewers they replace", async () => {
 	const s = setup();
-	vi.stubEnv("FAKE_OPENCODE_REPLY", JSON.stringify({ score: 10, rationale: "Lands as is.", findings: [] }));
 	expect((await quest("--root", s.repo, "review")).code).toBe(0);
 	// Sol wrote the fix, so Opus replaces it as the size's pick.
 	write(s.repo, "src/lib.ts", "export const x = 4;\n");
@@ -2185,7 +2036,7 @@ fakes("a new size pick, and its shadow, settle the open findings of the reviewer
 	const responses = join(s.repo, ".tmp", "responses.md");
 	const round = await quest("--root", s.repo, "review", ...sol, "--responses", responses, "--json");
 	expect(round.code, round.stderr).toBe(0);
-	const [opus, , shadow] = JSON.parse(round.stdout).rounds;
+	const [opus, shadow] = JSON.parse(round.stdout).rounds;
 	const settled = (r: Round) => [r.reviewer, r.effort, r.shadow, r.round, r.earlier!.findings.map((f) => f.number)];
 	expect(settled(opus)).toEqual(["claude", "medium", undefined, 1, [1]]);
 	// Sol's shadow had a finding open, so Opus's shadow, one effort below Opus medium, settles it.
@@ -2200,7 +2051,6 @@ fakes("a new size pick, and its shadow, settle the open findings of the reviewer
 		JSON.parse(round.stdout).tallies.map((t: Tally) => [t.reviewer, t.shadow, t.rounds, t.findings.high, t.fixed]),
 	).toEqual([
 		["claude", undefined, 1, 1, 0],
-		["opencode", undefined, 2, 0, 0],
 		["claude", true, 1, 1, 0],
 		["codex", undefined, 1, 1, 1],
 		["codex", true, 1, 1, 1],
@@ -2262,6 +2112,8 @@ test("a tally counts each finding once, by who raised it, through every round", 
 			session: "s",
 			rounds: 2,
 			findings: { high: 2, medium: 0, low: 1 },
+			// The first round's findings stay as it reported them, however later rounds settle or regrade them.
+			first: { high: 1, medium: 1, low: 1 },
 			fixed: 1,
 			refuted: 1,
 		},
@@ -2301,4 +2153,28 @@ test("a tally counts each finding once, by who raised it, through every round", 
 			],
 		),
 	).toThrow(/no tally/);
+});
+
+test("a question about data alone runs with no tools on either CLI", () => {
+	const context = {
+		mergeBase: "",
+		instructions: "i",
+		model: "m",
+		effort: "low",
+		schema: {},
+		schemaFile: "/s.json",
+	};
+	const claude = claudeFlags({ ...context, tools: "" });
+	expect(claude[claude.indexOf("--tools") + 1]).toBe("");
+	expect(claudeFlags(context)[claudeFlags(context).indexOf("--tools") + 1]).toBe("Read,Grep,Glob,Bash,Agent");
+	const codex = codexFlags({ ...context, tools: "" });
+	for (const off of [
+		"features.apps=false",
+		"features.shell_tool=false",
+		"features.unified_exec=false",
+		'web_search="disabled"',
+		"--skip-git-repo-check",
+	])
+		expect(codex).toContain(off);
+	expect(codexFlags(context)).not.toContain("features.shell_tool=false");
 });

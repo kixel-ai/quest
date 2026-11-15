@@ -88,7 +88,7 @@ An epic's or milestone's `Required` also holds back every quest under it.
 A child that must precede a sibling is in that sibling's `Required`.
 Nothing else orders work within a milestone: `quest unblocked` ranks it by downstream impact, then path.
 When the section is empty, delete it; the quest is now unblocked.
-`Required` must be acyclic.
+`Required` must be acyclic, and never link to a later milestone than the document listing it: move one side with `quest mv` or remove the link.
 
 `quest check` enforces this structure.
 Run it after creating or updating quests.
@@ -122,6 +122,8 @@ A `Maintainer:` item says why an agent cannot take the step and what automation 
 Record a wait there, not in a draft PR holding only evidence or steps for a person.
 Unlike a blocked quest it stays ready, so it resurfaces whenever ready work is triaged instead of stalling in the backlog.
 `quest waiting` lists every waiting item, the maintainer's first, ranked by what each unblocks, and `/quest-complete` walks the maintainer through them.
+
+A PR that launches something new for users to try, such as a site, demo, or feature, adds a follow-up quest for the maintainer to try and promote it, its `Maintainer:` item saying where to find it.
 
 ## Execution
 
@@ -192,8 +194,10 @@ Relay no interim report: resume a sub-agent that ended its turn on one, telling 
 A long-running coordinator lets compaction bound its context: what must outlast it lives in the forge and the quest tree, and a PR's state is read afresh before acting, not trusted from earlier turns.
 
 Start each sub-agent in the background with its own isolated worktree, since agents cannot write to a worktree their parent created.
-It reports only when done or blocked, and never waits on GitHub CI, reviews, or merges; stay silent on its interim notifications.
+Before starting or resuming one, run `quest agent admit` in the background and go on once it exits 0, handling reports meanwhile: it waits until the host has room for another agent. `quest agent start` and `resume` admit themselves.
+A sub-agent reports only when done or blocked, and never waits on GitHub CI, reviews, or merges; stay silent on its interim notifications.
 As each reports, explain its result in a few lines: its PR, whether it is still a draft, and its open decisions with recommendations.
+Before dispatching a session to apply the user's answers to a PR's decisions, post them on the PR in a comment that opens with `Maintainer decision`: `quest merge` refuses the PR's current head until a newer commit, or a later comment linking the decision, answers it.
 Once two agents report the same blocker, such as a check failure that reproduces on the base or a reviewer outage, name it with its evidence in each later agent's brief, and report it once.
 
 A report that is an API error such as a rate limit or overload, or a cancellation the user did not ask for, is not a result.
@@ -213,7 +217,7 @@ Leave the worktree you are running in and any holding uncommitted work or refuse
 
 Run each agent at an entry of `quest`'s ranked lists unless the repository's `AGENTS.md` names other models: as a native sub-agent on this session's harness, else through `quest agent`.
 Size each `/quest-iterate` you dispatch as a quest, by the work left on its PR, and name that size in its brief.
-Start it on the PR's writer, the model of its first `Implementer:` line, at the entry `quest models <size> --writer <model>` prints, waiting out its usage limit so the other model can review; a PR whose writer no list names, such as `unknown` or a retired model, takes its size's first entry that can run.
+Start it on the PR's writer, the model of its first `Implementer:` line, at the entry `quest models <size> --writer <model>` prints, or `quest models <PR size> --arm <arm>` when that line names a writer A/B arm, as `(arm B)`, naming the arm in its brief, waiting out its usage limit so the other model can review; a PR whose writer no list names, such as `unknown` or a retired model, takes its size's first entry that can run.
 
 `quest agent start --harness <claude|codex> --model <model> --effort <level> --permission-mode <mode> <worktree> <prompt>` runs a headless agent on that CLI's own login; start it as a background command in its own isolated worktree, so the harness reports its exit like a sub-agent's.
 `--permission-mode` is Claude Code's permission mode, or Codex's sandbox mode.

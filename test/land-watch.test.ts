@@ -8,14 +8,14 @@ import { fileURLToPath } from "node:url";
 
 import { beforeEach, describe, expect, test } from "vitest";
 
-import type { GitHubDependencies } from "../src/cli/github";
+import type { GitHubDependencies } from "../src/github/client";
 import { readRemote } from "../src/cli/land";
 import { parseResolution } from "../src/cli/land-apply";
 import { CHECK_LOG } from "../src/cli/land-checks";
-import { COLLECTION_ATTEMPTS, REQUEUE_LIMIT, history } from "../src/cli/land-fixer";
-import { privateRepository } from "../src/cli/land-serve";
+import { COLLECTION_ATTEMPTS, REQUEUE_LIMIT, carriedBy, history } from "../src/cli/land-fixer";
+import { privateRepository } from "../src/cli/land-daemon";
 import { jobsSection, readRemoval, SETTLE, watchPass, watchPermissions } from "../src/cli/land-watch";
-import { type FixContext, HELD } from "../src/cli/land-watch-fix";
+import { endPick, type FixContext, HELD } from "../src/cli/land-watch-fix";
 import {
 	type FlakyTest,
 	flakyName,
@@ -59,6 +59,8 @@ interface Pull {
 	state?: string;
 	/** `mergeStateStatus`, CLEAN by default. */
 	mergeState?: string;
+	/** `reviewDecision`, null by default: the base requires no review. */
+	reviewDecision?: string;
 	/** Its base branch, main by default. */
 	base?: string;
 	/** When it joined the merge queue, while it is in it. */
@@ -72,6 +74,8 @@ interface Pull {
 	/** Its head branch's pushes, oldest first, in place of those its removals imply. */
 	pushes?: { sha: string; at: string }[];
 	labels?: string[];
+	/** Its reviews, threads, and comments as the signal reader reads them; none by default. */
+	activity?: Record<string, unknown>;
 }
 interface Job {
 	id: number;
@@ -185,6 +189,7 @@ function removalPage(pull: Pull, since: string, after: unknown) {
 function deps(world: World): GitHubDependencies {
 	return {
 		token: "fake",
+		quota: "wait",
 		now: () => world.now,
 		sleep: async () => {},
 		warn: () => {},
@@ -198,6 +203,25 @@ function deps(world: World): GitHubDependencies {
 				if (query.includes("defaultBranchRef"))
 					return Response.json({ data: { repository: { defaultBranchRef: { name: "main" } } } });
 				const pullOf = () => world.pulls.find((item) => `PR_${item.number}` === variables.id)!;
+				const aliases = [...query.matchAll(/\bp(\d+): pullRequest\(number: \d+\)/g)].map((m) => Number(m[1]));
+				if (aliases.length) {
+					const empty = { pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] };
+					const activity = (pull: Pull) => ({
+						headRefOid: headOf(world, pull),
+						commits: { nodes: [{ commit: { oid: headOf(world, pull), committedDate: at(-100) } }] },
+						reviews: empty,
+						reviewThreads: empty,
+						comments: empty,
+						...pull.activity,
+					});
+					return Response.json({
+						data: {
+							repository: Object.fromEntries(
+								aliases.map((n) => [`p${n}`, activity(world.pulls.find((pull) => pull.number === n)!)]),
+							),
+						},
+					});
+				}
 				if (query.includes("statusCheckRollup")) {
 					expect(variables.id).toMatch(/^PR_\d+$/);
 					const contexts = world.checks?.[variables.sha];
@@ -218,6 +242,23 @@ function deps(world: World): GitHubDependencies {
 					return Response.json({ data: { repository: { object: { statusCheckRollup: rollup } } } });
 				}
 				const mutation = /^\s*mutation[^{]*\{\s*(\w+)/.exec(query)?.[1];
+				if (mutation === "dequeuePullRequest" || mutation === "disablePullRequestAutoMerge") {
+					const pull = pullOf();
+					// Like GitHub, which refuses to disable an auto-merge request that is gone.
+					if (
+						mutation === "disablePullRequestAutoMerge" &&
+						pull.armed === undefined &&
+						pull.queued === undefined
+					)
+						return Response.json({
+							errors: [{ type: "UNPROCESSABLE", message: "auto-merge is not enabled" }],
+						});
+					world.mutations.push(`${mutation} ${pull.number}`);
+					// Like GitHub, leaving the queue also disarms auto-merge.
+					if (mutation === "dequeuePullRequest") pull.queued = undefined;
+					pull.armed = undefined;
+					return Response.json({ data: { [mutation]: { clientMutationId: null } } });
+				}
 				if (mutation === "enqueuePullRequest" || mutation === "enablePullRequestAutoMerge") {
 					const pull = pullOf();
 					world.mutations.push(`${mutation} ${pull.number} ${variables.sha}`);
@@ -243,10 +284,13 @@ function deps(world: World): GitHubDependencies {
 					return Response.json({
 						data: {
 							node: {
+								number: pull.number,
+								repository: { nameWithOwner: "upstream/project" },
 								state: pull.state ?? "OPEN",
 								baseRefName: pull.base ?? "main",
 								headRefOid: headOf(world, pull),
 								mergeStateStatus: pull.mergeState ?? "CLEAN",
+								reviewDecision: pull.reviewDecision ?? null,
 								mergeQueueEntry: pull.queued ? { enqueuedAt: pull.queued } : null,
 								autoMergeRequest: pull.armed ? { enabledAt: pull.armed } : null,
 								labels: labelsOf(pull),
@@ -290,6 +334,7 @@ function deps(world: World): GitHubDependencies {
 										maintainerCanModify: false,
 										headRepository: { nameWithOwner: "upstream/project" },
 										mergeStateStatus: pull.mergeState ?? "CLEAN",
+										reviewDecision: pull.reviewDecision ?? null,
 										mergeQueueEntry: pull.queued ? { id: `MQE_${pull.number}` } : null,
 										autoMergeRequest: pull.armed ? { enabledAt: pull.armed, commitBody: "" } : null,
 										labels: labelsOf(pull),
@@ -467,11 +512,7 @@ test("a failed merge_group build is commented with its failing job's log and rec
 	});
 	expect(removal.failure).toMatchObject({
 		plan: { repository: "upstream/project", base: { ref: "main", sha: BUILT } },
-		numbers: [5],
-		blame: [5],
-		tip: HEAD,
 		reason: "failed_checks",
-		log: removal.log,
 	});
 	expect(removal.failure!.plan.queue[0]).toMatchObject({ number: 5, head: HEAD, enabledAt: at(1) });
 	expect(readFileSync(removal.log, "utf8")).toContain("== Check / test: failure at step just test");
@@ -722,6 +763,8 @@ test("an armed pick GitHub never queued is enqueued once ready, only at the head
 		armed(25),
 		// In the queue already, or never armed.
 		armed(26, { queued: at(3) }),
+		// It lacks an approval its base requires, which auto-merge waits for; an admin's enqueue would bypass it.
+		armed(28, { reviewDecision: "REVIEW_REQUIRED" }),
 		{ number: 27, head: HEAD, enqueues: [], removals: [] },
 	]);
 	github.unlisted = [25];
@@ -739,6 +782,134 @@ test("an armed pick GitHub never queued is enqueued once ready, only at the head
 	// Queued now: nothing more to do.
 	expect(await watchPass(REPOSITORY, { state }, deps(github))).toEqual([]);
 	expect(github.mutations).toHaveLength(2);
+});
+
+test("a queued or armed pick that draws an online finding leaves the queue, once, and is not enqueued again, unless retargeted", async () => {
+	const state = tempDir();
+	const page = (nodes: object[]) => ({ pageInfo: { hasNextPage: false, endCursor: null }, nodes });
+	const finding = {
+		reviews: page([
+			{
+				id: "r1",
+				url: "https://github.com/upstream/project/pull/30#pullrequestreview-1",
+				author: { __typename: "Bot", login: "rabbit" },
+				body: "[P1] Drops the last frame",
+				submittedAt: at(3),
+				commit: { oid: HEAD },
+			},
+		]),
+	};
+	const github = world([
+		{
+			number: 30,
+			head: HEAD,
+			enqueues: [{ createdAt: at(2), actor: "maintainer" }],
+			removals: [],
+			armed: at(2),
+			queued: at(2),
+			activity: finding,
+		},
+		{ number: 31, head: HEAD, enqueues: [], removals: [], armed: at(2), mergeState: "BLOCKED", activity: finding },
+		// Retargeted after the list read: another base's watcher owns it now.
+		{ number: 33, head: HEAD, enqueues: [], removals: [], armed: at(2), base: "release", activity: finding },
+		// Nothing holds it.
+		{
+			number: 32,
+			head: HEAD,
+			enqueues: [{ createdAt: at(2), actor: "maintainer" }],
+			removals: [],
+			armed: at(2),
+			queued: at(2),
+		},
+	]);
+	github.now = Date.parse(at(4));
+	expect(await watchPass(REPOSITORY, { state }, deps(github))).toEqual([
+		`dequeued 30 ${HEAD} 1 signals`,
+		`disarmed 31 ${HEAD} 1 signals`,
+	]);
+	// The dequeue disarmed #30 already, which still gets its comment.
+	expect(github.mutations).toEqual(["dequeuePullRequest 30", "disablePullRequestAutoMerge 31"]);
+	expect(github.comments[30]).toHaveLength(1);
+	expect(github.comments[30][0].body).toContain(
+		`taking it out of the queue and disarming its auto-merge, since its head ${HEAD} is held by finding by rabbit[bot]: drops the last frame`,
+	);
+	expect(github.comments[30][0].body).toContain("<!-- quest land: unanswered_signal -->");
+	// Out of the queue and disarmed: the next pass leaves both alone.
+	expect(await watchPass(REPOSITORY, { state }, deps(github))).toEqual([]);
+	expect(github.mutations).toHaveLength(2);
+	expect(github.comments[31]).toHaveLength(1);
+	expect(github.comments[33]).toBeUndefined();
+});
+
+test("a signaled pick leaves the queue even when GitHub refuses its comment, which a later pass posts", async () => {
+	const signaled = () =>
+		world([
+			{
+				number: 30,
+				head: HEAD,
+				enqueues: [{ createdAt: at(2), actor: "maintainer" }],
+				removals: [],
+				armed: at(2),
+				queued: at(2),
+				activity: {
+					reviews: {
+						pageInfo: { hasNextPage: false, endCursor: null },
+						nodes: [
+							{
+								id: "r1",
+								url: "https://github.com/upstream/project/pull/30#pullrequestreview-1",
+								author: { __typename: "Bot", login: "rabbit" },
+								body: "[P1] Drops the last frame",
+								submittedAt: at(3),
+								commit: { oid: HEAD },
+							},
+						],
+					},
+				},
+			},
+		]);
+	let state = tempDir();
+	let github = signaled();
+	github.now = Date.parse(at(4));
+	github.refuse = ["#30 quest land watch: ended"];
+	const first = await watchPass(REPOSITORY, { state }, deps(github));
+	expect(first[0]).toBe(`dequeued 30 ${HEAD} 1 signals`);
+	expect(first[1]).toMatch(new RegExp(`^unsaid 30 ${HEAD}: `));
+	expect(first).toHaveLength(2);
+	expect(github.mutations).toEqual(["dequeuePullRequest 30"]);
+	expect(github.comments[30] ?? []).toHaveLength(0);
+	// Out of the queue now; the kept comment still goes, once.
+	expect(await watchPass(REPOSITORY, { state }, deps(github))).toEqual([]);
+	expect(github.comments[30]).toHaveLength(1);
+	expect(github.comments[30][0].body).toContain("<!-- quest land: unanswered_signal -->");
+	expect(await watchPass(REPOSITORY, { state }, deps(github))).toEqual([]);
+	expect(github.comments[30]).toHaveLength(1);
+	expect(github.mutations).toEqual(["dequeuePullRequest 30"]);
+
+	// A comment GitHub keeps refusing is set aside after three passes.
+	state = tempDir();
+	github = signaled();
+	github.now = Date.parse(at(4));
+	github.refuse = Array(4).fill("#30 quest land watch: ended");
+	expect((await watchPass(REPOSITORY, { state }, deps(github)))[1]).toMatch(/^unsaid 30 /);
+	expect(await watchPass(REPOSITORY, { state }, deps(github))).toEqual([expect.stringMatching(/^unsaid 30 /)]);
+	expect(await watchPass(REPOSITORY, { state }, deps(github))).toEqual([
+		expect.stringMatching(/^set aside the signal comment on 30 after 3 refusals: /),
+	]);
+	expect(await watchPass(REPOSITORY, { state }, deps(github))).toEqual([]);
+	expect(github.comments[30] ?? []).toHaveLength(0);
+
+	// A kept comment whose PR closed is dropped unsaid.
+	state = tempDir();
+	github = signaled();
+	github.now = Date.parse(at(4));
+	github.refuse = ["#30 quest land watch: ended"];
+	await watchPass(REPOSITORY, { state }, deps(github));
+	github.pulls[0].state = "CLOSED";
+	expect(await watchPass(REPOSITORY, { state }, deps(github))).toEqual([]);
+	github.pulls[0].state = undefined;
+	expect(await watchPass(REPOSITORY, { state }, deps(github))).toEqual([]);
+	expect(github.comments[30] ?? []).toHaveLength(0);
 });
 
 test("a refused enqueue of an armed pick is reported once and retried, and says nothing when GitHub queued it first", async () => {
@@ -804,7 +975,7 @@ test("an armed pick withdrawn, retargeted, or held while the pass reads it is no
 
 test("the watcher's tokens ask for writes only with a fixer, and pushes for workflows only when they carry one", () => {
 	expect(watchPermissions(false)).toEqual({
-		api: { contents: "read", pull_requests: "write", actions: "read", merge_queues: "write" },
+		api: { contents: "write", pull_requests: "write", actions: "read", merge_queues: "write" },
 	});
 	expect(watchPermissions(true)).toEqual({
 		api: {
@@ -1012,6 +1183,7 @@ describe.skipIf(process.platform === "win32")("the watcher's land fixer", () => 
 			jobs,
 			effort: "high",
 			tags: ["deploy-*"],
+			branches: ["release"],
 			timeout: 60,
 			token: async () => "token",
 			read: readRemote,
@@ -1088,7 +1260,14 @@ describe.skipIf(process.platform === "win32")("the watcher's land fixer", () => 
 		git(repo.origin, "tag", "deploy-1", base);
 		git(repo.origin, "tag", "other-1", base);
 		git(context.root, "fetch", "--quiet", repo.origin, `${base}:refs/tags/deploy-0`);
-		fix.round(5, `git tag -l > '${fix.tools}/tags'\n${fixScript("fixed.txt")}`);
+		// It gets the matching branches as `origin/<branch>`, and the base it builds on as `origin/main`. The other
+		// tests run with `release` absent from GitHub, which matches nothing.
+		git(repo.origin, "update-ref", "refs/heads/release", head);
+		git(repo.origin, "update-ref", "refs/heads/release-next", head);
+		fix.round(
+			5,
+			`git tag -l > '${fix.tools}/tags'\ngit for-each-ref --format='%(refname) %(objectname)' refs/remotes > '${fix.tools}/remotes'\n${fixScript("fixed.txt")}`,
+		);
 		expect(await watchPass(REPOSITORY, { state }, deps(github), context)).toEqual([
 			"removed 5 failed_checks fix",
 			"fixing 5",
@@ -1096,6 +1275,9 @@ describe.skipIf(process.platform === "win32")("the watcher's land fixer", () => 
 		expect(github.comments[5][0].body).toContain("The land fixer works on it in the background");
 		await exited(state);
 		expect(readFileSync(join(fix.tools, "tags"), "utf8")).toBe("deploy-1\n");
+		expect(readFileSync(join(fix.tools, "remotes"), "utf8")).toBe(
+			`refs/remotes/origin/main ${base}\nrefs/remotes/origin/release ${head}\n`,
+		);
 		// The wrapper got the removal's full log followed by the PR's own checks, the PR, and the effort.
 		const [call] = fix.calls();
 		const [effort, input, number] = call.split(" ");
@@ -1177,6 +1359,150 @@ describe.skipIf(process.platform === "win32")("the watcher's land fixer", () => 
 		expect(handback).toContain("<!-- quest land: failed_checks -->");
 		expect(history(state, 5)!.rounds.map((round) => round.outcome)).toEqual(["fixed", "handback"]);
 		expect(history(state, 5)!.rounds[1].rule).toBe("repeated");
+	});
+
+	test("a fix whose dropped head drew a finding while the fixer ran is handed back, not re-enqueued", async () => {
+		const { repo, state, fix, context } = setup();
+		const base = repo.main();
+		const head = repo.pull(5, { "feature.txt": "new\n" });
+		const pull: Pull = {
+			number: 5,
+			head,
+			enqueues: [{ createdAt: at(1), actor: "maintainer" }],
+			removals: [
+				{ id: "R1", createdAt: at(5), reason: "failed_checks", actor: "github-merge-queue", before: head },
+			],
+		};
+		const github = { ...world([pull], [failedRun(5, at(3), base)]), origin: repo.origin };
+		github.now = Date.parse(at(6));
+		fix.round(5, fixScript("fixed.txt"));
+		expect(await watchPass(REPOSITORY, { state }, deps(github), context)).toEqual([
+			"removed 5 failed_checks fix",
+			"fixing 5",
+		]);
+		await exited(state);
+		// The fixer's commit read none of it, so it answers nothing on the head it replaces.
+		pull.activity = {
+			reviews: {
+				pageInfo: { hasNextPage: false, endCursor: null },
+				nodes: [
+					{
+						id: "r1",
+						url: "https://github.com/upstream/project/pull/5#pullrequestreview-1",
+						author: { __typename: "Bot", login: "rabbit" },
+						body: "[P1] Drops the last frame",
+						submittedAt: at(7),
+						commit: { oid: head },
+					},
+				],
+			},
+		};
+		github.now = Date.parse(at(10));
+		expect(await watchPass(REPOSITORY, { state }, deps(github), context)).toEqual(["handback 5"]);
+		expect(github.mutations).toEqual([]);
+		expect(github.comments[5].at(-1)!.body).toContain("finding by rabbit[bot]: drops the last frame");
+		// `quest status` reports why the pick stopped as the signal, not the failure the fixer took on.
+		expect(github.comments[5].at(-1)!.body).toContain("<!-- quest land: unanswered_signal -->");
+		// The handed-back fix still carries the dropped head, should anyone pick it again unanswered.
+		const pushed = git(repo.origin, "rev-parse", "refs/heads/branch-5");
+		expect(pushed).not.toBe(head);
+		expect(carriedBy(state, 5, pushed)?.heads).toEqual([head]);
+		// Ending the pick, as a hold or a person's removal does, leaves it too.
+		endPick(state, 5, history(state, 5)!.pick);
+		expect(history(state, 5)).toBeUndefined();
+		expect(carriedBy(state, 5, pushed)?.heads).toEqual([head]);
+	});
+
+	test("a fix a workflow queued and armed is dequeued once its dropped head draws a finding, without disarming twice", async () => {
+		const { repo, state, fix, context } = setup();
+		const base = repo.main();
+		const head = repo.pull(5, { "feature.txt": "new\n" });
+		const pull: Pull = {
+			number: 5,
+			head,
+			enqueues: [{ createdAt: at(1), actor: "maintainer" }],
+			removals: [
+				{ id: "R1", createdAt: at(5), reason: "failed_checks", actor: "github-merge-queue", before: head },
+			],
+		};
+		const github = { ...world([pull], [failedRun(5, at(3), base)]), origin: repo.origin };
+		github.now = Date.parse(at(6));
+		fix.round(5, fixScript("fixed.txt"));
+		await watchPass(REPOSITORY, { state }, deps(github), context);
+		await exited(state);
+		// A workflow queues and arms the fixer's push once it lands, before the fixer's requeue reads the PR.
+		github.onPull = (read) => {
+			const requeuing = readdirSync(state)
+				.filter((name) => /^watch-job-.*\.json$/.test(name))
+				.some((name) => JSON.parse(readFileSync(join(state, name), "utf8")).requeuing !== undefined);
+			if (requeuing && read.queued === undefined && !github.mutations.length) {
+				read.queued = at(8);
+				read.armed = at(8);
+			}
+		};
+		pull.activity = {
+			reviews: {
+				pageInfo: { hasNextPage: false, endCursor: null },
+				nodes: [
+					{
+						id: "r1",
+						url: "https://github.com/upstream/project/pull/5#pullrequestreview-1",
+						author: { __typename: "Bot", login: "rabbit" },
+						body: "[P1] Drops the last frame",
+						submittedAt: at(7),
+						commit: { oid: head },
+					},
+				],
+			},
+		};
+		github.now = Date.parse(at(10));
+		expect(await watchPass(REPOSITORY, { state }, deps(github), context)).toEqual(["handback 5"]);
+		// Leaving the queue disarmed it, so nothing asks GitHub to disarm a request that is gone.
+		expect(github.mutations).toEqual(["dequeuePullRequest 5"]);
+		expect(github.comments[5].at(-1)!.body).toContain("<!-- quest land: unanswered_signal -->");
+	});
+
+	test("a fix queued without its finding still carries the dropped head's, and leaves the queue once one arrives", async () => {
+		const { repo, state, fix, context } = setup();
+		const base = repo.main();
+		const head = repo.pull(5, { "feature.txt": "new\n" });
+		const pull: Pull = {
+			number: 5,
+			head,
+			enqueues: [{ createdAt: at(1), actor: "maintainer" }],
+			removals: [
+				{ id: "R1", createdAt: at(5), reason: "failed_checks", actor: "github-merge-queue", before: head },
+			],
+		};
+		const github = { ...world([pull], [failedRun(5, at(3), base)]), origin: repo.origin };
+		github.now = Date.parse(at(6));
+		fix.round(5, fixScript("fixed.txt"));
+		await watchPass(REPOSITORY, { state }, deps(github), context);
+		await exited(state);
+		github.now = Date.parse(at(10));
+		const fixed = () => git(repo.origin, "rev-parse", "refs/heads/branch-5");
+		expect(await watchPass(REPOSITORY, { state }, deps(github), context)).toEqual([`requeued 5 ${fixed()}`]);
+		// Queued at the fix, however it got there, a finding on the head it replaced still holds it.
+		pull.activity = {
+			reviews: {
+				pageInfo: { hasNextPage: false, endCursor: null },
+				nodes: [
+					{
+						id: "r1",
+						url: "https://github.com/upstream/project/pull/5#pullrequestreview-1",
+						author: { __typename: "Bot", login: "rabbit" },
+						body: "[P1] Drops the last frame",
+						submittedAt: at(11),
+						commit: { oid: head },
+					},
+				],
+			},
+		};
+		github.now = Date.parse(at(12));
+		expect(await watchPass(REPOSITORY, { state }, deps(github), context)).toEqual([
+			`dequeued 5 ${fixed()} 1 signals`,
+		]);
+		expect(github.mutations.at(-1)).toBe("dequeuePullRequest 5");
 	});
 
 	test("a fix that edits a protected path is handed back unpushed, as a ready commit", async () => {

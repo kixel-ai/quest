@@ -35,6 +35,10 @@ export type Pull = Issue & {
 		commit?: string;
 		/** The check suite of the workflow run that reported it. */
 		suite?: number;
+		/** The path of the workflow file in this repository whose run reported it. */
+		workflow?: string;
+		/** Whether that run is still going, so it may create more jobs. */
+		running?: boolean;
 	}[];
 	review: "APPROVED" | "CHANGES_REQUESTED" | "REVIEW_REQUIRED" | null;
 	/** Oldest first; `commit` is the one a review was submitted on, the head by default. */
@@ -158,6 +162,9 @@ export type Repo = {
 		name: string;
 		head_branch: string;
 		head_sha: string;
+		/** The workflow file it runs, and the repository that holds it. */
+		path?: string;
+		repository?: { full_name: string };
 		status: string;
 		conclusion: string | null;
 		html_url: string;
@@ -246,7 +253,7 @@ function queueTarget(repo: Repo, pull: Pull) {
 				{
 					commit: {
 						oid: headOf(repo, pull),
-						statusCheckRollup: pull.checks && { contexts: contextPage(pull, null) },
+						statusCheckRollup: pull.checks && { contexts: contextPage(repo, pull, null) },
 					},
 				},
 			],
@@ -258,7 +265,7 @@ function queueTarget(repo: Repo, pull: Pull) {
 export const ACTIONS_APP = 15368;
 
 /** One page of a head's check runs and commit statuses, as `statusCheckRollup.contexts` pages them. */
-function contextPage(pull: Pick<Pull, "runs">, after: unknown) {
+function contextPage(repo: Repo, pull: Pick<Pull, "runs">, after: unknown) {
 	const start = typeof after === "string" ? Number(after) : 0;
 	const all = (pull.runs ?? []).map((run, index) =>
 		run.context
@@ -271,7 +278,14 @@ function contextPage(pull: Pick<Pull, "runs">, after: unknown) {
 					status: "COMPLETED",
 					conclusion: run.conclusion,
 					detailsUrl: run.url,
-					checkSuite: { databaseId: run.suite ?? null, app: { databaseId: run.app ?? ACTIONS_APP } },
+					checkSuite: {
+						databaseId: run.suite ?? null,
+						status: run.running ? "IN_PROGRESS" : "COMPLETED",
+						app: { databaseId: run.app ?? ACTIONS_APP },
+						workflowRun: run.workflow
+							? { file: { path: run.workflow, repositoryName: `${repo.owner}/${repo.name}` } }
+							: null,
+					},
 				},
 	);
 	const end = start + 100;
@@ -287,7 +301,9 @@ function graphql(repo: Repo, query: string, variables: Record<string, unknown>) 
 		if (runs)
 			return {
 				data: {
-					repository: { object: { statusCheckRollup: { contexts: contextPage({ runs }, variables.after) } } },
+					repository: {
+						object: { statusCheckRollup: { contexts: contextPage(repo, { runs }, variables.after) } },
+					},
 				},
 			};
 		const pull = repo.pulls.find(
@@ -297,7 +313,7 @@ function graphql(repo: Repo, query: string, variables: Record<string, unknown>) 
 			data: {
 				repository: {
 					object: pull
-						? { statusCheckRollup: pull.checks && { contexts: contextPage(pull, variables.after) } }
+						? { statusCheckRollup: pull.checks && { contexts: contextPage(repo, pull, variables.after) } }
 						: null,
 				},
 			},
@@ -317,8 +333,67 @@ function graphql(repo: Repo, query: string, variables: Record<string, unknown>) 
 			},
 		};
 	}
+	// A batch of PRs' reviews, threads, and comments, as the online-review reader asks with one alias per PR.
+	const aliases = [...query.matchAll(/\bp(\d+): pullRequest\(number: \d+\)/g)].map((match) => Number(match[1]));
+	if (aliases.length)
+		return { data: { repository: Object.fromEntries(aliases.map((n) => [`p${n}`, activityOf(repo, n)])) } };
 	// Anything else reads as a repository with none of the fields asked for.
 	return { data: { repository: {} } };
+}
+
+/** An account as GraphQL names it: a bot without its `[bot]` suffix. */
+const actorOf = (login: string | null) =>
+	login === null
+		? null
+		: login.endsWith("[bot]")
+			? { __typename: "Bot", login: login.slice(0, -5) }
+			: { __typename: "User", login };
+
+/** A PR's head, reviews, threads, and comments, as the online-review reader asks for them. */
+function activityOf(repo: Repo, number: number) {
+	const pull = repo.pulls.find((p) => p.number === number);
+	if (!pull) return null;
+	const head = headOf(repo, pull);
+	const url = `https://github.com/${repo.owner}/${repo.name}/pull/${number}`;
+	return {
+		headRefOid: head,
+		commits: page([{ commit: { oid: head, committedDate: updatedAt } }]),
+		reviews: page(
+			(pull.reviews ?? []).map((review, index) => ({
+				id: `R_${number}_${index}`,
+				url: `${url}#pullrequestreview-${index}`,
+				author: actorOf(review.author),
+				authorAssociation: review.author === repo.owner ? "OWNER" : "COLLABORATOR",
+				body: review.body ?? "",
+				submittedAt: updatedAt,
+				commit: { oid: review.commit ?? head },
+			})),
+		),
+		reviewThreads: page(
+			(pull.threads ?? []).map((thread, index) => ({
+				id: `T_${number}_${index}`,
+				isResolved: thread.resolved === true,
+				resolvedBy: null,
+				comments: page(
+					thread.comments.map((comment, at) => ({
+						author: actorOf(comment.author),
+						body: comment.body,
+						url: `${url}#discussion_r${index}${at}`,
+						pullRequestReview: null,
+					})),
+				),
+			})),
+		),
+		comments: page(
+			(pull.comments ?? []).map((comment, index) => ({
+				author: actorOf(comment.author),
+				authorAssociation: comment.author === repo.owner ? "OWNER" : "COLLABORATOR",
+				body: comment.body,
+				createdAt: comment.at,
+				url: `${url}#issuecomment-${index}`,
+			})),
+		),
+	};
 }
 
 function tree(repo: Repo) {
@@ -372,8 +447,9 @@ type Permission =
 type Grant = { repositories: Set<string>; permissions: Partial<Record<Permission, string>> };
 
 /**
- * Answer one outbound request from the Worker. Sign-in always completes as the
- * world's first user; repository reads check that user's maintainer role.
+ * Answer one outbound request to GitHub's API from the world's repositories,
+ * scoping each read and write to the repositories and permissions of the
+ * installation token it carries.
  */
 export function fakeGitHub(world: World) {
 	for (const repo of world.repos) connect(repo);
@@ -476,6 +552,12 @@ export function fakeGitHub(world: World) {
 			grants.delete(token);
 			return new Response(null, { status: 204 });
 		}
+		const byId = path.match(/^\/repositories\/(\d+)$/);
+		if (byId) {
+			const found = world.repos.find((r) => r.id === Number(byId[1]));
+			if (!found || !scope?.repositories.has(`${found.owner}/${found.name}`)) return notFound();
+			return json({ full_name: `${found.owner}/${found.name}` });
+		}
 		const match = path.match(/^\/repos\/([^/]+)\/([^/]+)(\/.*)?$/);
 		const fullName = match && `${match[1]}/${match[2]}`;
 		const tail = match?.[3] ?? "";
@@ -527,6 +609,8 @@ export function fakeGitHub(world: World) {
 								return json({
 									data: {
 										node: {
+											number: pull.number,
+											repository: { nameWithOwner: `${repo.owner}/${repo.name}` },
 											state: pull.merged ? "MERGED" : pull.closed ? "CLOSED" : "OPEN",
 											baseRefName: pull.base ?? defaultOf(repo),
 											headRefOid: headOf(repo, pull),

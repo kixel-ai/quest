@@ -1,6 +1,5 @@
 {
 	"name": "quest",
-	"version": "0.2.1",
 	"description": "Versioned Markdown quests: validate plans, find ready work, and name the branches a quest lands on.",
 	"license": "MIT OR Apache-2.0",
 	"author": "Luke Curley",
@@ -8,25 +7,27 @@
 	"private": true,
 	"type": "module",
 	"exports": {
-		"./core": "./src/core/index.ts"
+		"./core": "./src/core/index.ts",
+		"./github": "./src/github/index.ts"
 	},
 	"bin": {
 		"quest": "dist/quest.js"
 	},
 	"packageManager": "bun@1.4.4",
 	"scripts": {
-		"build": "bun build src/cli/bin.ts --target=bun --banner \"#!/usr/bin/env -S bun --no-env-file\" --outfile dist/quest.js && bun scripts/executable.mjs dist/quest.js",
+		"build": "bun run bundle && bun scripts/executable.mjs dist/quest.js",
+		"bundle": "bun build src/cli/bin.ts --target=bun --banner \"#!/usr/bin/env -S bun --no-env-file\" --outfile dist/quest.js",
 		"compile": "bun build src/cli/bin.ts --compile --no-compile-autoload-dotenv --outfile dist/quest",
 		"quest": "bun src/cli/bin.ts",
-		"check": "tsc && tsc -p src/core && prettier --check .",
+		"check": "tsc && tsc -p src/core && tsc -p src/github && prettier --check .",
 		"test": "vitest run",
 		"fix": "prettier --write ."
 	},
 	"dependencies": {
-		"commander": "15.0.0",
+		"commander": "15.1.0",
 		"mdast-util-from-markdown": "2.1.0",
 		"mdast-util-gfm-strikethrough": "2.0.1",
-		"mdast-util-gfm-table": "2.0.0",
+		"mdast-util-gfm-table": "2.0.1",
 		"micromark-extension-gfm-strikethrough": "2.1.0",
 		"micromark-extension-gfm-table": "2.1.2"
 	},
@@ -35,7 +36,7 @@
 		"@types/node": "26.6.6",
 		"prettier": "3.9.10",
 		"typescript": "7.0.2",
-		"vitest": "5.0.5"
+		"vitest": "5.1.0"
 	},
 	"trustedDependencies": []
 }

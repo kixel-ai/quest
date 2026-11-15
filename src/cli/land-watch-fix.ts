@@ -3,9 +3,18 @@
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { isHoldLabel } from "../core";
-import { array, GitHub, type GitHubDependencies, GitHubGraphQLError, object, type ObjectValue, string } from "./github";
-import { type Queued, queueHead } from "../github/merge";
+import {
+	array,
+	GitHub,
+	type GitHubDependencies,
+	GitHubGraphQLError,
+	object,
+	type ObjectValue,
+	string,
+} from "../github/client";
+import { type Queued, lacksApproval, queueHead } from "../github/merge";
 import { UNREFUSED } from "./hold";
+import { type Carried, describe, readSignals } from "../github/signals";
 import { baseRemote, enqueue, type Entry, type LandMethod, mergeBase, type RemoteRead } from "./land";
 import { resolutionSection, type Resolution } from "./land-apply";
 import { checksSection } from "./land-checks";
@@ -16,11 +25,13 @@ import {
 	comment,
 	conflictFailure,
 	FixerRefusal,
+	SignalRefusal,
 	handbackLog,
 	fixerMarkdown,
 	fixerText,
 	history,
 	type History,
+	carriedBy,
 	historyPath,
 	identity,
 	importFix,
@@ -38,7 +49,7 @@ import {
 	stopRule,
 } from "./land-fixer";
 import { push, remoteHead } from "./land-head";
-import { save } from "./land-serve";
+import { save } from "./land-daemon";
 import type { Removal } from "./land-watch";
 import {
 	type Disable,
@@ -65,6 +76,8 @@ export interface FixContext {
 	timeout: number;
 	/** Patterns of tags, such as `deploy-*`, fetched from GitHub into each fixer checkout so its checks can read them. */
 	tags: string[];
+	/** Patterns of branches fetched from GitHub into each fixer checkout as `origin/<branch>`, for checks that diff against them. */
+	branches: string[];
 	token: (workflows: boolean) => Promise<string>;
 	read: RemoteRead;
 }
@@ -96,6 +109,8 @@ interface WatchJob extends Process {
 	requeued?: Queued;
 	/** Why the round ended in a handback, recorded before posting it, so a restart keeps the reason. */
 	handback?: string;
+	/** A finding or decision on the head handed it back, so its marker says `unanswered_signal`. */
+	signaled?: boolean;
 	/** A validated fix whose push GitHub refused, handed back for `quest land apply`. */
 	resolution?: Resolution;
 	/** Passes that failed to collect it, so one that keeps failing is set aside rather than holding a fixer slot. */
@@ -121,7 +136,7 @@ const JUDGED: Record<Cause, string> = {
 };
 
 const PULL = `query($id: ID!) { node(id: $id) { ... on PullRequest {
-	state baseRefName headRefOid mergeStateStatus mergeQueueEntry { enqueuedAt } autoMergeRequest { enabledAt }
+	number repository { nameWithOwner } state baseRefName headRefOid mergeStateStatus reviewDecision mergeQueueEntry { enqueuedAt } autoMergeRequest { enabledAt }
 	labels(first: 100) { nodes { name } }
 	headRepository { nameWithOwner }
 } } }`;
@@ -418,6 +433,16 @@ async function take(
 	);
 	log = input;
 
+	const branches = await fixerBranches(context, repository, base.ref);
+	if (branches.length)
+		await context.read(context.root, [
+			"fetch",
+			"--quiet",
+			"--no-tags",
+			baseRemote({ repository }),
+			...branches.map((branch) => branch.sha),
+		]);
+
 	const checkout = mkdtempSync(join(state, "fix-"));
 	try {
 		const packs = prepare(
@@ -425,12 +450,12 @@ async function take(
 			checkout,
 			[
 				`${removal.head}:refs/heads/batch`,
-				`${base.sha}:refs/heads/base`,
 				`${removal.head}:refs/heads/pr-${number}`,
 				...tags,
+				...branches.map((branch) => `${branch.sha}:refs/remotes/origin/${branch.name}`),
 			],
 			// Start at the base: the agent loads its instructions and tooling only from code already landed.
-			base.sha,
+			base,
 		);
 		if (!conflict) writeKnownFlaky(state, checkout);
 		const job: WatchJob = {
@@ -457,6 +482,30 @@ async function take(
 		rmSync(checkout, { recursive: true, force: true });
 		throw error;
 	}
+}
+
+/**
+ * GitHub's branches that a `--fixer-branch` pattern matches, other than the base, which the round pins itself.
+ * Matched here rather than by a fetch refspec, so a pattern naming a branch GitHub no longer has matches nothing.
+ */
+async function fixerBranches(
+	context: FixContext,
+	repository: string,
+	base: string,
+): Promise<{ name: string; sha: string }[]> {
+	if (!context.branches.length) return [];
+	const glob = (pattern: string) =>
+		pattern
+			.split("*")
+			.map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+			.join(".*");
+	const match = new RegExp(`^(?:${context.branches.map(glob).join("|")})$`);
+	const listed = await context.read(context.root, ["ls-remote", "--heads", baseRemote({ repository })]);
+	return listed
+		.split("\n")
+		.map((line) => /^([0-9a-f]{40}|[0-9a-f]{64})\trefs\/heads\/(.+)$/.exec(line))
+		.filter((found) => found !== null && found[2] !== base && match.test(found[2]))
+		.map((found) => ({ name: found![2], sha: found![1] }));
 }
 
 /** End a job: its checkout and its records go, and its output log stays for diagnosis on the host. */
@@ -659,13 +708,22 @@ async function collect(
 				job.requeuing = head;
 				save(path, job);
 			}
-			job.requeued = await requeue(github, entry.id, head, job.base.ref, job.dropped, queue);
+			job.requeued = await requeue(
+				github,
+				entry.id,
+				head,
+				job.base.ref,
+				job.dropped,
+				queue,
+				carriedBy(state, number, head),
+			);
 			save(path, job);
 		} catch (failure) {
 			if (failure instanceof Held) return [...said, ...(await leave())];
 			if (!(failure instanceof FixerRefusal)) throw failure;
 			handback = failure.message;
 			if (failure.resolution) job.resolution = failure.resolution;
+			if (failure instanceof SignalRefusal) job.signaled = true;
 		}
 	}
 
@@ -675,8 +733,10 @@ async function collect(
 	// Every handback ends the pick with a round of its own, a crash's or a timeout's too, so the App's
 	// next enqueue of a head this pick put back starts a new pick.
 	if (round?.outcome !== "handback") {
-		const { after: _, ...rest } = round ?? { job: name, before: entry.head, failure };
-		saveRound(state, number, history(state, number)!, { ...rest, outcome: "handback" });
+		saveRound(state, number, history(state, number)!, {
+			...(round ?? { job: name, before: entry.head, failure }),
+			outcome: "handback",
+		});
 	}
 	if (handback) {
 		job.handback = handback;
@@ -695,7 +755,7 @@ async function collect(
 		`handback ${name}`,
 		attribution,
 		handbackLog(job.log, !handback && result?.action === "handback" ? result.log : undefined),
-		job.reason,
+		job.signaled ? "unanswered_signal" : job.reason,
 		job.resolution ? (room) => resolutionSection(number, job.resolution!, room) : undefined,
 	);
 	finish(path, job);
@@ -705,8 +765,9 @@ async function collect(
 /**
  * Put `head` back in `base`'s queue, at the back: GitHub's merge queue, or the watcher's own, by arming
  * auto-merge pinned to it. A PR queued or armed at it since the queue dropped it, at `dropped`, needs
- * nothing more: a restart finds its own request, and a workflow may pick the fixer's push first. A
- * refusal, or a PR retargeted from `base`, hands the PR back; a hold leaves it to the session that holds it.
+ * no enqueue: a restart finds its own request, and a workflow may pick the fixer's push first. A
+ * refusal, or a PR retargeted from `base`, hands the PR back; a hold leaves it to the session that holds it. A signal
+ * on `head` or on the `carried` pick it replaces, queued or not, takes it out of the queue and hands it back.
  */
 async function requeue(
 	github: GitHub,
@@ -715,23 +776,47 @@ async function requeue(
 	base: string,
 	dropped: string,
 	queue: QueueMode,
+	carried?: Carried,
 ): Promise<Queued> {
 	const how = (pull: ObjectValue): Queued => (pull.mergeQueueEntry != null ? "enqueued" : "armed");
 	let pull = await readPull(github, id);
 	if (string(pull.baseRefName) !== base) throw new FixerRefusal(`retargeted from ${base} before it was re-enqueued`);
 	if (string(pull.headRefOid) !== head) throw new FixerRefusal("head moved before it was re-enqueued");
+	if (!queued(pull, dropped) && isHeld(pull)) throw new Held();
+	// A finding or decision that arrived while the fixer ran holds the head as it would a writer's pick, even one a
+	// workflow already queued. The fixer's own commit, which read neither, answers none on the pick it replaces.
+	const [owner, repo] = string(object(pull.repository).nameWithOwner).split("/");
+	const number = Number(pull.number);
+	const held = (
+		await readSignals(github, { owner: owner!, repo: repo! }, [number], carried && new Map([[number, carried]]))
+	).get(number)!;
+	if (held.head !== head) throw new FixerRefusal("head moved before it was re-enqueued");
+	if (held.signals.length > 0) {
+		if (pull.mergeQueueEntry != null) {
+			await github.graphql("mutation($id: ID!) { dequeuePullRequest(input: { id: $id }) { clientMutationId } }", {
+				id,
+			});
+			// Dequeuing can disarm auto-merge too, and GitHub refuses to disable a request that is gone.
+			pull = await readPull(github, id);
+		}
+		if (string(pull.headRefOid) === head && queued(pull, dropped) && pull.autoMergeRequest != null)
+			await github.graphql(
+				"mutation($id: ID!) { disablePullRequestAutoMerge(input: { pullRequestId: $id }) { clientMutationId } }",
+				{ id },
+			);
+		throw new SignalRefusal(`its head is held by ${describe(held.signals)}`);
+	}
 	if (!queued(pull, dropped)) {
-		if (isHeld(pull)) throw new Held();
 		try {
 			if (queue.kind === "own") await enqueue(github, id, head, queue.method);
 			else
-				await queueHead(
-					(query, variables) => github.graphql(query, variables),
+				await queueHead((query, variables) => github.graphql(query, variables), {
 					id,
 					head,
-					string(pull.mergeStateStatus),
-					"merge",
-				);
+					mergeState: string(pull.mergeStateStatus),
+					unapproved: lacksApproval(pull.reviewDecision),
+					method: "merge",
+				});
 		} catch (error) {
 			if (!(error instanceof GitHubGraphQLError) || error.types.some((type) => UNREFUSED.includes(type ?? "")))
 				throw error;

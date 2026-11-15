@@ -8,13 +8,13 @@ Engineering rules for every task, as `quest context` prints them. The repository
 - Reproduce a bug before fixing it, and fix it at the root cause, flaky tests included. Never work around one with a retry, sleep, timeout, or looser assertion.
 - Fail loud and early: error on unsupported or malformed input instead of warning and continuing, and decide a supported path at setup from known capabilities instead of trying one at runtime and silently falling back. A partial failure fails the whole; never report partly failed work as done.
 - Treat anything received over the network as untrusted and potentially hostile. Bound what a peer can make you hold by design, not with a constant. Run no code from a PR whose author lacks write access: it runs with your credentials.
-- For core functionality, build the bold, comprehensive solution, not the average one: handle every case, land it whole instead of a part plus follow-ups, and refactor whatever stands in the way. Keep everything outside the core minimal.
-- Be adversarial: attack your own approach, reports, reviews, and other PRs as hard as anyone else's, and argue for the best approach over the first one that works.
+- For core functionality, build the comprehensive solution: handle every case, land it whole instead of a part plus follow-ups, and refactor whatever stands in the way. Keep everything outside the core minimal.
+- Be brave and try new things: argue for what would stand out among countless near-identical approaches, not the average or the first that works. Attack your own work as hard as anyone else's.
 - Passing checks don't show a change works. Before review, exercise it on its real surface, such as the built binary, the running app, or the endpoint, and verify core functionality a second independent way, such as a property or differential check, a model, or a measurement. Measure performance claims. Put what you ran and saw in the PR body's `## Validation`; a change with no behavior to exercise says so.
 - Keep CI fast, so bold changes can be tried and thrown away cheaply: every test runs in CI, but the merge gate holds only fast, high-signal ones, and slow or expensive ones, such as other platforms, run nightly. A PR that slows the gate says by how much and why it is worth it.
 - Unit tests mock time instead of depending on wall-clock timing or sleeps, and cover edge cases, not old bugs or trivial values.
-- A lasting fact or instruction about a project belongs in its repository, not agent memory. Propose checking it in, to the nearest `AGENTS.md` or its quest; change no rule until the user agrees, and then follow `quest guide prompting`.
-- In a public repository, never mention customers, partners, or prospects, or link to private repositories. Justify work on its merits.
+- A lasting fact or instruction about a project belongs in its repository, not agent memory. Propose checking it in, to the nearest `AGENTS.md` or its quest; change no rule until the user agrees, then follow `quest guide prompting`.
+- In a public repository, never mention customers, partners, or prospects, or link to a private repository its maintainer doesn't own. Justify work on its merits.
 
 ## Important
 
@@ -23,7 +23,7 @@ Engineering rules for every task, as `quest context` prints them. The repository
 - Take a dependency only for nontrivial non-core functionality, at its newest stable version.
 - Do not bump package versions unless asked.
 - Comments explain the non-obvious why, never the history, and every export gets one plain line, the way you'd say it out loud.
-- Audit the code you read as you go, even outside your task's scope: bugs, security, these rules, dead code, and what could be simpler. Fix in the same PR the easy findings and any docs or comments your change outdates; suggest the rest as follow-ups.
+- Audit the code you read as you go, even outside your task: bugs, security, these rules, dead code, and what could be simpler. Fix in the same PR the easy findings and any docs or comments your change outdates; suggest the rest as follow-ups.
 - Say it once, in the fewest words that hold up.
 
 ## Public API
@@ -43,10 +43,10 @@ Put scratch, such as PR bodies, review drafts, logs, patches, helper scripts, an
 Before ending a task, pausing for a decision, or handing off, commit a checkpoint and report what remains and which checks passed or did not run.
 Finish with a clean checkout: intended changes committed and pushed, incidental generated changes restored, and pre-existing or unrelated changes preserved.
 
-Run CPU-heavy commands, such as builds, test suites, model checkers, and browsers, through `quest gate <command>`, which queues, however long, until the host has room.
-Never work around the queue by polling the load average or capping agents yourself; cancel a gated command only when you no longer need its result.
+Run commands that may use significant CPU, such as builds, tests, and model checkers, through `quest gate <command>`. Gate by CPU, not run time: `quest review`, servers, and formatters stay out.
+Never work around the queue by polling the load or capping agents, `quest agent admit`'s job; cancel a gated command only once its result is unneeded.
 Run it in the foreground and read its exit code directly, not through a pipe.
-Never end a turn or report while your background work runs, and never poll it with `sleep` or status checks: block on it with the harness's own wait for that task, at the longest interval it allows, saying nothing between waits.
+Never end a turn or report while your background work runs, and never poll it with `sleep`, status checks, or busy loops: block on the harness's own wait for that task, at its longest interval, saying nothing between waits.
 To wait on a PR's CI or reviews, use `quest wait`, re-running one that times out with the `--since` it printed, so activity during the first wait is still reported.
 A sub-agent ends its turn only with a final result or a question. Its final report holds only what its caller acts on, such as its PR's URL, state, and head, and each decision it needs with a recommendation; details go in the PR body.
 Back out when progress stalls rather than burn tokens; a gate's queue or a long command still running is not a stall.
@@ -64,8 +64,8 @@ A decision about an open PR never authorizes closing it. Confirm a close as its 
 
 ## Pull requests
 
-Merge the base only when the branch conflicts with it or a landing step, such as `quest merge` or a merge queue, refuses the head, and resolve the conflicts in that merge; a branch only behind needs none, since landing tests it on the current base.
-Before each push to a PR's branch, confirm the PR is still open, since a push after it merges restores the deleted branch.
+Merge the base only when the branch conflicts with it or a landing step, such as `quest merge` or a merge queue, refuses the head, and resolve the conflicts in that merge; a branch only behind needs none: landing tests it on the current base.
+Before each push to a PR's branch, confirm it is still open: a push after it merges restores the deleted branch.
 
 Before a PR is marked ready for review, a model other than its latest writer reviews the committed branch locally, as `/quest-review` describes; a later push needs a new review unless `/quest-merge` exempts its changes.
 Anything AI-attributed, such as an online reviewer's findings, is a suggestion, not a maintainer's decision: address findings already posted on the head, reply to feedback you disagree with, and never wait for an online review, since the queue waits for any approval the base requires.
@@ -74,9 +74,9 @@ Once you fix or refute an automated reviewer's finding, say so in its thread and
 
 The PR body's `## Models` section records its size as `Size: M` (its quest's, or for a skill's own PR, as a quest is sized) and one `Implementer: Codex, gpt-6.1-sol, high effort` line per implementing session, moved last whenever it pushes; write the model's ID, and `unknown` for whatever the harness doesn't report.
 
-Keep pull request CI read-only (a read-only `GITHUB_TOKEN`, write credentials only in environments limited to protected branches): quest branches are pushed to the repository, so their workflows get its secrets. Flag a workflow that breaks this.
+Keep pull request CI read-only (a read-only `GITHUB_TOKEN`, write credentials only in environments for protected branches): quest branches live in the repository, so their workflows get its secrets. Flag a workflow that breaks this.
 
-A PR that fixes a bug, or redoes work an earlier PR did badly, lists that PR under `## Caused by` as `- [owner/repo#N](url) - what it got wrong`, found by `git blame` on the lines the fix changes or named in its quest's Plan, and confirmed in that PR's diff to introduce the defect, not merely touch the lines, defer the work, or keep older behavior, else traced further back with blame, or says in one line that no single PR caused it, such as an upstream change or a bug as old as the code.
+A PR fixing a bug, or redoing an earlier PR's bad work, lists it under `## Caused by` as `- [owner/repo#N](url) - what it got wrong (found by check|reviewer|queue|canary|person|customer; incident <id>)`, each part when known. Find it by blaming the fixed lines, or in its quest's Plan, and confirm its diff introduced the defect, not merely touched those lines, deferred work, or kept older behavior, else trace further back; or say in one line why no single PR did, such as an upstream change or a bug as old as the code.
 Review findings fixed in the same PR are not culprits.
 
 ## Quests

@@ -1,13 +1,25 @@
 // `quest review` rewrites the `## Review` section of its branch's open PR after each round, so the head
 // it reviewed counts without an agent copying the round into the body by hand.
-import { reviewSection } from "../core";
-import { recorded } from "../github/models";
-import { type ClaimDependencies, repositoryPath, upstream } from "./claims";
+import { DEFAULT, PATHS, reviewSection } from "../core";
+import { recorded } from "./models-record";
+import { type ClaimDependencies, upstream } from "./claims";
+import { repositoryPath } from "../github/client";
 import { git } from "./git";
-import { requireRemote, string } from "./github";
-import { type PullModels, type Round, SEVERITIES, type Tally, located, parseBase, sameSeat } from "./review";
+import { requireRemote } from "./github";
+import { string } from "../github/client";
+import {
+	type PullModels,
+	type Reviewed,
+	type Risk,
+	type Round,
+	SEVERITIES,
+	type Tally,
+	located,
+	parseBase,
+	sameSeat,
+} from "./review";
 
-const HARNESSES: Record<Round["reviewer"], string> = { claude: "Claude Code", codex: "Codex", opencode: "opencode" };
+const HARNESSES: Record<Round["reviewer"], string> = { claude: "Claude Code", codex: "Codex" };
 
 /**
  * Model text as one inline code span, so a mention, issue reference, or Markdown in it renders as text.
@@ -32,6 +44,8 @@ const reviewerLine = (seat: Pick<Tally, "reviewer" | "model" | "effort" | "shado
 /** A tally's counts, as the record's `Rounds:` line and `quest usage` write them. */
 export interface Counts {
 	rounds: number;
+	/** The first round's findings, null when the tally began before rounds kept them. */
+	first: Tally["findings"] | null;
 	findings: Tally["findings"];
 	fixed: number;
 	refuted: number;
@@ -40,27 +54,40 @@ export interface Counts {
 	open: number;
 }
 
-/** The counts as the record's `Rounds:` line ends, after the rounds, naming only the severities found. */
-export function findingsText(counts: Omit<Counts, "rounds">): string {
-	const total = SEVERITIES.reduce((sum, severity) => sum + counts.findings[severity], 0);
-	const severities = SEVERITIES.filter((severity) => counts.findings[severity] > 0)
-		.map((severity) => `${severity} ${counts.findings[severity]}`)
+/** Findings as their total, then each severity found, such as `3 (high 1, low 2)`. */
+export function severityText(findings: Tally["findings"]): string {
+	const total = SEVERITIES.reduce((sum, severity) => sum + findings[severity], 0);
+	const severities = SEVERITIES.filter((severity) => findings[severity] > 0)
+		.map((severity) => `${severity} ${findings[severity]}`)
 		.join(", ");
-	return `findings ${total}${severities && ` (${severities})`}: fixed ${counts.fixed}, refuted ${counts.refuted}${counts.settled > 0 ? `, settled ${counts.settled}` : ""}, open ${counts.open}`;
+	return `${total}${severities && ` (${severities})`}`;
+}
+
+/** The counts as the record's `Rounds:` line ends, after the rounds. */
+export function findingsText(counts: Omit<Counts, "rounds">): string {
+	return `${counts.first === null ? "" : `first round ${severityText(counts.first)}; `}findings ${severityText(counts.findings)}: fixed ${counts.fixed}, refuted ${counts.refuted}${counts.settled > 0 ? `, settled ${counts.settled}` : ""}, open ${counts.open}`;
 }
 
 /** A tally's counts, where a finding neither fixed nor refuted is open. */
-const counted = (tally: Tally): Counts => ({
+const counted = ({ first, ...tally }: Tally): Counts => ({
 	...tally,
+	first: first ?? null,
 	settled: 0,
 	open: SEVERITIES.reduce((sum, severity) => sum + tally.findings[severity], 0) - tally.fixed - tally.refuted,
 });
 
+/** How the record names what set the classifier's tier, as `recordedRisk` reads it back. */
+function classifiedBy({ by }: Risk["classified"]): string {
+	if (by.kind === "paths") return PATHS;
+	if (by.kind === "default") return DEFAULT;
+	return `${HARNESSES[by.harness]}, ${by.model}, ${by.effort} effort, session ${code(by.session)}`;
+}
+
 /**
- * The `## Review` section's text for a run's `rounds` of the same head, without its heading, with every tally
- * on the branch: each round's reviewer's beside its round, and a reviewer the run left out on its own.
+ * The `## Review` section's text for a run's `rounds` of the same head, without its heading: the head's risk, then
+ * every tally on the branch, each round's reviewer's beside its round, and a reviewer the run left out on its own.
  */
-export function reviewRecord(rounds: Round[], tallies: Tally[]): string {
+export function reviewRecord({ rounds, tallies, risk }: Reviewed): string {
 	const [shared] = rounds;
 	// A reviewer the run left out may still hold open findings, which keep the head from passing too.
 	const clean =
@@ -71,6 +98,8 @@ export function reviewRecord(rounds: Round[], tallies: Tally[]): string {
 		// `quest status` counts a full SHA here as a review of that head, which an open finding has not passed.
 		`- Head: ${clean ? shared!.head : `${shared!.head.slice(0, 12)}, named in full once no reviewer reports a finding`}`,
 		`- Base: ${shared!.base.ref} at ${shared!.base.sha.slice(0, 12)}`,
+		`- Risk: ${risk.tier}, ${code(risk.reason)}`,
+		`- Classified: ${risk.classified.tier} by ${classifiedBy(risk.classified)}`,
 	];
 	for (const round of rounds) {
 		lines.push(
@@ -78,6 +107,7 @@ export function reviewRecord(rounds: Round[], tallies: Tally[]): string {
 			reviewerLine(round),
 			`- Session: ${code(round.session)}, round ${round.round}`,
 			`- Score: ${round.score}/10, ${code(round.rationale)}`,
+			...(round.raised ? [`- Raised the risk to ${round.raised.tier}: ${code(round.raised.reason)}`] : []),
 		);
 		const tally = tallies.find((each) => sameSeat(each, round));
 		if (tally === undefined) throw new Error(`no tally for ${round.reviewer}'s round`);
@@ -99,6 +129,10 @@ export function reviewRecord(rounds: Round[], tallies: Tally[]): string {
 			reviewerLine(tally),
 			// Its session, still named so `quest usage` counts it as reviewing.
 			...(tally.session === undefined ? [] : [`- Session: ${code(tally.session)}`]),
+			// Its last round reviewed this head, so its raise still holds.
+			...(risk.raisedBy && sameSeat(risk.raisedBy, tally)
+				? [`- Raised the risk to ${risk.tier}: ${code(risk.reason)}`]
+				: []),
 			`- Rounds: ${tally.rounds}; ${findingsText(counted(tally))}`,
 		);
 	return lines.join("\n");
@@ -124,6 +158,30 @@ export interface ReviewSummary {
 }
 
 const MARK = "Rewritten by `quest review` after each round.";
+
+/**
+ * The reviewer sessions `body`'s `## Review` record names, read from its `Session:` lines alone, so a record whose
+ * other lines this version cannot parse, as one a newer `quest review` wrote, still names them.
+ */
+export function reviewSessions(body: string): string[] {
+	const section = reviewSection(body);
+	if (!section) return [];
+	const all = body.slice(section.start, section.end);
+	const at = all.indexOf(MARK);
+	if (at < 0) return [];
+	return [...all.slice(at).matchAll(/^- Session: (`+) ?(.*?) ?\1(?:, round \d+)?\r?$/gm)].map((found) => found[2]!);
+}
+
+/**
+ * The risk classifier session `body`'s `## Review` record names, read from its `Classified:` line alone, as
+ * `reviewSessions` reads reviewers.
+ */
+export function classifierSessions(body: string): string[] {
+	const section = reviewSection(body);
+	if (!section) return [];
+	const found = /^- Classified: \S+ by .*, session (`+) ?(.*?) ?\1\r?$/m.exec(body.slice(section.start, section.end));
+	return found ? [found[2]!] : [];
+}
 
 /**
  * Each reviewer's latest round `body`'s `## Review` section records, or none when `quest review` wrote none
@@ -181,27 +239,35 @@ function parseCounts(text: string): Counts | null {
 	const line = /^- Rounds: (.*?)\r?$/m.exec(text);
 	if (!line) return null;
 	const found =
-		/^(\d+); findings (\d+)(?: \(([^)]*)\))?: fixed (\d+), refuted (\d+)(?:, settled (\d+))?, open (\d+)$/.exec(
+		/^(\d+); (?:first round (\d+)(?: \(([^)]*)\))?; )?findings (\d+)(?: \(([^)]*)\))?: fixed (\d+), refuted (\d+)(?:, settled (\d+))?, open (\d+)$/.exec(
 			line[1]!,
 		);
-	if (!found) throw new Error(`the ## Review record's Rounds line is malformed: ${line[1]}`);
-	const findings = { high: 0, medium: 0, low: 0 };
-	for (const part of found[3]?.split(", ") ?? []) {
-		const [severity, count] = part.split(" ");
-		if (!SEVERITIES.includes(severity as keyof typeof findings) || !/^\d+$/.test(count ?? ""))
-			throw new Error(`the ## Review record's Rounds line is malformed: ${line[1]}`);
-		findings[severity as keyof typeof findings] = Number(count);
-	}
+	const malformed = () => new Error(`the ## Review record's Rounds line is malformed: ${line[1]}`);
+	if (!found) throw malformed();
+	// Each severity's count, checked against the total the line states.
+	const severities = (total: string, list: string | undefined) => {
+		const findings = { high: 0, medium: 0, low: 0 };
+		for (const part of list?.split(", ") ?? []) {
+			const [severity, count] = part.split(" ");
+			if (!SEVERITIES.includes(severity as keyof typeof findings) || !/^\d+$/.test(count ?? ""))
+				throw malformed();
+			findings[severity as keyof typeof findings] = Number(count);
+		}
+		if (SEVERITIES.reduce((sum, severity) => sum + findings[severity], 0) !== Number(total))
+			throw new Error(`the ## Review record's Rounds line does not add up: ${line[1]}`);
+		return findings;
+	};
+	const findings = severities(found[4]!, found[5]);
 	const counts = {
 		rounds: Number(found[1]),
+		first: found[2] === undefined ? null : severities(found[2], found[3]),
 		findings,
-		fixed: Number(found[4]),
-		refuted: Number(found[5]),
-		settled: Number(found[6] ?? 0),
-		open: Number(found[7]),
+		fixed: Number(found[6]),
+		refuted: Number(found[7]),
+		settled: Number(found[8] ?? 0),
+		open: Number(found[9]),
 	};
-	const total = SEVERITIES.reduce((sum, severity) => sum + findings[severity], 0);
-	if (total !== Number(found[2]) || counts.fixed + counts.refuted + counts.settled + counts.open !== total)
+	if (counts.fixed + counts.refuted + counts.settled + counts.open !== Number(found[4]))
 		throw new Error(`the ## Review record's Rounds line does not add up: ${line[1]}`);
 	return counts;
 }
@@ -263,17 +329,12 @@ export async function pullModels(
 	return recorded(pull.body);
 }
 
-/** Record a run's `rounds` in the `## Review` section of their branch's open PR. The edit is the token's user's, which `/quest-merge` counts only when that user wrote the PR. */
-export async function recordRounds(
-	root: string,
-	rounds: Round[],
-	tallies: Tally[],
-	deps: ClaimDependencies,
-): Promise<Recorded> {
-	const [shared] = rounds;
+/** Record a run in the `## Review` section of its branch's open PR. The edit is the token's user's, which `/quest-merge` counts only when that user wrote the PR. */
+export async function recordRounds(root: string, reviewed: Reviewed, deps: ClaimDependencies): Promise<Recorded> {
+	const [shared] = reviewed.rounds;
 	const pull = await openPull(root, shared!.base.ref, shared!.branch, deps);
 	if ("skipped" in pull) return pull;
-	const next = withReview(pull.body, reviewRecord(rounds, tallies));
+	const next = withReview(pull.body, reviewRecord(reviewed));
 	if (next !== pull.body) await pull.client.request(pull.path, { method: "PATCH", body: { body: next } });
 	return { url: pull.url };
 }

@@ -57,12 +57,11 @@ Decided 2026-10-30 (user, /quest-plan), replacing "First public release":
     conflicts (71% of moq's 246 removals); the async fixer now absorbs those.
   - Keep the host queue, serial
 
-  The [queue watcher](/quest/m0/queue-watcher/README.md) ranks first and
-  records the full interview: moq first, self-hosted `merge_group` runners,
-  host-gate work frozen, build concurrency 1, re-enqueue at the back,
-  unlimited attempts while progressing, flaky re-enqueues, and fixing picks
-  GitHub refuses. The land work above now means the watcher first, then the
-  fixer and its host.
+  The queue watcher epic recorded the full interview: moq first, self-hosted
+  `merge_group` runners, host-gate work frozen, build concurrency 1,
+  re-enqueue at the back, unlimited attempts while progressing, and flaky
+  re-enqueues. Its git history keeps it; only
+  [its first flaky-test disable](/quest/m0/queue-watcher/README.md) remains.
 
 Decided while planning m0 (2026-09-26), replacing the earlier copied-files and
 ownership-manifest design:
@@ -74,7 +73,10 @@ ownership-manifest design:
   2026-11-01 (user, /quest-plan): `quest init` also rewrites a Quest-written
   stub nobody edited when its text is out of date. Amended 2026-11-03
   (maintainer, /quest-unblock): `quest init` writes no Claude hook entries;
-  Quest's worktree hooks are a user-level opt-in.)
+  Quest's worktree hooks are a user-level opt-in. Amended 2026-11-15 (user,
+  /quest-plan): `quest init` also plants each missing, unskipped
+  [audit-pack](/quest/m0/audit-pack/README.md) stub once and never edits it
+  afterwards.)
 - The repository's own tool manager pins the version: mise (release binaries)
   or a nix flake input (any rev, built from source). Quest ships no launcher
   and no pin file; an install outside either is simply unpinned.

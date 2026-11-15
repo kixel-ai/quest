@@ -82,8 +82,7 @@ bun link
 
 With Nix, `nix run github:moq-dev/quest -- --help` builds and runs it instead.
 Native Windows needs no WSL for Quest: see [installation and removal](docs/windows.md).
-Windows ZIP artifacts are added by the next release containing this change;
-older releases remain macOS/Linux-only.
+Releases from v0.3.0 on ship Windows ZIPs; v0.1.0 is macOS/Linux-only.
 
 The [CSV export example](examples/export/quest/README.md) is a small, working
 quest tree. From this checkout:
@@ -133,14 +132,15 @@ $ quest --root examples/export unblocked
 1	quest/m0/export.md
 
 $ quest --root examples/export unblocked --json --limit 1
-[{"path":"quest/m0/export.md","dependents":1,"hosts":[],"models":[{"harness":"claude","model":"claude-opus-5-5","effort":"low"},{"harness":"codex","model":"gpt-6.1-sol","effort":"medium"}]}]
+[{"path":"quest/m0/export.md","dependents":1,"hosts":[],"arm":"B","models":[{"harness":"claude","model":"claude-sonnet-5-5","effort":"high"},{"harness":"claude","model":"claude-opus-5-5","effort":"medium"},{"harness":"codex","model":"gpt-6.1-sol","effort":"medium"}]}]
 ```
 
 Each plain output line contains the count, a tab, and the path. On a terminal,
 a heading explains the count. `--json` prints an ordered array, including `[]`
 when no quests are ready, and gives each quest the `hosts` its `## Hosts`
-section names (empty when it runs anywhere) and the ranked `models` that write
-it, as [Route work by size](#route-work-by-size) describes; `--limit <count>`
+section names (empty when it runs anywhere), its writer A/B `arm`, and the
+ranked `models` that write it, as [Route work by size](#route-work-by-size)
+describes; `--limit <count>`
 requires a positive integer.
 Invalid trees fail with diagnostics and no ranking.
 `quest-run` uses the ranking unless you explicitly select work in another order.
@@ -285,7 +285,9 @@ binary carries, and reports a missing, outdated, or retired one. A job that
 checks a PR with a binary built from the base passes `--no-stubs`, since that
 binary's skills would reject a PR that changes a stub; the PR's own binary
 checks them in its own `quest check`. This repository's merge queue and
-`quest merge` do so.
+`quest merge` do so. It also reads the repository's [`RISK.md`](#risk-tiers),
+if any, and reports each `## High` item it cannot read, which would otherwise
+fail the next `quest review` on a branch from it.
 
 A link into a submodule that is not checked out, as in a fresh worktree or
 `actions/checkout` by default, resolves at the commit its gitlink pins when a
@@ -415,8 +417,9 @@ this command's scope.
 
 CI results are read for the current head. The first required check to fail
 prints `checks:failed` right away. `checks:passed` prints once nothing on the
-head is still going (no pending check and no unfinished GitHub Actions run, which
-may still create jobs), every check and workflow the base branch names is
+head is still going (no pending check, no finished job whose GitHub Actions run
+is still going, and, once a cancelled check makes it read the head's runs, no
+unfinished run, since each may still create jobs), every check and workflow the base branch names is
 present (except `quest land`'s, which no head carries), each required check
 from the app its requirement names, if any, and every required
 check passed; it names the last required check that passed and is dated when
@@ -482,6 +485,7 @@ mergeable conflicting
 merge-state dirty
 review-decision -
 review-record diff-identical 5f1c2e9a8b7d6c5e4f3a2b1c0d9e8f7a6b5c4d3e
+risk medium diff-identical low It changes when quest gate admits a command.
 auto-merge -
 merge-queue -
 landing-stopped -
@@ -500,15 +504,17 @@ comes last, and a missing value prints as `-`:
 | `url`, `state`, `draft`, `head` | The PR URL; `open`, `closed`, or `merged`; `true` or `false`; the head SHA. |
 | `mergeable`, `merge-state`, `review-decision` | GitHub's values, lowercased. |
 | `review-record` | Whether the PR body's [`## Review` record](#review-locally) still covers the head, and the head it names last: `current` when it is the head, `diff-identical` when `git diff <base>...<head>` prints the same as for it, `stale` otherwise, or `unknown` when GitHub cannot compare them, such as a diff too large; `-` when the record names no full SHA. Whose record counts is the reader's call. |
+| `risk` | The record's [risk tier](#risk-tiers), `low`, `medium`, or `high`; the same state as `review-record` for the head it names; the tier its classifier set before any reviewer raised it; and the reason. `-` when the record names none. |
 | `auto-merge` | Method, who enabled it, when, and the head it was enabled on. |
 | `merge-queue` | Queue state, position, and when it was enqueued. |
-| `landing-stopped` | The reason the latest merge-queue entry, auto-merge, or [`quest land`](#land-a-batch-with-quest-land) queue entry ended (such as `merge_conflict`, `failed_checks`, `manual`, `manually_disabled`, or `merged`), who ended it, and when; `-` once the PR has entered the merge queue or auto-merge again since. |
+| `landing-stopped` | The reason the latest merge-queue entry, auto-merge, or [`quest land`](#the-watchers-own-queue) queue entry ended (such as `merge_conflict`, `failed_checks`, `manual`, `manually_disabled`, or `merged`), who ended it, and when; `-` once the PR has entered the merge queue or auto-merge again since. |
 | `checks` | `failure` if any check fails, else `pending` if any is pending or a requirement is unreported, else `success`, and `passed=`, `failing=`, `pending=` counts, all from the checks that count; `-` when the head has no checks and the base requires none. |
 | `check` | `failing` or `pending`, `required` or `optional`, the result, details URL, and name. A required check or required workflow nothing reports yet prints as `pending required expected -` with its name, followed by `(from app <id>)` when the requirement names an app, or the workflow's repository and path, as `owner/name:path`. |
 | `review` | `current` or `stale` against the head, state, reviewer, time, and URL of each reviewer's latest review. |
 | `checkpoint` | Each bot reviewer that approves or requests changes, such as one whose approval the base requires, its round, and its review's URL, when that review is of the head and its latest verdict there, ignoring plain comments, is neither an approval nor a dismissal, at the end of its third, sixth, ... round: [`/quest-review`'s design checkpoint](#review-locally) for an online reviewer. A round is one commit it reviewed; a dismissed review counts as one that approves or requests changes. Only printed when due. |
 | `reacted:<content>` | Actor, time, and the PR or review reacted to, as `quest wait` names reactions. |
 | `thread` | Node ID, `current` or `outdated`, last commenter, latest comment URL, and `path:line` of each unresolved thread. |
+| `signal` | `finding` or `decision`, its URL, who posted it, and its text, for each [signal](#signals-that-hold-a-head) holding the head. |
 | `hold` | Label, acquisition token, acquisition time, verified GitHub event API URL, and age; `hold -` when no label holds it. Unknown acquisition facts print as `-` and `unknown age`. |
 | `starter-hold` | A draft its starter owns: last activity time, PR URL, and `last active` age. Last activity is not when ownership began. |
 
@@ -532,13 +538,13 @@ requirement names one, its app, as GitHub and `quest land` do, and leaves out
 same facts as one object with the fields `url`, `state`, `draft`, `head`,
 `mergeable`, `mergeState`, `reviewDecision`, `autoMerge`, `mergeQueue`,
 `landingStopped`, `checks` (`state`, `passed`, `failing`, `pending`), `reviews`, `checkpoints` (`reviewer`, `round`, `url`), `reactions`,
-`threads`, `holds` (`label`, `token`, `takenAt`, `age`, `eventUrl`), and `starterHold` (`lastActive`, `age`, `url`, or null). Ownership uses the state commands' shared reader without changing labels, and event links match the opaque acquisition token against GitHub's event listing. Long lists are paged; reactions are the newest 100 per PR or review,
+`threads`, `signals` (`kind`, `url`, `author`, `text`), `holds` (`label`, `token`, `takenAt`, `age`, `eventUrl`), and `starterHold` (`lastActive`, `age`, `url`, or null). Ownership uses the state commands' shared reader without changing labels, and event links match the opaque acquisition token against GitHub's event listing. Long lists are paged; reactions are the newest 100 per PR or review,
 as in `quest wait`. Any PR state exits 0, invalid arguments exit 2, and other
 failures exit 1.
 
 GitHub keeps auto-merge enabled across a writer's push without saying which head
 it was enabled on, so the `auto-merge` line reads it from the auto-merge commit
-body's `Quest-Land-Head` pin when [`quest land`](#land-a-batch-with-quest-land)
+body's `Quest-Land-Head` pin when [`quest land`](#the-watchers-own-queue)
 queued the PR. Otherwise it is the last push or merge to the head branch before
 auto-merge was enabled, from the head repository's activity; it prints `-`
 until GitHub lists the current head's push, which takes seconds to minutes, and
@@ -579,12 +585,19 @@ It also refuses a head that fails `quest check --no-stubs --base <base> --branch
 <head branch>`, which it runs on git objects it fetches, so nothing from the
 head runs, and ignores findings the base already has; run a `quest` the PR
 cannot modify, since the head's own build could skip the check. A base without
-quests skips it. It enables auto-merge bound to that SHA, or merges at once when nothing is
+quests skips it. While the base requires an approval the PR lacks, such as an
+online reviewer's that a ruleset requires (GitHub's review decision is
+`review_required` or `changes_requested`), it only arms auto-merge, which waits
+for the approval, and refuses where nothing would wait, since an admin's token
+would merge or enqueue past the requirement.
+It also refuses while a [signal](#signals-that-hold-a-head) holds the head,
+naming each.
+It enables auto-merge bound to that SHA, or merges at once when nothing is
 left to wait for. `--squash` or `--rebase` picks the method, and it refuses one
 the repository disallows; otherwise it uses the only method the repository
 allows, or else a merge commit, and refuses when merge commits are off and more
 than one method remains. On a base that requires the `quest land` check, it
-queues the PR for [`quest land`](#land-a-batch-with-quest-land) instead, with
+queues the PR for [`quest land`](#the-watchers-own-queue) instead, with
 auto-merge in the named method, or else squash, or else any method the
 repository and the base's rulesets both allow. That request only signals the
 queue; `quest land` applies its own method.
@@ -625,264 +638,6 @@ only what needs a maintainer: a behavior or design decision gets a diagnosis on 
 PR, and a fix that edits protected paths or that GitHub refuses to push gets a ready
 commit for `quest land apply <pr>`.
 
-## Land a batch with quest land
-
-`quest land serve` runs on a maintainer's host, with one process per base branch of a repository.
-It replaces the Land workflow; landing needs no GitHub Actions.
-The base requires the unreported `quest land` check, keeping auto-merge waiting.
-Queue an approved head with `quest merge <pr> --land <sha>`.
-
-```sh
-QUEST_LAND_KEY=/run/credentials/quest-land/key quest land serve --app-id 1039466 \
-  --sandbox /usr/local/bin/check-sandbox --fixer /usr/local/bin/fix-sandbox
-```
-
-Each PR lands as a squash commit by default. `--method merge` lands each one
-as a merge commit instead, for a long-lived branch such as a release branch
-that must keep the ancestry of what merges into it. Its first parent is the
-base the batch was tested on, its second parent is the queued head (or the
-daemon's merge of the base into it), and its tree is the tree the sandbox
-checked. The method is fixed at startup and applies to the chain the sandbox
-checks, the commit the fixer starts from, and GitHub's merge API. The daemon
-refuses merge commits on a base whose ruleset or classic protection requires
-linear history, and both the repository's merge settings and a ruleset's
-allowed merge methods must include the configured one. The auto-merge `quest merge --land` enables only signals the
-queue, so its method never decides how the daemon lands.
-
-The sandbox executable receives `<checkout> <base-sha>` as its two arguments,
-with cwd set to the checkout. The SHA is `plan.base.sha`, the commit the tested
-chain was built on, and is also exported as `QUEST_LAND_BASE`. Its environment
-otherwise contains only `PATH` and `LANG`. The wrapper must isolate PR code from
-the host's credentials and filesystem. Both the sandbox and fixer
-wrappers **must run code as a different user from the App key owner**, for example
-inside nspawn containers. Environment filtering cannot protect the key or later
-merge tokens from a process running under the daemon's UID through `/proc`.
-The sandbox gets a standalone shallow clone of the tested tip and every commit
-through that base (`batch links + 1` commits), with no remote or alternates.
-`HEAD` is the tested tip; `git diff "$2"` and `git merge-base "$2" HEAD` work,
-and nothing links back to the daemon's repository. moq's host wrapper can run
-`nix develop --command just ci "$2"`; quest's wrapper may ignore the extra argument. The fixer runs in an independent repository with batch history, no remotes,
-no alternates, and no link to the daemon's private bare repository. Fetches and
-chain construction use only that private repository in the state directory.
-The sandbox runs the repository's checks
-(`just check` and `just test` here). No credential or inherited home configuration
-is passed to it. The daemon refuses to start without `--sandbox`. The optional
-fixer runs as tracked background work, receiving the full log path followed by
-PR numbers, with the same restricted environment (`PATH` and `LANG` only).
-Its cwd is the standalone repository, checked out at `base` so the agent loads no
-PR's instructions or tooling, with `batch` and `pr-<n>` branches beside it. The
-prompt names each PR's branch and pinned head. For a base that fails its check
-alone it receives only the log path, and the repository has only `base`.
-The wrapper starts an ephemeral container and runs `quest land fix <log> [prs...]`
-there, exposing that repository read/write and the log read-only at the given paths.
-It supplies a fresh HOME, `OPENAI_BASE_URL` (the OpenAI-compatible Responses
-endpoint, including `/v1`) and `OPENAI_API_KEY` (the gate's proxy client key).
-The daemon never supplies these or any Git/GitHub credential, and the wrapper
-must keep every other credential out of the container. Its network must reach the
-model proxy and, so the fixer can run the repository's checks on its fix, the
-package registries and `github.com`/`codeload.github.com` that the repository's
-dependencies come from.
-The prompt allows only those dependency fetches: no GitHub API, no push, no other
-host. Codex login stays on CLIProxyAPI.
-The wrapper waits for the payload, returns its exit status, and tears down its
-container on exit or SIGTERM. A fixer gets 60 minutes from its start. A wrapper
-that queues for a shared launcher prints `quest land fixer: admitted <unix-seconds>`
-as one line to its output when the launcher admits the job, before any agent
-output, so the wait for a slot does not use up the run. Waiting counts against
-a total of 120 minutes from the spawn, which is also the deadline of a wrapper
-that prints no such line. On timeout the daemon sends SIGTERM, allows at
-least 10 seconds for container cleanup, then sends SIGKILL on a later collection. The payload defaults
-to `codex exec`; `--agent <executable>` and repeatable `--agent-arg <argument>`
-replace it for another CLI. It writes `<cwd>/quest-land-result.json`: an array of
-`{number, action:"requeue", reason}`, `{number, action:"fixed", head, reason}`, or
-`{number, action:"handback", diagnosis, recommendation}`, with no extra fields
-beyond an optional `comment`, an optional `blame: true` on each PR that caused the failure (a blamed PR is
-fixed or handed back), and on a handback an optional `log: [first, last]` citing the
-failure log's lines, which its comment quotes. For the base alone, it writes one
-object instead: `{action:"fixed", head, reason}` with the fix committed on `base`,
-or `{action:"handback", diagnosis, recommendation}`.
-The payload adds `agent` and `model` metadata to each result (`--model <id>`
-selects the default Codex model; unknown models fall back to `Codex`).
-Reasons and diagnoses are single lines. Fixed heads must be committed on `pr-<n>`.
-A `comment` is Markdown of at most 4000 characters that the fixer wants on its PR.
-The fixer holds no GitHub credential, since PR code it builds can read the
-container's environment, so the daemon posts the comment as the bot when it
-collects the job, before any outcome comment of its own. It quotes the text under the
-recorded agent, strips HTML comments so the text can never carry the daemon's
-hidden markers, defuses @-mentions, and redacts GitHub tokens, as it does for
-every fixer text and log it posts.
-
-Jobs and attempts persist across daemon restarts. A running fixer outlives a
-restart only where the host leaves its process group alive (under systemd,
-`KillMode=process` on the daemon's unit); otherwise its handback names the signal
-and the restart. After the wrapper exits, the
-daemon validates every result, ancestry, and protected path before lease-pushing
-as the bot. The protected set as a whole must match the pinned head or its merge with the
-current base, including content and mode. It covers `flake.nix`, `flake.lock`,
-`shell.nix`, `default.nix`, `nix/`, `.envrc`, `.github/`, `.gitmodules`, and gitlinks
-anywhere. Collection copies at most 100 MiB of Git metadata the fixer added into a
-clean object repository. It skips the packs fetched at launch, whose objects the clean
-repository borrows from the daemon's own. It ignores fixer configuration and never
-follows the fixer's Git alternates. Pack indexes are rebuilt with
-`git index-pack` rather than trusted; the fetch into the daemon's repository
-checks every object and link, since the import enables `fetch.fsckObjects=true`. It records `mechanical fix by <recorded agent/model>: <reason>` and the new head in
-`## Review`, and enables head-pinned auto-merge again on the fixed head, which keeps
-the place of the pick it descends from. Healthy PRs go back to batches unchanged,
-without a comment. A PR the daemon moved to its own recorded base merge before
-parking it is collected at that merge: a requeue pins it, and a fix, built on the
-pin, replaces it with a lease, since building on it would revert its newer base.
-Any other moved head hands back. Forks refusing maintainer edits, refused pushes, invalid results,
-crashes, or the fixer deadline hand back with a marked comment naming the exit
-status or signal, with the tail of the job's retained log. A GitHub error while
-collecting one PR hands back that PR alone, and the job's other PRs keep their own
-results. A PR whose collection fails three passes in a row, as when GitHub refuses its
-handback, is set aside with a logged warning: it leaves the job without a handback
-comment, so it rejoins batches as GitHub still queues it, and the PRs behind it go on. A validated fix whose push
-GitHub refuses, such as a merged base's `.github/workflows` changes that the App lacks
-the `workflows` permission to push, is handed back with its resolution. So is a fix
-that edits protected paths beyond what the base merge carries, such as a conflict in
-`flake.nix` the fixer resolved: those never land automatically. The resolution is the
-PR head, the base, the resolved tree, and the fixer's edits as a patch against the
-merge's conflicted result, or against the head itself for a fix that merges no base,
-sized to GitHub's 65,536-character comment limit. A maintainer
-runs `quest land apply <pr>`, which refuses a moved head, rebuilds and checks that
-tree, and prints an unpushed commit and its push command to run after reviewing it.
-A resolution too large for the comment hands back plainly. A handback disables
-auto-merge and carries the reason marker `quest status`
-reads. Each failure a fixer job blames a PR for is a round of its maintainer pick; a PR
-that only shared a broken batch has none. The fixer keeps going while each round
-changes something, and a handback names the stop rule that ended it: a round with no
-new commit for a failure that isn't flaky, such as a conflict requeued unchanged; the
-failure a fix addressed recurring right after it; or three unchanged re-enqueues in
-a row, where the fixer requeued a PR unchanged, as flaky unless it named another
-cause, and the base passed alone. The fixer names
-each failure's test or step, else the round counts the gate's check as one; a
-conflict names the base it conflicts with, so one after the base moved is new. A new
-maintainer pick starts a fresh history. Host provisioning and isolation
-belong to the host; these commands are executable paths, not shell expressions.
-Wrappers must expose only the supplied tree and log, never the state directory
-or its private bare repository.
-
-Batches alternate between the oldest and the newest queued PR as the base. Add
-up to floor(log2 n) further PRs that merge cleanly in that order, resolving
-quest links with `quest resolve`. A failed batch halves the next batch's size,
-down to one PR, and each batch that lands grows it back by one; the order and
-size persist in the state directory. Conflicting
-additions stay queued. A PR whose required checks are still running, or that
-still needs an approving review the base requires, stays queued and sits out
-batches until they pass and it is approved; checks count as in `quest status`. If it still waits two hours after
-its pick (twice the default `--timeout`), the daemon comments once on that pick,
-naming what it waits for, since a check that never reports or an approval nobody
-gives would hold it silently. The sandbox checks the tip once, without
-bisection: success lands one commit per PR, as `--method` says. A failure, or a base that
-conflicts with the batch's first PR, parks those PRs for the fixer: they keep their
-auto-merge and place, get no comment, and sit out batches while its
-job runs, so the rest of the queue keeps landing. The fixer reads the log and blames
-the PRs that caused it; the others go back to batches unchanged. When it blames
-none, the daemon checks the base alone. A green base leaves every PR to the fixer's
-verdict, as if blamed. A red base releases them all and halts the queue: nothing
-lands until the base moves and its check passes. The fixer then runs on the base
-alone. The daemon validates its fix as it would a PR's, protected paths
-included, pushes it to a `quest-land/fix-<sha>` branch, and opens it as a pull
-request for a maintainer to merge as an administrator. Only when the fixer cannot
-fix the base, or there is no fixer, does an issue say the queue is halted. If the
-base moves and still fails, the daemon closes that fix and runs the fixer on the
-new base. Once a check of a moved base passes, the queue resumes, and the daemon
-closes the issue and any fix it no longer needs. A job collected while the queue is halted releases its PRs without checking its own, possibly older, base. The daemon collects a finished fixer job even while a check runs.
-Without a fixer, a failure ejects the batch instead: ejection disables auto-merge
-and comments with the reason and the failing log, bounded by
-size. When GitHub refuses to merge one PR, only that PR stops: a conflict is
-parked for the fixer, a moved head or refusal is ejected, and the rest of the batch
-stays queued. `quest status` reads the hidden reason marker. Full logs stay in the state directory: `--state`, or by default systemd's
-`$STATE_DIRECTORY` or the XDG state home, in `<owner>-<repo>@<base>`, never inside the checkout. Each daemon pass deletes a log 7 days after its last write once no job, waiting removal, or replayed failure reads it. A check
-that runs past `--timeout` minutes (60 by default) is killed and fails its batch.
-
-Every chain commit the daemon builds, and every base it merges into a PR head, drops
-each `Required`, `Related`, or `Closes` entry linking to a quest the base
-deleted since the PR branched, as `quest rm` would have. The PR wrote that link
-while the quest was open, so the base finishing it is no fault of the PR's: a
-sibling PR that links a quest another sibling finishes lands in the same batch.
-A quest the base moved is a rename, not a deletion, and a link in prose stays.
-
-As a batch is filled, each PR it reaches is landed alone onto the current
-base, and `quest check` runs on the result; PRs the batch does not reach wait
-for a later round, so a long queue costs only each batch's candidates. A PR with findings the base lacks, such as
-a mistyped link, is parked alone for the fixer, blamed
-for those findings, so it never fails a batch; the fixer starts from that commit.
-Without a fixer it is ejected as `failed_checks` with those findings. This check runs
-in the daemon, never the sandbox: it parses quest files read from git objects
-and executes nothing from the tree. A base without a `quest/` directory skips
-it. A newly queued PR the batch reaches is also landed onto the four PRs
-landing soonest ahead of it; if any conflict, the daemon comments once with their numbers and files, so its author
-can resolve the overlap before its turn. It is screened again only once
-requeued.
-
-Queue reads happen about once a minute and between batches. Pins, required
-checks, reviews, conversations, rulesets, and classic protection remain enforced;
-unsupported protection settings prevent landing. Heads moved since approval are
-ejected as `head_moved`. Before landing, the daemon revalidates queue membership
-and the base. Before landing each PR, the daemon merges the current base into its
-head with `quest resolve` in the private repository if the head does not already
-contain that base. The resulting tree must equal the tested chain link's tree.
-It pushes that merge commit to the PR branch with a lease on the pinned head,
-then calls GitHub's merge API with the configured method, pinned to the
-prepared head. Up-to-date heads need no merge commit. After each API merge, it
-compares the commit's first parent and tree, and a merge commit's second parent
-with the prepared head, before proceeding to the next PR.
-
-If the PR branch push is refused for permissions, the daemon instead pushes the
-tested commit to the base as a fast-forward, leased on the expected parent. It
-comments on the PR with a link to the landed commit and closes it, so a squashed
-fork PR shows as closed rather than merged. A merge commit brings the PR's head
-into the base, so the daemon first waits about 15 seconds for GitHub to mark
-that PR merged, and closes it only if GitHub does not. A PR branch lease
-failure ejects `head_moved`. A locally prepared or API tree mismatch, or a merge
-commit with another second parent, logs CRITICAL. A PR whose prepared tree
-differs ejects alone as `tree_mismatch`; an already-landed one stays merged. Either way, the rest of the batch stays queued
-and is rebuilt and checked on the new base.
-
-After an API refusal, the daemon re-reads mergeability and briefly retries
-pending mergeability or a base refresh. It also retries while GitHub still
-reports the pin as the head of a PR it just prepared, since GitHub can refuse the
-merge for that stale head; only another writer's head ejects `head_moved`. It
-likewise retries while GitHub calls the merge it just pushed conflicting, since
-that merge holds the tested base; if GitHub still does after about 15 seconds,
-the next round rebuilds the queue on the base as it then is.
-A confirmed conflict parks only that PR for the fixer and a moved head ejects
-only that PR; the rest stays queued. A persistent policy refusal ejects as `merge_refused` without the
-fixer. Already-merged PRs are skipped. An unexpected first parent of an API merge means the
-base moved: the remainder is rebuilt without ejection.
-
-Restart accepts a changed head only if the private state records that exact
-daemon-authored merge for the same original pin and queue time, with the pin as
-first parent, the tested base as second parent, and the tested tree. Author text
-alone is not trusted. Every other changed head needs a maintainer to requeue it.
-Checks remain bound to the original pin. Merged PRs drop out of the queue, and
-an interrupted fallback close resumes from its private intent record without
-repeating a landed base push. `flock` prevents two
-daemons using the repository (including separate worktrees) or one state directory; `quest` must be on
-PATH for the merge driver.
-
-The App key stays on the host, in `$CREDENTIALS_DIRECTORY/github-app-key` or a
-file named by `QUEST_LAND_KEY`, never in argv, where `/proc` would show it. Remote fetches and `ls-remote` use a separate repository-scoped installation
-token with exactly `contents: read`, so private repositories are supported. The
-read token is refreshed before expiry and retried once on authentication refusal.
-Git receives it only through temporary `GIT_CONFIG_*` environment settings, never
-in argv or repository configuration. Local `file://` fetches into sandbox and
-fixer repositories remain credential-free. Write installation tokens are scoped
-to this repository, with contents and pull requests write.
-Tokens are minted for each push or API merge and passed only to trusted git
-and GitHub clients, never the sandbox or fixer. A PR-branch push also requests
-workflow write when the head-to-merge range carries workflow changes from the base. An API
-merge requests workflow write when that PR's landed commit changes `.github/workflows`, or
-when any commit the PR brings does (including a merge of a base that changed one),
-since GitHub refuses an App's merge of a PR whose commits touch workflows. Queue API tokens, which disable auto-merge on ejection and
-so need contents write, stay in the daemon, refresh before expiry, and are
-replaced on a 401. Batch errors are logged and retried with bounded exponential
-backoff. Grant the App the base ruleset's bypass and the read permissions needed
-to inspect branch protection. The bypass actor's API merge of a pinned PR with
-the unreported required `quest land` check must be verified on the live host.
-
 ## Watch the merge queue with quest land watch
 
 `quest land watch` runs on a maintainer's host, one process per base branch of a repository,
@@ -894,7 +649,10 @@ which offers no merge queue. Each pass reads the base's rules
 GitHub's queue on a repository switches its watcher with no host change; a
 pass that cannot read them does nothing. It reads them with a `contents: read`
 token, so an installation granted only one mode's permissions runs it. On GitHub's queue it tells each PR the queue
-drops unmerged why. With `--fixer`, it also runs the land fixer on each PR the
+drops unmerged why, and takes a queued or armed PR whose head draws a
+[signal](#signals-that-hold-a-head) out of the queue, disarming its auto-merge
+and saying why, even one another session holds, since GitHub's queue ignores
+hold labels. With `--fixer`, it also runs the land fixer on each PR the
 queue dropped for a failure or a conflict, and puts it back at the back of the
 queue. It polls; the host needs no public endpoint. Its base is resolved once at
 startup, from `--base` or the default branch, so a renamed default branch needs a
@@ -932,7 +690,8 @@ ready ([community#209348](https://github.com/orgs/community/discussions/209348))
 as for a pick `quest merge --land` armed while required checks ran. Each pass,
 the watcher enqueues every such PR: open, armed, ready (its merge state is
 `CLEAN`, `HAS_HOOKS`, or `UNSTABLE`: its required checks passed and it does not
-conflict), not in the queue, and not added to it since it was armed. It
+conflict), not lacking an approval its base requires, which auto-merge waits
+for, not in the queue, and not added to it since it was armed. It
 enqueues only the head auto-merge was armed on, with `expectedHeadOid` bound to
 it: GitHub keeps auto-merge across a push, but a push by anyone but the land
 fixer ends the pick, and a head it cannot tell yet waits for the next pass. An
@@ -945,10 +704,10 @@ With `--fixer`, the watcher takes each recorded removal, oldest first, while
 its PR still waits as the queue dropped it:
 
 - A conflict is first merged with the current base by the quest merge driver,
-  in the daemon's private repository, as the host gate merges a base. A clean
+  in the daemon's private repository. A clean
   merge needs no fixer: the watcher lease-pushes it to the PR branch, records
   it in the PR body's Review, and re-enqueues it.
-- Otherwise the fixer runs in the background, as for the host gate: the same
+- Otherwise the [fixer](#the-land-fixer) runs in the background: a
   credential-free wrapper, given the failure log and the PR's number, with the
   dropped head on `pr-<n>`, starting from the base the `merge_group` build
   was built on, or from the current base for a conflict, with the merge's
@@ -960,10 +719,12 @@ its PR still waits as the queue dropped it:
   which `quest land fix --effort` reads by default. Each `--fixer-tag`
   pattern, such as `deploy-*`, fetches the matching tags from GitHub into
   the checkout, pruning those GitHub deleted, so a check that reads them
-  runs there as in the queue's build.
+  runs there as in the queue's build. Each `--fixer-branch` pattern, such
+  as `release`, does the same for GitHub's branches, as `origin/<branch>`,
+  for a check that diffs against one. The checkout has no remote, so it
+  always gets the base it starts from as `origin/<base>`.
 
-Each finished round is recorded in its pick's history, as the host gate
-records its rounds: `fixed` for a fixer commit, `merged` for a clean merge,
+Each finished round is recorded in its pick's history: `fixed` for a fixer commit, `merged` for a clean merge,
 the cause the fixer named for a failed build it requeued unchanged (`flaky`,
 `base` when the base fails it too, or `environment` when the runner does), and
 `unchanged` for a conflict it requeued unchanged or a requeue that names no
@@ -972,9 +733,8 @@ without quoting or repeated whitespace, falling back to the failing job and
 step, or, for a conflict, the base it conflicted with. The pick keeps going
 while each round makes progress: an `unchanged` round, the failure a fix
 addressed recurring right after it, or three unchanged re-enqueues in a row,
-whatever their causes, hand it back. A fix is validated, lease-pushed, and recorded in Review as for the host
-gate, and a push GitHub refuses, or a fix that edits protected paths, is handed
-back with its resolution for `quest land apply`. The watcher then puts the fixed, merged, or requeued head back
+whatever their causes, hand it back. A fix is validated, lease-pushed, and recorded in Review, and a push GitHub refuses, or a fix that edits protected paths, is handed
+back with its resolution for `quest land apply`, as [the land fixer](#the-land-fixer) describes. The watcher then puts the fixed, merged, or requeued head back
 in the queue with `expectedHeadOid` bound to it: it enqueues a head whose
 required checks have passed, and arms auto-merge on one whose checks still
 run, so GitHub enqueues it once they pass. Either joins the back of the queue.
@@ -1014,7 +774,7 @@ first flaked. One verdict alone only re-enqueues the PR, since one judgment coul
 hide a real bug. When a listed test flakes again, the fixer also commits its
 disabling on a `disable` branch from the base: only the skip in the test
 framework's own form, naming that follow-up quest. The watcher validates that
-commit as it does a base fix, refusing any edit under `quest/`, then commits
+commit as it does a fix, against the base's protected paths, refusing any edit under `quest/`, then commits
 the follow-up quest on top from a fixed template, `quest/m0/flaky/<name>.md`
 in the repository's m0 `flaky` epic, to fix or delete the test, creating the
 epic's README when the base has none. It pushes the result to `quest-land/flaky-<sha>`, opens it as a pull
@@ -1022,14 +782,119 @@ request with its Review recorded, and enqueues it like any other, with no
 maintainer's pick. A refused disable waits for the test's next flake, and a
 pull request GitHub refuses to enqueue says so and waits for a maintainer.
 
-It shares `quest land serve`'s App key, state directory, private repository,
-and locks, so the two never run for the same repository at once. Without a
-fixer its token asks for `contents: read`, `pull_requests: write`,
-`actions: read`, which the App needs for the logs, and `merge_queues: write`,
-which `enqueuePullRequest` needs. With one it also asks for `contents: write`,
-for arming auto-merge and pushing fixes, and `checks: read` and `statuses: read`,
+Without a fixer its token asks for `contents: write`, which disarming a signaled
+pull request's auto-merge needs, `pull_requests: write`, `actions: read`, which
+the App needs for the logs, and `merge_queues: write`, which
+`enqueuePullRequest` needs. With one, which also arms auto-merge and pushes
+fixes, it also asks for `checks: read` and `statuses: read`,
 for the PR's own checks the fixer reads; a push that carries a workflow change
 asks for `workflows: write`.
+
+### The land fixer
+
+The fixer wrapper **must run code as a different user from the App key
+owner**, for example inside an nspawn container. Environment filtering cannot
+protect the key or later merge tokens from a process running under the
+daemon's UID through `/proc`. Host provisioning and isolation belong to the
+host; `--fixer` is an executable path, not a shell expression.
+
+The wrapper runs as tracked background work, receiving the full log path
+followed by the PR's number, with only `PATH` and `LANG` in its environment.
+Its cwd is a standalone repository with no remotes, no alternates, and no link
+to the daemon's private bare repository, checked out at `base` so the agent
+loads no PR's instructions or tooling, with `batch` and `pr-<n>` branches at
+the dropped head beside it. The prompt names the PR's branch and pinned head.
+Wrappers must expose only the supplied tree and log, never the state directory
+or its private bare repository.
+The wrapper starts an ephemeral container and runs `quest land fix <log> <prs...>`
+there, exposing that repository read/write and the log read-only at the given paths.
+It supplies a fresh HOME, `OPENAI_BASE_URL` (the OpenAI-compatible Responses
+endpoint, including `/v1`) and `OPENAI_API_KEY` (the gate's proxy client key).
+The daemon never supplies these or any Git/GitHub credential, and the wrapper
+must keep every other credential out of the container. Its network must reach the
+model proxy and, so the fixer can run the repository's checks on its fix, the
+package registries and `github.com`/`codeload.github.com` that the repository's
+dependencies come from.
+The prompt allows only those dependency fetches: no GitHub API, no push, no other
+host. Codex login stays on CLIProxyAPI.
+The wrapper waits for the payload, returns its exit status, and tears down its
+container on exit or SIGTERM. A fixer gets 60 minutes from its start. A wrapper
+that queues for a shared launcher prints `quest land fixer: admitted <unix-seconds>`
+as one line to its output when the launcher admits the job, before any agent
+output, so the wait for a slot does not use up the run. Waiting counts against
+a total of 120 minutes from the spawn, which is also the deadline of a wrapper
+that prints no such line. On timeout the daemon sends SIGTERM, allows at
+least 10 seconds for container cleanup, then sends SIGKILL on a later collection. The payload defaults
+to `codex exec`; `--agent <executable>` and repeatable `--agent-arg <argument>`
+replace it for another CLI. It writes `<cwd>/quest-land-result.json`: an array of
+`{number, action:"requeue", reason}`, `{number, action:"fixed", head, reason}`, or
+`{number, action:"handback", diagnosis, recommendation}`, with no extra fields
+beyond an optional `comment`, an optional `blame: true` on a PR that caused the failure (a blamed PR is
+fixed or handed back), and on a handback an optional `log: [first, last]` citing the
+failure log's lines, which its comment quotes.
+The payload adds `agent` and `model` metadata to each result (`--model <id>`
+selects the default Codex model; unknown models fall back to `Codex`).
+Reasons and diagnoses are single lines. Fixed heads must be committed on `pr-<n>`.
+A `comment` is Markdown of at most 4000 characters that the fixer wants on its PR.
+The fixer holds no GitHub credential, since PR code it builds can read the
+container's environment, so the daemon posts the comment as the bot when it
+collects the job, before any outcome comment of its own. It quotes the text under the
+recorded agent, strips HTML comments so the text can never carry the daemon's
+hidden markers, defuses @-mentions, and redacts GitHub tokens, as it does for
+every fixer text and log it posts.
+
+Jobs and attempts persist across daemon restarts. A running fixer outlives a
+restart only where the host leaves its process group alive (under systemd,
+`KillMode=process` on the daemon's unit); otherwise its handback names the signal
+and the restart. After the wrapper exits, the
+daemon validates every result, ancestry, and protected path before lease-pushing
+as the bot. The protected set as a whole must match the pinned head or its merge with the
+current base, including content and mode. It covers `flake.nix`, `flake.lock`,
+`shell.nix`, `default.nix`, `nix/`, `.envrc`, `.github/`, `.gitmodules`, and gitlinks
+anywhere. Collection copies at most 100 MiB of Git metadata the fixer added into a
+clean object repository. It skips the packs fetched at launch, whose objects the clean
+repository borrows from the daemon's own. It ignores fixer configuration and never
+follows the fixer's Git alternates. Pack indexes are rebuilt with
+`git index-pack` rather than trusted; the fetch into the daemon's repository
+checks every object and link, since the import enables `fetch.fsckObjects=true`. It records `mechanical fix by <recorded agent/model>: <reason>` and the new head in
+`## Review`. Forks refusing maintainer edits, refused pushes, invalid results,
+crashes, or the fixer deadline hand back with a marked comment naming the exit
+status or signal, with the tail of the job's retained log. A validated fix whose push
+GitHub refuses, such as a merged base's `.github/workflows` changes that the App lacks
+the `workflows` permission to push, is handed back with its resolution. So is a fix
+that edits protected paths beyond what the base merge carries, such as a conflict in
+`flake.nix` the fixer resolved: those never land automatically. The resolution is the
+PR head, the base, the resolved tree, and the fixer's edits as a patch against the
+merge's conflicted result, or against the head itself for a fix that merges no base,
+sized to GitHub's 65,536-character comment limit. A maintainer
+runs `quest land apply <pr>`, which refuses a moved head, rebuilds and checks that
+tree, and prints an unpushed commit and its push command to run after reviewing it.
+A resolution too large for the comment hands back plainly.
+
+Every base the watcher merges into a PR head, for a conflict's clean merge or an
+own-queue build, drops each `Required`, `Related`, or `Closes` entry linking to
+a quest the base deleted since the PR branched, as `quest rm` would have. The PR
+wrote that link while the quest was open, so the base finishing it is no fault
+of the PR's. A quest the base moved is a rename, not a deletion, and a link in
+prose stays.
+
+The App key stays on the host, in `$CREDENTIALS_DIRECTORY/github-app-key` or a
+file named by `QUEST_LAND_KEY`, never in argv, where `/proc` would show it. Remote fetches and `ls-remote` use a separate repository-scoped installation
+token with exactly `contents: read`, so private repositories are supported. The
+read token is refreshed before expiry and retried once on authentication refusal.
+Git receives it only through temporary `GIT_CONFIG_*` environment settings, never
+in argv or repository configuration. Local `file://` fetches into fixer
+repositories remain credential-free. Write installation tokens are scoped to
+this repository. Tokens are minted for each push or API merge and passed only
+to trusted git and GitHub clients, never the fixer. API tokens stay in the
+daemon, refresh before expiry, and are replaced on a 401. Pass errors are
+logged and retried with bounded exponential backoff. `flock` prevents two
+daemons using the repository (including separate worktrees) or one state
+directory; `quest` must be on PATH for the merge driver. Full logs stay in the
+state directory: `--state`, or by default systemd's `$STATE_DIRECTORY` or the
+XDG state home, in `<owner>-<repo>@<base>`, never inside the checkout. Each
+pass deletes a log 7 days after its last write once no job or waiting removal
+reads it.
 
 ### The watcher's own queue
 
@@ -1039,10 +904,16 @@ base keeps requiring the `quest land` context nobody reports, with the App as
 the ruleset's bypass actor, so GitHub never merges a pick itself and the
 watcher is the base's only writer outside an admin's emergency bypass.
 
-Its picks are those `quest land serve` reads: open PRs whose auto-merge
-`quest merge --land` armed, pinned to their head, in the order they were armed,
-with the same ejections for a moved head, a missing pin, a requested change, or
-a failing required check. A pick still waiting on its required checks or a
+Its picks are the open PRs whose auto-merge `quest merge --land` armed, pinned
+to their head, in the order they were armed. It ejects, with a comment, a pick
+whose head moved since its pin, that lacks a pin, that has a requested change
+or unresolved conversations, or whose required check failed. Pins, required
+checks, reviews, conversations, rulesets, and classic protection stay
+enforced, and protection settings it cannot uphold refuse the queue. The
+auto-merge `quest merge --land` enables only signals the queue, so its method
+never decides how the watcher lands; `--method` does, and both the
+repository's merge settings and a ruleset's allowed merge methods must include
+it, and merge commits are refused on a base that requires linear history. A pick still waiting on its required checks or a
 required approval keeps its place, and one another session holds waits, armed,
 until its hold clears.
 
@@ -1052,13 +923,25 @@ merge driver, in the daemon's private repository, and pushes that merge to
 branch on push, as it builds a merge group; the header of this repository's
 `.github/workflows/queue.yml` shows the trigger. The base's required checks
 other than `quest land`, reported on the merge, decide the build: once they
-pass, the watcher lands the pick through `quest land serve`'s landing path. It
-lease-pushes the merge to the PR's branch, merges it with GitHub's merge API
+pass, the watcher lands the pick. It lease-pushes the merge to the PR's branch, merges it with GitHub's merge API
 pinned to that head, as a squash or, with `--method merge`, a merge commit, and
 checks that the landed tree is the tested one, logging `CRITICAL` when it is
-not; a fork that refuses the push lands by a leased fast-forward of the base.
-It lands only on the base it tested: a base that moved during the build
+not. It lands only on the base it tested: a base that moved during the build
 rebuilds the pick there, with no attempt counted.
+
+If the PR branch push is refused, as a fork's is, the watcher instead pushes
+the tested commit to the base as a fast-forward, leased on the expected
+parent. It comments on the PR with a link to the landed commit and closes it,
+so a squashed fork PR shows as closed rather than merged. A merge commit brings
+the PR's head into the base, so the watcher first waits about 15 seconds for
+GitHub to mark that PR merged, and closes it only if GitHub does not. An
+interrupted fallback resumes from its private intent record without repeating
+a landed base push. After a merge API refusal, the watcher re-reads
+mergeability and briefly retries pending mergeability or a base refresh. It
+also retries while GitHub still reports the pin as the head of a PR it just
+pushed, or calls the merge it just pushed conflicting. A persistent refusal
+ejects the pick as `merge_refused`, a moved head ends it, and a lost merge
+response is confirmed from the PR rather than merged again.
 
 The queue branch's push runs the merged PR's own workflow, so a fork can
 rewrite any guard that lives there. For a queue workflow on a private runner,
@@ -1090,26 +973,33 @@ queue workflow's required check, since GitHub's queue never reports
 The own queue's token asks for `contents: write` and `pull_requests: write`,
 to arm and disarm auto-merge and comment, `actions: write` to read logs and
 cancel runs, `checks: write` for its check runs, `statuses: read`, and
-`administration: read` for the base's classic protection, as `quest land serve`
-does. Its pushes ask for `contents: write`, and `workflows: write` for one that
+`administration: read` for the base's classic protection. Its pushes ask for `contents: write`, and `workflows: write` for one that
 carries a workflow change.
 
 ### Pin bumps
 
-With `--bump <owner/repo>`, repeatable, the watcher keeps each named
-repository's flake input on the watched repository at the watched base, so
-every push to the base reaches those repositories with no one touching them.
-It needs `nix` on `PATH`. Once a pass sees the base at a commit a target does
+With `--bump`, the watcher keeps the flake input on the watched repository at
+the watched repository's latest GitHub release in every other repository the
+App is installed on, so every release reaches those repositories with no one
+touching them, and they run only released code. Before the first release it
+bumps nothing.
+Installing the App on a repository enrolls it and uninstalling it stops its
+bumps; there is no list to keep. Each time the latest release moves, a pass lists every
+installation's repositories, reads each one's `flake.lock` on its default
+branch without cloning it, and keeps those that lock the watched repository
+through exactly one root input as targets; a repository locking it through
+several is reported and skipped. Discovery needs the installations to grant
+`contents: read`. It needs `nix` on `PATH`. Once a pass sees a latest release whose commit a target does
 not pin yet, it opens or updates that target's one `quest-bump` PR as the App:
 
 1. It reads the target's `flake.lock` on its default branch for the one root
    input that locks the watched repository on GitHub; a target already at the
-   commit gets nothing, and an open bump PR there is closed.
+   release's commit gets nothing, and an open bump PR there is closed.
 2. In a fresh shallow checkout, which it refuses when a tracked symlink leaves
    the checkout or dangles, since the tools write through symlinks, it drops a
-   revision from that input's URL in
-   `flake.nix`, so `flake.lock` alone pins it from then on, and locks the input
-   at the commit with `nix flake lock --override-input`.
+   revision or tag from that input's URL in
+   `flake.nix`, so `flake.lock` alone pins it from then on and a later
+   `nix flake update` cannot move it, and locks the input at the release's commit with `nix flake lock --override-input`.
 3. It builds the watched repository's `quest` at that commit with `nix build`,
    and runs its `quest init` and `quest check --fix` on the checkout with
    `--root`, from a directory of its own, so the target's `bunfig.toml` never
@@ -1120,7 +1010,7 @@ not pin yet, it opens or updates that target's one `quest-bump` PR as the App:
    merged or closed PR, is replaced. Auto-merge on the open PR is disarmed
    before the push. The PR body links the comparison and records the review as
    skipped, since a pin bump changes no repository code and the target's CI is
-   the gate.
+   the gate. Its title and body name the release.
 5. Findings `quest check --fix` cannot resolve leave the PR a draft with a
    `## Waiting` item quoting them. Otherwise it lands like any PR there, through
    `quest merge`'s path: into GitHub's merge queue, the target's own queue, or
@@ -1133,9 +1023,11 @@ not pin yet, it opens or updates that target's one `quest-bump` PR as the App:
    `quest merge` refuses, is commented on and left for a maintainer.
 
 From there the target's own gate and fixer take the PR, as any other; a newer
-commit on the base replaces it with a fresh bump. `bump.json` in the state
-directory records each target's last bump, so a restart repeats nothing and a
-closed bump is not reopened for the same commit. A target's failure is logged
+release replaces it with a fresh bump. `bump.json` in the state directory
+records each target's last bump by the release it moved to, so a restart
+repeats nothing, a closed bump is not reopened for the same release, and a pass
+that runs before the base's release is tagged leaves that release to the next
+pass. A target's failure is logged
 and retried on the next pass without holding up the others. Each target gets
 its own tokens: `contents: write`, `pull_requests: write`, `merge_queues:
 write`, and reads of `actions`, `administration`, `checks`, and `statuses` for its API
@@ -1143,15 +1035,49 @@ calls, and `workflows: write` for a push whose diff from the branch's old head
 carries a workflow change. Nix reads GitHub with the watched repository's
 `contents: read` token.
 
-## Gate expensive commands
+### Signals that hold a head
 
-`quest gate <command> [args...]` holds an expensive command until the host has
+A signal holds a PR's head from landing until it is fixed or answered, since
+the review its pick relied on predates it. `quest merge --land` refuses while
+one holds, `quest status` lists each as a `signal` line, and a queue takes a
+PR that draws one out, ejecting it as `unanswered_signal`, even while it waits
+to merge. Nothing waits for a reviewer: a signal the queue reads before the
+merge ends the pick. There are two kinds:
+
+- `finding`: an online reviewer's (a bot's, or a review whose body opens
+  `Automated review by <name>`) on the head. A review thread it opened holds
+  until it is resolved or a writer other than the reviewer replies. A `[P<n>]`
+  line in its latest review over the head, counting one that only opens
+  threads, holds until a writer's later comment links that review.
+- `decision`: a writer's comment that opens with `Maintainer decision`, not in
+  a quote or code block, posted after the head's commit, which therefore cannot apply it. A
+  newer commit answers it, as does a writer's later comment that links it.
+
+The land fixer's commit reads neither kind, so it answers none: a head the
+fixer put back in the queue still counts the findings on every head its pick's
+rounds replaced, and the decisions posted since that pick, wherever the queue
+judges it (the fixer's re-enqueue, `quest land watch`'s dequeue, and the own queue), however the head got queued. The carry is its own record, written
+before the fixer publishes the head and kept through handbacks, holds, removals,
+and later picks, so only a writer's push, which moves the head away, ends it.
+
+A writer can push to the repository: an owner, or a member or collaborator
+whose permission GitHub reports as write or higher. A bot is never one.
+
+## Gate CPU-heavy commands
+
+`quest gate <command> [args...]` holds a CPU-heavy command until the host has
 room for it, across all of a user's repositories and worktrees:
 
 ```sh
 quest gate bun run test
 quest gate cargo build --release
 ```
+
+Gate a command by the CPU it may use, not by how long it runs. Leave model
+calls, such as `quest review`, long-running servers, and quick tools such as
+formatters out of the gate: the first two wait rather than compute, a server
+never exits, so it would hold its admission forever, and a quick tool would
+only wait for room it barely uses.
 
 Like every command Quest runs, the gated command gets the environment Quest was
 started with. Quest never loads the working directory's `.env` files, as Bun
@@ -1196,11 +1122,16 @@ they kept every CPU busy. macOS, Windows, and Linux without a systemd user
 manager have no scope to measure, so the load average alone decides there.
 
 A user's admissions on one host are recorded under
-`~/.cache/quest/admissions/<hostname>`, whatever the caller's environment or
-login session. The home directory comes from the user database, not `$HOME`;
-an account missing from it, as in arbitrary-UID containers, uses
-`/tmp/quest-<uid>/admissions/<hostname>`, and refuses that directory unless only
-its UID can write it.
+`~/.cache/quest/admissions-v2/<hostname>`, whatever the caller's environment or
+login session. A gate judges whether another still runs by its process ID, so
+on Linux each PID namespace, such as a sandbox's, keeps a ledger of its own,
+named `<hostname>-pid<inode>`, and its gates do not count the host's. A gate
+that finds its running admission dropped records it again and warns. The home
+directory comes from the user database, not `$HOME`; an account missing from
+it, as in arbitrary-UID containers, uses
+`/tmp/quest-<uid>/admissions-v2/<hostname>`, and refuses that directory unless
+only its UID can write it. `quest agent` keeps its admissions beside them, in
+`agents-v2/<hostname>`.
 
 Two kinds of command go ahead of the rest. `quest gate --quick <command>` waits
 at most a minute, then starts the command whatever the host's load, memory, and
@@ -1209,10 +1140,12 @@ pass it only for cheap commands, such as a formatter or `quest check`, that cost
 less to run than to hold back. A check that lands PRs goes first: with
 `QUEST_GATE_PRIORITY=1` in its environment, every gate inside the check waits
 for memory but never for load or the queue, whether or not other gated commands
-run. Both
+run, and its command gets `MBX_SCHEDULER_PRIORITY=normal` unless it sets its
+own, so [mbx](https://github.com/jdx/mr-boxington), where installed, schedules
+its compiles ahead of lower-priority builds. Both kinds of command
 record their admissions, so the other callers count them against the host's
 headroom. Set the variable where the check starts, such as a merge queue
-build's workflow or the land daemon's sandbox, rather than relying on a slot in
+build's workflow, rather than relying on a slot in
 the host's ledger: a container's gates keep a ledger of their own, yet wait on
 the host's load. `quest agent` drops the variable, as it drops an admission.
 
@@ -1287,6 +1220,41 @@ arrive together, it takes a third; a repeated Ctrl-C, which Just does not
 forward, kills at the second. There is no timeout except `--quick`'s: any other
 command waits its turn for as long as the host stays busy.
 
+### Record each run
+
+A process that starts an agent, such as a job runner or a CPU audit, can read
+back what the agent's gated commands waited for by setting `QUEST_GATE_RECORD`
+in the agent's environment to an absolute path. Every outermost `quest gate`
+run on Linux or macOS, including those the agent's parallel shells and
+subagents start, then appends one JSON line to that file, however the run ends:
+
+```json
+{"command":["cargo","test"],"directory":"/home/me/src/app","started":"2026-11-12T19:40:01.120Z","admitted":"2026-11-12T19:40:31.452Z","unit":"quest-gate-0d6c3f9e-5a51-4c1b-9d0e-2f4b8a7c6e10.scope","exit":0,"cancelled":false,"error":null}
+```
+
+- `started` and `admitted` give the wait. A run cancelled before admission has
+  a null `admitted`.
+- `unit` is the command's systemd user scope, null where the gate owns it
+  another way, such as on macOS. Once the scope ends, systemd logs
+  `<unit>: Consumed 1.386s CPU time over 1.357s wall clock time, 8.1M memory
+  peak.` to the user journal (`journalctl --user -u <unit>`) at info level when
+  the scope used a notable amount, such as a second of CPU, and at debug level
+  otherwise. The memory peak needs systemd 255 and Linux 5.19.
+- `exit` is the status the gate returns, `cancelled` whether it was cancelled,
+  and `error` the gate's own failure, such as a scope it cannot confirm
+  stopped.
+
+Each line is one write to a file opened for appending, so concurrent gates
+leave only whole lines; give each agent its own file to tell them apart. Nested
+gates write nothing, since their command runs inside their outermost gate's.
+An unset or empty variable writes nothing, a relative path or a symlink is
+refused, and a file the gate cannot open fails it before the command runs. A
+new file is readable only by its user. A line it cannot write fails the gate
+too, except that a cancelled run exits as it would have without the record.
+Windows refuses the variable, since it cannot refuse a symlink atomically.
+The agent's own processes write the file, so a record is only as trustworthy
+as the agent.
+
 ## Route work by size
 
 `quest` ranks the harnesses, models, and efforts that write work of each size,
@@ -1295,7 +1263,7 @@ the same for every repository unless its `AGENTS.md` names others:
 | Size | Writer | Fallback |
 |---|---|---|
 | XS | Claude Code `claude-sonnet-5-5` high | Codex `gpt-6.1-sol` low |
-| S | Claude Code `claude-opus-5-5` low | Codex `gpt-6.1-sol` medium |
+| S | Claude Code `claude-opus-5-5` medium | Codex `gpt-6.1-sol` medium |
 | M | Claude Code `claude-opus-5-5` medium | Codex `gpt-6.1-sol` high |
 | L | Claude Code `claude-opus-5-5` high | Codex `gpt-6.1-sol` xhigh |
 | XL | Claude Code `claude-opus-5-5` xhigh | none |
@@ -1307,6 +1275,19 @@ XL. `/quest-run` starts a quest on the first entry that can run, and falls
 to the next only while nothing is written: when the CLI is missing or logged
 out, or the agent stops at its usage limit with nothing beyond the claim
 commit. Once a model writes, the PR is its own.
+
+While the writer A/B runs, XS, S, M, and XL quests split 50/50 between two
+arms, to measure where published guidance disagrees: arm A runs the table's
+writer, and arm B runs Claude Code `claude-opus-5-5` medium for XS,
+`claude-sonnet-5-5` high for S, `claude-opus-5-5` high for M, and
+`claude-fable-5-2` medium for XL. A hash of the quest's path picks the arm,
+so a restart or respawn keeps it; `quest unblocked --json` names it as `arm`,
+`A` or `B`, and puts its entry first in `models`. L runs no arm, nor does a
+quest with a `Maintainer:` decision open, which runs the next size's list, so
+an arm always runs at its PR's size; their `arm` is `null`. The agent
+that runs that entry ends its `Implementer:` line with the arm, as
+`Implementer: Claude Code, claude-opus-5-5, high effort (arm B)`; a fallback
+names none, so its PR counts in neither arm.
 
 A `/quest-iterate` stays on the PR's writer, the model its `## Models`
 record's first `Implementer:` line names, so the other model can always
@@ -1320,14 +1301,16 @@ claude	claude-sonnet-5-5	high
 codex	gpt-6.1-sol	low
 
 $ quest models XS --writer claude-opus-5-5
-claude	claude-opus-5-5	low
+claude	claude-opus-5-5	medium
 ```
 
 `--writer` prints the size's entry for that model, or else its entry at the
 nearest size that lists it, the larger on a tie; a model no list names is an
-error. `--json` prints an array of `{harness, model, effort}` objects. The
+error. An iterate on a PR whose first `Implementer:` line names an arm runs
+that arm's entry at the PR's size instead, as `quest models M --arm B`
+prints, and records it as `(iterate, XS, arm B)`. `--json` prints an array of `{harness, model, effort}` objects. The
 iterate records the size it was given in its `Implementer:` line, as
-`Implementer: Claude Code, claude-opus-5-5, low effort (iterate, XS)`, so
+`Implementer: Claude Code, claude-opus-5-5, medium effort (iterate, XS)`, so
 the model check can audit the routing. `quest review` still reviews the
 whole branch at the PR's size.
 
@@ -1345,14 +1328,12 @@ size. Each size ranks its reviewers, the same for every repository:
 | L | Codex `gpt-6.1-sol` xhigh | Claude Code `claude-opus-5-5` high |
 | XL | Codex `gpt-6.1-sol` xhigh | Claude Code `claude-opus-5-5` xhigh |
 
-Beside it, opencode `opencode-go/deepseek-v4.1-flash` at `high` reviews the
-same head for every size, in its own session, so each head is read by a model
-family no writer runs, at about $0.05 a review. The shadow, the pick's model
-one effort lower (Sol low for an XS PR), reviews it too, in its own session, so
-the routing can be retuned from what each effort step finds over the one below
-it. It is skipped when the pick runs at low or at an `--effort` off the ladder
-(low, medium, high, xhigh, max). It runs on the branch's first run of the
-pair, then reruns only while it has findings to settle, or once the pick
+Beside it, the shadow, the pick's model one effort lower (Sol low for an XS
+PR), reviews the same head in its own session, so the routing can be retuned
+from what each effort step finds over the one below it. It is skipped when the
+pick runs at low or at an `--effort` off the ladder (low, medium, high, xhigh).
+
+It runs on the branch's first run of the pick, then reruns only while it has findings to settle, or once the pick
 changed so that it is no longer one step below; its findings are numbered,
 answered, and settled like any reviewer's. A pick with no step below it seats
 a shadow at its own effort while the old shadow still has findings, so none
@@ -1371,11 +1352,10 @@ Without a record, or when its last line names an `unknown` model, the harness
 running the command, usually the session that
 just pushed, is taken to be the latest writer, so Codex reviews from Claude Code
 and Claude Code from Codex. `--harness` names the only reviewer instead of
-the pair and the shadow, at its entry's model and effort, and `--model` and `--effort`
+the pick and the shadow, at its entry's model and effort, and `--model` and `--effort`
 override the size pick's or that reviewer's, as a repository whose `AGENTS.md`
-names other reviewers needs. The second reviewer's model is avoided like any
-other, which, without `--harness`, is an error. A `--harness` run keeps the other
-reviewers' sessions for the pair's next run, and refuses while one has
+names other reviewers needs. A `--harness` run keeps the other
+reviewers' sessions for the pick's next run, and refuses while one has
 findings to settle, so a head never passes one reviewer alone while the other's
 findings are open. When the latest writer changes the size's pick to one with
 no session on the branch, its first session settles the open findings of the
@@ -1397,16 +1377,12 @@ gateway or provider is set. Variables that would change the reviewer's plugins,
 permissions, model, or configuration stay stripped.
 A logged-out error names the profile the CLI checked, `CLAUDE_CONFIG_DIR` or
 `CODEX_HOME`, or the default when unset, and any gateway or provider.
-`--harness opencode` runs opencode alone, with `--model` as `provider/model`
-and `--effort` as the model's variant, since no size lists it. It keeps the user's own opencode config, such as custom providers, and login,
-and counts as logged out when `opencode models` does not list the model.
 ```sh
 quest review                                  # round 1 against origin's default branch
 quest review --responses .tmp/responses.md    # round 2: the new head, with fixes and refutations
 quest review --base origin/release --new      # a new session against another base
 quest review --size S --exclude-model gpt-6.1-sol  # an S PR that Sol wrote, with no record in its body
 quest review --branch quest/m1/foo --responses .tmp/responses.md  # a detached checkout of that branch's head
-quest review --harness opencode --model opencode-go/deepseek-v4-pro --effort high  # opencode alone, on another model
 ```
 
 Every turn reviews only the branch's own change, from the merge base of `HEAD`
@@ -1414,10 +1390,9 @@ with the base's tip, so a branch behind its base draws no findings on code the
 base gained since, which a diff against its tip shows as reverted.
 The first round explores the change once. It runs the reviewer's own review,
 `codex exec review` with custom instructions or Claude Code's `/code-review
-<effort> <merge-base>...HEAD` with text after the target, or for opencode, which
-has no review mode, a prompt asking for one, given the range, the
+<effort> <merge-base>...HEAD` with text after the target, given the range, the
 base's `REVIEW.md`, if any, and any earlier findings and responses up front.
-None returns a JSON schema itself, so the round resumes that session for one
+Neither returns a JSON schema itself, so the round resumes that session for one
 turn that reads nothing and reports the review in one schema, with a score from
 0 to 10 for how ready the head is to land and one sentence on why: 10 lands as
 is, 7 to 9 lands after the findings are fixed, 4 to 6 needs rework, and 0 to 3
@@ -1443,8 +1418,7 @@ reviewer settles only its own findings, and gets `--responses` only when it has
 some, so on the same head only a reviewer with findings runs. Resuming keeps the
 reviewer's prompt cache; Claude Code is asked for its 1-hour cache, and Codex
 keeps its default. Each reviewer's session is kept per branch in the clone's
-common Git directory, so any worktree of the clone resumes it, except opencode's,
-which stays in the checkout it started in, so another worktree starts a new one;
+common Git directory, so any worktree of the clone resumes it;
 `--new` starts new sessions, but continues each reviewer's tally of its findings
 on the branch, less those it drops unsettled, unless the saved state is one
 this quest cannot read. `--branch` names the branch instead of the checked-out one, which a
@@ -1460,53 +1434,50 @@ commands. Codex leaves out its skills catalog; it still loads the user's
 split the login, so the reviewer is told to disregard it. Claude Code loads no settings files, so no
 allow rule, even the user's own, widens that. Codex skips the user's config,
 whose project trust would load the checkout's `.codex/config.toml` and start its
-MCP servers outside the sandbox. opencode loads no project config, which would
-start the checkout's plugins and MCP servers and name its shell, nor Claude
-Code's files, and has every tool but its shell denied, after the user's own
-rules so none outranks the denial. Its shell runs each command under
-sandbox-runtime (`srt` on `PATH`, which this repository's dev shell provides),
-with no network, reading only the checkout and its Git directories, and writing
-only a private directory; on Linux, `srt` must also refuse Unix sockets, which
-it does only with its seccomp helper, so nixpkgs' plain package is refused.
-Whether those flags isolate is up to each
+MCP servers outside the sandbox. Whether those flags isolate is up to each
 CLI's release, so `just review-sandbox`, in this repository, plants project MCP
-servers and hooks for Codex and Claude Code on a head, for Claude Code local settings,
-an allow rule, an `env` shell prefix, an API key helper, and a status line, and
-for opencode an MCP server, plugins, and a shell. It
-runs `quest review` with the installed CLIs and copies of your logins
-(opencode's own, which it shares with every session), and
-fails if any of it runs, the review trusts a new directory, the reviewer's
-flags let the planted rule allow a command, or opencode's shell writes, reads
-your home, reaches the network, or goes unused. `QUEST_LIVE_OPENCODE_MODEL`
-names opencode's model, as `provider/model#variant`. A login with no file to copy, such
+servers and hooks for both CLIs on a head, and for Claude Code local settings,
+an allow rule, an `env` shell prefix, an API key helper, and a status line. It
+runs `quest review` with the installed CLIs and copies of your logins, and
+fails if any of it runs, the review trusts a new directory, or the reviewer's
+flags let the planted rule allow a command. A login with no file to copy, such
 as one in the macOS keychain, needs the CLI's credential exported instead:
 `CLAUDE_CODE_OAUTH_TOKEN` from `claude setup-token`, or `CODEX_API_KEY`. It spends real usage, so CI never runs it; run it
-after upgrading any of the CLIs. The base is fetched first, since
+after upgrading either CLI. The base is fetched first, since
 the sandbox has no network. The reviewer follows the base's `AGENTS.md` and `CLAUDE.md`, at the
 root and in each directory holding a changed path, never the checkout's, so a
 change cannot instruct its own reviewer. The base's `REVIEW.md` is optional,
 given at the start of each session, and chooses the review's stance, such as adversarial.
 
-It prints the size and its source, base, and head, then for each reviewer its
+It prints the size and its source, base, and head; the head's `risk` tier and
+reason, then `classified` with the classifier's tier, how it was set (`model`,
+`paths`, or `default`), and reason, and for a model a `classifier` line with its
+harness, model, effort, and session, and its `usage` line; then for each reviewer its
 harness, model, and effort, session, round,
-an `unchanged` line for a repeated round, a `usage` line per turn (input tokens, the part read from the prompt cache, and output), the
+an `unchanged` line for a repeated round, a `usage` line per turn (input tokens, the part read from the prompt cache, and output),
+the score, a `raised` line with the tier and reason when it raised the classifier's, the
 finding count, then each finding as its number, severity, `path:line`, and title over its
 indented body, then `earlier` with the last round's head and its findings, each
 as its number, disposition, severity, `path:line`, and title over its reason; last
 come a `record` line and a `next` line. `--json` prints one object with
 `rounds`, one per reviewer, `tallies`, every reviewer's findings across the
-branch's rounds, `record`, and `next`.
+branch's rounds, `risk`, the head's tier with its classification, `record`,
+and `next`.
 
 After each round, `quest review` rewrites the `## Review` section of the open PR
 from the branch into the base, found among the upstream's PRs from the
 repository the base's remote pushes to, and prints `record <url>`. The record
-names the reviewed head and the base's short SHA, then for each reviewer its
+names the reviewed head and the base's short SHA, the head's risk tier and who
+classified it, then for each reviewer its
 harness, model, and effort, its Reviewer line ending in `, shadow` for the
-shadow, the session and round, the score and rationale, its tally, each finding with
+shadow, the session and round, the score and rationale, the tier it raised the
+risk to and why, its tally, each finding with
 its location, and the last round's findings with their dispositions. The
-tally, as `- Rounds: 3; findings 4 (high 1, medium 3): fixed 3, refuted 1, open 0`,
-counts the reviewer's rounds on the branch and each finding it raised once,
-by its latest severity, however many rounds keep it open. A finding counts
+tally, as `- Rounds: 3; first round 2 (medium 2); findings 4 (high 1, medium 3): fixed 3, refuted 1, open 0`,
+counts the reviewer's rounds on the branch, its first round's findings as that
+round graded them, and each finding it raised once,
+by its latest severity, however many rounds keep it open. A tally begun before
+it kept first rounds leaves that part out. A finding counts
 for the reviewer that raised it when a new size pick's reviewer fixes or
 refutes it, but one that reviewer keeps open becomes its own, since its round
 reports it again. `--new` drops the findings it leaves unsettled from the
@@ -1536,45 +1507,139 @@ and Codex, sent to `OPENAI_BASE_URL`, gives up on the gateway's 429 after its
 own retries, which also counts as the limit there.
 `/quest-review` runs the rounds and marks the PR ready.
 
+### Risk tiers
+
+Each head also gets a risk tier, `low`, `medium`, or `high`: what could break,
+for whom, and how hard it is to undo, set from the change and never from who
+wrote it. Nothing acts on the tier yet; `quest status` and `quest usage` report
+it.
+
+A change is `high`, with no model, when a changed path on either side of a
+rename matches a pattern held high: `RISK.md` itself, everything under
+`.github/workflows/` and `.github/actions/`, and each pattern in the `## High`
+list of the base's `RISK.md`, at the repository's root:
+
+```markdown
+# Risk
+
+Customers run the relay and the player; the CLI is for contributors.
+
+## High
+
+- `src/billing/` - charges customers, and refunds are manual
+- `**/*.proto` - peers on older releases read the wire format
+```
+
+Each item is a backticked path from the root, where `*` and `?` stay within one
+segment, a whole `**` segment spans any number, and a matched directory covers
+everything under it, then ` - ` and why changing it is high. The rest of the
+file is prose for the classifier, such as what is customer-facing. `quest
+review` reads the file from the base's tip, so a change cannot lower its own
+tier, and fails on one it cannot read, which the repository's own `quest check`
+reports first. A base with no `RISK.md` makes every change no path holds high
+`medium`.
+
+Otherwise a classifier reads the diff and the base's `RISK.md` in one read-only
+turn and replies with a tier and one sentence on why: Claude Code
+`claude-haiku-5-5` at low effort, or Codex `gpt-6.1-sol` at low when Claude
+Code is missing, logged out, has its login rejected, or hit its usage limit.
+When neither can run, the review fails on the limit that resets first if both
+hit theirs, and otherwise as a usage error naming why each failed. A diff past 200,000 characters gives it only the
+stat, and it reads the parts it needs. The tier is kept with the reviewers'
+sessions, so a later round on the same head and base `RISK.md` reuses it, and
+`--new` classifies again. Each reviewer judges the tier too, told the
+classified one, and can only raise it: the head's tier is the riskiest, with
+the reason of the first to judge it so. The record names it after the base:
+
+```markdown
+- Risk: high, `It changes the record format quest status parses.`
+- Classified: medium by Claude Code, claude-haiku-5-5, low effort, session `5b0e6c1a-27d4-4f8e-9a51-3c2d7e8f9b10`
+```
+
+`Classified:` names `the always-high paths` or `default` when no model set the
+tier, and a reviewer that raised it adds `- Raised the risk to high: <reason>`
+to its block.
+
+### Score the reviewer
+
+`quest eval` scores the reviewer on the repository's past PRs, kept in
+`review-eval.json` at its root: culprits, each with the places at its last head
+of the defect a later fix's `## Caused by` named, and clean PRs that broke
+nothing. Score a change to the reviewer table, the prompts, or `REVIEW.md`
+before it lands, and put the score and its cost in its PR.
+
+```sh
+quest eval add 570 --fix 704 --what "It counts every link as a culprit." \
+  --defect src/cli/usage.ts:395-399 --defect src/cli/usage.ts:408-410
+quest eval add 503 --clean
+quest eval run                          # the size's pick and its shadow on every case
+quest eval run --harness claude --effort high --pr 570
+```
+
+`add` reads the PR's last head and base from GitHub and records its merge base,
+size, latest writer, and tier, and a culprit already in the set gains each
+further defect. `run` fetches each case from the set's repository, so a fork's
+clone scores its upstream's set, and reviews it at its head in a detached checkout,
+giving the reviewers the first round `quest review` gives, with the base's
+`AGENTS.md` and `CLAUDE.md` and this checkout's committed `REVIEW.md`. A
+finding on any line of a defect's places finds it; every finding on a clean PR
+is noise. It prints defects found and clean findings by severity for the pick,
+its shadow, and either, by size and by tier, each case's rounds, and the cost
+token-max prices for the run's sessions.
+
 ## Audit cost and accuracy
 
 `quest usage` reports `origin`'s PRs updated since `--since` (a local
-`YYYY-MM-DD`, by default 7 days ago) and the agent sessions this host ran
-since then: which harness, model, and effort worked on each PR, in which role,
-at what token cost, and how the work went.
+`YYYY-MM-DD`, by default 7 days ago) and the agent sessions this host, and
+each host `--ssh` names, ran since then: which harness, model, and effort
+worked on each PR, in which role, at what token cost, and how the work went.
 
 ```console
 $ quest usage --pr 569
 moq-dev/quest, PRs updated and sessions active since 2026-11-06; costs (~$) estimate API list prices
 
-#569 S merged: quest: finish model routing (quest/m0/model-routing/README)
+#569 S medium merged: quest: finish model routing (quest/m0/model-routing/README)
+  risk: medium, It changes which model reviews each PR size.
   implementer: Claude Code, claude-opus-5-5, unknown effort
   review: Codex, gpt-6.1-sol, medium effort; round 1, score 10/10; rounds 1, findings 0: fixed 0, refuted 0, open 0
   online review: review (OpenAI), not at the final head; 0 findings: 0 accepted, 0 declined, 0 unclassified, 0 unanswered
   land fixes: codex, gpt-6.1-sol, medium effort
   sessions:
-     implementing  claude  claude-opus-5-5  low     in 50, cache 36.2k written 1.1M read, out 6.1k, ~$0.63
-     reviewing     codex   gpt-6.1-sol      medium  in 14.7k, cache 0 written 39.8k read, out 421, ~$0.04
+     implementing  local  claude  claude-opus-5-5   low     in 50, cache 36.2k written 1.1M read, out 6.1k, ~$0.63
+     reviewing     local  codex   gpt-6.1-sol       medium  in 14.7k, cache 0 written 39.8k read, out 421, ~$0.04
+     classifying   local  claude  claude-haiku-5-5  low     in 9.2k, cache 0 written 0 read, out 38, ~$0.00
+  waits: gate-run 4m, pull 12m
+  time: writing 9m (41%), understanding 6m (27%), testing 4m (18%), reporting 3m (14%), idle 2m
+  went wrong (implementing): the first test run failed on a stale build and was rerun after rebuilding
 ```
 
-[ccusage](https://github.com/ccusage/ccusage)'s `session --json` reads and
+[token-max](https://github.com/kixel-ai/token-max)'s `sessions` reads and
 prices the sessions, at each model's API list price, which subscriptions do
-not bill, so the cost is an estimate. `quest usage` ties each Claude Code or
-Codex session to the PR whose head branch its log last names, reading only the
-branch, directory, remote, start time, and effort from `$CLAUDE_CONFIG_DIR` (or
-`~/.config/claude` and `~/.claude`) and `$CODEX_HOME` (or `~/.codex`), never a
+not bill, so the cost is an estimate. A Claude sub-agent or a Codex review or
+spawned thread is a session of its own, so a quest a sub-agent worked on
+carries its own cost, not its coordinator's. `quest usage` ties each Claude
+Code or Codex session to the PR whose head branch it last names, from the
+branches, directory, repositories, and start token-max exports for it, never a
 prompt or reply. Since another repository may use the same branch name, the
-session must also be this repository's, as its Codex log, its checkout's
-remotes, or, once the checkout is deleted, a Codex log for that exact directory
-names (never a parent's, which a nested clone may not share); otherwise it stays unattributed. A session is reviewing when the PR's `## Review` record names
-it or Codex marks it a review, implementing when it began before the PR opened,
-and iterating otherwise. An opencode session, whose log quest does not read, is
-the reviewing session of the newest PR whose `## Review` record names it. Each PR shows its `## Models` size and implementers, and as `unread:` each Implementer line it cannot read; each reviewer the
+session must also be this repository's, as the repositories token-max resolved
+for it on its own host name, or, once its checkout is deleted, those resolved
+there for another session in that exact directory, as a Codex log records
+(never a parent's, which a nested clone may not share); otherwise it stays
+unattributed. A session on no such branch, such as a sub-agent in a detached
+checkout, belongs to its parent's PRs unless its own repository is known to be
+another, and a coordinator whose sub-agents worked on several PRs belongs to all
+of them, its cost counting equally toward each, so a PR's sessions add up to its
+whole cost. Each session gets the record
+[`quest records sender`](#session-records) would send, and its role comes from
+it, so a review's sub-agents count as reviewing. Each PR shows its `## Models` size, its risk tier and
+whether a reviewer raised it, and its implementers, and as `unread:` each Implementer line it cannot read; each reviewer the
 `quest review` record names, with its latest round and score and its tally of
 findings across every round, marked `shadow` for the shadow, where a merged PR whose last round left only low
 findings open counts them settled, since `/quest-review` fixes or refutes those
-before merge without another round; the land fixer's fixes; the later PRs that list it under
-`## Caused by`; and each online reviewer's record, read from GitHub.
+before merge without another round; the land fixer's fixes; the later merged PRs
+whose `## Caused by` names it on a bullet that opens with its link, as
+`- [owner/repo#N](url) - why`, never a link elsewhere on a line; and each
+online reviewer's record, read from GitHub.
 
 An online reviewer is any bot account whose review has a body or opens a
 thread, as a reply-only review does not, or a review whose body opens with
@@ -1593,20 +1658,215 @@ a bot resolving its own thread or a later review leaving it out, and as
 unanswered otherwise.
 
 Rollups follow: spend by size, role, harness, model, and effort; accuracy
-by size and implementer, which sums the tallies but the shadow's, so it counts
+by size and implementer, which sums the tallies but the shadow's, and their
+first rounds over the PRs whose every such tally records one, so it counts
 every finding the routed reviewers caught before merge, while the shadow's
 findings measure an effort step rather than the writer. Since a branch's tallies span every PR from it, only the
 PR whose record holds its latest tally, by the most rounds and then the newest,
 counts them, and a record written before tallies
 counts as unreviewed. An `Implementer:` line's own size, as
-`(iterate, XS)`, counts over the PR's; and, over the merged PRs, each online
+`(iterate, XS)`, counts over the PR's. The writer A/B reports by size and arm,
+with the same outcomes and every session's spend, counting a sized PR only when
+each of its `Implementer:` lines names the same arm. Each implementer also carries its
+writing sessions' cost on the merged PRs they were found on, so cost per merged
+PR divides by those PRs, not the ones no host reported: a PR's spend on a
+model goes to its line of that model, of the same effort where both name one,
+and spend on a model no line names, such as a sub-agent on a smaller model,
+to the line that took the most. Spend that fits several lines goes to the
+first line when an implementing session spent it and to the later ones when an
+iterating one did. Local reviewers roll up the same way, by the
+PR's size and each reviewer's harness, model, effort, and shadow mark: PRs
+reviewed, tallies, first rounds, and reviewing cost per PR, where a session
+the record names, or its sub-agent, goes to that reviewer. Spend still left
+fitting several, such as a routed and a shadow reviewer at one effort whose
+sessions no record names, is split evenly among them and reported as `split`.
+Each risk tier's PRs, how many merged,
+how many a reviewer raised, and how many a later PR's `## Caused by` names
+show whether the tiers predict what breaks. Each breakage a merged PR in the
+window names under `## Caused by` follows on its own line, by culprit, even one
+older than the window, which is read from GitHub: the culprit's tier, size,
+writers, and local reviewers, who found it and the incident it closes when
+the bullet ends with
+`(found by check|reviewer|queue|canary|person|customer; incident <id>)` as the
+rules ask, either part alone allowed, and how long after the culprit merged the fix opened. Over the merged
+PRs come each online
 reviewer's coverage, final heads reviewed, findings per PR reviewed, and
-answers. Sessions on no PR here, from any
-repository or agent ccusage reads, total on an `Unattributed` line. `--pr` and
+answers. A hand-back counts only while its draft is open, so a merged PR
+never shows one.
+Sessions on no PR here, from any
+repository or agent token-max reads, total on an `Unattributed` line. `--pr` and
 `--quest` narrow the report to one PR or one quest's branch, and `--json`
-prints it as one object. Without `ccusage` on `PATH`, it says how to install it
-and reports the PRs' records alone. Each host reports its own sessions; the
-land fixer's container keeps no session log, so its fixes show without tokens.
+prints it as one object. Without `token-max` on `PATH`, it says how to install
+it and reports the PRs' records alone. Each PR's `waits:` line sums its
+sessions' waits by kind, a shared session's in its share, and its `time:` line
+their [time splits](#time-splits) the same way, with each note on what went
+wrong; a `Time by role` rollup sums each role's splits, how much of the time a
+checker labeled again it labeled differently, and what labeling took.
+
+`--ssh HOST`, repeatable, also reads that SSH destination's sessions through
+the token-max installed there, matching each through the repositories resolved
+on its own host. A host that fails fails the report, naming it; drop it from
+`--ssh` to report without it. A session found on several hosts, such as a
+history copied between them, counts once at its costliest copy, and the report
+says how many copies it folded from which hosts. A session with a request
+token-max could not price, or a transcript line it could not read or that was
+unfinished, is listed under `Lower bounds` with its unreadable lines, and every
+cost it reaches reads `or more`. The land fixer's container keeps no session log, so
+its fixes show without tokens.
+
+### Session records
+
+When an agent session's turn ends in a checkout that uses Quest, `quest`
+sends Kixel Code one record of it, rebuilt each time, so a resend replaces
+the last and the store follows the session as it grows. The store keeps the
+latest upload, since one sender sends a session's uploads in order. The type is
+`SessionRecord`, exported from `quest/core` with `parseRecord` and
+`parseUpload`, which refuse a malformed record whole:
+
+```json
+{"harness":"claude","session":"7ef44bda-fb9b-436f-9ed8-9013d0f38d46","parent":null,"repository":"acme/app","branch":"quest/m0/login","quest":"quest/m0/login.md","pulls":[42],"role":"implementing","models":[{"model":"claude-opus-5-5","effort":"high","input":230,"cacheWrite":211500,"cacheRead":15800000,"output":88800,"cost":6.64,"complete":true}],"cost":6.64,"complete":true,"start":"2026-11-14T00:06:12.270Z","end":"2026-11-14T00:31:40.120Z","waits":[{"kind":"gate-queue","start":"2026-11-14T00:22:07.386Z","end":"2026-11-14T00:22:07.402Z","until":null}],"split":null}
+```
+
+- `pulls` are the PRs it worked on, attributed as `quest usage` attributes
+  them; a session with none yet, such as planning before its PR opens, keeps
+  its `branch`, and the next record names the PR.
+- `role` is classifying when a PR's `## Review` record names it as the
+  [risk classifier](#risk-tiers), reviewing when it names it as a reviewer or
+  Codex marks it a review, else the one the first quest skill it ran gives: planning
+  (`/quest-plan`, `/quest-audit`, `/quest-recurring`, `/quest-import`,
+  `/quest-grill`, `/quest-delete`, `/quest-export`), implementing
+  (`/quest-start`), iterating (`/quest-iterate`), reviewing (`/quest-review`),
+  merging (`/quest-merge`, `/quest-complete`), or coordinating (`/quest-run`,
+  `/quest-spawn`). Without one, a sub-agent takes its parent's role unless that
+  is coordinating; a session on its sub-agents' PRs only is coordinating; one
+  on a `quest-plan/`, `quest-audit/`, `quest-recurring/`, or `quest-import/`
+  branch is planning; and the rest are implementing when their first request
+  came before the PR opened, else iterating.
+- `waits` holds each wait a tool timed: `gate-queue` and `gate-run` for an
+  outermost `quest gate`, `pull` for `quest wait` with the first activity it
+  printed as `until` (null on timeout), `merge-queue` for a `quest wait` that
+  ended on `merged` or `removed_from_merge_queue`, and `person` from a blocking
+  question, such as `AskUserQuestion` or `request_user_input`, to its answer.
+  `quest gate` and `quest wait` log theirs under
+  `$XDG_STATE_HOME/quest/waits` (`~/.local/state`), one file per day kept 90
+  days, whenever `CLAUDE_CODE_SESSION_ID` or `CODEX_THREAD_ID` names the
+  session; a Claude sub-agent's commands carry its parent's ID, so a wait goes
+  to the one sub-agent of it running then in the wait's directory. Waits may
+  overlap, as parallel gates do. `null` means they could not be read, as for a
+  session on another host in `quest usage --ssh`, or one whose transcript has
+  lines token-max could not read either. Like token costs, waits count only
+  those that ended since the window's start.
+- `split` is where the rest of its time went, as the next section describes;
+  null until every step is labeled, and for a session on another host.
+
+The record holds no prompt, reply, or transcript text: skills and questions
+are read from the transcript on this host, and only their names and times
+leave it. The split's notes are lines a model wrote, told to name no one and
+quote no message.
+
+A checkout names its endpoint in a committed `.quest.json`:
+
+```json
+{ "records": "https://kixel.example/records" }
+```
+
+and each user pairs a token with it in `$XDG_CONFIG_HOME/quest/records.json`
+(`~/.config`), so a checkout naming another endpoint, as a hostile branch
+might, is never sent the token or a record:
+
+```json
+{ "https://kixel.example/records": "token" }
+```
+
+The endpoint must be HTTPS, or HTTP to `localhost`. A checkout naming none, or
+an endpoint the user holds no token for, sends nothing, and the hook says so
+once as a system message.
+
+The `Stop` hook [`quest setup`](#configure-your-agent) installs for Claude Code
+and Codex only queues the session under `$XDG_STATE_HOME/quest/records`. One
+sender per user, `quest records sender`, sends the queue each minute at low
+priority, so a busy host's stops never spend its GitHub quota. Its service
+manager runs exactly one, so passes never overlap and a session's uploads reach
+the store in order:
+
+```console
+$ quest records install
+installed and started /home/me/.config/systemd/user/quest-records.service
+```
+
+`quest records install` writes a systemd user service on Linux or a launchd
+agent on macOS running `quest records sender` with the current `PATH`, and
+(re)starts it; rerun it after upgrading `quest`. `quest records uninstall`
+removes it. While no sender runs, stops still queue, and the next stop says so
+once per outage.
+
+Each pass runs token-max on this host from the earliest queued session's first
+instant, reads the PRs updated since then, or since its last upload for that
+endpoint and repository read them, if earlier, so a fix merged after its
+sessions were sent still goes with the next one, labels each session's new
+steps for its [time split](#time-splits), and posts
+`{"records": [...], "breakages": [...]}`, the breakages being those the merged
+PRs among them name under `## Caused by`, as `quest usage` reports them, with
+`Authorization: Bearer <token>`, one upload per endpoint and repository, each
+queued session with its sub-agents, which stop without the hook naming them.
+Each upload is checked with `parseUpload` before it is posted. A 2xx drops the
+sessions from the queue, unless the hook queued one again meanwhile. A 401 or
+403 drops them and sends that endpoint nothing more until the token changes.
+Any other failure keeps them queued, and the next stop says so once. A failing
+endpoint and repository back off, waiting a minute and doubling up to six
+hours, and sit out the passes meanwhile, so they never widen the others'
+window. token-max missing is retried each pass.
+
+A deploy or alert reports what it found with `quest records incident`, which
+posts one breakage at once to the checkout's endpoint and fails loud on any
+answer but a 2xx, since nothing retries it:
+
+```console
+$ quest records incident https://alerts.example/1 --found canary
+reported https://alerts.example/1 open, its culprit unknown
+$ quest records incident https://alerts.example/1 --found canary --pr 42
+reported https://alerts.example/1 against #42
+```
+
+The ID is the reporter's, and a report with the same ID replaces the last. An
+incident stays open, and the store counts open ones apart, until it is
+reported again with `--pr`, or a merged fix names it on its culprit's
+`## Caused by` line, as `(incident https://alerts.example/1)`: the sender then
+sends the fix's breakage under the incident's ID, so it replaces the open one
+as one record holding the culprit, the fix, and the incident. Where several
+fixes name one incident, the one updated last wins. One fix closes several incidents of a
+culprit with a line for each. `--found` is one of `check`, `reviewer`, `queue`,
+`canary`, `person`, or `customer`, and `--at` sets when it was found, as
+an ISO 8601 date and time with a `Z` or offset, by default now. Reverts and red default-branch runs are not reported here: the
+store reads them from GitHub itself.
+
+### Time splits
+
+Before the sender builds a record, a cheap model, Claude Haiku at low effort,
+else Codex's `gpt-6.1-sol` at low, labels each step of the session's
+transcript it has not labeled yet: each tool call or message, with its time
+and a trimmed result, sorted into a fixed list of categories: `understanding`,
+`researching`, `writing`, `testing`, `environment`, `git`, `forge`,
+`reviewing`, `rework`, `coordinating`, `operating`, `reporting`, `circles`
+(going in circles), `waiting`, and `other`. `idle`, the time between turns, is
+measured, never judged. Each stretch of the transcript goes to the step it
+ends at, less the part a timed wait covers, so the categories and the timed
+waits sum to the transcript's span and the categories' tokens to its tokens,
+whatever the model judges. Each part also gets one line on what went wrong,
+if anything did, cut to 300 characters. A reply that is not labels covering
+every step of its part passes the part to the next model. About one part in
+ten is labeled again by a stronger model, Claude Sonnet at medium else
+`gpt-6.1-sol` at medium, and the split reports the time the two labeled
+differently, so the classifier has a known error; a check no model could give
+leaves its part unchecked. The split's `usage` is what labeling took, by model,
+unusable replies included.
+
+The labels are kept under `$XDG_STATE_HOME/quest/records/splits`, so each stop
+labels only the new steps, and `quest usage` reads them without asking a model.
+The transcript text reaches only the labeling model, never the store. Labeling
+never holds a record back: a session no model could label, such as with every
+model logged out, is sent without its split, the next stop says why, and the
+session's next stop labels the steps still unlabeled.
 
 ### Typed messages
 
@@ -1652,7 +1912,12 @@ quest agent start --harness claude --model claude-opus-5-5 --effort high --permi
 quest agent resume --harness claude --model claude-opus-5-5 --effort high --permission-mode auto .worktrees/foo <session> "Take the recommendation."
 quest agent stop .worktrees/foo
 quest agent stop --all
+quest agent admit
 ```
+
+`--effort` takes any level the CLI does except `max`, which costs about as much
+as a stronger model at a lower effort without matching it; `quest review`
+refuses it too.
 
 Codex starts and resumes only in a checkout registered by `quest worktree create`,
 on Linux with the `quest worktree run` supervisor available.
@@ -1664,6 +1929,20 @@ for resume, including after a decision pause or failed turn. Reinstall or rebuil
 pruned dependencies when the next turn needs them. Claude continues to run
 directly in the supplied checkout. Codex desktop threads use the desktop app's
 native archival instead.
+
+Start and resume first wait until the host can carry one more agent, before
+claiming the worktree, and a coordinator runs `quest agent admit` before it
+starts or resumes a sub-agent of its own. The host has room while `quest gate`
+would admit a command at once, counting every command queued for it and, as one
+recent admission each, every agent admitted in the last 5 minutes: an agent adds
+no gated load until its first build, and three quarters of those that build at
+all reach it by then. An agent `start` or `resume` runs stops counting when it
+exits. As in the gate, a host loaded only by work no gate holds still starts one
+agent at a time.
+
+Admission only delays the next agent: none already running is paused or
+stopped, and `quest agent stop` does not see a launch still waiting, which ends
+when its command is cancelled.
 
 Options go before the worktree, and the prompt or message follows it, so text
 starting with `-` is never read as an option. The agent runs in the worktree
@@ -1962,7 +2241,9 @@ background commands when it ends, and a session that ends its turn on one
 leaves its result unread. A command is the agent's when its transcript holds
 the ID Claude Code gave it on backgrounding it, so a sibling's gate does not
 hold an agent. Claude Code lists a command only while it runs, so the
-refusal ends with the gate. Codex runs no such hook.
+refusal ends with the gate. Codex runs no such hook. Once the turn can end,
+Claude Code's and Codex's `Stop` hooks queue the session's
+[record](#session-records).
 
 `quest` must be on the `PATH` the agent starts with, as for the worktree `--body`, a `body=` field,
 `git commit -m`, `--body-file -` with a here-document, or a body file. A file

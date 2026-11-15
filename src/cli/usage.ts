@@ -1,20 +1,45 @@
 // `quest usage`: which harness, model, and effort worked on each PR, in which role and at what token cost, and how
-// the work went by the PR's own record. ccusage reads and prices the sessions; quest ties each to a PR by the
-// branch its log names, reading only that metadata and never a prompt or reply.
+// the work went by the PR's own record. token-max reads and prices the sessions, on this host and any SSH host
+// named; quest ties each to a PR by the branches and repositories token-max exports for it.
 import { spawnSync } from "node:child_process";
-import { closeSync, existsSync, openSync, readdirSync, readSync } from "node:fs";
-import { homedir } from "node:os";
-import { join } from "node:path";
-import { type Size, SIZES, handedBack, questBranch } from "../core";
-import { recorded } from "../github/models";
-import { type ClaimDependencies, repositoryPath, upstream } from "./claims";
-import { discoveryEnv, git } from "./git";
+import { type RecordedRisk, type Size, SIZES, TIERS, type Tier, handedBack, questBranch, recordedRisk } from "../core";
+import type { Arm } from "./models";
+import { recorded } from "./models-record";
+import { type ClaimDependencies, upstream } from "./claims";
+import { repositoryPath } from "../github/client";
+import { git } from "./git";
+import { culpritOf, culprits } from "./breakage";
 import { fixes } from "./land-fixer";
 import { MERGER } from "./land-watch-fix";
-import { type GitHub, type ObjectValue, type Repository, githubRepository, link, requireRemote } from "./github";
-import { type OnlineReview, readOnlineReviews } from "./online-review";
-import { type Counts, type ReviewSummary, findingsText, parseReview } from "./review-record";
+import { githubRepository, requireRemote } from "./github";
+import { type GitHub, type ObjectValue, type Repository, link, object } from "../github/client";
+import { type OnlineReview, readOnlineReviews } from "../github/online-review";
+import {
+	type Counts,
+	type ReviewSummary,
+	classifierSessions,
+	findingsText,
+	parseReview,
+	reviewSessions,
+	severityText,
+} from "./review-record";
 import { SEVERITIES } from "./review";
+import {
+	type BreakageRecord,
+	ROLES,
+	breakageKey,
+	type Role,
+	SPLIT_CATEGORIES,
+	type Seat,
+	type SessionRecord,
+	type SplitUsage,
+	type TimeSplit,
+	WAIT_KINDS,
+} from "../core";
+import { type RecordInput, buildRecords } from "./records";
+import { stateDirectory } from "./send";
+import { keptSplit } from "./split";
+import { type LoggedWait, readWaits } from "./waits";
 
 /** A session's tokens, and their cost at the model's API list price, which subscriptions do not bill. */
 export interface Tokens {
@@ -23,39 +48,43 @@ export interface Tokens {
 	cacheRead: number;
 	output: number;
 	cost: number;
+	/** False when the cost is a lower bound: a request went unpriced or a transcript line was unreadable. */
+	complete: boolean;
 }
 
-/** One session as ccusage prices it: its harness (ccusage's agent), its ID there, and its spend per model. */
-export interface Priced {
+/** One model and effort's spend in a session; token-max names neither when the transcript does not. */
+export type Spent = { model: string | null; effort: string | null } & Tokens;
+
+/** One session as `token-max sessions` exports and prices it. */
+export interface Session {
+	/** The `--ssh` destination it was read on, or null for this host. */
+	host: string | null;
 	harness: string;
-	id: string;
-	models: ({ model: string } & Tokens)[];
-}
-
-/** Where a session spent its tokens, as far as its log tells. */
-export interface SessionLog {
-	/** Epoch milliseconds of its first record. */
-	started: number;
-	/** Each branch its log names, with the first and last time it does, and the directory it last ran in there. */
-	branches: Map<string, { first: number; last: number; cwd: string | null }>;
-	/** The repository its checkout fetched from, when the log names it; Claude Code's does not. */
-	repository: Repository | null;
-	effort: string | null;
-	/** Codex marks the sessions `codex exec review` starts. */
+	/** The harness's own ID, as `quest review` records it; null when the transcript names none. */
+	id: string | null;
+	/** The ID of the session that spawned it, as a sub-agent's or a Codex review's parent; null for a top session. */
+	parent: string | null;
 	review: boolean;
+	cwd: string | null;
+	/** The GitHub repositories, as lowercase `owner/repo`, its host resolved for it; null when it could not. */
+	repositories: string[] | null;
+	/** Each branch it named, with the first and last time, in epoch milliseconds. */
+	branches: { name: string; first: number; last: number }[];
+	/** Epoch milliseconds of its first and last request in the window. */
+	start: number;
+	end: number;
+	models: Spent[];
+	cost: number;
+	/** False when its cost is a lower bound: a request went unpriced, or a line was unreadable or unfinished. */
+	complete: boolean;
+	/** Transcript lines token-max could not read, which its cost leaves out. */
+	skippedLines: number;
+	/** Its transcript files, on its host. */
+	files: string[];
 }
 
-export type Role = "implementing" | "iterating" | "reviewing";
-
-/** One session attributed to a PR. */
-export interface SessionRow {
-	harness: string;
-	session: string;
-	role: Role;
-	effort: string | null;
-	models: ({ model: string } & Tokens)[];
-}
-
+/** One session's record, on a PR it worked on, and the host it was read on, or null for this one. */
+export type SessionRow = SessionRecord & { host: string | null };
 /** One PR's record and the sessions that worked on it. */
 export interface PullRow {
 	number: number;
@@ -66,14 +95,16 @@ export interface PullRow {
 	repository: string | null;
 	state: "open" | "closed" | "merged";
 	draft: boolean;
-	/** Its body has a `## Waiting` section, so it was handed back to the maintainer. */
+	/** Its body, as a draft now or any earlier version, had a `## Waiting` section, so it was handed back to the maintainer. */
 	handedBack: boolean;
 	size: Size | null;
-	implementers: { harness: string; model: string; effort: string; size: Size | null }[];
+	implementers: { harness: string; model: string; effort: string; size: Size | null; arm: Arm | null }[];
 	/** The `Implementer:` items it cannot read, which count toward no implementer. */
 	unread: string[];
 	/** Each reviewer the PR's `## Review` record names, with its latest round and its tally. */
 	review: ReviewSummary[];
+	/** The risk tier the record names for its head, null when it names none. */
+	risk: RecordedRisk | null;
 	/** Who made each mechanical fix the land fixer recorded, or `quest land watch` for a base merge it made alone. */
 	landFixes: string[];
 	/** Later PRs that list it under `## Caused by`. */
@@ -87,9 +118,22 @@ export interface SpendRow extends Tokens {
 	size: Size | null;
 	role: Role;
 	harness: string;
-	model: string;
+	model: string | null;
 	effort: string | null;
 	sessions: number;
+}
+
+/** Spend at list price over the PRs it was found on, which leave out PRs whose sessions no host reported. */
+export type Spend = {
+	pulls: number;
+	/** The part of `cost` split evenly with other seats of its model and effort that nothing told apart. */
+	split: number;
+} & Tokens;
+
+/** First rounds summed over the reviewed PRs whose every counted tally records one. */
+export interface FirstRounds {
+	pulls: number;
+	findings: Counts["findings"];
 }
 
 export interface AccuracyRow {
@@ -107,11 +151,49 @@ export interface AccuracyRow {
 	scored: number;
 	score: number;
 	/** Every reviewer's findings but the shadow's across every round on the reviewed PRs, and as `rounds`, each PR's most rounds. */
-	tally: Counts;
+	tally: Omit<Counts, "first">;
+	firstRounds: FirstRounds;
+	/** Its writing sessions' spend on its merged PRs, so `spent.cost / spent.pulls` is its cost per merged PR. */
+	spent: Spend;
 	/** The land fixer's model-run fixes, leaving out the watcher's own base merges. */
 	landFixes: number;
 	/** Later PRs naming these PRs under `## Caused by`. */
 	fixes: number;
+}
+
+/** One local reviewer seat over the PRs reported, by the PR's size, since review efforts follow it. */
+export interface ReviewerRow {
+	size: Size | null;
+	harness: string;
+	model: string;
+	effort: string;
+	shadow: boolean;
+	/** PRs whose record tallies this reviewer, each branch counted once, and its findings across every round. */
+	reviewed: number;
+	tally: Omit<Counts, "first">;
+	firstRounds: FirstRounds;
+	/** Its reviewing sessions' spend, so `spent.cost / spent.pulls` is its cost per PR reviewed. */
+	spent: Spend;
+}
+
+/** One writer A/B arm at one size, over the PRs every Implementer line of which names it. */
+export interface ArmRow extends Omit<AccuracyRow, "size" | "spent"> {
+	size: Size;
+	arm: Arm;
+	/** The sessions on its PRs in every role, and their spend. */
+	sessions: number;
+	spend: Tokens;
+}
+
+/** The PRs of one risk tier, or of none (`tier` null): how many merged, how many a reviewer raised, and later fixed. */
+export interface TierRow {
+	tier: Tier | null;
+	pulls: number;
+	merged: number;
+	/** PRs a reviewer judged riskier than the classifier did. */
+	raised: number;
+	/** PRs a later PR names under `## Caused by`. */
+	culprits: number;
 }
 
 /** One online reviewer over the merged PRs reported. */
@@ -129,17 +211,47 @@ export interface OnlineRow {
 	unanswered: number;
 }
 
+/** One role's time splits, summed over its sessions that have one, each session once. */
+export interface SplitRow {
+	role: Role;
+	/** Sessions with a split, and those without one yet or read on another host. */
+	sessions: number;
+	unsplit: number;
+	categories: TimeSplit["categories"];
+	/** The time a stronger model labeled again, and the part it labeled differently. */
+	checked: number;
+	disagreed: number;
+	notes: number;
+	/** What labeling took, by model. */
+	usage: SplitUsage[];
+}
+
 export interface Usage {
 	repository: string;
 	since: string;
-	/** Whether ccusage ran; without it, the report holds only the PRs' records. */
+	/** Whether token-max ran; without it, the report holds only the PRs' records. */
 	priced: boolean;
 	pulls: PullRow[];
 	spend: SpendRow[];
 	accuracy: AccuracyRow[];
+	reviewers: ReviewerRow[];
+	/** The writer A/B's arms, while it runs. */
+	arms: ArmRow[];
+	tiers: TierRow[];
 	online: OnlineRow[];
-	/** The sessions on no PR reported here, from every repository and agent ccusage reads; null when narrowed. */
+	/** Where each role's time went. */
+	splits: SplitRow[];
+	/**
+	 * What the merged PRs in the window name under `## Caused by`, with each culprit as its body records it, wherever
+	 * it falls; narrowed, those whose culprit or fix is reported. Incidents reach only the store.
+	 */
+	breakages: BreakageRecord[];
+	/** The sessions on no PR reported here, from every repository and agent token-max reads; null when narrowed. */
 	unattributed: ({ sessions: number } & Tokens) | null;
+	/** Copies of a session found on several hosts, left out for its costliest copy, and the hosts they came from. */
+	folded: { copies: number; hosts: (string | null)[] };
+	/** Each session reported whose cost is a lower bound, with the transcript lines token-max could not read. */
+	incomplete: { host: string | null; harness: string; session: string | null; skippedLines: number }[];
 }
 
 export interface UsageOptions {
@@ -147,18 +259,22 @@ export interface UsageOptions {
 	since: string;
 	quest?: string;
 	pr?: number;
+	/** SSH destinations whose sessions are attributed too, beside this host's. */
+	ssh?: string[];
 }
 
 export interface UsageDependencies extends ClaimDependencies {
-	/** ccusage's sessions since a `YYYY-MM-DD` date, or null when it is not installed. */
-	ccusage(since: string): Priced[] | null;
-	env: NodeJS.ProcessEnv;
-	home: string;
+	/** token-max's sessions since an instant on this host and each SSH destination, or null when it is not installed. */
+	sessions(since: Date, ssh: string[]): Session[] | null;
+	/** The waits logged on this host that ended since an instant, epoch ms. */
+	waits(since: number): LoggedWait[];
+	/** A local session's time split from the labels the record sender kept, never asking a model. */
+	split: NonNullable<RecordInput["split"]>;
 }
 
-/** The install hint printed when ccusage is missing. */
-export const CCUSAGE_MISSING =
-	"ccusage is not installed, so no session tokens or cost are reported; install it with `npm install -g ccusage`";
+/** The install hint printed when token-max is missing. */
+export const TOKEN_MAX_MISSING =
+	"token-max is not installed, so no session tokens or cost are reported; install it with `cargo install --locked --git https://github.com/kixel-ai/token-max`";
 
 /** The local date `days` before `now`, as `YYYY-MM-DD`. */
 export function daysBefore(now: Date, days: number): string {
@@ -166,183 +282,114 @@ export function daysBefore(now: Date, days: number): string {
 	return `${at.getFullYear()}-${String(at.getMonth() + 1).padStart(2, "0")}-${String(at.getDate()).padStart(2, "0")}`;
 }
 
-/** Run `ccusage session --json` from PATH, or return null when it is not installed. */
-export function runCcusage(since: string, env: NodeJS.ProcessEnv): Priced[] | null {
-	const result = spawnSync("ccusage", ["session", "--json", "--since", since.replaceAll("-", "")], {
-		encoding: "utf8",
-		env,
-		maxBuffer: 1 << 30,
-	});
-	if ((result.error as NodeJS.ErrnoException | undefined)?.code === "ENOENT") return null;
+/** Run `token-max sessions` from PATH, or return null when it is not installed. */
+export function runTokenMax(since: Date, ssh: string[]): Session[] | null {
+	const hosts = ssh.flatMap((host) => ["--ssh", host]);
+	const args = ["sessions", "--since", since.toISOString(), ...hosts, ...(ssh.length ? ["--include-local"] : [])];
+	const result = spawnSync("token-max", args, { encoding: "utf8", maxBuffer: 1 << 30 });
+	if ((result.error as NodeJS.ErrnoException | undefined)?.code === "ENOENT") {
+		if (ssh.length) throw new Error("token-max is not installed, so --ssh cannot read other hosts' sessions");
+		return null;
+	}
 	if (result.error) throw result.error;
-	if (result.status !== 0) throw new Error(`ccusage session --json exited ${result.status}: ${result.stderr.trim()}`);
-	return parseCcusage(result.stdout);
+	// token-max prints its error as one JSON object, naming the host that failed.
+	if (result.status !== 0) throw new Error(`token-max sessions exited ${result.status}: ${result.stderr.trim()}`);
+	return parseSessions(result.stdout);
 }
 
-/** The sessions `ccusage session --json` printed, failing on any field it lacks. */
-export function parseCcusage(text: string): Priced[] {
-	const rows: unknown = (JSON.parse(text) as { session?: unknown } | null)?.session;
-	if (!Array.isArray(rows)) throw new Error("ccusage session --json printed no session list");
-	const count = (value: unknown, what: string): number => {
-		if (typeof value !== "number" || !Number.isFinite(value) || value < 0)
-			throw new Error(`ccusage printed a session without a ${what}`);
-		return value;
+/** The sessions `token-max sessions` printed, one JSON object per line, failing on any field it lacks. */
+export function parseSessions(text: string): Session[] {
+	const fail = (what: string): never => {
+		throw new Error(`token-max printed a session without ${what}`);
 	};
-	const word = (value: unknown, what: string): string => {
-		if (typeof value !== "string" || value === "") throw new Error(`ccusage printed a session without a ${what}`);
-		return value;
+	const count = (value: unknown, what: string): number =>
+		typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : fail(what);
+	const word = (value: unknown, what: string): string =>
+		typeof value === "string" && value !== "" ? value : fail(what);
+	const optional = (value: unknown, what: string): string | null => (value === null ? null : word(value, what));
+	const flag = (value: unknown, what: string): boolean => (typeof value === "boolean" ? value : fail(what));
+	const time = (value: unknown, what: string): number => {
+		const at = Date.parse(word(value, what));
+		return Number.isNaN(at) ? fail(what) : at;
 	};
-	return rows.map((row: Record<string, unknown>) => {
-		const models = row?.modelBreakdowns;
-		if (!Array.isArray(models)) throw new Error("ccusage printed a session without modelBreakdowns");
-		return {
-			harness: word(row.agent, "agent"),
-			id: word(row.period, "session ID"),
-			models: models.map((m: Record<string, unknown>) => ({
-				model: word(m?.modelName, "model name"),
-				input: count(m.inputTokens, "input token count"),
-				cacheWrite: count(m.cacheCreationTokens, "cache write token count"),
-				cacheRead: count(m.cacheReadTokens, "cache read token count"),
-				output: count(m.outputTokens, "output token count"),
-				cost: count(m.cost, "cost"),
-			})),
-		};
-	});
+	return text
+		.split("\n")
+		.filter((line) => line !== "")
+		.map((line) => {
+			const row = JSON.parse(line) as Record<string, unknown> | null;
+			if (row === null || typeof row !== "object") return fail("a JSON object");
+			const repositories = row.repositories;
+			if (repositories !== null && !Array.isArray(repositories)) fail("a repository list");
+			const branches = Array.isArray(row.branches) ? row.branches : fail("a branch list");
+			const models = Array.isArray(row.models) ? row.models : fail("a model list");
+			// A session's unreadable or unfinished lines may hide any model's requests, so each model's cost is then
+			// a lower bound too, though token-max marks only the session.
+			const complete = flag(row.complete, "its completeness");
+			return {
+				host: optional(row.host, "a host"),
+				harness: word(row.harness, "a harness"),
+				id: optional(row.session, "a session ID"),
+				parent: optional(row.parent, "a parent"),
+				review: flag(row.review, "a review mark"),
+				cwd: optional(row.cwd, "a directory"),
+				// A repository that is not on GitHub can head no PR here, so only GitHub's count.
+				repositories:
+					repositories === null
+						? null
+						: (repositories as unknown[]).flatMap((url) => {
+								const named = githubRepository(word(url, "a repository URL"));
+								return named ? [key(named)] : [];
+							}),
+				branches: branches.map((b: Record<string, unknown>) => ({
+					name: word(b?.name, "a branch name"),
+					first: time(b.first, "a branch's first time"),
+					last: time(b.last, "a branch's last time"),
+				})),
+				start: time(row.start, "a start"),
+				end: time(row.end, "an end"),
+				models: models.map((m: Record<string, unknown>) => ({
+					model: optional(m?.model, "a model"),
+					effort: optional(m.effort, "an effort"),
+					input: count(m.inputTokens, "an input token count"),
+					cacheWrite: count(m.cacheWriteTokens, "a cache write token count"),
+					cacheRead: count(m.cacheReadTokens, "a cache read token count"),
+					output: count(m.outputTokens, "an output token count"),
+					cost: count(m.costUsd, "a model's cost"),
+					complete: flag(m.complete, "a model's completeness") && complete,
+				})),
+				cost: count(row.costUsd, "a cost"),
+				complete,
+				skippedLines: count(row.skippedLines, "a skipped line count"),
+				files: (Array.isArray(row.files) ? row.files : fail("a file list")).map((f: unknown) =>
+					word(f, "a file"),
+				),
+			};
+		});
 }
 
 /**
- * Visit each line of the file at `path`, reading it in bounded chunks since logs reach gigabytes. The last line is
- * marked incomplete when no newline ends it, as while its session is still writing it. Reading stops once `visit`
- * returns false.
+ * Each session once, keeping its costliest copy where several hosts hold it, as when history was copied between
+ * them, since counting every copy would inflate the cost per PR. Returns the copies it left out too.
  */
-export function eachLine(path: string, visit: (line: string, complete: boolean) => boolean | void): void {
-	const fd = openSync(path, "r");
-	try {
-		const chunk = Buffer.alloc(1 << 22);
-		let rest = Buffer.alloc(0);
-		for (let read = readSync(fd, chunk); read > 0; read = readSync(fd, chunk)) {
-			const data = rest.length ? Buffer.concat([rest, chunk.subarray(0, read)]) : chunk.subarray(0, read);
-			let start = 0;
-			for (let end = data.indexOf(10); end >= 0; end = data.indexOf(10, start)) {
-				if (end > start && visit(data.toString("utf8", start, end), true) === false) return;
-				start = end + 1;
-			}
-			rest = Buffer.from(data.subarray(start));
-		}
-		if (rest.length) visit(rest.toString("utf8"), false);
-	} finally {
-		closeSync(fd);
+export function fold(sessions: Session[]): { kept: Session[]; dropped: Session[] } {
+	const best = new Map<string, Session>();
+	const dropped: Session[] = [];
+	const id = (session: Session) => JSON.stringify([session.harness, session.id]);
+	for (const session of sessions) {
+		if (session.id === null) continue;
+		const other = best.get(id(session));
+		if (other === undefined) best.set(id(session), session);
+		else if (session.cost > other.cost) {
+			dropped.push(other);
+			best.set(id(session), session);
+		} else dropped.push(session);
 	}
+	const kept = sessions.filter((session) => session.id === null || best.get(id(session)) === session);
+	return { kept, dropped };
 }
 
-/** One JSON record of a log line, or null for an incomplete last line. */
-export function parseLine(path: string, line: string, complete: boolean): Record<string, unknown> | null {
-	try {
-		return JSON.parse(line) as Record<string, unknown>;
-	} catch (error) {
-		if (!complete) return null;
-		throw new Error(`${path} has a line that is not JSON: ${(error as Error).message}`);
-	}
-}
-
-/** Claude Code's session logs by session ID, from each config directory ccusage reads, once each. */
-export function claudeLogs(deps: { env: NodeJS.ProcessEnv; home: string }): Map<string, string> {
-	const configured = deps.env.CLAUDE_CONFIG_DIR?.split(",")
-		.map((dir) => dir.trim())
-		.filter(Boolean);
-	const dirs = configured?.length ? configured : [join(deps.home, ".config", "claude"), join(deps.home, ".claude")];
-	const logs = new Map<string, string>();
-	for (const dir of dirs) {
-		const projects = join(dir, "projects");
-		if (!existsSync(projects)) continue;
-		for (const project of readdirSync(projects, { withFileTypes: true })) {
-			if (!project.isDirectory()) continue;
-			for (const file of readdirSync(join(projects, project.name)))
-				if (file.endsWith(".jsonl") && !logs.has(file.slice(0, -6)))
-					logs.set(file.slice(0, -6), join(projects, project.name, file));
-		}
-	}
-	return logs;
-}
-
-/** What a Claude Code log tells: every record carries its checkout's branch, and each reply its effort. */
-export function readClaudeLog(path: string): SessionLog {
-	const log: SessionLog = { started: NaN, branches: new Map(), repository: null, effort: null, review: false };
-	eachLine(path, (line, complete) => {
-		const record = parseLine(path, line, complete);
-		const at = typeof record?.timestamp === "string" ? Date.parse(record.timestamp) : NaN;
-		if (record === null || Number.isNaN(at)) return;
-		if (!(at >= log.started)) log.started = at;
-		const branch = record.gitBranch;
-		if (typeof branch === "string" && branch !== "" && branch !== "HEAD") {
-			const seen = log.branches.get(branch);
-			const cwd = typeof record.cwd === "string" ? record.cwd : null;
-			if (seen) {
-				seen.last = Math.max(seen.last, at);
-				seen.cwd = cwd ?? seen.cwd;
-			} else log.branches.set(branch, { first: at, last: at, cwd });
-		}
-		if (record.type === "assistant" && typeof record.effort === "string") log.effort = record.effort;
-	});
-	return log;
-}
-
-/** What a Codex rollout tells: its first record names the checkout's branch and remote, and each turn its effort. */
-export function readCodexLog(path: string): SessionLog {
-	let log: SessionLog | undefined;
-	eachLine(path, (line, complete) => {
-		if (log === undefined) {
-			const meta = parseLine(path, line, complete);
-			const payload = meta?.payload as Record<string, unknown> | undefined;
-			const at = Date.parse(String(payload?.timestamp ?? meta?.timestamp));
-			if (meta?.type !== "session_meta" || Number.isNaN(at))
-				throw new Error(`${path} does not start with a Codex session_meta record`);
-			const repo = payload?.git as Record<string, unknown> | undefined;
-			const branch = typeof repo?.branch === "string" && repo.branch !== "" ? repo.branch : null;
-			const url = typeof repo?.repository_url === "string" ? repo.repository_url : null;
-			const cwd = typeof payload?.cwd === "string" ? payload.cwd : null;
-			log = {
-				started: at,
-				branches: new Map(branch ? [[branch, { first: at, last: at, cwd }]] : []),
-				repository: url === null ? null : githubRepository(url),
-				effort: null,
-				review: (payload?.source as Record<string, unknown> | undefined)?.subagent === "review",
-			};
-			return;
-		}
-		// A turn context is small, unlike the replies and tool output, so only its lines are parsed.
-		if (!line.includes('"type":"turn_context"')) return;
-		const effort = (parseLine(path, line, complete)?.payload as Record<string, unknown> | undefined)?.effort;
-		if (typeof effort === "string") log.effort = effort;
-	});
-	if (log === undefined) throw new Error(`${path} is empty`);
-	return log;
-}
-
-/** The log of each priced session, found where its harness keeps it, or null for one quest cannot read. */
-function sessionLogs(sessions: Priced[], deps: UsageDependencies): (SessionLog | null)[] {
-	let claude: Map<string, string> | undefined;
-	const codex = deps.env.CODEX_HOME || join(deps.home, ".codex");
-	return sessions.map((session) => {
-		if (session.harness === "claude") {
-			claude ??= claudeLogs(deps);
-			const path = claude.get(session.id);
-			return path === undefined ? null : readClaudeLog(path);
-		}
-		if (session.harness === "codex") {
-			// ccusage names a rollout by its path under the sessions directory, or under the flat archive.
-			if (session.id.split("/").includes(".."))
-				throw new Error(`ccusage named a Codex session outside its home: ${session.id}`);
-			const path = ["sessions", "archived_sessions"]
-				.map((dir) => join(codex, dir, `${session.id}.jsonl`))
-				.find((each) => existsSync(each));
-			return path === undefined ? null : readCodexLog(path);
-		}
-		return null;
-	});
-}
-
-interface Pull {
+/** A PR as `quest usage` reads it from GitHub. */
+export interface Pull {
 	number: number;
 	url: string;
 	title: string;
@@ -356,7 +403,8 @@ interface Pull {
 	body: string;
 }
 
-const key = (repository: Repository) => `${repository.owner}/${repository.repo}`.toLowerCase();
+/** `repository` as lowercase `owner/repo`. */
+export const key = (repository: Repository) => `${repository.owner}/${repository.repo}`.toLowerCase();
 
 function pull(row: ObjectValue): Pull {
 	const head = row.head as ObjectValue;
@@ -377,7 +425,7 @@ function pull(row: ObjectValue): Pull {
 }
 
 /** The PRs of `repository` updated since `since`, newest update first, read until the listing passes it. */
-async function updatedPulls(client: GitHub, repository: Repository, since: number): Promise<Pull[]> {
+export async function updatedPulls(client: GitHub, repository: Repository, since: number): Promise<Pull[]> {
 	const pulls: Pull[] = [];
 	let next: string | undefined =
 		`${repositoryPath(repository)}/pulls?state=all&sort=updated&direction=desc&per_page=100`;
@@ -392,18 +440,57 @@ async function updatedPulls(client: GitHub, repository: Repository, since: numbe
 	return pulls;
 }
 
-/** The PR numbers of `repository` that `body`'s `## Caused by` section links. */
-function causes(body: string, repository: Repository): number[] {
-	const heading = /^## Caused by[ \t]*\r?$/m.exec(body);
-	if (!heading) return [];
-	const rest = body.slice(heading.index + heading[0].length);
-	const section = rest.slice(0, /^## /m.exec(rest)?.index ?? rest.length);
-	const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-	const url = new RegExp(
-		`https://github\\.com/${escape(repository.owner)}/${escape(repository.repo)}/pull/(\\d+)`,
-		"gi",
-	);
-	return [...new Set([...section.matchAll(url)].map((match) => Number(match[1])))];
+/** The PR numbers of `repository` that `body`'s `## Caused by` section names as culprits, as {@link culprits} reads them. */
+export const causes = (body: string, repository: Repository): number[] => [
+	...new Set(culprits(body, repository).map((cause) => cause.number)),
+];
+
+/** PR `number` of `repository`, or null when GitHub has none, as for a mistyped `## Caused by` link. */
+export async function readPull(client: GitHub, repository: Repository, number: number): Promise<Pull | null> {
+	const response = await client.request(`${repositoryPath(repository)}/pulls/${number}`, { allow: [404] });
+	return response.status === 404 ? null : pull(object(await response.json()));
+}
+
+/** What {@link fixBreakages} reads. */
+export interface FixSources {
+	client: GitHub;
+	repository: Repository;
+	pulls: Pull[];
+	/** The PRs a narrowed report shows; unset, every breakage. */
+	only?: Set<number>;
+}
+
+/**
+ * A breakage for each culprit the merged PRs among `pulls` name under `## Caused by`, found when the fix opened, with
+ * the incident its line closes. A culprit outside `pulls` is read from GitHub, once each; a link to no PR names no
+ * culprit. An incident several lines close keeps the line of the fix updated last, so no body can send one twice.
+ * Given `only`, it keeps only the breakages whose fix or culprit `only` names.
+ */
+export async function fixBreakages({ client, repository, pulls, only }: FixSources): Promise<BreakageRecord[]> {
+	const known = new Map<number, Pull | null>(pulls.map((each) => [each.number, each]));
+	const breakages: BreakageRecord[] = [];
+	const seen = new Set<string>();
+	// GitHub lists the newest update first.
+	for (const fix of pulls.filter((each) => each.state === "merged"))
+		for (const cause of culprits(fix.body, repository)) {
+			if (cause.number === fix.number) continue;
+			// A narrowed report reads no culprit of a breakage it leaves out.
+			if (only && !only.has(fix.number) && !only.has(cause.number)) continue;
+			if (!known.has(cause.number)) known.set(cause.number, await readPull(client, repository, cause.number));
+			const culprit = known.get(cause.number);
+			if (!culprit) continue;
+			const breakage: BreakageRecord = {
+				repository: key(repository),
+				culprit: culpritOf(culprit),
+				fix: fix.number,
+				incident: cause.incident,
+				found: cause.found,
+				at: new Date(fix.created).toISOString(),
+			};
+			if (!seen.has(breakageKey(breakage))) breakages.push(breakage);
+			seen.add(breakageKey(breakage));
+		}
+	return breakages;
 }
 
 const sized = (value: string | null | undefined): Size | null =>
@@ -430,7 +517,8 @@ function settledOnMerge(reviews: ReviewSummary[], merged: boolean): ReviewSummar
 /** Each PR's record, without its sessions yet. */
 function pullRows(pulls: Pull[], repository: Repository): PullRow[] {
 	const fixedBy = new Map<number, number[]>();
-	for (const each of pulls)
+	// A fix counts once it lands: an open or abandoned one, such as a closed duplicate, fixed nothing.
+	for (const each of pulls.filter((pull) => pull.state === "merged"))
 		for (const cause of causes(each.body, repository))
 			if (cause !== each.number) fixedBy.set(cause, [...(fixedBy.get(cause) ?? []), each.number]);
 	return pulls.map((each) => {
@@ -450,6 +538,7 @@ function pullRows(pulls: Pull[], repository: Repository): PullRow[] {
 			),
 			unread: own.implementers.filter(({ fields }) => fields === null).map(({ item }) => item),
 			review: settledOnMerge(parseReview(each.body), each.state === "merged"),
+			risk: recordedRisk(each.body),
 			landFixes: fixes(each.body),
 			fixedBy: (fixedBy.get(each.number) ?? []).sort((a, b) => a - b),
 			online: [],
@@ -464,90 +553,54 @@ const add = (to: Tokens, from: Tokens) => {
 	to.cacheRead += from.cacheRead;
 	to.output += from.output;
 	to.cost += from.cost;
+	to.complete &&= from.complete;
 };
-const zero = (): Tokens => ({ input: 0, cacheWrite: 0, cacheRead: 0, output: 0, cost: 0 });
+const zero = (): Tokens => ({ input: 0, cacheWrite: 0, cacheRead: 0, output: 0, cost: 0, complete: true });
 
 /**
- * The ID a harness gives a session, as `quest review` records it: Claude Code's is ccusage's, and Codex's is the
- * thread ID that ends the rollout's file name.
+ * Which repositories the directory `cwd` on `host` belongs to: those token-max resolved for the session, else those
+ * it resolved for another session in that exact directory on the same host, as a Codex log records after the
+ * checkout is deleted; null when nothing tells, since a branch name alone may be another repository's. A directory
+ * above it never tells, since a nested clone may be another repository's.
  */
-function sessionId(session: Priced): string {
-	if (session.harness !== "codex") return session.id;
-	return /([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/.exec(session.id)?.[1] ?? session.id;
-}
-
-/** The GitHub repositories the checkout at `cwd` has remotes for, or null once it is no checkout to ask. */
-function checkoutRepositories(cwd: string): string[] | null {
-	if (!existsSync(cwd)) return null;
-	const remotes = spawnSync("git", ["-C", cwd, "remote", "-v"], { encoding: "utf8", env: discoveryEnv() });
-	if (remotes.status !== 0) return null;
-	return remotes.stdout.split("\n").flatMap((line) => {
-		const named = githubRepository(line.split(/\s+/)[1] ?? "");
-		return named ? [key(named)] : [];
-	});
-}
-
-/**
- * Which repositories the directory `cwd` belongs to: its checkout's remotes while it exists, else the remote a
- * Codex log names for that exact directory, as a reviewer run in the same checkout records; null when nothing
- * tells, since a branch name alone may be another repository's. A directory above it never tells, since a
- * nested clone may be another repository's.
- */
-function owners(logs: (SessionLog | null)[]): (cwd: string) => string[] | null {
-	const logged = new Map<string, Set<string>>();
-	for (const log of logs)
-		if (log?.repository)
-			for (const seen of log.branches.values())
-				if (seen.cwd) logged.set(seen.cwd, (logged.get(seen.cwd) ?? new Set()).add(key(log.repository)));
-	const cache = new Map<string, string[] | null>();
-	return (cwd) => {
-		if (!cache.has(cwd)) {
-			const names = logged.get(cwd);
-			cache.set(cwd, checkoutRepositories(cwd) ?? (names ? [...names] : null));
+function owners(sessions: Session[]): (session: Session) => string[] | null {
+	const where = (session: Session) => JSON.stringify([session.host, session.cwd]);
+	const known = new Map<string, Set<string>>();
+	for (const session of sessions)
+		if (session.cwd !== null && session.repositories?.length) {
+			const names = known.get(where(session)) ?? new Set();
+			for (const name of session.repositories) names.add(name);
+			known.set(where(session), names);
 		}
-		return cache.get(cwd)!;
+	return (session) => {
+		if (session.repositories?.length) return session.repositories;
+		const names = session.cwd === null ? undefined : known.get(where(session));
+		return names ? [...names] : null;
 	};
 }
 
 /**
- * Attribute each priced session to the PR whose head branch its log last named, among those still open when the
- * session reached the branch and headed from the repository its log, checkout, or directory names, and give it a
- * role: reviewing when a PR's review record names it or Codex marks it a review, implementing when it began before
- * its PR opened, and iterating otherwise. A session whose log quest cannot read, such as opencode's, is the
- * reviewing session of the PR whose record names it, the newest when a branch's later PR resumed it. Returns the
- * sessions on no PR here.
+ * The PR each session's own branch heads: the one whose head branch it last named, among those still open when the
+ * session reached the branch and headed from a repository its host resolved for it. `evidence` holds every exported
+ * copy, folded ones included, since a dropped copy may be the only one naming its directory's repository.
  */
 function attribute(
-	sessions: Priced[],
-	logs: (SessionLog | null)[],
+	sessions: Session[],
+	evidence: Session[],
 	pulls: Pull[],
-	rows: Map<number, PullRow>,
-	reviewers: Map<string, { number: number; effort: string }>,
-): Priced[] {
+): { own: Map<Session, Pull>; known: (session: Session) => string[] | null } {
 	const byBranch = new Map<string, Pull[]>();
 	for (const each of [...pulls].sort((a, b) => a.created - b.created))
 		byBranch.set(each.branch, [...(byBranch.get(each.branch) ?? []), each]);
-	const unattributed: Priced[] = [];
-	const owned = owners(logs);
-	sessions.forEach((session, index) => {
-		const id = sessionId(session);
-		const named = reviewers.get(id);
-		const log = logs[index];
-		if (!log && named) {
-			const row = rows.get(named.number);
-			const { harness, models } = session;
-			if (row) row.sessions.push({ harness, session: id, role: "reviewing", effort: named.effort, models });
-			else unattributed.push(session);
-			return;
-		}
-		const branches = log ? [...log.branches].sort((a, b) => b[1].last - a[1].last) : [];
-		let found: Pull | undefined;
-		for (const [branch, seen] of branches) {
-			// Another repository may use the same branch name, so a session counts only where its repository is known.
-			const known = log!.repository ? [key(log!.repository)] : seen.cwd ? owned(seen.cwd) : null;
-			if (known === null) continue;
+	const own = new Map<Session, Pull>();
+	const owned = owners(evidence);
+	for (const session of sessions) {
+		// Another repository may use the same branch name, so a session counts only where its repository is known.
+		const known = owned(session);
+		if (known === null) continue;
+		for (const seen of [...session.branches].sort((a, b) => b.last - a.last)) {
 			// A branch can head a new PR after an earlier one closed: take the one open when the session reached it.
-			const open = (byBranch.get(branch) ?? []).filter(
+			const open = (byBranch.get(seen.name) ?? []).filter(
 				(each) =>
 					(each.closed === null || each.closed >= seen.first) &&
 					each.repository !== null &&
@@ -555,31 +608,68 @@ function attribute(
 			);
 			// A checkout with remotes for both a fork and its upstream cannot tell which one's branch it was on.
 			if (new Set(open.map((each) => each.repository)).size > 1) continue;
-			found = open[0];
-			if (found) break;
+			const found = open[0];
+			if (found) {
+				own.set(session, found);
+				break;
+			}
 		}
-		const row = found && rows.get(found.number);
-		if (!found || !row || !log) {
-			unattributed.push(session);
-			return;
-		}
-		row.sessions.push({
-			harness: session.harness,
-			session: id,
-			role: log.review || named ? "reviewing" : log.started < found.created ? "implementing" : "iterating",
-			effort: log.effort,
-			models: session.models,
-		});
-	});
-	return unattributed;
+	}
+	return { own, known: owned };
 }
 
+/** What `sessionRecords` builds from. */
+export interface RecordSources {
+	/** The base repository as lowercase `owner/repo`. */
+	repository: string;
+	/** The sessions to attribute, each once. */
+	sessions: Session[];
+	/** Every exported copy, folded ones included, for the repositories each directory belongs to. */
+	evidence: Session[];
+	/** The repository's PRs in the window. */
+	pulls: Pull[];
+	/** The waits logged on this host. */
+	waits: LoggedWait[];
+	/** The sessions to build records for; by default, those on a PR. */
+	emit?: Set<Session>;
+	/** The window's start, epoch ms. */
+	since: number;
+	/** A local session's time split, or null while it has none. */
+	split?: RecordInput["split"];
+}
+
+/** Each session's record, attributed to the PRs in the window, whose review records name their reviewers and classifier. */
+export function sessionRecords(sources: RecordSources): Map<Session, SessionRecord> {
+	const { repository, sessions, evidence, pulls, waits, emit, since, split } = sources;
+	// Only the reviewer sessions are read, so no PR author can stop every session's record with a body this version
+	// cannot parse.
+	const reviewers = new Set(pulls.flatMap((pull) => reviewSessions(pull.body)));
+	const classifiers = new Set(pulls.flatMap((pull) => classifierSessions(pull.body)));
+	return buildRecords({
+		repository,
+		sessions,
+		...attribute(sessions, evidence, pulls),
+		reviewers,
+		classifiers,
+		waits,
+		emit,
+		since,
+		split,
+	});
+}
+
+/** A row of a session with no ID, by its host and transcript files, which no two sessions share. */
+const anonymous = new WeakMap<SessionRow, string>();
+
+/** One session across the PR rows it appears on. */
+const identity = (session: SessionRow) => JSON.stringify([session.harness, session.session ?? anonymous.get(session)]);
+
 function spendRows(pulls: PullRow[]): SpendRow[] {
-	const rows = new Map<string, SpendRow>();
+	const rows = new Map<string, SpendRow & { seen: Set<string> }>();
 	for (const each of pulls)
 		for (const session of each.sessions)
 			for (const spent of session.models) {
-				const id = JSON.stringify([each.size, session.role, session.harness, spent.model, session.effort]);
+				const id = JSON.stringify([each.size, session.role, session.harness, spent.model, spent.effort]);
 				let row = rows.get(id);
 				if (!row) {
 					row = {
@@ -587,36 +677,167 @@ function spendRows(pulls: PullRow[]): SpendRow[] {
 						role: session.role,
 						harness: session.harness,
 						model: spent.model,
-						effort: session.effort,
+						effort: spent.effort,
 						sessions: 0,
 						...zero(),
+						seen: new Set(),
 					};
 					rows.set(id, row);
 				}
-				row.sessions++;
-				add(row, spent);
+				if (!row.seen.has(identity(session))) row.sessions++;
+				row.seen.add(identity(session));
+				add(row, portion(session, spent));
 			}
-	const roles: Role[] = ["implementing", "iterating", "reviewing"];
-	return [...rows.values()].sort((a, b) =>
-		order(
-			[a.size, roles.indexOf(a.role), a.harness, a.model, a.effort],
-			[b.size, roles.indexOf(b.role), b.harness, b.model, b.effort],
-		),
+	const roles: readonly Role[] = ROLES;
+	return [...rows.values()]
+		.map(({ seen: _, ...row }) => row)
+		.sort((a, b) =>
+			order(
+				[a.size, roles.indexOf(a.role), a.harness, a.model, a.effort],
+				[b.size, roles.indexOf(b.role), b.harness, b.model, b.effort],
+			),
+		);
+}
+
+const noCounts = (): Omit<Counts, "first"> => ({
+	rounds: 0,
+	findings: { high: 0, medium: 0, low: 0 },
+	fixed: 0,
+	refuted: 0,
+	settled: 0,
+	open: 0,
+});
+const noFirst = (): FirstRounds => ({ pulls: 0, findings: { high: 0, medium: 0, low: 0 } });
+const noSpend = (): Spend => ({ pulls: 0, split: 0, ...zero() });
+
+/** Add one PR's `tallies` of a cell to its counts, its rounds as their most, and to its first rounds when all have one. */
+function count(to: { tally: Omit<Counts, "first">; firstRounds: FirstRounds }, tallies: Counts[]) {
+	to.tally.rounds += Math.max(...tallies.map((tally) => tally.rounds));
+	for (const tally of tallies) {
+		for (const severity of SEVERITIES) to.tally.findings[severity] += tally.findings[severity];
+		to.tally.fixed += tally.fixed;
+		to.tally.refuted += tally.refuted;
+		to.tally.settled += tally.settled;
+		to.tally.open += tally.open;
+	}
+	if (tallies.every((tally) => tally.first !== null)) {
+		to.firstRounds.pulls++;
+		for (const tally of tallies)
+			for (const severity of SEVERITIES) to.firstRounds.findings[severity] += tally.first![severity];
+	}
+}
+
+/**
+ * A PR's spend split among `seats`, as its record names them: spend whose `seat` is known, as a reviewer's session its
+ * record names, to that seat; each model's other spend to the seats of that model, of its effort where both name one;
+ * and spend of a model no seat names, as a sub-agent on a smaller model, to the seat that took the most, the PR's
+ * main one. Spend that fits several seats goes to the first, the PR's writer, when an implementing session spent it,
+ * and to the others when an iterating one did; what still fits several is split evenly among them and counted as
+ * `split`, rather than given to one. Returns each seat's share, by index, and nothing without a seat.
+ */
+export function share(
+	spent: (Spent & { role?: Role; seat?: number })[],
+	seats: { model: string; effort: string }[],
+): Map<number, Tokens & { split: number }> {
+	const shares = new Map<number, Tokens & { split: number }>();
+	if (seats.length === 0) return shares;
+	const into = (seat: number, from: Tokens, split = false) => {
+		const to = shares.get(seat) ?? { split: 0, ...zero() };
+		add(to, from);
+		if (split) to.split += from.cost;
+		shares.set(seat, to);
+	};
+	const rest: Spent[] = [];
+	for (const each of spent) {
+		if (each.seat !== undefined) {
+			into(each.seat, each);
+			continue;
+		}
+		const same = seats.flatMap((seat, i) => (seat.model === each.model ? [i] : []));
+		const effort = each.effort ?? "unknown";
+		const exact = same.filter((i) => seats[i]!.effort === effort);
+		const loose = same.filter((i) => seats[i]!.effort === "unknown" || effort === "unknown");
+		let fits = exact.length > 0 ? exact : loose.length > 0 ? loose : same;
+		if (fits.length > 1 && each.role === "implementing" && fits.includes(0)) fits = [0];
+		else if (fits.length > 1 && each.role === "iterating" && fits.some((i) => i !== 0))
+			fits = fits.filter((i) => i !== 0);
+		if (fits.length === 0) rest.push(each);
+		else for (const seat of fits) into(seat, part(each, fits.length), fits.length > 1);
+	}
+	if (rest.length > 0) {
+		const main = [...shares].reduce<[number, Tokens] | undefined>(
+			(best, entry) => (best === undefined || entry[1].cost > best[1].cost ? entry : best),
+			undefined,
+		);
+		for (const each of rest) into(main?.[0] ?? 0, each);
+	}
+	return shares;
+}
+
+/** A session's spend on one PR: on several, as a coordinator is, it counts toward each in equal shares. */
+const portion = (session: SessionRow, spent: Spent): Spent =>
+	session.pulls.length > 1 ? { ...spent, ...part(spent, session.pulls.length) } : spent;
+const shareOf = (session: SessionRow): Spent[] => session.models.map((spent) => portion(session, spent));
+
+/** One `n`th of `tokens`. */
+function part(tokens: Tokens, n: number): Tokens {
+	return {
+		input: tokens.input / n,
+		cacheWrite: tokens.cacheWrite / n,
+		cacheRead: tokens.cacheRead / n,
+		output: tokens.output / n,
+		cost: tokens.cost / n,
+		complete: tokens.complete,
+	};
+}
+
+const noOutcomes = (): Omit<AccuracyRow, "size" | "harness" | "model" | "effort" | "spent"> => ({
+	pulls: 0,
+	merged: 0,
+	handedBack: 0,
+	reviewed: 0,
+	scored: 0,
+	score: 0,
+	tally: noCounts(),
+	firstRounds: noFirst(),
+	landFixes: 0,
+	fixes: 0,
+});
+
+/** Add a PR's outcomes to a writer's or arm's row, counting its tallies only when it is its branch's `latest`. */
+function outcome(row: ReturnType<typeof noOutcomes>, each: PullRow, latest: Set<PullRow>) {
+	row.pulls++;
+	if (each.state === "merged") row.merged++;
+	if (each.handedBack) row.handedBack++;
+	row.fixes += each.fixedBy.length;
+	row.landFixes += each.landFixes.filter((by) => by !== MERGER).length;
+	// The shadow's findings measure an effort step, not the writer, so they stay out of the writer's row.
+	const counted = latest.has(each) ? each.review.filter((review) => review.tally !== null && !review.shadow) : [];
+	if (counted.length === 0) return;
+	row.reviewed++;
+	for (const { score } of counted)
+		if (score !== null) {
+			row.scored++;
+			row.score += score;
+		}
+	count(
+		row,
+		counted.map((review) => review.tally!),
 	);
 }
 
-function accuracyRows(pulls: PullRow[]): AccuracyRow[] {
-	const rows = new Map<string, AccuracyRow>();
-	// A branch's saved tallies span every PR from it, so only one PR that has both a tally and an implementer
-	// to count it for counts them: the one whose record holds the latest tally, as the most rounds show, since
-	// each round rewrites only its own PR's record; the newest breaks a tie. A deleted fork has no repository,
-	// so its PR stands alone.
+/**
+ * A branch's saved tallies span every PR from it, so only one of its PRs that `counts` counts them: the one whose
+ * record holds the latest tally, as the most rounds show, since each round rewrites only its own PR's record; the
+ * newest breaks a tie. A deleted fork has no repository, so its PR stands alone.
+ */
+function tallied(pulls: PullRow[], counts: (pull: PullRow) => boolean): Set<PullRow> {
 	const branch = (each: PullRow) => JSON.stringify([each.repository ?? each.number, each.branch]);
 	const rounds = (each: PullRow) =>
 		each.review.reduce((sum, review) => sum + (review.shadow ? 0 : (review.tally?.rounds ?? 0)), 0);
 	const latest = new Map<string, PullRow>();
 	for (const each of pulls) {
-		if (each.implementers.length === 0 || each.review.every((review) => review.tally === null)) continue;
+		if (!counts(each) || each.review.every((review) => review.tally === null)) continue;
 		const other = latest.get(branch(each));
 		if (
 			other === undefined ||
@@ -625,15 +846,28 @@ function accuracyRows(pulls: PullRow[]): AccuracyRow[] {
 		)
 			latest.set(branch(each), each);
 	}
+	return new Set(latest.values());
+}
+
+function accuracyRows(pulls: PullRow[]): AccuracyRow[] {
+	const rows = new Map<string, AccuracyRow>();
+	const latest = tallied(pulls, (each) => each.implementers.length > 0);
 	for (const each of pulls) {
 		// A session that pushed twice is one implementer of the PR, whether or not each line names its size.
-		const distinct = new Map(
-			each.implementers.map((i) => {
-				const at = { ...i, size: i.size ?? each.size };
-				return [JSON.stringify(at), at];
-			}),
-		);
-		for (const implementer of distinct.values()) {
+		const distinct = [
+			...new Map(
+				each.implementers.map(({ harness, model, effort, size }) => {
+					const at = { harness, model, effort, size: size ?? each.size };
+					return [JSON.stringify(at), at];
+				}),
+			).values(),
+		];
+		const writing = each.sessions
+			.filter((session) => session.role === "implementing" || session.role === "iterating")
+			.flatMap((session) => shareOf(session).map((spent) => ({ ...spent, role: session.role })));
+		const shares =
+			each.state === "merged" ? share(writing, distinct) : new Map<number, Tokens & { split: number }>();
+		for (const [i, implementer] of distinct.entries()) {
 			const size = implementer.size;
 			const id = JSON.stringify([size, implementer.harness, implementer.model, implementer.effort]);
 			let row = rows.get(id);
@@ -643,55 +877,132 @@ function accuracyRows(pulls: PullRow[]): AccuracyRow[] {
 					harness: implementer.harness,
 					model: implementer.model,
 					effort: implementer.effort,
-					pulls: 0,
-					merged: 0,
-					handedBack: 0,
-					reviewed: 0,
-					scored: 0,
-					score: 0,
-					tally: {
-						rounds: 0,
-						findings: { high: 0, medium: 0, low: 0 },
-						fixed: 0,
-						refuted: 0,
-						settled: 0,
-						open: 0,
-					},
-					landFixes: 0,
-					fixes: 0,
+					...noOutcomes(),
+					spent: noSpend(),
 				};
 				rows.set(id, row);
 			}
-			row.pulls++;
-			if (each.state === "merged") row.merged++;
-			if (each.handedBack) row.handedBack++;
-			row.fixes += each.fixedBy.length;
-			row.landFixes += each.landFixes.filter((by) => by !== MERGER).length;
-			// The shadow's findings measure an effort step, not the writer, so they stay out of the writer's row.
-			const tallied =
-				latest.get(branch(each)) === each
-					? each.review.filter((review) => review.tally !== null && !review.shadow)
-					: [];
-			if (tallied.length > 0) {
-				row.reviewed++;
-				row.tally.rounds += Math.max(...tallied.map((review) => review.tally!.rounds));
-			}
-			for (const { score, tally } of tallied) {
-				if (score !== null) {
-					row.scored++;
-					row.score += score;
-				}
-				for (const severity of SEVERITIES) row.tally.findings[severity] += tally!.findings[severity];
-				row.tally.fixed += tally!.fixed;
-				row.tally.refuted += tally!.refuted;
-				row.tally.settled += tally!.settled;
-				row.tally.open += tally!.open;
+			outcome(row, each, latest);
+			const spent = shares.get(i);
+			if (spent) {
+				row.spent.pulls++;
+				row.spent.split += spent.split;
+				add(row.spent, spent);
 			}
 		}
 	}
 	return [...rows.values()].sort((a, b) =>
 		order([a.size, a.harness, a.model, a.effort], [b.size, b.harness, b.model, b.effort]),
 	);
+}
+
+function reviewerRows(pulls: PullRow[]): ReviewerRow[] {
+	const rows = new Map<string, ReviewerRow>();
+	const latest = tallied(pulls, () => true);
+	const row = (each: PullRow, review: ReviewSummary) => {
+		const id = JSON.stringify([each.size, review.harness, review.model, review.effort, review.shadow]);
+		let found = rows.get(id);
+		if (!found) {
+			found = {
+				size: each.size,
+				harness: review.harness,
+				model: review.model,
+				effort: review.effort,
+				shadow: review.shadow,
+				reviewed: 0,
+				tally: noCounts(),
+				firstRounds: noFirst(),
+				spent: noSpend(),
+			};
+			rows.set(id, found);
+		}
+		return found;
+	};
+	for (const each of pulls) {
+		// A session its record names, or that one's sub-agent, is that reviewer's, so a routed and a shadow reviewer
+		// at one effort are told apart.
+		const named = (session: SessionRow) => {
+			const at = each.review.findIndex(
+				(review) =>
+					review.session !== null &&
+					(review.session === session.session || review.session === session.parent),
+			);
+			return at < 0 ? undefined : at;
+		};
+		const reviewing = each.sessions
+			.filter((session) => session.role === "reviewing")
+			.flatMap((session) => shareOf(session).map((spent) => ({ ...spent, seat: named(session) })));
+		for (const [i, spent] of share(reviewing, each.review)) {
+			const to = row(each, each.review[i]!).spent;
+			to.pulls++;
+			to.split += spent.split;
+			add(to, spent);
+		}
+		if (!latest.has(each)) continue;
+		for (const review of each.review.filter((review) => review.tally !== null)) {
+			const to = row(each, review);
+			to.reviewed++;
+			count(to, [review.tally!]);
+		}
+	}
+	return [...rows.values()].sort((a, b) =>
+		order(
+			[a.size, a.harness, a.model, a.effort, String(a.shadow)],
+			[b.size, b.harness, b.model, b.effort, String(b.shadow)],
+		),
+	);
+}
+
+/**
+ * The writer A/B's rollup: each sized PR whose every Implementer line names the same arm counts in it, under the
+ * size and writer its first line names, with every session's spend on it; a writer off its arm, such as a fallback
+ * that names none, leaves its PR in neither.
+ */
+function armRows(pulls: PullRow[]): ArmRow[] {
+	const rows = new Map<string, ArmRow>();
+	const seen = new Map<ArmRow, Set<string>>();
+	const latest = tallied(pulls, (each) => each.implementers.length > 0);
+	for (const each of pulls) {
+		const first = each.implementers[0];
+		if (!first?.arm || each.size === null || each.unread.length > 0) continue;
+		if (each.implementers.some((implementer) => implementer.arm !== first.arm)) continue;
+		const { harness, model, effort, arm } = first;
+		const id = JSON.stringify([each.size, arm, harness, model, effort]);
+		let row = rows.get(id);
+		if (!row) {
+			row = { size: each.size, arm, harness, model, effort, ...noOutcomes(), sessions: 0, spend: zero() };
+			rows.set(id, row);
+		}
+		outcome(row, each, latest);
+		const counted = seen.get(row) ?? new Set<string>();
+		seen.set(row, counted);
+		for (const session of each.sessions) {
+			// A session on several PRs of the arm, as a coordinator is, counts once, its shares adding up to its cost.
+			if (!counted.has(identity(session))) row.sessions++;
+			counted.add(identity(session));
+			for (const spent of shareOf(session)) add(row.spend, spent);
+		}
+	}
+	return [...rows.values()].sort((a, b) =>
+		order([a.size, a.arm, a.harness, a.model, a.effort], [b.size, b.arm, b.harness, b.model, b.effort]),
+	);
+}
+
+/** One row per risk tier among `pulls`, lowest first, and PRs with none last. */
+function tierRows(pulls: PullRow[]): TierRow[] {
+	return [...TIERS, null].flatMap((tier) => {
+		const rows = pulls.filter((each) => (each.risk?.tier ?? null) === tier);
+		if (rows.length === 0) return [];
+		return [
+			{
+				tier,
+				pulls: rows.length,
+				merged: rows.filter((each) => each.state === "merged").length,
+				raised: rows.filter((each) => each.risk !== null && each.risk.tier !== each.risk.classified).length,
+				culprits: rows.filter((each) => each.fixedBy.length > 0).length,
+			},
+		];
+	});
 }
 
 function onlineRows(pulls: PullRow[]): OnlineRow[] {
@@ -759,36 +1070,83 @@ export async function usage(root: string, options: UsageOptions, deps: UsageDepe
 	const allRows = pullRows(all, repository);
 	const rows = allRows.filter((row) => pulls.some((each) => each.number === row.number));
 	const byNumber = new Map(rows.map((row) => [row.number, row]));
-	const priced = deps.ccusage(options.since);
+	const exported = deps.sessions(new Date(since), options.ssh ?? []);
+	const { kept, dropped } = fold(exported ?? []);
 	let unattributed: Usage["unattributed"] = null;
-	if (priced !== null) {
+	let incomplete: Session[] = [];
+	let folded: Session[] = dropped;
+	if (exported !== null) {
 		// Every PR in the window competes for a session, so narrowing never hands one PR another's sessions.
-		const reviewers = new Map<string, { number: number; effort: string }>();
-		for (const row of [...allRows].sort((a, b) => a.number - b.number))
-			for (const review of row.review)
-				if (review.session !== null)
-					reviewers.set(review.session, { number: row.number, effort: review.effort });
-		const left = attribute(priced, sessionLogs(priced, deps), all, byNumber, reviewers);
+		const records = sessionRecords({
+			repository: key(repository),
+			sessions: kept,
+			evidence: exported,
+			pulls: all,
+			waits: deps.waits(since),
+			since,
+			split: deps.split,
+		});
+		const attributed: Session[] = [];
+		const left: Session[] = [];
+		for (const session of kept) {
+			const record = records.get(session);
+			const on = record?.pulls.flatMap((number) => byNumber.get(number) ?? []) ?? [];
+			for (const row of on) {
+				const each = { ...record!, host: session.host };
+				if (each.session === null) anonymous.set(each, JSON.stringify([session.host, session.files]));
+				row.sessions.push(each);
+			}
+			if (on.length) attributed.push(session);
+			else if (!record?.pulls.length) left.push(session);
+		}
+		const reported = narrowed ? attributed : [...attributed, ...left];
 		if (!narrowed) {
 			unattributed = { sessions: left.length, ...zero() };
 			for (const session of left) for (const spent of session.models) add(unattributed, spent);
 		}
+		incomplete = reported.filter((session) => !session.complete);
+		// A narrowed report counts only the folded copies of the sessions it reports.
+		const ids = new Set(reported.map((session) => `${session.harness}\0${session.id}`));
+		folded = dropped.filter((session) => ids.has(`${session.harness}\0${session.id}`));
 	}
 	const online = await readOnlineReviews(
 		client,
 		repository,
 		rows.map((row) => row.number),
 	);
-	for (const row of rows) row.online = online.get(row.number) ?? [];
+	for (const row of rows) {
+		const read = online.get(row.number);
+		row.online = read?.online ?? [];
+		// `quest ready` and hand edits drop the section before merge, so an earlier body counts too.
+		if (read?.bodies.some(handedBack)) row.handedBack = true;
+	}
+	const breakages = await fixBreakages({
+		client,
+		repository,
+		pulls: all,
+		only: narrowed ? new Set(rows.map((row) => row.number)) : undefined,
+	});
 	return {
 		repository: key(repository),
 		since: options.since,
-		priced: priced !== null,
+		priced: exported !== null,
 		pulls: rows,
 		spend: spendRows(rows),
 		accuracy: accuracyRows(rows),
+		reviewers: reviewerRows(rows),
+		arms: armRows(rows),
+		tiers: tierRows(rows),
 		online: onlineRows(rows),
+		splits: splitRows(rows),
+		breakages,
 		unattributed,
+		folded: { copies: folded.length, hosts: [...new Set(folded.map((session) => session.host))] },
+		incomplete: incomplete.map((session) => ({
+			host: session.host,
+			harness: session.harness,
+			session: session.id,
+			skippedLines: session.skippedLines,
+		})),
 	};
 }
 
@@ -801,11 +1159,144 @@ const compact = (n: number) =>
 				? `${(n / 1e3).toFixed(1)}k`
 				: String(n);
 const tokens = (t: Tokens) =>
-	`in ${compact(t.input)}, cache ${compact(t.cacheWrite)} written ${compact(t.cacheRead)} read, out ${compact(t.output)}, ~$${t.cost.toFixed(2)}`;
+	`in ${compact(t.input)}, cache ${compact(t.cacheWrite)} written ${compact(t.cacheRead)} read, out ${compact(t.output)}, ~$${t.cost.toFixed(2)}${t.complete ? "" : " or more"}`;
 const mean = (sum: number, count: number) => (count ? (sum / count).toFixed(1) : "-");
+const firsts = (f: FirstRounds) => `first rounds ${f.pulls}: ${severityText(f.findings)}`;
+const per = (s: Spend, what: string) =>
+	s.pulls
+		? `~$${(s.cost / s.pulls).toFixed(2)}${s.complete ? "" : " or more"} per ${what} over ${s.pulls}${s.split ? `, ~$${s.split.toFixed(2)} of it split with other seats` : ""}`
+		: `no ${what} priced`;
 const percent = (part: number, whole: number) => (whole ? `${Math.round((100 * part) / whole)}%` : "-");
 const answers = (r: Omit<OnlineReview, "reviewer" | "finalHead">) =>
 	`${r.findings} finding${r.findings === 1 ? "" : "s"}: ${r.accepted} accepted, ${r.declined} declined, ${r.unclassified} unclassified, ${r.unanswered} unanswered`;
+
+const seat = ({ model, effort }: Seat) => `${model} ${effort}`;
+
+/** A fix's breakage: its culprit's tier, size, writers, and reviewers, then who found it, and when after the merge. */
+function breakageText(b: BreakageRecord): string {
+	const c = b.culprit!;
+	const made = [
+		c.tier ?? "no tier",
+		c.size ?? "unsized",
+		c.writers.length ? `written by ${c.writers.map(seat).join(", ")}` : "no writer recorded",
+		c.reviewers.length ? `reviewed by ${c.reviewers.map(seat).join(", ")}` : "no local review",
+	].join(", ");
+	const ms = c.merged === null ? null : Date.parse(b.at) - Date.parse(c.merged);
+	const after =
+		ms === null
+			? "never merged"
+			: ms < 0
+				? "opened before it merged"
+				: `${ms >= 172_800_000 ? `${(ms / 86_400_000).toFixed(1)}d` : duration(ms)} after merge`;
+	return `${made}; fixed by #${b.fix}${b.incident ? `, closing incident ${b.incident}` : ""}, ${b.found ? `found by ${b.found}` : "finder unrecorded"}, ${after}`;
+}
+
+/** Seconds under a minute, hours past two, else minutes. */
+const duration = (ms: number) =>
+	ms < 60_000
+		? `${Math.round(ms / 1000)}s`
+		: ms >= 7_200_000
+			? `${(ms / 3_600_000).toFixed(1)}h`
+			: `${Math.round(ms / 60_000)}m`;
+
+const noCategories = () =>
+	Object.fromEntries(SPLIT_CATEGORIES.map((c) => [c, { ms: 0, tokens: 0 }])) as TimeSplit["categories"];
+
+/** Each role's splits, summed over the reported PRs' sessions, a session on several PRs once. */
+function splitRows(pulls: PullRow[]): SplitRow[] {
+	const rows = new Map<Role, SplitRow>();
+	const seen = new Set<string>();
+	for (const each of pulls)
+		for (const session of each.sessions) {
+			if (seen.has(identity(session))) continue;
+			seen.add(identity(session));
+			let row = rows.get(session.role);
+			if (!row) {
+				row = {
+					role: session.role,
+					sessions: 0,
+					unsplit: 0,
+					categories: noCategories(),
+					checked: 0,
+					disagreed: 0,
+					notes: 0,
+					usage: [],
+				};
+				rows.set(session.role, row);
+			}
+			const split = session.split;
+			if (split === null) {
+				row.unsplit++;
+				continue;
+			}
+			row.sessions++;
+			for (const c of SPLIT_CATEGORIES) {
+				row.categories[c].ms += split.categories[c].ms;
+				row.categories[c].tokens += split.categories[c].tokens;
+			}
+			row.checked += split.check?.ms ?? 0;
+			row.disagreed += split.check?.disagreed ?? 0;
+			row.notes += split.notes.length;
+			for (const u of split.usage) {
+				const to = row.usage.find(
+					(x) => x.harness === u.harness && x.model === u.model && x.effort === u.effort,
+				);
+				if (to) {
+					to.input += u.input;
+					to.cached += u.cached;
+					to.output += u.output;
+				} else row.usage.push({ ...u });
+			}
+		}
+	const roles: readonly Role[] = ROLES;
+	return [...rows.values()].sort((a, b) => roles.indexOf(a.role) - roles.indexOf(b.role));
+}
+
+/** Each category with time, most first, as a share of the working time, then idle; empty when there is none. */
+function categoryText(categories: TimeSplit["categories"]): string {
+	const working = SPLIT_CATEGORIES.filter((c) => c !== "idle");
+	const total = working.reduce((sum, c) => sum + categories[c].ms, 0);
+	const parts = working
+		.filter((c) => categories[c].ms >= 1000)
+		.sort((a, b) => categories[b].ms - categories[a].ms)
+		.map((c) => `${c} ${duration(categories[c].ms)} (${percent(categories[c].ms, total)})`);
+	if (categories.idle.ms >= 1000) parts.push(`idle ${duration(categories.idle.ms)}`);
+	return parts.join(", ");
+}
+
+/** A PR's sessions' time by category, a shared session's in its share, and how many have no split. */
+function splitTotals(sessions: SessionRow[]): string {
+	const totals = noCategories();
+	let unsplit = 0;
+	for (const s of sessions) {
+		if (s.split === null) unsplit++;
+		else
+			for (const c of SPLIT_CATEGORIES) {
+				totals[c].ms += s.split.categories[c].ms / s.pulls.length;
+				totals[c].tokens += s.split.categories[c].tokens / s.pulls.length;
+			}
+	}
+	const text = categoryText(totals);
+	const missing = unsplit ? `${unsplit} session${unsplit === 1 ? "" : "s"} not split` : "";
+	return [text, missing].filter(Boolean).join("; ");
+}
+
+/**
+ * The time a PR's sessions spent in each kind of wait, a shared session's in its share, and how many sessions'
+ * waits are unknown, as for those read on another host; empty when there is nothing to say.
+ */
+function waitTotals(sessions: SessionRow[]): string {
+	const totals = new Map<string, number>();
+	let unknown = 0;
+	for (const s of sessions) {
+		if (s.waits === null) unknown++;
+		for (const w of s.waits ?? [])
+			totals.set(w.kind, (totals.get(w.kind) ?? 0) + (Date.parse(w.end) - Date.parse(w.start)) / s.pulls.length);
+	}
+	const parts = WAIT_KINDS.filter((kind) => totals.has(kind)).map((kind) => `${kind} ${duration(totals.get(kind)!)}`);
+	if (unknown) parts.push(`unknown for ${unknown} session${unknown === 1 ? "" : "s"} on other hosts`);
+	return parts.join(", ");
+}
 
 /** Rows of cells, each column padded to its widest cell. */
 function table(rows: string[][]): string[] {
@@ -825,9 +1316,18 @@ export function usageLines(report: Usage): string[] {
 	];
 	for (const row of report.pulls) {
 		const state = `${row.state}${row.draft ? (row.handedBack ? " draft, handed back" : " draft") : ""}`;
-		lines.push("", `#${row.number} ${row.size ?? "-"} ${state}: ${row.title} (${row.branch})`);
-		for (const i of row.implementers)
-			lines.push(`  implementer: ${i.harness}, ${i.model}, ${i.effort} effort${i.size ? ` (${i.size})` : ""}`);
+		lines.push(
+			"",
+			`#${row.number} ${row.size ?? "-"} ${row.risk?.tier ?? "-"} ${state}: ${row.title} (${row.branch})`,
+		);
+		if (row.risk)
+			lines.push(
+				`  risk: ${row.risk.tier}, ${row.risk.reason}${row.risk.tier === row.risk.classified ? "" : `; raised from ${row.risk.classified} by a reviewer`}`,
+			);
+		for (const i of row.implementers) {
+			const notes = [i.size, i.arm && `arm ${i.arm}`].filter(Boolean).join(", ");
+			lines.push(`  implementer: ${i.harness}, ${i.model}, ${i.effort} effort${notes ? ` (${notes})` : ""}`);
+		}
 		for (const item of row.unread) lines.push(`  unread: ${item}`);
 		for (const r of row.review)
 			lines.push(
@@ -838,9 +1338,23 @@ export function usageLines(report: Usage): string[] {
 		if (row.landFixes.length) lines.push(`  land fixes: ${row.landFixes.join("; ")}`);
 		if (row.fixedBy.length) lines.push(`  fixed later by: ${row.fixedBy.map((n) => `#${n}`).join(", ")}`);
 		const sessions = row.sessions.flatMap((s) =>
-			s.models.map((m) => ["   ", s.role, s.harness, m.model, s.effort ?? "-", tokens(m)]),
+			s.models.map((m) => [
+				"   ",
+				s.role,
+				s.host ?? "local",
+				s.harness,
+				m.model ?? "-",
+				m.effort ?? "-",
+				`${tokens(m)}${s.pulls.length > 1 ? `, 1/${s.pulls.length} here` : ""}`,
+			]),
 		);
 		if (sessions.length) lines.push("  sessions:", ...table(sessions));
+		const waited = waitTotals(row.sessions);
+		if (waited) lines.push(`  waits: ${waited}`);
+		const spent = splitTotals(row.sessions);
+		if (spent) lines.push(`  time: ${spent}`);
+		for (const s of row.sessions)
+			for (const note of s.split?.notes ?? []) lines.push(`  went wrong (${s.role}): ${note}`);
 	}
 	if (report.spend.length)
 		lines.push(
@@ -852,7 +1366,7 @@ export function usageLines(report: Usage): string[] {
 					s.size ?? "-",
 					s.role,
 					s.harness,
-					s.model,
+					s.model ?? "-",
 					s.effort ?? "-",
 					`${s.sessions}x`,
 					tokens(s),
@@ -870,7 +1384,50 @@ export function usageLines(report: Usage): string[] {
 					a.harness,
 					a.model,
 					a.effort,
-					`${a.pulls} PRs, ${a.merged} merged, ${a.handedBack} handed back, ${a.reviewed} reviewed: score ${mean(a.score, a.scored)}, rounds ${mean(a.tally.rounds, a.reviewed)}, ${findingsText(a.tally)}; ${a.landFixes} land fixes, ${a.fixes} later fixes`,
+					`${a.pulls} PRs, ${a.merged} merged, ${a.handedBack} handed back, ${a.reviewed} reviewed: score ${mean(a.score, a.scored)}, rounds ${mean(a.tally.rounds, a.reviewed)}, ${findingsText({ ...a.tally, first: null })}, ${firsts(a.firstRounds)}; ${a.landFixes} land fixes, ${a.fixes} later fixes; ${per(a.spent, "merged PR")}`,
+				]),
+			),
+		);
+	if (report.reviewers.length)
+		lines.push(
+			"",
+			"Local reviewers by PR size:",
+			...table(
+				report.reviewers.map((r) => [
+					" ",
+					r.size ?? "-",
+					r.harness,
+					r.model,
+					`${r.effort}${r.shadow ? ", shadow" : ""}`,
+					`${r.reviewed} reviewed: rounds ${mean(r.tally.rounds, r.reviewed)}, ${findingsText({ ...r.tally, first: null })}, ${firsts(r.firstRounds)}; ${per(r.spent, "PR reviewed")}`,
+				]),
+			),
+		);
+	if (report.arms.length)
+		lines.push(
+			"",
+			"Writer A/B by size and arm:",
+			...table(
+				report.arms.map((a) => [
+					" ",
+					a.size,
+					a.arm,
+					a.harness,
+					a.model,
+					a.effort,
+					`${a.pulls} PRs, ${a.merged} merged, ${a.handedBack} handed back, ${a.reviewed} reviewed: rounds ${mean(a.tally.rounds, a.reviewed)}, ${findingsText({ ...a.tally, first: null })}, ${firsts(a.firstRounds)}; ${a.fixes} later fixes; ${a.sessions} sessions, ${tokens(a.spend)}`,
+				]),
+			),
+		);
+	if (report.tiers.length)
+		lines.push(
+			"",
+			"By risk tier:",
+			...table(
+				report.tiers.map((t) => [
+					" ",
+					t.tier ?? "-",
+					`${t.pulls} PRs, ${t.merged} merged, ${t.raised} raised by a reviewer, ${t.culprits} later fixed`,
 				]),
 			),
 		);
@@ -886,12 +1443,61 @@ export function usageLines(report: Usage): string[] {
 				]),
 			),
 		);
+	if (report.splits.some((r) => r.sessions > 0))
+		lines.push(
+			"",
+			"Time by role, beyond timed waits:",
+			...report.splits.flatMap((r) => [
+				`  ${r.role}, ${r.sessions} split${r.unsplit ? `, ${r.unsplit} not` : ""}: ${categoryText(r.categories) || "no time"}`,
+				`    ${r.notes} notes; checked ${duration(r.checked)}, ${percent(r.disagreed, r.checked)} labeled differently; labeling took ${
+					r.usage
+						.map(
+							(u) =>
+								`${u.model} ${u.effort} in ${compact(u.input)} (${compact(u.cached)} cached), out ${compact(u.output)}`,
+						)
+						.join(", ") || "nothing"
+				}`,
+			]),
+		);
+	if (report.breakages.length)
+		lines.push(
+			"",
+			"Breakages, by the merged fix naming its culprit under ## Caused by:",
+			...table(report.breakages.map((b) => [" ", `#${b.culprit!.number}`, breakageText(b)])),
+		);
 	const u = report.unattributed;
 	if (u) lines.push("", `Unattributed: ${u.sessions} sessions on no PR here, any repository or agent: ${tokens(u)}`);
+	const host = (name: string | null) => name ?? "local";
+	const { folded, incomplete } = report;
+	if (folded.copies)
+		lines.push(
+			"",
+			`Folded ${folded.copies} ${folded.copies === 1 ? "copy" : "copies"} of sessions found on several hosts, keeping each one's costliest; left out from ${folded.hosts.map(host).join(", ")}`,
+		);
+	if (incomplete.length)
+		lines.push(
+			"",
+			"Lower bounds: these sessions had a request token-max could not price, or a line it could not read or that was unfinished:",
+			...table(
+				incomplete.map((s) => [
+					" ",
+					host(s.host),
+					s.harness,
+					s.session ?? "-",
+					`${s.skippedLines} unreadable lines`,
+				]),
+			),
+		);
 	return lines;
 }
 
 /** The dependencies `quest usage` runs with. */
 export function usageDependencies(github: ClaimDependencies): UsageDependencies {
-	return { ...github, ccusage: (since) => runCcusage(since, process.env), env: process.env, home: homedir() };
+	const state = stateDirectory(process.env);
+	return {
+		...github,
+		sessions: runTokenMax,
+		waits: (since) => readWaits(since),
+		split: (session, waits, since) => keptSplit(state, session, waits, since),
+	};
 }
