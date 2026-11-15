@@ -6,7 +6,7 @@ import { join } from "node:path/posix";
 
 import { type ShellCall, type ShellGroup, commandLine } from "../core";
 import { cgroupUsage, members } from "./supervise";
-import { appendLog, logDirectory, readLog } from "./waits";
+import { appendLog, logDays, logDirectory, readDays } from "./waits";
 
 /** The session's cgroup and its CPU counter, in microseconds, when a hook sampled them. */
 export interface Sample {
@@ -47,9 +47,39 @@ export function startLine(caller: Caller, call: string, command: string, sample:
 	return { kind: "start", ...caller, call, command: commandLine(command), ...sample };
 }
 
-/** The call lines logged on this host from `since`'s UTC day on, failing on a line it cannot read. */
+/**
+ * The call lines logged on this host from `since`'s UTC day on, and from each earlier day while one of them is about
+ * a call whose start or background handoff lies earlier, so a group that began before the window ends where it
+ * did. Fails on a line it cannot read.
+ */
 export function readCalls(since: number, env: NodeJS.ProcessEnv = process.env): CallLine[] {
-	return readLog(callsDirectory(env), since, parseCall, "a shell call");
+	const dir = callsDirectory(env);
+	const days = logDays(dir);
+	const first = new Date(since).toISOString().slice(0, 10);
+	let from = days.findIndex((name) => name >= first);
+	if (from === -1) from = days.length;
+	let lines = readDays(dir, days.slice(from), parseCall, "a shell call");
+	while (from > 0 && begunEarlier(lines)) {
+		from--;
+		lines = [...readDays(dir, [days[from]!], parseCall, "a shell call"), ...lines];
+	}
+	return lines;
+}
+
+/** Whether `lines` hold a call's return without its start, or a running background task without its handoff. */
+function begunEarlier(lines: CallLine[]): boolean {
+	const started = new Set<string>();
+	const handed = new Set<string>();
+	for (const line of lines) {
+		if (line.kind === "start") started.add(`${line.harness}\0${line.session}\0${line.call}`);
+		if (line.kind === "end" && line.task !== null) handed.add(`${line.harness}\0${line.session}\0${line.task}`);
+	}
+	return lines.some((line) =>
+		line.kind === "end"
+			? !started.has(`${line.harness}\0${line.session}\0${line.call}`)
+			: line.kind === "stop" &&
+				line.running.some((task) => !handed.has(`${line.harness}\0${line.session}\0${task}`)),
+	);
 }
 
 function parseCall(line: string): CallLine | null {

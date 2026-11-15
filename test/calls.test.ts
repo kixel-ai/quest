@@ -189,3 +189,29 @@ test("the call log keeps whole lines and reads from a window's day", () => {
 	logCall(line, env, Date.parse(line.at));
 	expect(() => readCalls(Date.parse("2026-11-14T20:00:00Z"), env)).toThrow("is not a shell call quest logged");
 });
+
+test("reading a window also reads each earlier day a call in it began on", () => {
+	const env = { XDG_STATE_HOME: tempDir() };
+	const sample = (at: string) => ({ at, cgroup: "/a.scope", usage: 0 });
+	const caller = { harness: "claude", session: "s", agent: null };
+	const log = (line: CallLine) => logCall(line, env, Date.parse(line.at));
+	// Two days back, an unrelated call; the day before, a background call handed off; the window's day, a call that
+	// ran over midnight and a turn end that still lists the background task.
+	log({ kind: "start", ...caller, call: "old", command: "old", ...sample("2026-11-13T10:00:00.000Z") });
+	log({ kind: "end", ...caller, call: "old", task: null, ...sample("2026-11-13T10:00:01.000Z") });
+	log({ kind: "start", ...caller, call: "bg", command: "bg", ...sample("2026-11-14T23:50:00.000Z") });
+	log({ kind: "end", ...caller, call: "bg", task: "b1", ...sample("2026-11-14T23:50:01.000Z") });
+	log({ kind: "start", ...caller, call: "late", command: "late", ...sample("2026-11-14T23:59:00.000Z") });
+	log({ kind: "end", ...caller, call: "late", task: null, ...sample("2026-11-15T00:01:00.000Z") });
+	log({ kind: "stop", harness: "claude", session: "s", running: ["b1"], ...sample("2026-11-15T00:02:00.000Z") });
+	const read = readCalls(Date.parse("2026-11-15T00:00:00Z"), env);
+	expect(read.map((l) => (l.kind === "stop" ? "stop" : `${l.kind} ${l.call}`))).toEqual([
+		"start bg",
+		"end bg",
+		"start late",
+		"end late",
+		"stop",
+	]);
+	// The group they form began before the window, so no record of the window holds it.
+	expect(shellGroups(read).map((g) => [g.start, g.calls.length])).toEqual([[Date.parse("2026-11-14T23:50:00Z"), 2]]);
+});

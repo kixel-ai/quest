@@ -75,11 +75,8 @@ export function appendLog(dir: string, value: unknown, now: number, what: string
 	}
 }
 
-/**
- * The lines in `dir`'s files from `since`'s UTC day on, as `parse` reads each, failing on a line it cannot read
- * except a last one still being written.
- */
-export function readLog<T>(dir: string, since: number, parse: (line: string) => T | null, what: string): T[] {
+/** The days `dir` holds a file for, as `YYYY-MM-DD`, oldest first. */
+export function logDays(dir: string): string[] {
 	let names: string[];
 	try {
 		names = readdirSync(dir);
@@ -87,11 +84,30 @@ export function readLog<T>(dir: string, since: number, parse: (line: string) => 
 		if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
 		throw error;
 	}
-	const first = day(since);
+	return names
+		.filter((name) => /^\d{4}-\d\d-\d\d\.jsonl$/.test(name))
+		.map((name) => name.slice(0, 10))
+		.sort();
+}
+
+/**
+ * The lines in `dir`'s files from `since`'s UTC day on, as `parse` reads each, failing on a line it cannot read
+ * except a last one still being written.
+ */
+export function readLog<T>(dir: string, since: number, parse: (line: string) => T | null, what: string): T[] {
+	return readDays(
+		dir,
+		logDays(dir).filter((name) => name >= day(since)),
+		parse,
+		what,
+	);
+}
+
+/** The lines in `dir`'s files for `days`, as `readLog` reads them. */
+export function readDays<T>(dir: string, days: string[], parse: (line: string) => T | null, what: string): T[] {
 	const read: T[] = [];
-	for (const name of names.sort()) {
-		if (!/^\d{4}-\d\d-\d\d\.jsonl$/.test(name) || name.slice(0, 10) < first) continue;
-		const path = join(dir, name);
+	for (const name of days) {
+		const path = join(dir, `${name}.jsonl`);
 		const lines = readFileSync(path, "utf8").split("\n");
 		lines.forEach((line, i) => {
 			if (line === "") return;
