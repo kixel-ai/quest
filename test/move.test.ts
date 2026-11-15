@@ -530,6 +530,7 @@ test("open pull requests come from every page, by head branch", async () => {
 	const requested: string[] = [];
 	const deps: GitHubDependencies = {
 		token: "test-token",
+		quota: "wait",
 		now: () => 0,
 		sleep: async () => undefined,
 		warn: () => undefined,

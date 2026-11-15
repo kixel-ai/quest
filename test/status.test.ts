@@ -139,6 +139,7 @@ function setup(
 	const activityRequests: string[] = [];
 	const deps: GitHubDependencies = {
 		token: "test-token",
+		quota: "wait",
 		now: () => options.now ?? 0,
 		sleep: async () => {},
 		warn: (message) => options.warnings?.push(message),
