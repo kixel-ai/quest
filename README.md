@@ -1063,9 +1063,9 @@ and later picks, so only a writer's push, which moves the head away, ends it.
 A writer can push to the repository: an owner, or a member or collaborator
 whose permission GitHub reports as write or higher. A bot is never one.
 
-## Gate expensive commands
+## Gate CPU-heavy commands
 
-`quest gate <command> [args...]` holds an expensive command until the host has
+`quest gate <command> [args...]` holds a CPU-heavy command until the host has
 room for it, across all of a user's repositories and worktrees:
 
 ```sh
@@ -1073,9 +1073,11 @@ quest gate bun run test
 quest gate cargo build --release
 ```
 
-Leave model calls, such as `quest review`, and long-running servers out of the
-gate: they wait rather than compute, and a server never exits, so it would hold
-its admission forever.
+Gate a command by the CPU it may use, not by how long it runs. Leave model
+calls, such as `quest review`, long-running servers, and quick tools such as
+formatters out of the gate: the first two wait rather than compute, a server
+never exits, so it would hold its admission forever, and a quick tool would
+only wait for room it barely uses.
 
 Like every command Quest runs, the gated command gets the environment Quest was
 started with. Quest never loads the working directory's `.env` files, as Bun

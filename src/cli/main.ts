@@ -159,7 +159,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 
 	program
 		.command("gate")
-		.summary("Run an expensive command once the host has room for it")
+		.summary("Run a CPU-heavy command once the host has room for it")
 		.description(
 			"Wait while the 1-minute load average exceeds the host's CPU count or available memory is below " +
 				"min(4 GiB, RAM/4). Each admission in the last minute counts as one more unit of load and one " +
@@ -167,8 +167,8 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"only the raw measures do. The load limit applies only while a gated command still runs. Where a " +
 				"systemd scope owns each running command, the load counts as at least the sum of their peak CPU " +
 				"use in the last minute, and nothing starts while those fill every CPU, so a lull between a " +
-				"command's phases does not free its CPUs. Leave model calls, such as quest review, and long-running " +
-				"servers out of the gate. Nested gate " +
+				"command's phases does not free its CPUs. Gate by CPU, not run time: leave model calls, such as " +
+				"quest review, long-running servers, and quick tools such as formatters out of the gate. Nested gate " +
 				"calls run immediately. Limits come from the host; there is " +
 				"no configuration.\n\n" +
 				`--quick waits at most ${QUICK_MS / 1000} seconds, then starts the command anyway; pass it only for ` +

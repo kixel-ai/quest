@@ -43,7 +43,7 @@ Put scratch, such as PR bodies, review drafts, logs, patches, helper scripts, an
 Before ending a task, pausing for a decision, or handing off, commit a checkpoint and report what remains and which checks passed or did not run.
 Finish with a clean checkout: intended changes committed and pushed, incidental generated changes restored, and pre-existing or unrelated changes preserved.
 
-Run CPU-heavy commands, such as builds, tests, model checkers, and browsers, through `quest gate <command>`, which queues until the host has room; model calls like `quest review` and servers stay out.
+Run commands that may use significant CPU, such as builds, tests, and model checkers, through `quest gate <command>`. Gate by CPU, not run time: `quest review`, servers, and formatters stay out.
 Never work around the queue by polling the load or capping agents, `quest agent admit`'s job; cancel a gated command only once its result is unneeded.
 Run it in the foreground and read its exit code directly, not through a pipe.
 Never end a turn or report while your background work runs, and never poll it with `sleep`, status checks, or busy loops: block on the harness's own wait for that task, at its longest interval, saying nothing between waits.

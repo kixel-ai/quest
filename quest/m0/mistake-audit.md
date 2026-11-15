@@ -112,6 +112,10 @@ Check first next run:
   2026-11-11T18:43Z: no data yet.
 - Heads that landed past a finding or decision, after
   [moq-dev/quest#652](https://github.com/moq-dev/quest/pull/652) lands.
+- Gating mistakes, after `quest context` said on 2026-11-15 to gate by
+  CPU, not run time: `quest gate quest review` ran 591 times in the 14
+  days before, 126 of them on 11-12. Count it from transcripts until
+  [gating records](/quest/m0/benchmark/gating.md) land, then from them.
 - Whether moq-dev/moq and moq-dev/moq.pro planned the runtime follow-ups
   of moq-dev/quest's 2026-11-11 run PR, and whether their escapes recurred.
 
