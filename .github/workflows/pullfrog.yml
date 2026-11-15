@@ -36,6 +36,9 @@ jobs:
         with:
           determinate: false
       - name: Put the dev shell's tools on PATH
+        # bash, not the default shell, for pipefail: a failing print-dev-env
+        # must fail the step, not write an empty PATH.
+        shell: bash
         run: |
           nix print-dev-env --json |
             jq -r '.variables.PATH.value' |
