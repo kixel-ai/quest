@@ -90,6 +90,7 @@ import {
 import { CHECKED_CONTEXT, USER_ASKED, questRoot } from "./rules";
 import { messageLines, messages } from "./messages";
 import { logWait, pullWaitKind, readWaits } from "./waits";
+import { readCalls } from "./calls";
 import {
 	CHECKOUT_CONFIG,
 	SEND_INTERVAL,
@@ -1273,6 +1274,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 						github: () => gitHubDependencies(warn),
 						sessions: (since) => runTokenMax(since, []),
 						waits: (since) => readWaits(since),
+						calls: (since) => readCalls(since),
 						ask,
 						fetch: globalThis.fetch,
 						sleep: (ms) => new Promise((done) => setTimeout(done, ms)),
@@ -1871,7 +1873,8 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"calls there that break a rule a program can check: em dashes an agent writes, a push without an " +
 				"explicit refspec, a force-push or rebase, a GitHub post without its `(Written by ...)` footer, and " +
 				"scratch files in /tmp. Stop and SubagentStop refuse to end an agent's turn while a `quest gate` " +
-				"command it started runs in the background. Each runs `quest hook`, so `quest` must be on the PATH the agent starts " +
+				"command it started runs in the background. PreToolUse and the PostToolUse hooks also sample each " +
+				"shell call's CPU for the session's record. Each runs `quest hook`, so `quest` must be on the PATH the agent starts " +
 				"with, and Codex asks to trust its hooks once through /hooks.\n\n" +
 				"With --worktrees, also installs Claude Code's " +
 				WORKTREE_HOOKS.map((h) => h.event).join(", ") +
@@ -1906,7 +1909,10 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"or a commit message or new GitHub post that adds an em dash outside a `>` quote line, a `git push` " +
 				"whose refspecs lack a `:`, a force-push, a `git rebase` or `git pull --rebase`, a new GitHub post " +
 				"whose body lacks a `(Written by ...)` line, or a file written under /tmp. A force-push or rebase the " +
-				`user asked for passes with the \`${USER_ASKED}\` prefix. Stop and SubagentStop refuse to end the ` +
+				`user asked for passes with the \`${USER_ASKED}\` prefix. Around each shell call it lets through, ` +
+				"PreToolUse and PostToolUse (or Claude Code's PostToolUseFailure) log the session's cgroup CPU counter " +
+				"under $XDG_STATE_HOME/quest/calls, where that cgroup holds the session alone, for its record. " +
+				"Stop and SubagentStop refuse to end the " +
 				"turn, naming each command, while a `quest gate` command the ending agent started runs in Claude " +
 				"Code's background: one whose background ID its transcript holds. Otherwise Claude Code's and Codex's Stop " +
 				`queue the session's record for the endpoint the checkout's ${CHECKOUT_CONFIG} names, for quest records ` +

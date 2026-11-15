@@ -17,8 +17,3 @@ heavy commands, letting them start after 60 seconds whatever the load:
 `just fix` 41 times, `just check` 18, and `cargo build` 18. No repository
 script passes it outside Quest's own lifecycle check. Until this lands,
 `quest gate --help` still offers it for formatters.
-
-## Related
-
-- [Gating records](/quest/m0/benchmark/gating.md) - audits what agents
-  gate under the same rule

@@ -40,6 +40,7 @@ import { type RecordInput, buildRecords } from "./records";
 import { stateDirectory } from "./send";
 import { keptSplit } from "./split";
 import { type LoggedWait, readWaits } from "./waits";
+import { type CallLine, readCalls } from "./calls";
 
 /** A session's tokens, and their cost at the model's API list price, which subscriptions do not bill. */
 export interface Tokens {
@@ -268,6 +269,8 @@ export interface UsageDependencies extends ClaimDependencies {
 	sessions(since: Date, ssh: string[]): Session[] | null;
 	/** The waits logged on this host that ended since an instant, epoch ms. */
 	waits(since: number): LoggedWait[];
+	/** The shell calls sampled on this host around an instant, epoch ms (see `readCalls`). */
+	calls(since: number): CallLine[];
 	/** A local session's time split from the labels the record sender kept, never asking a model. */
 	split: NonNullable<RecordInput["split"]>;
 }
@@ -630,6 +633,8 @@ export interface RecordSources {
 	pulls: Pull[];
 	/** The waits logged on this host. */
 	waits: LoggedWait[];
+	/** The shell calls sampled on this host. */
+	calls: CallLine[];
 	/** The sessions to build records for; by default, those on a PR. */
 	emit?: Set<Session>;
 	/** The window's start, epoch ms. */
@@ -640,7 +645,7 @@ export interface RecordSources {
 
 /** Each session's record, attributed to the PRs in the window, whose review records name their reviewers and classifier. */
 export function sessionRecords(sources: RecordSources): Map<Session, SessionRecord> {
-	const { repository, sessions, evidence, pulls, waits, emit, since, split } = sources;
+	const { repository, sessions, evidence, pulls, waits, calls, emit, since, split } = sources;
 	// Only the reviewer sessions are read, so no PR author can stop every session's record with a body this version
 	// cannot parse.
 	const reviewers = new Set(pulls.flatMap((pull) => reviewSessions(pull.body)));
@@ -652,6 +657,7 @@ export function sessionRecords(sources: RecordSources): Map<Session, SessionReco
 		reviewers,
 		classifiers,
 		waits,
+		calls,
 		emit,
 		since,
 		split,
@@ -1083,6 +1089,7 @@ export async function usage(root: string, options: UsageOptions, deps: UsageDepe
 			evidence: exported,
 			pulls: all,
 			waits: deps.waits(since),
+			calls: deps.calls(since),
 			since,
 			split: deps.split,
 		});
@@ -1498,6 +1505,7 @@ export function usageDependencies(github: ClaimDependencies): UsageDependencies 
 		...github,
 		sessions: runTokenMax,
 		waits: (since) => readWaits(since),
+		calls: (since) => readCalls(since),
 		split: (session, waits, since) => keptSplit(state, session, waits, since),
 	};
 }

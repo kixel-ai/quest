@@ -24,8 +24,9 @@ import type { Readable } from "node:stream";
 import { setTimeout as sleep } from "node:timers/promises";
 import { type Cancellation, cancelled, follow, forwards, GROUP, interrupts, received, requested } from "./interrupt";
 import { stubbed } from "./job";
+import { commandLine } from "../core";
 import { envSessions, logWait } from "./waits";
-import { questScope, scopeGroup, startTime, systemdScopes } from "./supervise";
+import { cgroupUsage, measuredRun, questScope, scopeGroup, startTime, systemdScopes } from "./supervise";
 
 /**
  * One admitted command: a unique id, the wall-clock time it was admitted, and the process ID of
@@ -436,17 +437,8 @@ export function fileHost(directory: string, now = Date.now): Host {
 			const group = groups.get(unit) ?? scopeGroup(unit);
 			if (group === undefined) return undefined;
 			groups.set(unit, group);
-			let stat: string;
-			try {
-				stat = readFileSync(join(group, "cpu.stat"), "utf8");
-			} catch (error) {
-				// The scope ended, and systemd removed its cgroup.
-				if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
-				throw error;
-			}
-			const usage = stat.match(/^usage_usec (\d+)$/m)?.[1];
-			if (usage === undefined) throw new Error(`gate cannot read the CPU use of ${unit}`);
-			return Number(usage);
+			// Null once the scope ended, and systemd removed its cgroup.
+			return cgroupUsage(group) ?? undefined;
 		},
 	};
 }
@@ -740,21 +732,29 @@ export const inside: Owner = plain(true);
  * `enclosing`, so the enclosing scope keeps its own weight for the session's other work, its
  * owner's kill stops the gate's scope too, and the gate forwards that owner's signals to it.
  */
-const background =
-	(unit: string, enclosing: string | null): Owner =>
-	(command, env, cancel) =>
-		systemdScopes.run(unit, process.cwd(), command, {
+function background(unit: string, enclosing: string | null): Measuring {
+	let used: number | null = null;
+	const run: Owner = async (command, env, cancel) => {
+		const { status, cpu } = await measuredRun(unit, process.cwd(), command, {
 			env,
 			cancel,
 			within: enclosing,
 			slice: "background.slice",
 		});
+		used = cpu === null ? null : Math.round(cpu / 1000);
+		return status;
+	};
+	return Object.assign(run, { cpu: () => used });
+}
+
+/** An owner that also reports the CPU milliseconds its last run used, or null when it could not read them. */
+export type Measuring = Owner & { cpu(): number | null };
 
 /** Run the command in background scope `unit`, a new name, outside any Quest scope (see `background`). */
-export const scope = (unit: string): Owner => background(unit, null);
+export const scope = (unit: string): Measuring => background(unit, null);
 
 /** Run the command in background scope `unit`, a new name, bound to the Quest scope `enclosing` (see `background`). */
-export const bound = (unit: string, enclosing: string): Owner => background(unit, enclosing);
+export const bound = (unit: string, enclosing: string): Measuring => background(unit, enclosing);
 
 /**
  * On Windows, run the command under a stub in a kill-on-close Job Object that forbids breakaway
@@ -849,7 +849,7 @@ const TOKEN = 3;
  * like macOS, without a systemd user manager. Windows owns them through a Job Object. A systemd
  * scope also lets the gate measure its command's CPU use (see `measure`), so `unit` names it.
  */
-export function owner(env = process.env, cgroup = "/proc/self/cgroup"): { run: Owner; unit?: string } {
+export function owner(env = process.env, cgroup = "/proc/self/cgroup"): { run: Owner | Measuring; unit?: string } {
 	// A Quest scope around this process holds the command too, since it shares the cgroup or an ancestor.
 	const enclosing = process.platform === "linux" ? questScope(cgroup) : undefined;
 	if (env[ADMITTED] === "1") return { run: env[GROUP] === "1" || enclosing ? inside : direct };
@@ -910,6 +910,8 @@ interface Observed {
 	admitted?: number;
 	/** The systemd scope the command ran in, whose journal lines hold its CPU time and peak memory. */
 	unit?: string;
+	/** The CPU milliseconds the command used, where its owner measured them. */
+	cpu?: number | null;
 }
 
 /**
@@ -940,20 +942,19 @@ export async function gate(command: string[], options: GateOptions = {}): Promis
 			status = 1;
 		}
 		if (waits) {
-			const ended = Date.now();
 			const iso = (ms: number) => new Date(ms).toISOString();
 			try {
-				// A run cancelled before admission waited in the queue until it ended.
-				const admitted = observed.admitted ?? ended;
 				logWait(
-					{ kind: "gate-queue", start: iso(started), end: iso(admitted), until: null },
+					{
+						kind: "gate",
+						command: commandLine(command.join(" ")),
+						start: iso(started),
+						admitted: observed.admitted === undefined ? null : iso(observed.admitted),
+						end: iso(Date.now()),
+						cpu: observed.cpu ?? null,
+					},
 					{ cwd: directory },
 				);
-				if (observed.admitted !== undefined)
-					logWait(
-						{ kind: "gate-run", start: iso(admitted), end: iso(ended), until: null },
-						{ cwd: directory },
-					);
 			} catch (error) {
 				// A cancelled run exits as it would have, logged or not.
 				if (cancel.signal.aborted) process.stderr.write(`quest gate: ${message(error)}\n`);
@@ -1053,6 +1054,7 @@ async function gated(
 		result = await run(command, env, cancel);
 	} finally {
 		stop.abort();
+		if ("cpu" in run) observed.cpu = run.cpu();
 	}
 	const failed = await measuring;
 	if (cancel.signal.aborted) return cancelled(cancel.signal);

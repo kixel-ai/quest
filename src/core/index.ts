@@ -104,12 +104,16 @@ export {
 	parseBreakage,
 } from "./breakage";
 export {
+	COMMAND_LIMIT,
+	type GatedRun,
 	type ModelSpend,
 	type RecordUpload,
 	ROLES,
 	type Role,
 	type SessionRecord,
 	type SessionWait,
+	type ShellCall,
+	type ShellGroup,
 	SPLIT_CATEGORIES,
 	type SplitCategory,
 	type SplitUsage,
@@ -117,6 +121,7 @@ export {
 	NOTE_LIMIT,
 	WAIT_KINDS,
 	type WaitKind,
+	commandLine,
 	parseRecord,
 	parseUpload,
 } from "./record";
