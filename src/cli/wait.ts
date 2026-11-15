@@ -1,5 +1,5 @@
 // `quest wait`: poll a pull request's activity through its forge until something happens or the timeout.
-import type { Forge, PullRequest } from "../core";
+import type { Forge, PullRequest, Repository, Watch } from "../core";
 
 const POLL = 5 * 60_000;
 /**
@@ -34,18 +34,31 @@ export interface Clock {
 	sleep(milliseconds: number): Promise<unknown>;
 }
 
-/** Wait until activity, returning plain output lines: each event, the last followed by its resume cursor. */
+/** Chooses the forge a wait reads, asking no longer than its deadline, epoch milliseconds. */
+export interface ForgeChoice {
+	choose(repository: Repository, deadline: number): Promise<Forge>;
+}
+
+/**
+ * Wait until activity, returning plain output lines: each event, the last followed by its resume cursor. The timeout
+ * covers choosing the forge too.
+ */
 export async function waitForActivity(
 	pr: PullRequest,
 	options: WaitOptions,
-	forge: Forge,
+	choice: ForgeChoice,
 	clock: Clock,
 ): Promise<string[]> {
 	const started = clock.now();
 	const deadline = options.timeout === undefined ? Infinity : started + options.timeout * 1000;
-	const watch = forge.watch(pr, { since: options.since, deadline });
+	let forge: Forge | undefined;
+	let watch: Watch | undefined;
 	let asOf: string | null = null;
-	const timedOut = () => new WaitTimeout(watch.resume, asOf === null ? undefined : { forge: forge.name, at: asOf });
+	const timedOut = () =>
+		new WaitTimeout(
+			watch ? watch.resume : options.since,
+			asOf === null || forge === undefined ? undefined : { forge: forge.name, at: asOf },
+		);
 	const pause = async (milliseconds: number) => {
 		const remaining = deadline - clock.now();
 		if (remaining <= 0) throw timedOut();
@@ -53,6 +66,8 @@ export async function waitForActivity(
 		if (clock.now() >= deadline) throw timedOut();
 	};
 	try {
+		forge = await choice.choose(pr, deadline);
+		watch = forge.watch(pr, { since: options.since, deadline });
 		for (;;) {
 			const answer = await watch.poll();
 			asOf = answer.asOf;

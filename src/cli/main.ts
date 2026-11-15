@@ -41,6 +41,7 @@ import {
 	stopAgent,
 	stopAll,
 } from "./agent";
+import type { Repository } from "../core";
 import { type ClaimDependencies, held, openDrafts, reach, target, upstream, upstreamRefs } from "./claims";
 import { type ForgeDependencies, forgeFor } from "./forge";
 import { PENDING_MS } from "./admission";
@@ -607,20 +608,22 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 					return false;
 				}
 			};
-			pending = forgeFor(pr, forgeDependencies("wait"))
-				.then((forge) => waitForActivity(pr, options, forge, { now: Date.now, sleep }))
-				.then(
-					(lines) => {
-						for (const line of lines) print(line);
-						return logged(lines[0]?.split(" ")[1] ?? null) ? 0 : 1;
-					},
-					(error: unknown) => {
-						if (error instanceof WaitTimeout && error.cursor) print(error.cursor);
-						warn(error instanceof Error ? error.message : String(error));
-						if (error instanceof WaitTimeout) return logged(null) ? 3 : 1;
-						return error instanceof InputError ? 2 : 1;
-					},
-				);
+			const choice = {
+				choose: (repository: Repository, deadline: number) =>
+					forgeFor(repository, forgeDependencies("wait"), deadline),
+			};
+			pending = waitForActivity(pr, options, choice, { now: Date.now, sleep }).then(
+				(lines) => {
+					for (const line of lines) print(line);
+					return logged(lines[0]?.split(" ")[1] ?? null) ? 0 : 1;
+				},
+				(error: unknown) => {
+					if (error instanceof WaitTimeout && error.cursor) print(error.cursor);
+					warn(error instanceof Error ? error.message : String(error));
+					if (error instanceof WaitTimeout) return logged(null) ? 3 : 1;
+					return error instanceof InputError ? 2 : 1;
+				},
+			);
 		});
 
 	program

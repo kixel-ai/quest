@@ -30,7 +30,12 @@ export class GitHubForge implements Forge {
 	}
 
 	viewer(): Promise<string> {
-		this.#viewer ??= new GitHub(this.deps)
+		return this.#viewerOn(new GitHub(this.deps));
+	}
+
+	/** The viewer, read once on `github`, whose deadline then bounds the read. */
+	#viewerOn(github: GitHub): Promise<string> {
+		this.#viewer ??= github
 			.graphql("query { viewer { login } }", {})
 			.then((data) => string(object(data.viewer).login));
 		return this.#viewer;
@@ -49,7 +54,8 @@ export class GitHubForge implements Forge {
 	}
 
 	watch(pull: PullRequest, options: WatchOptions): Watch {
-		return watchPull(new GitHub(this.deps, options.deadline), this.deps, pull, options.since, this);
+		const github = new GitHub(this.deps, options.deadline);
+		return watchPull(github, this.deps, pull, options.since, { viewer: () => this.#viewerOn(github) });
 	}
 }
 

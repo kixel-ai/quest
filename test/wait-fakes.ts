@@ -173,6 +173,8 @@ export function setup(
 		rules?: unknown[];
 		/** The head's workflow runs, as `GET /actions/runs` lists them, one listing per read; the last repeats. */
 		runs?: unknown[][];
+		/** GitHub's answer to the viewer query; `waiter` by default. */
+		viewer?: Response;
 	} = {},
 ) {
 	let now = Date.parse("2026-10-07T12:10:00Z");
@@ -206,7 +208,7 @@ export function setup(
 			if (parsed.pathname === "/graphql") {
 				const body = JSON.parse(String(init?.body)) as { query: string };
 				if (body.query === "query { viewer { login } }")
-					return response({ data: { viewer: { login: "waiter" } } });
+					return side.viewer ?? response({ data: { viewer: { login: "waiter" } } });
 				if (body.query.includes("statusCheckRollup")) {
 					checkCalls.push({ ...call, body });
 					return side.checks?.shift() ?? checks();
@@ -261,7 +263,7 @@ export function setup(
 
 /** Wait on GitHub, with the fixture's clock. */
 export function waitOn(pull: typeof pr, options: WaitOptions, deps: GitHubDependencies): Promise<string[]> {
-	return waitForActivity(pull, options, new GitHubForge(deps), deps);
+	return waitForActivity(pull, options, { choose: async () => new GitHubForge(deps) }, deps);
 }
 
 export function graphql(fixture: ReturnType<typeof setup>) {

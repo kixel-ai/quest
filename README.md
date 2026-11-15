@@ -576,7 +576,8 @@ Its read API lives under `/forge`, with the token as a bearer token:
 and the lowercase `owner/repo` of each repository served to them, and
 `POST /forge/<read>` takes one of `status`, `pulls`, `held`, or `watch` and
 answers `{"value", "asOf"}`, the read's value and the time of the newest
-webhook behind it. `quest/core` exports each read's types and their parsers;
+webhook behind it. A 400 with `{"error"}` refuses a bad argument, such as a
+malformed `--since`, which `quest` reports as a usage error. `quest/core` exports each read's types and their parsers;
 `quest/github`'s `GitHubForge` answers the same reads from GitHub.
 
 ## Own a pull request

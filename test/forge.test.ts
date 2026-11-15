@@ -10,6 +10,7 @@ import { afterEach, describe, expect, test } from "vitest";
 import {
 	type Forge,
 	type ForgeCall,
+	InputError,
 	FORGE_CALLS,
 	type Holdings,
 	type PullRequest,
@@ -53,7 +54,13 @@ function kixelQuest(
 			return Response.json({ error: "no such read" }, { status: 404 });
 		if (options.answer !== undefined) return Response.json(options.answer);
 		const forge = new GitHubForge(github(), options.login ?? "waiter");
-		const value = await serve(forge, call, parseForgeRequest(call, body));
+		let value: unknown;
+		try {
+			value = await serve(forge, call, parseForgeRequest(call, body));
+		} catch (error) {
+			if (error instanceof InputError) return Response.json({ error: error.message }, { status: 400 });
+			throw error;
+		}
 		return new Response(forgeJson({ value, asOf: options.asOf ?? null }), {
 			headers: { "content-type": "application/json" },
 		});
@@ -322,17 +329,27 @@ describe("wait", () => {
 
 	test.each(scenarios)("%s wakes the same through Kixel Quest as from GitHub", async (_, scenario) => {
 		const direct = scenario();
-		const expected = await waitForActivity(wait.pr, {}, new GitHubForge(direct.deps), direct.deps);
+		const expected = await waitForActivity(
+			wait.pr,
+			{},
+			{ choose: async () => new GitHubForge(direct.deps) },
+			direct.deps,
+		);
 		const fixture = scenario();
 		const { forge } = await throughKixelQuest(() => fixture.deps);
-		expect(await waitForActivity(wait.pr, {}, forge, fixture.deps)).toEqual(expected);
+		expect(await waitForActivity(wait.pr, {}, { choose: async () => forge }, fixture.deps)).toEqual(expected);
 		expect(fixture.sleeps).toEqual(direct.sleeps);
 	});
 
 	test("a timeout resumes from Kixel Quest's cursor and says how current its index was", async () => {
 		const fixture = wait.setup([wait.pull(), wait.response([wait.pushed()]), wait.response([]), wait.response([])]);
 		const { forge } = await throughKixelQuest(() => fixture.deps, { asOf: "2026-10-07T12:09:00Z" });
-		const error = await waitForActivity(wait.pr, { timeout: 60 }, forge, fixture.deps).catch((e: unknown) => e);
+		const error = await waitForActivity(
+			wait.pr,
+			{ timeout: 60 },
+			{ choose: async () => forge },
+			fixture.deps,
+		).catch((e: unknown) => e);
 		expect(error).toBeInstanceOf(WaitTimeout);
 		expect((error as WaitTimeout).cursor).toMatch(/^q1\./);
 		expect((error as Error).message).toBe(
@@ -340,6 +357,55 @@ describe("wait", () => {
 		);
 	});
 });
+
+describe("wait deadlines and arguments", () => {
+	test("the timeout covers asking Kixel Quest which forge to read", async () => {
+		const server = kixelQuest(() => wait.setup([]).deps);
+		let now = 0;
+		// The first reading starts the clock; by the time Kixel Quest would be asked, the timeout has passed.
+		const clock = { now: () => (now++ === 0 ? 0 : 20_000), sleep: async () => {} };
+		const deps = { ...dependencies(server.fetch, unreachableGitHub), now: clock.now };
+		const choice = { choose: (pull: PullRequest, deadline: number) => forgeFor(pull, deps, deadline) };
+		const error = await waitForActivity(wait.pr, { timeout: 10 }, choice, clock).catch((e: unknown) => e);
+		expect(error).toBeInstanceOf(WaitTimeout);
+		expect(server.requests).toEqual([]);
+	});
+
+	test("a rate-limited viewer read on GitHub gives up at the wait's timeout", async () => {
+		const fixture = wait.setup([wait.pull(), wait.response([wait.pushed()]), wait.response([])], [wait.A], {
+			viewer: wait.response(
+				{ message: "API rate limit exceeded" },
+				{
+					"x-ratelimit-remaining": "0",
+					"x-ratelimit-reset": String(Date.parse("2026-10-07T13:10:00Z") / 1000),
+				},
+				403,
+			),
+		});
+		const error = await wait.waitOn(wait.pr, { timeout: 60 }, fixture.deps).catch((e: unknown) => e);
+		expect(error).toBeInstanceOf(WaitTimeout);
+		expect(fixture.sleeps.reduce((sum, ms) => sum + ms, 0)).toBeLessThanOrEqual(60_000);
+	});
+
+	test("Kixel Quest's refusal of a bad wait point is a usage error, as GitHub's is", async () => {
+		const bad = { since: "yesterday" };
+		const direct = wait.setup([]);
+		await expect(wait.waitOn(wait.pr, bad, direct.deps)).rejects.toBeInstanceOf(InputError);
+		const fixture = wait.setup([]);
+		const { forge } = await throughKixelQuest(() => fixture.deps);
+		const error = await waitForActivity(wait.pr, bad, { choose: async () => forge }, fixture.deps).catch(
+			(e: unknown) => e,
+		);
+		expect(error).toBeInstanceOf(InputError);
+		expect((error as Error).message).toMatch(
+			/^Kixel Quest refused POST \/forge\/watch, invalid timestamp: yesterday/,
+		);
+	});
+});
+
+const unreachableGitHub = (): GitHubDependencies => {
+	throw new Error("read GitHub");
+};
 
 describe("choosing the forge", () => {
 	const unreachable = (): GitHubDependencies => {

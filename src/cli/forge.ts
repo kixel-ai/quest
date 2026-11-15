@@ -15,6 +15,7 @@ import {
 	type Watch,
 	type WatchOptions,
 	forgeJson,
+	InputError,
 	parseForgeAnswer,
 	parseForgeInfo,
 } from "../core";
@@ -49,10 +50,13 @@ export function kixelQuest(deps: ForgeDependencies): KixelQuest | null {
 	return token === null ? null : new KixelQuest(url, token, deps);
 }
 
-/** The forge whose answers `repository`'s reads use: Kixel Quest when it serves the repository to this person. */
-export async function forgeFor(repository: Repository, deps: ForgeDependencies): Promise<Forge> {
+/**
+ * The forge whose answers `repository`'s reads use: Kixel Quest when it serves the repository to this person. Asking
+ * Kixel Quest gives up at `deadline`, epoch milliseconds.
+ */
+export async function forgeFor(repository: Repository, deps: ForgeDependencies, deadline = Infinity): Promise<Forge> {
 	const kixel = kixelQuest(deps);
-	return kixel !== null && (await kixel.serves(repository))
+	return kixel !== null && (await kixel.serves(repository, deadline))
 		? new KixelQuestForge(kixel)
 		: new GitHubForge(deps.github());
 }
@@ -67,9 +71,9 @@ export class KixelQuest {
 		private readonly deps: ForgeDependencies,
 	) {}
 
-	/** The person the token names, and the repositories Kixel Quest serves them; read once. */
-	info(): Promise<ForgeInfo> {
-		this.#info ??= this.#send("GET", "/forge", undefined, Infinity).then((json) => {
+	/** The person the token names, and the repositories Kixel Quest serves them; read once, by `deadline`. */
+	info(deadline = Infinity): Promise<ForgeInfo> {
+		this.#info ??= this.#send("GET", "/forge", undefined, deadline).then((json) => {
 			try {
 				return parseForgeInfo(json);
 			} catch (error) {
@@ -80,8 +84,10 @@ export class KixelQuest {
 	}
 
 	/** Whether Kixel Quest answers `repository`'s reads for this person. */
-	async serves(repository: Repository): Promise<boolean> {
-		return (await this.info()).repositories.includes(`${repository.owner}/${repository.repo}`.toLowerCase());
+	async serves(repository: Repository, deadline = Infinity): Promise<boolean> {
+		return (await this.info(deadline)).repositories.includes(
+			`${repository.owner}/${repository.repo}`.toLowerCase(),
+		);
 	}
 
 	/** Ask for `call`, giving up at `deadline` (epoch milliseconds). */
@@ -110,6 +116,7 @@ export class KixelQuest {
 	async #send(method: "GET" | "POST", path: string, body: unknown, deadline: number): Promise<unknown> {
 		const failed = (why: string) => this.#failed(method, path, why);
 		const remaining = deadline - this.deps.now();
+		if (remaining <= 0) throw failed("its deadline passed");
 		// Called unbound, as a Worker's fetch requires.
 		const fetch = this.deps.fetch;
 		let response: Response;
@@ -136,6 +143,9 @@ export class KixelQuest {
 		}
 		if (response.status === 401 || response.status === 403)
 			throw failed(`it refused the token ${tokensPath(this.deps.env)} pairs with it (HTTP ${response.status})`);
+		// A bad argument, such as a malformed wait point, is the caller's to fix on any forge.
+		if (response.status === 400)
+			throw new InputError(`Kixel Quest refused ${method} ${path}${reason(text) || ", a bad request"}`);
 		if (!response.ok) throw failed(`HTTP ${response.status}${reason(text)}`);
 		try {
 			return JSON.parse(text);
