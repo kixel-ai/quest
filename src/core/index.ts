@@ -81,6 +81,7 @@ export {
 	installedStubs,
 	lines,
 	newline,
+	planAudits,
 	planInit,
 	questReadme,
 } from "./init";

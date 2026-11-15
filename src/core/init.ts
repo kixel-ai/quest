@@ -3,10 +3,10 @@
 //
 // The plan touches only skill stubs (writing missing or outdated ones and
 // removing those of retired skills), one reference line in the root agent
-// instructions, one `.gitattributes` line, `quest/README.md` when missing, and
-// a stub per shipped audit no quest names and the root does not skip, with the
-// milestone it goes in. It never edits a quest, so a planted stub is the
-// repository's from then on.
+// instructions, one `.gitattributes` line, and `quest/README.md` when missing.
+// A second plan (`planAudits`) adds a stub per shipped audit no quest names
+// and the root does not skip, with the milestone it goes in. It never edits a
+// quest, so a planted stub is the repository's from then on.
 // It writes no Claude Code hooks: Quest's hooks are a user-level opt-in
 // (`quest setup`), since a repository's settings would force them on every
 // contributor.
@@ -141,7 +141,6 @@ export function planInit(repo: Checkout, stubs: readonly Stub[], options: { goal
 
 	const changes: InitChange[] = [...written, ...retired.map((dir) => ({ path: `${dir}/SKILL.md`, content: null }))];
 	if (repo.lstat(readme) === null) changes.push({ path: readme, content: questReadme(options.goal) });
-	changes.push(...planAudits(repo));
 	for (const [path, marker, line] of [
 		[instructions, REFERENCE_MARKER, REFERENCE_LINE],
 		[".gitattributes", ATTRIBUTES_LINE, ATTRIBUTES_LINE],
@@ -161,7 +160,7 @@ export function planInit(repo: Checkout, stubs: readonly Stub[], options: { goal
  * check`, so the stubs go in m(N+1) after the lowest milestone, m0 created
  * when there is none, and are ready at once.
  */
-function planAudits(repo: Checkout): InitChange[] {
+export function planAudits(repo: Checkout): InitChange[] {
 	const docs = questDocs(repo);
 	const done = covered(docs, "quest/README.md");
 	const missing = AUDITS.filter((audit) => !done.has(audit.name));
@@ -187,6 +186,9 @@ function planAudits(repo: Checkout): InitChange[] {
 		if (milestones.has(number)) continue;
 		checkPath(repo, path, "file");
 		if (repo.lstat(path) !== null) refuse(path, "is not a quest document");
+		// Its branch, `quest/mN`, cannot exist beside the milestone's.
+		if (repo.lstat(`quest/m${number}.md`) !== null)
+			refuse(`quest/m${number}.md`, `is in the way of milestone m${number}, which an audit's stub needs`);
 		changes.push({ path, content });
 	}
 	for (const audit of missing) {

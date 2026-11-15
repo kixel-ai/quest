@@ -604,3 +604,25 @@ test("init refuses a stub's path that other work holds, writing nothing", () => 
 	expect(() => init(dir)).toThrow("quest/m1/audit-deps.md is in the way of the `deps` audit's stub");
 	expect(snapshot(dir)).toEqual(before);
 });
+
+test("a held audit path leaves the skill stub findings in place", () => {
+	const dir = tempDir();
+	init(dir);
+	write(dir, "quest/m0/work.md", QUEST);
+	rmSync(join(dir, "quest/m1/audit-deps.md"));
+	write(dir, "quest/m1/audit-deps.md", QUEST);
+	rmSync(join(dir, ".claude/skills/quest-start"), { recursive: true });
+	expect(stubFindings(dir)).toEqual([
+		".claude/skills/quest-start/SKILL.md: is missing; run the repository's pinned `quest init` and commit the result",
+	]);
+});
+
+test("init refuses a quest whose branch a new milestone would nest under", () => {
+	const dir = tempDir();
+	write(dir, "quest/README.md", "# Quests\n\n## Goal\n\nWork.\n");
+	write(dir, "quest/m0/README.md", "# Now\n\n## Goal\n\nNow.\n");
+	write(dir, "quest/m0/work.md", QUEST);
+	write(dir, "quest/m1.md", QUEST);
+	expect(() => init(dir)).toThrow("quest/m1.md is in the way of milestone m1");
+	expect(existsSync(join(dir, "quest/m1"))).toBe(false);
+});

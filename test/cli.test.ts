@@ -88,7 +88,7 @@ test("init and uninstall print each changed path and nothing else", () => {
 	expect(init.code).toBe(0);
 	expect(init.stdout).toMatch(/^(\S+\n)+$/);
 	expect(init.stdout).toContain(
-		"quest/README.md\nquest/m0/README.md\nquest/m1/README.md\nquest/m1/audit-tree.md\nquest/m1/audit-deps.md\nAGENTS.md\n",
+		"quest/README.md\nAGENTS.md\n.gitattributes\nquest/m0/README.md\nquest/m1/README.md\nquest/m1/audit-tree.md\nquest/m1/audit-deps.md\n",
 	);
 	expect(run("--root", root, "init").stdout).toBe("");
 	expect(run("--root", root, "uninstall").stdout).toMatch(/^(\S+\n)+$/);
