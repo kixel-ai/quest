@@ -32,9 +32,11 @@ again.
 
 Agent's choices, for the implementer to revisit:
 
-- Add `ended` (ISO timestamp, null for a run cancelled before admission)
-  and `cpu` in milliseconds (null where the wait log's is), matching the
-  wait log's names and units so both read the same.
+- Add `ended` (ISO timestamp, set however the run ends, a run cancelled
+  in the queue included, as the wait log's `end` is) and `cpu` in
+  milliseconds (null where the wait log's is, and for a run that never
+  ran). `ended` follows the record's `started` and `admitted` rather than
+  the wait log's `end`; `cpu` and its unit match the wait log's.
 - Keep `unit`, which still names the scope's journal line for peak memory.
 - Update the README's "Record each run" section to say where CPU and wall
   time come from.
