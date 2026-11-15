@@ -3,17 +3,28 @@
 // command line can carry a secret, such as an inline token, and records leave it. That is still enough for the
 // mistake audit to tell a cheap command from a heavy one: `cargo check` from `cargo build`, `just check` from `just
 // test`. A shell script is no easy grammar, so the parse below is not what keeps a secret on the host: a program
-// counts only where it is a shell builtin or the host can run it, as the caller's `runs` decides, and any other
-// word read as one, such as a password a misread here-document gave, becomes `?`.
+// counts only where it is a shell builtin or the host can run it, as the caller's `runs` decides, and a subcommand
+// only where it is one of the fixed `VERBS`. Any other word read as one, such as a password a misread
+// here-document or quote gave, becomes `?` or is left out, so a misreading costs the audit detail, never a secret.
 
 /** The longest name a record keeps, in characters; names past it are left out. */
 export const COMMAND_LIMIT = 200;
 
 /** A program's name: a path's last part, short and of plain characters, or `?` for one written otherwise. */
 const PROGRAM = /^(?:[A-Za-z0-9._+][A-Za-z0-9._+-]{0,31}|\?)$/;
-/** A subcommand: lowercase words joined by hyphens, as `build` or `merge-base`, never a value such as a token. */
-const SUBCOMMAND = /^[a-z]{1,24}(?:-[a-z]{1,24})*$/;
-const SUBCOMMAND_LIMIT = 24;
+/**
+ * The subcommands a record keeps, a fixed list rather than any word's shape, so no data read as one leaves the host:
+ * those of the build tools, package managers, and forge and service tools agents run, and the common names of
+ * `just` and `make` recipes. Any other is left out, keeping only its program.
+ */
+const VERBS = new Set(
+	`add all api apply audit auth bench blame branch build check checkout cherry-pick ci clean clippy clone commit
+	compose config coverage create daemon delete deploy describe dev develop diff disable doc enable eval exec fetch
+	flake fmt format gate gc generate get grep init install issue lint lock log logs merge metadata mod mv nextest
+	outdated pr ps publish pull push rebase release remove repo reset restart restore rev-parse review rm run search serve
+	shell show start stash status stop switch sync tag test tidy tree typecheck uninstall update upgrade usage vet
+	watch workflow worktree x`.split(/\s+/),
+);
 
 /**
  * Programs whose first argument names what they do, kept as its subcommand. Any other program's first argument is
@@ -76,8 +87,11 @@ const BUILTINS = new Set([
 	"wait",
 ]);
 
-/** Whether a command's program word, a name or a path, runs on the host that ran it. */
-export type Runs = (program: string) => boolean;
+/**
+ * Whether a command's program word, a name or a path, runs on the host that ran it, a relative path resolved from
+ * the directories the script changed to before it, in order, from where it started.
+ */
+export type Runs = (program: string, cd: string[]) => boolean;
 
 /** Words that open a compound command or a wrapper of the next one, skipped to reach the program it runs. */
 const KEYWORDS = new Set(["if", "then", "else", "elif", "do", "while", "until", "!", "{", "}"]);
@@ -96,7 +110,7 @@ export function isCommandName(name: string): boolean {
 			return (
 				rest.length === 0 &&
 				PROGRAM.test(program!) &&
-				(sub === undefined || (sub.length <= SUBCOMMAND_LIMIT && SUBCOMMAND.test(sub)))
+				(sub === undefined || (SUBCOMMANDS.has(program!) && VERBS.has(sub)))
 			);
 		})
 	);
@@ -104,16 +118,26 @@ export function isCommandName(name: string): boolean {
 
 /** The programs a shell command line runs, in order and each once, as a record keeps them. */
 export function commandName(script: string, runs: Runs): string {
-	return join(words(script).map((command) => simple(command, runs)));
+	// Each literal `cd` the script ran so far, in order. A `cd` in a subshell or a failed one misleads this, which
+	// at worst records a `?` for a program that did run.
+	const cd: string[] = [];
+	return join(
+		words(script).map((command) => {
+			if (command[0] === "cd" && command[1] !== undefined && command[1] !== "-" && !command[1].includes("$"))
+				cd.push(command[1]);
+			return simple(command, (program) => runs(program, cd));
+		}),
+	);
 }
 
 /** The program an argument vector runs, as a record keeps it, reading a shell's `-c` script as `commandName` does. */
 export function argvName(argv: string[], runs: Runs): string {
+	const run = (program: string) => runs(program, []);
 	const program = argv[0]?.split("/").pop() ?? "";
 	if (["sh", "bash", "zsh", "dash"].includes(program) && argv[1] === "-c" && argv[2] !== undefined) {
 		return commandName(argv[2], runs);
 	}
-	return join([simple(argv, runs)]);
+	return join([simple(argv, run)]);
 }
 
 function join(names: (string | null)[]): string {
@@ -130,7 +154,7 @@ function join(names: (string | null)[]): string {
 }
 
 /** One simple command's program and subcommand, or null for one that names no program. */
-function simple(command: string[], runs: Runs): string | null {
+function simple(command: string[], runs: (program: string) => boolean): string | null {
 	let i = 0;
 	const assignment = (word: string) => /^[A-Za-z_][A-Za-z0-9_]*=/.test(word);
 	for (;;) {
@@ -152,7 +176,7 @@ function simple(command: string[], runs: Runs): string | null {
 	const base = first.split("/").pop()!;
 	const program = PROGRAM.test(base) && ((!first.includes("/") && BUILTINS.has(first)) || runs(first)) ? base : "?";
 	const sub = SUBCOMMANDS.has(program) ? command[i + 1] : undefined;
-	return sub !== undefined && sub.length <= SUBCOMMAND_LIMIT && SUBCOMMAND.test(sub) ? `${program} ${sub}` : program;
+	return sub !== undefined && VERBS.has(sub) ? `${program} ${sub}` : program;
 }
 
 /**
@@ -309,7 +333,10 @@ function closing(script: string, from: number): number {
 			}
 		} else if (c === "#" && wordStart) {
 			while (i + 1 < script.length && script[i + 1] !== "\n") i++;
-		} else if (c === "<" && script.startsWith("<<", i) && script[i + 2] !== "<") {
+		} else if (script.startsWith("<<<", i)) {
+			// A here-string, whose word follows on its line, opens no here-document.
+			i += 2;
+		} else if (c === "<" && script.startsWith("<<", i)) {
 			const tabs = script[i + 2] === "-";
 			const match = /^[ \t]*(?:'([^']*)'|"([^"]*)"|([^\s;&|()<>]+))/.exec(script.slice(i + (tabs ? 3 : 2)));
 			if (match) {

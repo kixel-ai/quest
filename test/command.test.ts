@@ -1,3 +1,5 @@
+import { posix } from "node:path";
+
 import { expect, test } from "vitest";
 
 import { COMMAND_LIMIT, argvName, commandName, isCommandName } from "../src/core";
@@ -5,11 +7,10 @@ import { runs } from "../src/cli/program";
 
 /** The programs a host in these tests can run, by name or path. */
 const installed = new Set(
-	"bun cargo cat curl date gh git just ls make node quest tail /usr/bin/time ./target/release/quest /bin/sh".split(
-		" ",
-	),
+	"bun cargo cat curl date gh git just ls make node quest tail /usr/bin/time target/release/quest /bin/sh".split(" "),
 );
-const host = (program: string) => installed.has(program);
+const host = (program: string, cd: string[]) =>
+	installed.has(program.includes("/") ? posix.join(...cd, program) : program);
 
 test.each([
 	["cargo build --release", "cargo build"],
@@ -40,6 +41,12 @@ test.each([
 	// A word misread as a program, or one the host cannot run, stays a `?`.
 	["hunter2; gh pr view", "?; gh pr"],
 	["./hunter2 x", "?"],
+	['echo "$(cat <<< hi\n)" "hello; git password"', "cat; echo"],
+	// A subcommand outside the fixed list is left out, as a password a misread quote would make one.
+	["git password", "git"],
+	["just my-recipe", "just"],
+	['output="$(cat <<< foo\n)"; cargo check', "cat; cargo check"],
+	["cd target && release/quest gate", "cd; quest gate"],
 ])("%j is kept as %j", (script, name) => {
 	expect(commandName(script, host)).toBe(name);
 	expect(isCommandName(name)).toBe(true);
@@ -58,16 +65,26 @@ test("a name stops at the limit, whole programs at a time", () => {
 	expect(isCommandName(name)).toBe(true);
 });
 
-test.each(["", "cargo build --release", "gh pr view 1", "-f x", "a\nb", "cargo Build", "x;y"])(
-	"%j is no command name",
-	(name) => expect(isCommandName(name)).toBe(false),
-);
+test.each([
+	"",
+	"cargo build --release",
+	"gh pr view 1",
+	"-f x",
+	"a\nb",
+	"cargo Build",
+	"x;y",
+	"git password",
+	"ls test",
+])("%j is no command name", (name) => expect(isCommandName(name)).toBe(false));
 
 test("a host runs a name on PATH or a path to a launchable file, from its directory", () => {
-	const on = runs({ PATH: "/bin:/usr/bin" }, "/");
+	const run = runs({ PATH: "/bin:/usr/bin" }, "/");
+	const on = (program: string, cd: string[] = []) => run(program, cd);
 	expect(on("sh")).toBe(true);
 	expect(on("bin/sh")).toBe(true);
 	expect(on("hunter2")).toBe(false);
 	expect(on("./hunter2")).toBe(false);
 	expect(on("etc/passwd")).toBe(false);
+	expect(on("./sh", ["usr", "bin"])).toBe(true);
+	expect(on("./sh", ["usr"])).toBe(false);
 });
