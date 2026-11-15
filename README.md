@@ -385,7 +385,7 @@ A number uses the repository's `origin`, so it needs a checkout or `--root`
 naming one; a URL works from any directory.
 Authentication comes from `GH_TOKEN`, then `GITHUB_TOKEN`, then `gh auth token`.
 Every REST read quest makes revalidates its last answer by ETag, kept per token
-under `$XDG_CACHE_HOME/quest/github` (`~/.cache`, at most 64 MiB), so an
+under `$XDG_CACHE_HOME/quest/github` (`~/.cache`, about 64 MiB), so an
 unchanged read costs none of the token's GitHub quota.
 Without `--since`, the point is the current head's push time, so an existing
 review on that head is included. GitHub lists a push seconds to minutes after

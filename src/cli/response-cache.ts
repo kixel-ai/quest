@@ -5,7 +5,7 @@ import { join } from "node:path";
 
 import type { CachedResponse, ResponseCache } from "../github/client";
 
-/** The most the cache holds on disk; past it, the least recently used entries go first. */
+/** The cache's size bound; past it, the least recently used entries go first. */
 const LIMIT = 64 * 1024 * 1024;
 
 /** Where the cache lives: `$XDG_CACHE_HOME/quest/github`, else `~/.cache/quest/github`. */
@@ -18,7 +18,9 @@ export function responseCacheDirectory(env: NodeJS.ProcessEnv = process.env): st
  * a finished file into place, so concurrent processes never read a partial entry. Each process sums
  * the directory on its first write, whenever its writes since would pass `limit`, and after every
  * eighth of `limit` it writes, so other processes' writes are counted too, evicting the least recently
- * used down to three quarters of `limit` once past it. An entry over an eighth of `limit` is not kept.
+ * used down to three quarters of `limit` once past it. Concurrent writers can each pass `limit` by up
+ * to an eighth of it until the next sum; summing on every write would hold it exactly, at about
+ * 100 ms a write for a full directory. An entry over an eighth of `limit` is not kept.
  */
 export function diskResponseCache(directory: string, limit = LIMIT): ResponseCache {
 	/** The directory's size at this process's last sum, undefined before the first, and bytes written since. */
