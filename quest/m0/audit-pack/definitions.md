@@ -4,8 +4,7 @@
 
 The pack ships `code`, `cost`, `docs`, and `tests` definitions, each
 repository-neutral and merged from the strongest parts of moq's and
-moq.pro's audits of the same name, and this repository's tree carries their
-stubs.
+moq.pro's audits of the same name.
 
 ## Plan
 

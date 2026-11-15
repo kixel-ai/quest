@@ -42,7 +42,8 @@ Invoke `/quest-plan` in Claude Code or `$quest-plan` in Codex with an outcome yo
 want to work toward. The skill helps settle the scope, then writes the quests,
 grouped into epics and milestones, with what each one requires. Init already
 planted one quest per [recurring audit](../README.md#run-recurring-audits),
-such as `quest/m1/audit-deps.md`, each running once the work before it is done. See the
+such as `quest/m1/audit-deps.md`. In a fresh tree they are ready at once; to run
+them after your first milestone, add `Required` on `quest/m0/README.md` to each. See the
 [CSV export example](../examples/export/quest/README.md) for a populated tree.
 
 From your repository root, validate the result and list the ready quests:
