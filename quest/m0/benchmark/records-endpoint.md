@@ -34,7 +34,9 @@ no repository had committed yet).
   checkout with no endpoint.
 - Put the token on each host, and start its sender with `quest records
   install`, through kixel-ai/dotfiles, which owns the maintainer's host
-  configuration, not by hand.
+  configuration, not by hand. Only once Kixel Quest serves `GET /forge`
+  (kixel-ai/kixel.quest's `quest/m0/read-api.md`): with that token, every
+  forge read goes to Kixel Quest and fails until it answers.
 
 Tests: a session in a checkout whose remote Kixel Quest serves is sent with
 its `owner/repo`; one it refuses stays queued on the host; and the override

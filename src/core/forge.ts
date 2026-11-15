@@ -297,7 +297,11 @@ const boolean: Parse<boolean> = (value, at) => (typeof value === "boolean" ? val
 const count: Parse<number> = (value, at) =>
 	Number.isSafeInteger(value) && (value as number) >= 0 ? (value as number) : fail(at, "a count");
 const time: Parse<string> = (value, at) =>
-	typeof value === "string" && !Number.isNaN(Date.parse(value)) ? value : fail(at, "a timestamp");
+	typeof value === "string" &&
+	/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d+)?(?:Z|[+-]\d\d:\d\d)$/.test(value) &&
+	!Number.isNaN(Date.parse(value))
+		? value
+		: fail(at, "an ISO 8601 timestamp");
 const oneOf =
 	<T extends string>(options: readonly T[]): Parse<T> =>
 	(value, at) =>

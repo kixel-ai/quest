@@ -2,7 +2,27 @@
 // the work went by the PR's own record. token-max reads and prices the sessions, on this host and any SSH host
 // named; quest ties each to a PR by the branches and repositories token-max exports for it.
 import { spawnSync } from "node:child_process";
-import { type RecordedRisk, type Size, SIZES, TIERS, type Tier, handedBack, questBranch, recordedRisk } from "../core";
+import {
+	breakageKey,
+	type BreakageRecord,
+	handedBack,
+	questBranch,
+	type RecordedRisk,
+	recordedRisk,
+	type Repository,
+	type Role,
+	ROLES,
+	type Seat,
+	type SessionRecord,
+	type Size,
+	SIZES,
+	SPLIT_CATEGORIES,
+	type SplitUsage,
+	type Tier,
+	TIERS,
+	type TimeSplit,
+	WAIT_KINDS,
+} from "../core";
 import type { Arm } from "./models";
 import { recorded } from "./models-record";
 import { type ClaimDependencies, upstream } from "./claims";
@@ -13,7 +33,6 @@ import { fixes } from "./land-fixer";
 import { MERGER } from "./land-watch-fix";
 import { githubRepository, requireRemote } from "./github";
 import { type GitHub, type ObjectValue, link, object } from "../github/client";
-import type { Repository } from "../core";
 import { type OnlineReview, readOnlineReviews } from "../github/online-review";
 import {
 	type Counts,
@@ -25,18 +44,6 @@ import {
 	severityText,
 } from "./review-record";
 import { SEVERITIES } from "./review";
-import {
-	type BreakageRecord,
-	ROLES,
-	breakageKey,
-	type Role,
-	SPLIT_CATEGORIES,
-	type Seat,
-	type SessionRecord,
-	type SplitUsage,
-	type TimeSplit,
-	WAIT_KINDS,
-} from "../core";
 import { type RecordInput, buildRecords } from "./records";
 import { stateDirectory } from "./send";
 import { keptSplit } from "./split";

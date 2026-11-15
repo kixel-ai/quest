@@ -117,6 +117,8 @@ export class KixelQuest {
 		try {
 			response = await fetch(`${this.url}${path}`, {
 				method,
+				// The token is Kixel Quest's alone, so it follows no redirect elsewhere.
+				redirect: "error",
 				headers: {
 					Authorization: `Bearer ${this.token}`,
 					Accept: "application/json",
