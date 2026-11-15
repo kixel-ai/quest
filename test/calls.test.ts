@@ -59,6 +59,13 @@ describe.skipIf(process.platform !== "linux")("sessionSample", () => {
 		expect(sessionSample(at, { ...host(below, [10, 20, 30, 21], 30), harness: { pid: 10 } })).toEqual(none);
 	});
 
+	test("refuses a scope shared with another tree whose parent still runs elsewhere", () => {
+		// The app 2 starts the harness 10 and, in the same scope, an unrelated process 50.
+		const parents = { 2: 1, 10: 2, 20: 10, 30: 20, 50: 2 };
+		const each = host(parents, [10, 20, 30, 50], 30);
+		expect(sessionSample(at, { ...each, harness: { pid: 10 } })).toEqual(none);
+	});
+
 	test("refuses a hook outside the cgroup it reads", () => {
 		const each = host({ 10: 1, 30: 10 }, [10], 30);
 		expect(sessionSample(at, { ...each, harness: { pid: 10 } })).toEqual(none);

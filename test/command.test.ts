@@ -1,9 +1,11 @@
-import { posix } from "node:path";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join, posix } from "node:path";
 
 import { expect, test } from "vitest";
 
 import { COMMAND_LIMIT, argvName, commandName, isCommandName } from "../src/core";
 import { runs } from "../src/cli/program";
+import { tempDir } from "./fixture";
 
 /** The programs a host in these tests can run, by name or path. */
 const installed = new Set(
@@ -77,14 +79,30 @@ test.each([
 	"ls test",
 ])("%j is no command name", (name) => expect(isCommandName(name)).toBe(false));
 
-test("a host runs a name on PATH or a path to a launchable file, from its directory", () => {
-	const run = runs({ PATH: "/bin:/usr/bin" }, "/");
-	const on = (program: string, cd: string[] = []) => run(program, cd);
-	expect(on("sh")).toBe(true);
-	expect(on("bin/sh")).toBe(true);
-	expect(on("hunter2")).toBe(false);
-	expect(on("./hunter2")).toBe(false);
-	expect(on("etc/passwd")).toBe(false);
-	expect(on("./sh", ["usr", "bin"])).toBe(true);
-	expect(on("./sh", ["usr"])).toBe(false);
+// Windows finds a program by its extension rather than a mode bit.
+test.skipIf(process.platform === "win32")(
+	"a host runs a name on PATH or a path to a launchable file, from its directory",
+	() => {
+		const root = tempDir();
+		mkdirSync(join(root, "bin"));
+		writeFileSync(join(root, "bin", "tool"), "#!/bin/sh\n", { mode: 0o755 });
+		writeFileSync(join(root, "bin", "data"), "x\n", { mode: 0o644 });
+		const run = runs({ PATH: join(root, "bin") }, root);
+		const on = (program: string, cd: string[] = []) => run(program, cd);
+		expect(on("tool")).toBe(true);
+		expect(on("bin/tool")).toBe(true);
+		expect(on("hunter2")).toBe(false);
+		expect(on("./hunter2")).toBe(false);
+		expect(on("bin/data")).toBe(false);
+		expect(on("./tool", ["bin"])).toBe(true);
+		expect(on("./tool", ["."])).toBe(false);
+	},
+);
+
+test("a Windows path names its program by its last part, without its extension", () => {
+	const ran: string[] = [];
+	const host = (program: string) => (ran.push(program), true);
+	expect(argvName(["C:\\tools\\cargo.exe", "build"], host)).toBe("cargo build");
+	expect(commandName("'C:\\tools\\gh.cmd' pr view 1", host)).toBe("gh pr");
+	expect(ran).toEqual(["C:\\tools\\cargo.exe", "C:\\tools\\gh.cmd"]);
 });

@@ -134,7 +134,8 @@ export interface Host {
  * Such a cgroup holds one tree of processes, whose top is the harness: the hook's topmost ancestor in the cgroup, from
  * which every other branch hangs, as when an app starts each agent session in a scope of its own. A terminal's scope
  * fails, since its top is the terminal's shell, as does one shared with other work. A process whose parent left, as
- * a daemonized one's does, is the session's leftover and counts.
+ * a daemonized one's does, is the session's leftover and counts where init or a systemd manager adopted it; one
+ * whose parent runs outside the cgroup is other work.
  */
 export function sessionSample(now: number, host: Host): Sample {
 	const at = new Date(now).toISOString();
@@ -161,13 +162,27 @@ export function sessionSample(now: number, host: Host): Sample {
 	if (!chain.has(host.self) || !harnessIs(host, top)) return none;
 	for (const pid of inside) {
 		if (chain.has(pid)) continue;
-		// The chain member this process hangs from, or undefined for a tree whose root's parent left the cgroup.
+		// The chain member this process hangs from, else its tree's root's parent outside the cgroup, or undefined.
 		let at: number | undefined = parent(pid);
 		while (at !== undefined && inside.has(at) && !chain.has(at)) at = parent(at);
 		if (at !== undefined && chain.has(at) && at !== top) return none;
+		// A tree outside the harness's counts only as a daemon the session left, which init or the user's service
+		// manager, as the reaper of orphans, adopted. A live parent elsewhere means other work shares the cgroup.
+		if (at !== undefined && !chain.has(at) && !adopted(host.proc, at)) return none;
 	}
 	const usage = cgroupUsage(group);
 	return usage === null ? none : { at, cgroup: path, usage };
+}
+
+/** Whether `pid` reaps orphans: init, or a systemd service manager, such as the user's. */
+function adopted(proc: string, pid: number): boolean {
+	if (pid === 1) return true;
+	try {
+		return readFileSync(join(proc, String(pid), "comm"), "utf8").trim() === "systemd";
+	} catch (error) {
+		if (["ENOENT", "ESRCH"].includes((error as NodeJS.ErrnoException).code ?? "")) return false;
+		throw error;
+	}
 }
 
 /** Whether `pid` is the harness `host` names, by its process ID or its name. */

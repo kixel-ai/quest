@@ -133,7 +133,7 @@ export function commandName(script: string, runs: Runs): string {
 /** The program an argument vector runs, as a record keeps it, reading a shell's `-c` script as `commandName` does. */
 export function argvName(argv: string[], runs: Runs): string {
 	const run = (program: string) => runs(program, []);
-	const program = argv[0]?.split("/").pop() ?? "";
+	const program = argv[0]?.split(/[\\/]/).pop() ?? "";
 	if (["sh", "bash", "zsh", "dash"].includes(program) && argv[1] === "-c" && argv[2] !== undefined) {
 		return commandName(argv[2], runs);
 	}
@@ -165,7 +165,7 @@ function simple(command: string[], runs: (program: string) => boolean): string |
 			i++;
 			continue;
 		}
-		if (WRAPPERS.has(word.split("/").pop()!) && command[i + 1] !== undefined) {
+		if (WRAPPERS.has(word.split(/[\\/]/).pop()!) && command[i + 1] !== undefined) {
 			i++;
 			while (command[i] !== undefined && /^(?:-.*|\d+[smhd]?|[A-Za-z_][A-Za-z0-9_]*=.*)$/.test(command[i]!)) i++;
 			continue;
@@ -173,8 +173,13 @@ function simple(command: string[], runs: (program: string) => boolean): string |
 		break;
 	}
 	const first = command[i]!;
-	const base = first.split("/").pop()!;
-	const program = PROGRAM.test(base) && ((!first.includes("/") && BUILTINS.has(first)) || runs(first)) ? base : "?";
+	// A path's last part, by either separator, as Windows writes one, without a Windows program's extension.
+	const base = first
+		.split(/[\\/]/)
+		.pop()!
+		.replace(/\.(?:exe|cmd|bat|com)$/i, "");
+	const path = /[\\/]/.test(first);
+	const program = PROGRAM.test(base) && ((!path && BUILTINS.has(first)) || runs(first)) ? base : "?";
 	const sub = SUBCOMMANDS.has(program) ? command[i + 1] : undefined;
 	return sub !== undefined && VERBS.has(sub) ? `${program} ${sub}` : program;
 }
