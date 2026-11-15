@@ -23,14 +23,15 @@ repository named by its remote (rejected: a committed `.quest.json`, which
 no repository had committed yet).
 
 - Delete the `.quest.json` reader (`CHECKOUT_CONFIG` in `src/cli/send.ts`)
-  and the help text naming it. The token file keeps one token for Kixel
-  Quest, the same one the [forge reads](/quest/m0/github-quota/forge-reads.md)
-  use.
+  and the help text naming it. Send to the Kixel Quest that
+  `kixelQuest()` in `src/cli/forge.ts` names, `https://kixel.quest` or
+  `QUEST_KIXEL_URL`, with the token the forge reads use: the one
+  `~/.config/quest/records.json` pairs with that URL.
 - Kixel Quest refuses a whole upload naming a repository it does not index
   or the sender cannot read, so the sender sends only the repositories
-  Kixel Quest says it serves, the same answer the forge reads use, and
-  keeps the rest on the host as it does today for a checkout with no
-  endpoint.
+  Kixel Quest says it serves, `KixelQuest.serves()`, the same answer the
+  forge reads use, and keeps the rest on the host as it does today for a
+  checkout with no endpoint.
 - Put the token on each host, and start its sender with `quest records
   install`, through kixel-ai/dotfiles, which owns the maintainer's host
   configuration, not by hand.

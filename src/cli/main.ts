@@ -149,6 +149,10 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		warn,
 	});
 	const theme = out.terminal ? new Theme(out.terminal) : null;
+	const FORGE_READS =
+		"Where Kixel Quest serves the repository and $XDG_CONFIG_HOME/quest/records.json pairs a token with it, " +
+		"these reads go to Kixel Quest's index instead, sparing the GitHub quota, and its failure fails the command; " +
+		"QUEST_FORGE=github reads GitHub, and QUEST_KIXEL_URL names another Kixel Quest. ";
 
 	const program = new Command("quest")
 		.description(description)
@@ -359,6 +363,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"through parents whose default branch has quest/README.md, so a fork with its own quests is its own " +
 				"upstream. The branches and PRs of the fork the remote pushes to count too. Each skipped quest is listed on stderr with its PR and how long ago that PR was last " +
 				"active, so a stale claim can be offered for takeover. Off GitHub, only branches are checked. " +
+				FORGE_READS +
 				"Outside conditions are never checked.\n\n" +
 				"Given a path, piped output lists its blockers, one per line with nesting indented, with an " +
 				"explanation on stderr; no output means it is ready. On a terminal it prints a quest log instead: a " +
@@ -458,8 +463,10 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"Invalid trees fail before printing. Outside conditions are never checked, nor whether another " +
 				"session holds a draft.\n\n" +
 				"Drafts are read from the open PRs of the remote's upstream, found as for quest unblocked " +
-				"--unclaimed, using GH_TOKEN, GITHUB_TOKEN, or gh auth token. Without the remote, off GitHub, or " +
-				"when GitHub cannot be read, it lists the quest tree's items alone and warns that drafts were skipped.",
+				"--unclaimed, using GH_TOKEN, GITHUB_TOKEN, or gh auth token. " +
+				FORGE_READS +
+				"Without the remote, off GitHub, or when the drafts cannot be read, it lists the quest tree's items alone " +
+				"and warns that drafts were skipped.",
 		)
 		.option("--json", "Print a deterministic JSON array")
 		.option("--maintainer", "Only items waiting on the maintainer")
@@ -517,7 +524,9 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"with a warning.\n\n" +
 				"--release deletes the quest's branch on the remote, with a lease on its tip, and closes its PR, only " +
 				"while that tip is still an empty commit.\n\n" +
-				"Uses GH_TOKEN, GITHUB_TOKEN, or gh auth token on GitHub. Exits 0 when done, 3 when refused " +
+				"Uses GH_TOKEN, GITHUB_TOKEN, or gh auth token on GitHub. " +
+				FORGE_READS.replace("these reads", "the check for an existing claim") +
+				"Exits 0 when done, 3 when refused " +
 				"(blocked, held, a branch in the way, or work on the branch), 2 for invalid arguments, and 1 for other " +
 				"failures.",
 		)
@@ -573,6 +582,9 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"Pass the final field of the last line to --since to resume without replaying events. " +
 				"On timeout, the only line is a resume point for --since (a cursor, or the given --since or head SHA if setup did not finish), so a retry with it still reports activity from the first wait.\n\n" +
 				"Uses GH_TOKEN, GITHUB_TOKEN, or gh auth token. Label changes, replies, and reactions by that account are ignored. " +
+				FORGE_READS.replace("these reads", "its polls") +
+				"Through Kixel Quest, that account is the person its token names, and a timeout says how current its " +
+				"index's last answer was. " +
 				"Exits 0 for activity, 3 on timeout, 2 for invalid arguments, and 1 for other failures. " +
 				"Issue-comment edits print as edited, including updates to older bot status comments. The account's own edits are ignored.\n\n" +
 				"In an agent session, where CLAUDE_CODE_SESSION_ID or CODEX_THREAD_ID is set, the wait is logged under " +
@@ -598,17 +610,17 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 			pending = forgeFor(pr, forgeDependencies("wait"))
 				.then((forge) => waitForActivity(pr, options, forge, { now: Date.now, sleep }))
 				.then(
-				(lines) => {
-					for (const line of lines) print(line);
-					return logged(lines[0]?.split(" ")[1] ?? null) ? 0 : 1;
-				},
-				(error: unknown) => {
-					if (error instanceof WaitTimeout && error.cursor) print(error.cursor);
-					warn(error instanceof Error ? error.message : String(error));
-					if (error instanceof WaitTimeout) return logged(null) ? 3 : 1;
-					return error instanceof InputError ? 2 : 1;
-				},
-			);
+					(lines) => {
+						for (const line of lines) print(line);
+						return logged(lines[0]?.split(" ")[1] ?? null) ? 0 : 1;
+					},
+					(error: unknown) => {
+						if (error instanceof WaitTimeout && error.cursor) print(error.cursor);
+						warn(error instanceof Error ? error.message : String(error));
+						if (error instanceof WaitTimeout) return logged(null) ? 3 : 1;
+						return error instanceof InputError ? 2 : 1;
+					},
+				);
 		});
 
 	program
@@ -640,7 +652,9 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"reaction on the PR or a review; a thread line per unresolved review thread, led by its node ID; and a " +
 				"signal line per finding or decision that holds the head from landing (see the README). " +
 				"A missing value prints as -. --json prints the same facts as one deterministic object.\n\n" +
-				"Uses GH_TOKEN, GITHUB_TOKEN, or gh auth token. Exits 0 for any PR state, 2 for invalid arguments, " +
+				"Uses GH_TOKEN, GITHUB_TOKEN, or gh auth token. " +
+				FORGE_READS.replace("these reads", "the read") +
+				"Exits 0 for any PR state, 2 for invalid arguments, " +
 				"and 1 for other failures.",
 		)
 		.argument("<pr>", "GitHub PR URL, or a PR number in origin")
@@ -650,16 +664,16 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 			pending = forgeFor(pr, forgeDependencies())
 				.then((forge) => forge.status(pr))
 				.then(
-				({ value: status }) => {
-					if (options.json) print(JSON.stringify(status));
-					else for (const line of statusLines(status)) print(line);
-					return 0;
-				},
-				(error: unknown) => {
-					warn(error instanceof Error ? error.message : String(error));
-					return 1;
-				},
-			);
+					({ value: status }) => {
+						if (options.json) print(JSON.stringify(status));
+						else for (const line of statusLines(status)) print(line);
+						return 0;
+					},
+					(error: unknown) => {
+						warn(error instanceof Error ? error.message : String(error));
+						return 1;
+					},
+				);
 		});
 
 	const OWNERSHIP =
@@ -1752,13 +1766,10 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		.argument("<from>", "Quest file or epic directory, as /quest/..., quest/..., or a filesystem path")
 		.argument("<to>", "Its new path, which must not exist")
 		.action((from: string, to: string) => {
-			pending = moveQuest(root(), from, to, claimDependencies()).then(
-				report,
-				(error: unknown) => {
-					warn(error instanceof Error ? error.message : String(error));
-					return 1;
-				},
-			);
+			pending = moveQuest(root(), from, to, claimDependencies()).then(report, (error: unknown) => {
+				warn(error instanceof Error ? error.message : String(error));
+				return 1;
+			});
 		});
 
 	program

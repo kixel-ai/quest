@@ -69,7 +69,13 @@ export class KixelQuest {
 
 	/** The person the token names, and the repositories Kixel Quest serves them; read once. */
 	info(): Promise<ForgeInfo> {
-		this.#info ??= this.#send("GET", "/forge", undefined, Infinity).then(parseForgeInfo);
+		this.#info ??= this.#send("GET", "/forge", undefined, Infinity).then((json) => {
+			try {
+				return parseForgeInfo(json);
+			} catch (error) {
+				throw this.#failed("GET", "/forge", (error as Error).message);
+			}
+		});
 		return this.#info;
 	}
 
@@ -84,18 +90,32 @@ export class KixelQuest {
 		request: ForgeCalls[C]["request"],
 		deadline = Infinity,
 	): Promise<Answer<ForgeCalls[C]["value"]>> {
-		return parseForgeAnswer(call, await this.#send("POST", `/forge/${call}`, request, deadline));
+		const path = `/forge/${call}`;
+		const json = await this.#send("POST", path, request, deadline);
+		try {
+			return parseForgeAnswer(call, json);
+		} catch (error) {
+			throw this.#failed("POST", path, (error as Error).message);
+		}
+	}
+
+	/** A failed request, naming the setting that reads GitHub instead. */
+	#failed(method: string, path: string, why: string): Error {
+		return new Error(
+			`Kixel Quest (${this.url}) failed ${method} ${path}: ${why}; set ${FORGE}=github to read GitHub`,
+		);
 	}
 
 	/** The JSON answer to a request, or an error naming the setting that reads GitHub instead. */
 	async #send(method: "GET" | "POST", path: string, body: unknown, deadline: number): Promise<unknown> {
-		const failed = (why: string) =>
-			new Error(`Kixel Quest (${this.url}) failed ${method} ${path}: ${why}; set ${FORGE}=github to read GitHub`);
+		const failed = (why: string) => this.#failed(method, path, why);
 		const remaining = deadline - this.deps.now();
+		// Called unbound, as a Worker's fetch requires.
+		const fetch = this.deps.fetch;
 		let response: Response;
 		let text: string;
 		try {
-			response = await this.deps.fetch(`${this.url}${path}`, {
+			response = await fetch(`${this.url}${path}`, {
 				method,
 				headers: {
 					Authorization: `Bearer ${this.token}`,
@@ -104,7 +124,9 @@ export class KixelQuest {
 					...(body === undefined ? {} : { "Content-Type": "application/json" }),
 				},
 				...(body === undefined ? {} : { body: forgeJson(body) }),
-				...(Number.isFinite(remaining) ? { signal: AbortSignal.timeout(Math.max(0, Math.ceil(remaining))) } : {}),
+				...(Number.isFinite(remaining)
+					? { signal: AbortSignal.timeout(Math.max(0, Math.ceil(remaining))) }
+					: {}),
 			});
 			text = await response.text();
 		} catch (error) {

@@ -4,7 +4,19 @@ import { resolve } from "node:path";
 import { isQuest, remove } from "../core";
 import { LAND_CHECK, type Reason, pin, pinned } from "../github/land";
 import { programEnvironment } from "./program";
-import { GitHub, GitHubDeadline, type GitHubDependencies, object, type ObjectValue, type RequiredCheck, array, currentChecks, requirements, string, repositoryPath } from "../github/client";
+import {
+	GitHub,
+	GitHubDeadline,
+	type GitHubDependencies,
+	object,
+	type ObjectValue,
+	type RequiredCheck,
+	array,
+	currentChecks,
+	requirements,
+	string,
+	repositoryPath,
+} from "../github/client";
 import type { Repository } from "../core";
 import type { WorkflowRun } from "../github/checks";
 import { appOf } from "../github/checks";

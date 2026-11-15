@@ -1,15 +1,7 @@
 // Reading who holds a PR: its `quest:*` labels, the events that added them, and a draft its starter still holds.
 // Taking and releasing holds stays in the CLI.
 import { type HoldFact, type PullRequest, type StarterHold, handedBack, isHoldLabel, latestHold } from "../core";
-import {
-	GitHub,
-	type GitHubDependencies,
-	type ObjectValue,
-	array,
-	object,
-	repositoryPath,
-	string,
-} from "./client";
+import { GitHub, type GitHubDependencies, type ObjectValue, array, object, repositoryPath, string } from "./client";
 import { lacksApproval } from "./merge";
 
 /** The PR, its `quest:*` labels, and the timeline events that add a label. */

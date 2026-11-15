@@ -3,7 +3,15 @@
 // exactly the tested tree with the App.
 import { existsSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { GitHub, type GitHubDependencies, object, type ObjectValue, type RequiredCheck, requirements, string } from "../github/client";
+import {
+	GitHub,
+	type GitHubDependencies,
+	object,
+	type ObjectValue,
+	type RequiredCheck,
+	requirements,
+	string,
+} from "../github/client";
 import type { Repository } from "../core";
 import {
 	baseRemote,

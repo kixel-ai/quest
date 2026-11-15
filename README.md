@@ -551,6 +551,34 @@ until GitHub lists the current head's push, which takes seconds to minutes, and
 when a push shares the second auto-merge was enabled. A head there that differs
 from `head` means a push followed auto-merge: disable it, or land the new head.
 
+### Read through Kixel Quest
+
+Agents polling `quest status`, `quest wait`, and `quest unblocked --unclaimed`
+can spend a person's whole hourly GitHub quota. Where
+[Kixel Quest](https://kixel.quest) serves the repository, those reads, and the
+claim and draft reads of `quest start` and `quest waiting`, go to its index of
+GitHub's webhooks instead. It serves only people its allow-list gives a token,
+which `quest` takes from `$XDG_CONFIG_HOME/quest/records.json`, paired with
+`https://kixel.quest`:
+
+```json
+{ "https://kixel.quest": "<token>" }
+```
+
+Without a token, or for a repository Kixel Quest does not serve, reads go to
+GitHub as above; the output is the same either way. When Kixel Quest fails, the
+command fails too, naming `QUEST_FORGE=github`, which reads GitHub instead.
+`QUEST_KIXEL_URL` names another Kixel Quest, such as one running locally, whose
+token the same file pairs with its URL.
+
+Its read API lives under `/forge`, with the token as a bearer token:
+`GET /forge` answers `{"login", "repositories"}`, the person the token names
+and the lowercase `owner/repo` of each repository served to them, and
+`POST /forge/<read>` takes one of `status`, `pulls`, `held`, or `watch` and
+answers `{"value", "asOf"}`, the read's value and the time of the newest
+webhook behind it. `quest/core` exports each read's types and their parsers;
+`quest/github`'s `GitHubForge` answers the same reads from GitHub.
+
 ## Own a pull request
 
 Before a session pushes to an existing PR, it takes the PR, so two agents
