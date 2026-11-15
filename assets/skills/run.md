@@ -45,7 +45,7 @@ Leave a PR whose required checks are still running for a later round; an automat
 
 A PR whose author has write access and that changes no user-facing behavior carries a standing `/quest-merge` pick, unless the repository's `CONTRIBUTING.md` opts out: run `/quest-merge` on it without asking, and name it as auto-picked in the summary.
 That covers only tests, benchmarks, CI, internal docs or comments, and behavior-preserving code. Anything users or other repositories get, such as CLI behavior or output, shipped skills or rules, user-facing docs, dependencies, or release artifacts, needs the user's pick, as does adding or expanding quests.
-A trivial PR, such as a dependency bump, carries it too whatever its author, under the same opt-out, but merges only once Pullfrog has approved its head.
+A trivial PR, such as a dependency bump, carries it too whatever its author, under the same opt-out, but merges only once Pullfrog has approved its head; in a repository without Pullfrog, it needs the user's pick.
 Judge the diff, not the title, before every `/quest-merge` run, and ask when unsure: the standing pick ends at the first head that does not qualify, or once a person takes the PR out of the queue.
 
 Ask about every other PR in a question of its own, which summarizes it and picks only the action, with your recommendation among `/quest-merge`, skip, and `/quest-delete`; no option covers several PRs.
