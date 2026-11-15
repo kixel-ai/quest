@@ -391,6 +391,7 @@ class Forge {
 		// The fake refuses a method call, as workerd's fetch does; the CLI calls it as one.
 		let clock = 0;
 		return {
+			quota: "wait",
 			fetch: async (input, init) => {
 				const number = /\/pulls\/(\d+)\/merge$/.exec(String(input))?.[1];
 				if (number && init?.method === "PUT") this.beforeMerge?.(Number(number));
@@ -915,6 +916,7 @@ describe.skipIf(process.platform === "win32")("host daemon", () => {
 		const seen: string[] = [];
 		let unauthorized = false;
 		const deps = apiDependencies(async () => `token-${++minted}`, {
+			quota: "wait",
 			now: () => clock,
 			sleep: async () => {},
 			warn: () => {},

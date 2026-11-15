@@ -155,6 +155,7 @@ function sender(
 			now: Date.now,
 			sleep: async () => {},
 			token: "t",
+			quota: "wait",
 			warn: () => {},
 		}),
 		sessions: (since) => {

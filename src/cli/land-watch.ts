@@ -959,17 +959,19 @@ export async function watch(
 	if (options.bump) checkTools();
 	const now = { fetch, now: Date.now };
 	const mint = (wanted: Permissions) => installationToken(repository, options, wanted, now);
+	// The daemon outlasts a spent quota rather than exit, since nothing would restart its pass sooner.
+	const quota = "wait" as const;
 	// Each mode's token is minted only once a pass needs it, and the mode is read with neither, so an
 	// installation granted only one mode's permissions still runs it.
-	const probe = apiDependencies(() => mint({ contents: "read" }), { ...now, sleep, warn });
+	const probe = apiDependencies(() => mint({ contents: "read" }), { ...now, sleep, warn, quota });
 	const unlock = await startDaemon(root, repository, options, () => defaultBranch(new GitHub(probe), repository));
 	const base = options.base!;
 	try {
 		const fixing = options.fixer !== undefined;
 		const github = watchPermissions(fixing);
 		const own = watchPermissions(fixing, true);
-		const deps = apiDependencies(() => mint(github.api), { ...now, sleep, warn });
-		const ownDeps = apiDependencies(() => mint(own.api), { ...now, sleep, warn });
+		const deps = apiDependencies(() => mint(github.api), { ...now, sleep, warn, quota });
+		const ownDeps = apiDependencies(() => mint(own.api), { ...now, sleep, warn, quota });
 		const token = (workflows: boolean) => mint(workflows ? own.pushWorkflows! : own.push!);
 		const read = authenticatedRead(() => mint(own.read!));
 		const trusted = privateRepository(options.state);
@@ -1006,6 +1008,7 @@ export async function watch(
 								...now,
 								sleep,
 								warn,
+								quota,
 							}),
 						),
 					state: options.state,
@@ -1019,7 +1022,7 @@ export async function watch(
 							const push: Permissions = { contents: "write", pull_requests: "write" };
 							connection = {
 								remote: `https://github.com/${key}.git`,
-								deps: apiDependencies(() => scoped(BUMP_PERMISSIONS), { ...now, sleep, warn }),
+								deps: apiDependencies(() => scoped(BUMP_PERMISSIONS), { ...now, sleep, warn, quota }),
 								token: (workflows) => scoped(workflows ? { ...push, workflows: "write" } : push),
 								read: authenticatedRead(() => scoped({ contents: "read" })),
 							};

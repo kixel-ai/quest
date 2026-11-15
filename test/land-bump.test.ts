@@ -105,6 +105,7 @@ function deps(world: World): GitHubDependencies {
 	const json = (value: unknown, status = 200) => Response.json(value, { status });
 	return {
 		token: "test",
+		quota: "wait",
 		now: () => 0,
 		sleep: async () => {},
 		warn: () => {},
@@ -685,6 +686,7 @@ describe("discoverTargets", () => {
 	function installation(repositories: Record<string, string | undefined>, requests: string[]): GitHubDependencies {
 		return {
 			token: "test",
+			quota: "wait",
 			now: () => 0,
 			sleep: async () => {},
 			warn: () => {},
