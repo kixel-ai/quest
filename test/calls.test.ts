@@ -17,7 +17,12 @@ import { tempDir } from "./fixture";
 describe.skipIf(process.platform !== "linux")("sessionSample", () => {
 	const scope = "/app.slice/agent.scope";
 	/** A fake /proc and cgroup tree: each process's parent, which are in the session's scope, and the name of 10. */
-	function host(parents: Record<number, number>, scoped: number[], self: number) {
+	function host(
+		parents: Record<number, number>,
+		scoped: number[],
+		self: number,
+		sessions: Record<number, string> = {},
+	) {
 		const proc = tempDir();
 		const cgroups = tempDir();
 		for (const [pid, parent] of Object.entries(parents)) {
@@ -25,12 +30,17 @@ describe.skipIf(process.platform !== "linux")("sessionSample", () => {
 			// The command name may hold spaces and parentheses.
 			writeFileSync(join(proc, pid, "stat"), `${pid} (a (b) c) S ${parent} 1 1 0\n`);
 			writeFileSync(join(proc, pid, "comm"), pid === "10" ? "codex\n" : "bash\n");
+			const session = sessions[Number(pid)];
+			writeFileSync(
+				join(proc, pid, "environ"),
+				session ? `PATH=/bin\0CLAUDE_CODE_SESSION_ID=${session}\0` : "PATH=/bin\0",
+			);
 			writeFileSync(join(proc, pid, "cgroup"), `0::${scoped.includes(Number(pid)) ? scope : "/other.scope"}\n`);
 		}
 		mkdirSync(join(cgroups, scope), { recursive: true });
 		writeFileSync(join(cgroups, scope, "cgroup.procs"), `${scoped.join("\n")}\n`);
 		writeFileSync(join(cgroups, scope, "cpu.stat"), "usage_usec 7000\nuser_usec 5000\n");
-		return { proc, cgroups, self };
+		return { proc, cgroups, self, session: "s" };
 	}
 	const at = Date.parse("2026-11-15T10:00:00Z");
 	const counted: Sample = { at: "2026-11-15T10:00:00.000Z", cgroup: scope, usage: 7000 };
@@ -40,7 +50,7 @@ describe.skipIf(process.platform !== "linux")("sessionSample", () => {
 		// The harness 10, its hook shell 20 and hook 30, an MCP server 11, a tool shell 12 and its child 13, and a
 		// daemon 40 whose parent left.
 		const parents = { 10: 1, 20: 10, 30: 20, 11: 10, 12: 10, 13: 12, 40: 1 };
-		const each = host(parents, [10, 20, 30, 11, 12, 13, 40], 30);
+		const each = host(parents, [10, 20, 30, 11, 12, 13, 40], 30, { 40: "s" });
 		expect(sessionSample(at, { ...each, harness: { pid: 10 } })).toEqual(counted);
 		expect(sessionSample(at, { ...each, harness: { name: "codex" } })).toEqual(counted);
 		// A harness that names itself, or runs under a name, elsewhere is not this scope's top.
@@ -64,6 +74,18 @@ describe.skipIf(process.platform !== "linux")("sessionSample", () => {
 		const parents = { 2: 1, 10: 2, 20: 10, 30: 20, 50: 2 };
 		const each = host(parents, [10, 20, 30, 50], 30);
 		expect(sessionSample(at, { ...each, harness: { pid: 10 } })).toEqual(none);
+	});
+
+	test("refuses an orphan whose environment names another session, or none", () => {
+		// Init adopted 50, as it would another harness whose launcher exited, or a daemon of another session's.
+		const parents = { 10: 1, 20: 10, 30: 20, 50: 1, 51: 50 };
+		for (const sessions of [{}, { 50: "other" }] as Record<number, string>[]) {
+			const each = host(parents, [10, 20, 30, 50, 51], 30, sessions);
+			expect(sessionSample(at, { ...each, harness: { pid: 10 } })).toEqual(none);
+		}
+		// Its own daemon, with a child of its own, counts.
+		const own = host(parents, [10, 20, 30, 50, 51], 30, { 50: "s" });
+		expect(sessionSample(at, { ...own, harness: { pid: 10 } })).toEqual(counted);
 	});
 
 	test("refuses a hook outside the cgroup it reads", () => {

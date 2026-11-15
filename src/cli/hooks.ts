@@ -441,7 +441,8 @@ function sample(deps: HookDependencies, value: Partial<HookInput>): Sample {
 				? { pid }
 				: undefined;
 	if (!harness) return { at: new Date(now).toISOString(), cgroup: null, usage: null };
-	return sessionSample(now, { proc: "/proc", cgroups: "/sys/fs/cgroup", self: process.pid, harness });
+	const session = typeof value.session_id === "string" ? value.session_id : "";
+	return sessionSample(now, { proc: "/proc", cgroups: "/sys/fs/cgroup", self: process.pid, harness, session });
 }
 
 /**

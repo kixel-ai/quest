@@ -127,6 +127,8 @@ export interface Host {
 	 * Codex's `codex`.
 	 */
 	harness: { pid: number } | { name: string };
+	/** The hook's session ID, which the harness gives each command it runs in its environment. */
+	session: string;
 }
 
 /**
@@ -134,8 +136,8 @@ export interface Host {
  * Such a cgroup holds one tree of processes, whose top is the harness: the hook's topmost ancestor in the cgroup, from
  * which every other branch hangs, as when an app starts each agent session in a scope of its own. A terminal's scope
  * fails, since its top is the terminal's shell, as does one shared with other work. A process whose parent left, as
- * a daemonized one's does, is the session's leftover and counts where init or a systemd manager adopted it; one
- * whose parent runs outside the cgroup is other work.
+ * a daemonized one's does, is the session's leftover and counts where init or a systemd manager adopted it and its
+ * environment names the session, as the harness gives each command; any other is other work.
  */
 export function sessionSample(now: number, host: Host): Sample {
 	const at = new Date(now).toISOString();
@@ -166,9 +168,14 @@ export function sessionSample(now: number, host: Host): Sample {
 		let at: number | undefined = parent(pid);
 		while (at !== undefined && inside.has(at) && !chain.has(at)) at = parent(at);
 		if (at !== undefined && chain.has(at) && at !== top) return none;
-		// A tree outside the harness's counts only as a daemon the session left, which init or the user's service
-		// manager, as the reaper of orphans, adopted. A live parent elsewhere means other work shares the cgroup.
-		if (at !== undefined && !chain.has(at) && !adopted(host.proc, at)) return none;
+		// A tree outside the harness's counts only as a daemon the session left: init or the user's service manager,
+		// as the reaper of orphans, adopted its root, whose environment names the session. A live parent elsewhere, or
+		// an orphan of another session's, means other work shares the cgroup.
+		if (at !== undefined && !chain.has(at)) {
+			let root = pid;
+			while (parent(root) !== at) root = parent(root)!;
+			if (!adopted(host.proc, at) || !ownedBy(host.proc, root, host.session)) return none;
+		}
 	}
 	const usage = cgroupUsage(group);
 	return usage === null ? none : { at, cgroup: path, usage };
@@ -183,6 +190,20 @@ function adopted(proc: string, pid: number): boolean {
 		if (["ENOENT", "ESRCH"].includes((error as NodeJS.ErrnoException).code ?? "")) return false;
 		throw error;
 	}
+}
+
+/** Whether `pid`'s environment names `session` as Claude Code's or Codex's, as each gives the commands it runs. */
+function ownedBy(proc: string, pid: number, session: string): boolean {
+	if (session === "") return false;
+	let environ: string;
+	try {
+		environ = readFileSync(join(proc, String(pid), "environ"), "utf8");
+	} catch (error) {
+		if (["ENOENT", "ESRCH", "EACCES"].includes((error as NodeJS.ErrnoException).code ?? "")) return false;
+		throw error;
+	}
+	const names = environ.split("\0");
+	return names.includes(`CLAUDE_CODE_SESSION_ID=${session}`) || names.includes(`CODEX_THREAD_ID=${session}`);
 }
 
 /** Whether `pid` is the harness `host` names, by its process ID or its name. */
