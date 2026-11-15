@@ -283,7 +283,7 @@ test("the tool hooks sample each shell call's start and return, naming its sessi
 			session: "s1",
 			agent: "a1",
 			call: "t1",
-			command: "cat > x <<'EOF'",
+			command: "cat",
 			...sample,
 		},
 		{ kind: "end", harness: "claude", session: "s1", agent: "a1", call: "t1", task: "b7", ...sample },

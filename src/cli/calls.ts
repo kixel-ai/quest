@@ -4,7 +4,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path/posix";
 
-import { type ShellCall, type ShellGroup, commandLine } from "../core";
+import { type ShellCall, type ShellGroup, commandName } from "../core";
 import { cgroupUsage, members } from "./supervise";
 import { appendLog, logDays, logDirectory, readDays } from "./waits";
 
@@ -42,20 +42,23 @@ export function logCall(line: CallLine, env: NodeJS.ProcessEnv = process.env, no
 	appendLog(callsDirectory(env), line, now, "shell call");
 }
 
-/** A start line for `command`, cut as a record keeps it. */
+/** A start line for `command`, as a record keeps it: the programs it runs, without arguments. */
 export function startLine(caller: Caller, call: string, command: string, sample: Sample): CallLine {
-	return { kind: "start", ...caller, call, command: commandLine(command), ...sample };
+	return { kind: "start", ...caller, call, command: commandName(command), ...sample };
 }
 
 /**
- * The call lines logged on this host from `since`'s UTC day on, and from each earlier day while one of them is about
- * a call whose start or background handoff lies earlier, so a group that began before the window ends where it
- * did. Fails on a line it cannot read.
+ * The call lines logged on this host from the UTC day before `since`'s on, and from each earlier day while one of
+ * them is about a call whose start or background handoff lies earlier, so a group that began before the window ends
+ * where it did. Fails on a line it cannot read.
  */
 export function readCalls(since: number, env: NodeJS.ProcessEnv = process.env): CallLine[] {
 	const dir = callsDirectory(env);
 	const days = logDays(dir);
-	const first = new Date(since).toISOString().slice(0, 10);
+	// The day before the window's, too: a background call handed off then and finished before the window's first turn
+	// end leaves no line in the window naming it, yet ends the group a call in the window overlapped. Only one turn
+	// running over a day hides such a call still.
+	const first = new Date(since - 86_400_000).toISOString().slice(0, 10);
 	let from = days.findIndex((name) => name >= first);
 	if (from === -1) from = days.length;
 	let lines = readDays(dir, days.slice(from), parseCall, "a shell call");

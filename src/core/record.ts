@@ -1,4 +1,5 @@
 import { type BreakageRecord, breakageKey, parseBreakage } from "./breakage";
+import { isCommandName } from "./command";
 import { parser } from "./parse";
 
 // The record of one agent session that `quest` sends to Kixel Code, which stores exactly this shape, and that
@@ -34,18 +35,9 @@ export interface SessionWait {
 	until: string | null;
 }
 
-/** The longest command line a record keeps, in characters: enough to tell what ran, short of a heredoc's body. */
-export const COMMAND_LIMIT = 200;
-
-/** `text`'s first line, cut to `COMMAND_LIMIT` characters, as a record keeps a command. */
-export function commandLine(text: string): string {
-	const line = text.trimStart().split("\n", 1)[0]!.trimEnd();
-	return line.length > COMMAND_LIMIT ? line.slice(0, COMMAND_LIMIT) : line;
-}
-
 /** One outermost `quest gate` run, its instants ISO 8601 UTC. */
 export interface GatedRun {
-	/** Its command line, as `commandLine` keeps it. */
+	/** The programs it ran, as `commandName` keeps them: no arguments. */
 	command: string;
 	/** When it asked to be admitted. */
 	start: string;
@@ -58,7 +50,7 @@ export interface GatedRun {
 
 /** One shell call a session's harness ran, its instants ISO 8601 UTC. */
 export interface ShellCall {
-	/** Its command line, as `commandLine` keeps it. */
+	/** The programs it ran, as `commandName` keeps them: no arguments. */
 	command: string;
 	start: string;
 	/** When it returned, or for one the harness ran in the background, when it was first seen finished. */
@@ -292,10 +284,10 @@ export function parseRecord(value: unknown): SessionRecord {
 	return record;
 }
 
-/** A command line no longer or wider than `commandLine` keeps. */
+/** Program names as `commandName` keeps them, so no record carries a command's arguments. */
 function command(value: unknown, field: string): string {
-	const line = text(value, field);
-	return /[\r\n]/.test(line) || line.length > COMMAND_LIMIT ? fail(`${field} is not one short line`) : line;
+	const name = text(value, field);
+	return isCommandName(name) ? name : fail(`${field} is not program names alone`);
 }
 
 /** CPU milliseconds, or null. */

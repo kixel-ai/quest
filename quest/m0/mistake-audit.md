@@ -54,7 +54,9 @@ Agent's choices, for the implementer to revisit. Each run:
 - Read both kinds of gating mistake from each record's `gated` and
   `shell` lists: gated runs ranked by least CPU, and shell groups by most,
   with no threshold, judging each command's class rather than one cheap
-  run of a usually heavy command. Count `nix build` apart, since
+  run of a usually heavy command. A `command` holds only program names and
+  subcommands, such as `cd; cargo build`, so judge the class by those. Count
+  `nix build` apart, since
   `nix-daemon` builds outside its gate's scope. A `shell` group's `cpu` is
   null outside a cgroup that holds the session alone, as in a terminal, so
   say how many groups were unmeasured; a `shared` group's CPU also covers

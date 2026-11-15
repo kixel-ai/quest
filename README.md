@@ -1802,15 +1802,15 @@ latest upload, since one sender sends a session's uploads in order. The type is
   session on another host in `quest usage --ssh`, or one whose transcript has
   lines token-max could not read either. Like token costs, waits count only
   those that ended since the window's start.
-- `gated` lists each outermost `quest gate` run: its `command`, cut to its
-  first line and 200 characters, when it asked to start, when it was
-  `admitted` (null when it ended queued), when it ended, and the CPU
-  milliseconds its command used, read from its systemd scope once it exits,
-  or null where the gate owns no scope, as on macOS or Windows. The gate logs
+- `gated` lists each outermost `quest gate` run: its `command`, when it
+  asked to start, when it was `admitted` (null when it ended queued), when it
+  ended, and the CPU milliseconds its command used, read from its systemd
+  scope once it exits, or null where the gate owns no scope, as on macOS or
+  Windows. The gate logs
   each run as one line among the waits, and the record takes its
   `gate-queue` and `gate-run` waits from it. `nix build` counts little here,
   since `nix-daemon` builds outside the scope.
-- `shell` lists its shell calls, each cut the same way, in groups: calls that
+- `shell` lists its shell calls, each with its `command`, in groups: calls that
   overlapped, in parallel or in the background, are one group. A group's
   `cpu` is the milliseconds the session's own cgroup used from its first
   call's start to its last call's end, which counts what ran outside the
@@ -1829,7 +1829,18 @@ latest upload, since one sender sends a session's uploads in order. The type is
   as a sub-agent's with its parent's, is in each of their records, listing
   only that session's calls, with `shared` true. Both lists are null for a
   session on another host; `gated` counts the runs that ended since the
-  window's start, and `shell` the groups that started since then.
+  window's start, and `shell` the groups that started since then. To find
+  where a group began, `quest usage` reads the call log from the day before
+  the window's, and earlier days while a call it read began on one; only a
+  background call handed off and finished within one turn of over a day can
+  still split a group at the window's start.
+- A `command` keeps only the programs it ran, in order and each once, with
+  the subcommand of those that take one, such as `cd; cargo build; tail`:
+  never arguments, assignments, redirections, or here-document bodies, since
+  a command line can carry a secret and records leave the host. Programs
+  such as `git`, `cargo`, `just`, `nix`, and `npm` keep their subcommand;
+  any other's first argument is data and stays. A program written as a
+  variable is `?`.
 - `split` is where the rest of its time went, as the next section describes;
   null until every step is labeled, and for a session on another host.
 

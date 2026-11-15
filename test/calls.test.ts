@@ -171,7 +171,7 @@ describe("shellGroups", () => {
 	});
 });
 
-test("the call log keeps whole lines and reads from a window's day", () => {
+test("the call log keeps whole lines and reads from the day before a window's", () => {
 	const env = { XDG_STATE_HOME: tempDir() };
 	const line: CallLine = {
 		kind: "stop",
@@ -184,7 +184,8 @@ test("the call log keeps whole lines and reads from a window's day", () => {
 	};
 	logCall(line, env, Date.parse(line.at));
 	expect(readCalls(Date.parse("2026-11-14T20:00:00Z"), env)).toEqual([line]);
-	expect(readCalls(Date.parse("2026-11-15T00:30:00Z"), env)).toEqual([]);
+	expect(readCalls(Date.parse("2026-11-15T00:30:00Z"), env)).toEqual([line]);
+	expect(readCalls(Date.parse("2026-11-16T00:30:00Z"), env)).toEqual([]);
 	logCall({ ...line, running: [""] }, env, Date.parse(line.at));
 	logCall(line, env, Date.parse(line.at));
 	expect(() => readCalls(Date.parse("2026-11-14T20:00:00Z"), env)).toThrow("is not a shell call quest logged");
@@ -213,5 +214,22 @@ test("reading a window also reads each earlier day a call in it began on", () =>
 		"stop",
 	]);
 	// The group they form began before the window, so no record of the window holds it.
+	expect(shellGroups(read).map((g) => [g.start, g.calls.length])).toEqual([[Date.parse("2026-11-14T23:50:00Z"), 2]]);
+});
+
+test("reading a window also reads the day before, for a background call no line in the window names", () => {
+	const env = { XDG_STATE_HOME: tempDir() };
+	const sample = (at: string) => ({ at, cgroup: "/a.scope", usage: 0 });
+	const caller = { harness: "claude", session: "s", agent: null };
+	const log = (line: CallLine) => logCall(line, env, Date.parse(line.at));
+	// A background call handed off the day before, finishing before the window's first turn end, which no longer
+	// lists it; a call in the window overlapped it.
+	log({ kind: "start", ...caller, call: "bg", command: "bg", ...sample("2026-11-14T23:50:00.000Z") });
+	log({ kind: "end", ...caller, call: "bg", task: "b1", ...sample("2026-11-14T23:50:01.000Z") });
+	log({ kind: "start", ...caller, call: "in", command: "in", ...sample("2026-11-15T00:01:00.000Z") });
+	log({ kind: "end", ...caller, call: "in", task: null, ...sample("2026-11-15T00:01:30.000Z") });
+	log({ kind: "stop", harness: "claude", session: "s", running: [], ...sample("2026-11-15T00:02:00.000Z") });
+	const read = readCalls(Date.parse("2026-11-15T00:00:00Z"), env);
+	// One group, which began before the window, rather than one starting inside it.
 	expect(shellGroups(read).map((g) => [g.start, g.calls.length])).toEqual([[Date.parse("2026-11-14T23:50:00Z"), 2]]);
 });

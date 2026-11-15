@@ -1555,7 +1555,8 @@ describe.skipIf(process.platform === "win32")("the run record", () => {
 		expect(rest).toEqual([]);
 		expect(line).toMatchObject({
 			kind: "gate",
-			command: `/bin/sh -c ${spin[2]}`,
+			// Its shell script runs no program but the shell's own builtins.
+			command: "?",
 			sessions: [{ harness: "claude", session: "s1" }],
 			directory: process.cwd(),
 		});

@@ -24,7 +24,7 @@ import type { Readable } from "node:stream";
 import { setTimeout as sleep } from "node:timers/promises";
 import { type Cancellation, cancelled, follow, forwards, GROUP, interrupts, received, requested } from "./interrupt";
 import { stubbed } from "./job";
-import { commandLine } from "../core";
+import { argvName } from "../core";
 import { envSessions, logWait } from "./waits";
 import { cgroupUsage, measuredRun, questScope, scopeGroup, startTime, systemdScopes } from "./supervise";
 
@@ -930,7 +930,7 @@ export async function gate(command: string[], options: GateOptions = {}): Promis
 				logWait(
 					{
 						kind: "gate",
-						command: commandLine(command.join(" ")),
+						command: argvName(command),
 						start: iso(started),
 						admitted: observed.admitted === undefined ? null : iso(observed.admitted),
 						end: iso(Date.now()),

@@ -105,8 +105,8 @@ export {
 	breakageKey,
 	parseBreakage,
 } from "./breakage";
+export { COMMAND_LIMIT, argvName, commandName, isCommandName } from "./command";
 export {
-	COMMAND_LIMIT,
 	type GatedRun,
 	type ModelSpend,
 	type RecordUpload,
@@ -123,7 +123,6 @@ export {
 	NOTE_LIMIT,
 	WAIT_KINDS,
 	type WaitKind,
-	commandLine,
 	parseRecord,
 	parseUpload,
 } from "./record";

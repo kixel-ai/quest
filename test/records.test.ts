@@ -152,7 +152,7 @@ describe("parseRecord", () => {
 			"never started",
 		],
 		[
-			"a gated command over two lines",
+			"a gated command with its arguments",
 			record({
 				gated: [
 					{
@@ -163,21 +163,21 @@ describe("parseRecord", () => {
 							end: "2026-11-06T10:30:00.000Z",
 							cpu: 1200,
 						},
-						command: "a\nb",
+						command: "gh pr view 1",
 					},
 				],
 			}),
-			"one short line",
+			"program names alone",
 		],
 		["a shell group without calls", record({ shell: [{ calls: [], cpu: 1, shared: false }] }), "calls"],
 		[
-			"a shell command longer than a record keeps",
+			"a shell command over two lines",
 			record({
 				shell: [
 					{
 						calls: [
 							{
-								command: "x".repeat(201),
+								command: "a\nb",
 								start: "2026-11-06T10:31:00.000Z",
 								end: "2026-11-06T10:31:01.000Z",
 							},
@@ -187,7 +187,7 @@ describe("parseRecord", () => {
 					},
 				],
 			}),
-			"one short line",
+			"program names alone",
 		],
 		["a quest that is not a path", record({ quest: "a.md" }), "quest path"],
 	])("refuses %s", (_, value, message) => {
