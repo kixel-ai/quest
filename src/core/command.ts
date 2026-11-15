@@ -128,7 +128,8 @@ function words(script: string): string[][] {
 	const commands: string[][] = [];
 	let current: string[] = [];
 	let word: string | null = null;
-	const heredocs: string[] = [];
+	/** Pending here-documents' delimiters, and whether `<<-` lets tabs lead them. */
+	const heredocs: { delimiter: string; tabs: boolean }[] = [];
 	const endWord = () => {
 		if (word !== null) current.push(word);
 		word = null;
@@ -140,6 +141,16 @@ function words(script: string): string[][] {
 	};
 	let i = 0;
 	const n = script.length;
+	/**
+	 * Read the command substitution whose text starts at `from` and ends at `close`'s index, as `script.indexOf`
+	 * finds it, as commands of its own; the word it sits in goes on, its output standing as one character.
+	 */
+	const substitute = (from: number, close: number) => {
+		const end = close === -1 ? n : close;
+		commands.push(...words(script.slice(from, end)));
+		word = (word ?? "") + "0";
+		i = end + 1;
+	};
 	/** Read a quoted or plain word from `i` with no command structure, as a redirection's target. */
 	const target = (): string => {
 		while (script[i] === " " || script[i] === "\t") i++;
@@ -171,7 +182,8 @@ function words(script: string): string[][] {
 				const eol = script.indexOf("\n", i);
 				const line = script.slice(i, eol === -1 ? n : eol);
 				i = eol === -1 ? n : eol + 1;
-				if (line.trim() === heredocs[0]) heredocs.shift();
+				const { delimiter, tabs } = heredocs[0]!;
+				if ((tabs ? line.replace(/^\t+/, "") : line) === delimiter) heredocs.shift();
 			}
 		} else if (c === " " || c === "\t") {
 			endWord();
@@ -190,15 +202,20 @@ function words(script: string): string[][] {
 			word = (word ?? "") + script.slice(i + 1, end);
 			i = end + 1;
 		} else if (c === '"') {
-			let j = i + 1;
-			let text = "";
-			while (j < n && script[j] !== '"') {
-				if (script[j] === "\\" && j + 1 < n) j++;
-				text += script[j];
-				j++;
+			// Literal text stays data; a substitution inside runs commands.
+			word ??= "";
+			i++;
+			while (i < n && script[i] !== '"') {
+				if (script[i] === "$" && script[i + 1] === "(" && script[i + 2] !== "(")
+					substitute(i + 2, closing(script, i + 2));
+				else if (script[i] === "`") substitute(i + 1, backtick(script, i + 1));
+				else {
+					if (script[i] === "\\" && i + 1 < n) i++;
+					word += script[i];
+					i++;
+				}
 			}
-			word = (word ?? "") + text;
-			i = j + 1;
+			i++;
 		} else if (c === "<" || c === ">" || (c === "&" && script[i + 1] === ">")) {
 			// A redirection: a file descriptor before it, its operator, and its target are no part of the command.
 			if (word !== null && /^\d+$/.test(word)) word = null;
@@ -206,7 +223,7 @@ function words(script: string): string[][] {
 			let op = "";
 			while (i < n && /[<>&|-]/.test(script[i]!) && op.length < 3) op += script[i++];
 			if (op === "<<<") target();
-			else if (op.startsWith("<<")) heredocs.push(target());
+			else if (op.startsWith("<<")) heredocs.push({ tabs: op === "<<-", delimiter: target() });
 			else if (op.endsWith("&") && /\d|-/.test(script[i] ?? "")) {
 				while (/[\d-]/.test(script[i] ?? "")) i++;
 			} else target();
@@ -216,9 +233,10 @@ function words(script: string): string[][] {
 			word = (word ?? "") + "0";
 			i = close === -1 ? n : close + 2;
 		} else if (c === "$" && script[i + 1] === "(") {
-			endCommand();
-			i += 2;
-		} else if (";&|()`".includes(c)) {
+			substitute(i + 2, closing(script, i + 2));
+		} else if (c === "`") {
+			substitute(i + 1, backtick(script, i + 1));
+		} else if (";&|()".includes(c)) {
 			endCommand();
 			i++;
 		} else {
@@ -228,4 +246,37 @@ function words(script: string): string[][] {
 	}
 	endCommand();
 	return commands;
+}
+
+/** The index of the `)` closing the substitution whose text starts at `from`, past nested ones and quotes, or -1. */
+function closing(script: string, from: number): number {
+	let depth = 1;
+	for (let i = from; i < script.length; i++) {
+		const c = script[i]!;
+		if (c === "\\") i++;
+		else if (c === "'") {
+			const close = script.indexOf("'", i + 1);
+			if (close === -1) return -1;
+			i = close;
+		} else if (c === '"') {
+			for (i++; i < script.length && script[i] !== '"'; i++) {
+				if (script[i] === "\\") i++;
+				else if (script[i] === "$" && script[i + 1] === "(") {
+					i = closing(script, i + 2);
+					if (i === -1) return -1;
+				}
+			}
+		} else if (c === "(") depth++;
+		else if (c === ")" && --depth === 0) return i;
+	}
+	return -1;
+}
+
+/** The index of the backtick closing the substitution whose text starts at `from`, or -1. */
+function backtick(script: string, from: number): number {
+	for (let i = from; i < script.length; i++) {
+		if (script[i] === "\\") i++;
+		else if (script[i] === "`") return i;
+	}
+	return -1;
 }

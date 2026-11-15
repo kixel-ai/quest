@@ -20,6 +20,12 @@ test.each([
 	["$EDITOR file", "?"],
 	["# just a comment", "?"],
 	["just check && just check", "just check"],
+	["printf '%s' $(date +%s) hunter2", "date; printf"],
+	["printf %s `date` hunter2; ls", "date; printf; ls"],
+	['output="$(cargo check)"; echo "$output"', "cargo check; echo"],
+	['echo "a $(git log --format="%H (x)") b"', "git log; echo"],
+	["cat <<'EOF'\n  EOF\nhunter2\nEOF\nls", "cat; ls"],
+	["cat <<-EOF\n\thunter2\n\tEOF\nls", "cat; ls"],
 ])("%j is kept as %j", (script, name) => {
 	expect(commandName(script)).toBe(name);
 	expect(isCommandName(name)).toBe(true);
