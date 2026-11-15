@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { expect, test } from "vitest";
@@ -686,4 +686,156 @@ test("an incident's --at must be a date and time with a Z or offset, on a real c
 		"Nov 6 2026 10:00 UTC",
 	])
 		expect(parseInstant(text), text).toBeNull();
+});
+
+/** A PR of acme/proj from `branch`, opened and last updated at `at`. */
+const opened = (number: number, branch: string, at: string) => ({
+	number,
+	html_url: `https://github.com/acme/proj/pull/${number}`,
+	title: "B",
+	head: { ref: branch, repo: { full_name: "acme/proj" } },
+	state: "open",
+	draft: true,
+	merged_at: null,
+	created_at: at,
+	updated_at: at,
+	closed_at: null,
+	body: "",
+});
+
+const remembered = (env: NodeJS.ProcessEnv) => {
+	const dir = join(env.XDG_STATE_HOME!, "quest", "records", "remembered");
+	if (!existsSync(dir)) return [];
+	return readdirSync(dir)
+		.flatMap((group) => readdirSync(join(dir, group)).map((name) => join(dir, group, name)))
+		.map((path) => (JSON.parse(readFileSync(path, "utf8")) as { pending: { session: string } }).pending.session)
+		.sort();
+};
+
+/** A later session on main in `root`, queued, which only brings its group's next pass. */
+function later(env: NodeJS.ProcessEnv, root: string, id: string): Session {
+	writeFileSync(join(root, `${id}.jsonl`), `{"type":"user","timestamp":"2026-11-06T13:00:00Z"}\n`);
+	queue({ ...stopped(root), session: id, transcript: join(root, `${id}.jsonl`) }, env);
+	const at = Date.parse("2026-11-06T13:00:00Z");
+	return session(id, "main", {
+		start: at,
+		end: at + 60_000,
+		branches: [{ name: "main", first: at, last: at + 60_000 }],
+		files: [join(root, `${id}.jsonl`)],
+	});
+}
+
+test("a session sent before its branch's PR opened is resent with the PR on its group's next pass", async () => {
+	const env = home();
+	const root = checkout(ENDPOINT);
+	queue(stopped(root), env);
+	const first = session("s1", "fix/x", { files: [transcript()] });
+	const before = sender(env, 200, [first]);
+	await sendPass(before.deps);
+	expect(parseUpload(before.uploads[0]!.body).records.map((r) => [r.session, r.pulls])).toEqual([["s1", []]]);
+	expect(remembered(env)).toEqual(["s1"]);
+	// The PR opens; nothing reads it until the repository's next session is sent, which queues s1 again.
+	const s2 = later(env, root, "s2");
+	const pr = opened(9, "fix/x", "2026-11-06T13:30:00Z");
+	const next = sender(env, 200, [first, s2], () => {}, [pr]);
+	next.clock.now = Date.parse("2026-11-06T14:00:00Z");
+	await sendPass(next.deps);
+	expect(parseUpload(next.uploads[0]!.body).records.map((r) => r.session)).toEqual(["s2"]);
+	expect(pending(env)).toHaveLength(1);
+	// Its resend widens token-max's window back to its start, once, and names the PR; nothing waits after it.
+	const resend = sender(env, 200, [first, s2], () => {}, [pr]);
+	await sendPass(resend.deps);
+	expect(resend.windows).toEqual([new Date("2026-11-06T10:00:00Z")]);
+	expect(parseUpload(resend.uploads[0]!.body).records.map((r) => [r.session, r.pulls, r.role])).toEqual([
+		["s1", [9], "implementing"],
+	]);
+	expect(pending(env)).toEqual([]);
+	// s2 stays remembered, as main heads no PR either.
+	expect(remembered(env)).toEqual(["s2"]);
+});
+
+test("a moved session and a sub-agent's fresh branch wait for their own PRs; a PR on an older branch triggers nothing", async () => {
+	const env = home();
+	const root = checkout(ENDPOINT);
+	queue(stopped(root), env);
+	const at = (time: string) => Date.parse(`2026-11-06T${time}:00Z`);
+	// s1 moved from quest/m0/a, whose PR 7 is open, to fix/y; its sub-agent works on fix/sub.
+	const s1 = session("s1", "quest/m0/a", {
+		files: [transcript()],
+		branches: [
+			{ name: "quest/m0/a", first: at("10:00"), last: at("10:10") },
+			{ name: "fix/y", first: at("10:20"), last: at("10:30") },
+		],
+	});
+	const sub = session("sub", "fix/sub", { parent: "s1" });
+	const first = sender(env, 200, [s1, sub]);
+	await sendPass(first.deps);
+	expect(parseUpload(first.uploads[0]!.body).records.map((r) => [r.session, r.pulls])).toEqual([
+		["s1", [7]],
+		["sub", [7]],
+	]);
+	const pass = async (id: string, now: string, pulls: object[]) => {
+		const s = later(env, root, id);
+		const each = sender(env, 200, [s1, sub, s], () => {}, pulls);
+		each.clock.now = Date.parse(`2026-11-06T${now}:00Z`);
+		await sendPass(each.deps);
+		const resend = sender(env, 200, [s1, sub, s], () => {}, pulls);
+		await sendPass(resend.deps);
+		return resend.uploads.map((u) => parseUpload(u.body).records.map((r) => [r.session, r.pulls]));
+	};
+	// Newest update first, as GitHub lists them.
+	const pulls = [
+		opened(12, "fix/y", "2026-11-06T15:30:00Z"),
+		opened(11, "fix/sub", "2026-11-06T14:30:00Z"),
+		opened(10, "quest/m0/a", "2026-11-06T13:30:00Z"),
+	];
+	// Another PR on quest/m0/a changes nothing attribution would send.
+	expect(await pass("s2", "14:00", pulls.slice(2))).toEqual([]);
+	// A PR on the sub-agent's branch resends the tree; s1 still waits for fix/y.
+	expect(await pass("s3", "15:00", pulls.slice(1))).toEqual([
+		[
+			["s1", [7]],
+			["sub", [11]],
+		],
+	]);
+	expect(remembered(env)).toEqual(["s1", "s2", "s3"]);
+	expect(await pass("s4", "16:00", pulls)).toEqual([
+		[
+			["s1", [12]],
+			["sub", [11]],
+		],
+	]);
+	expect(remembered(env)).toEqual(["s2", "s3", "s4"]);
+});
+
+test("a remembered session is forgotten once its transcript is gone, unreadable, or unlisted, without a notice", async () => {
+	const env = home();
+	const root = checkout(ENDPOINT);
+	const files = [transcript(), transcript(), transcript()];
+	for (const id of ["gone", "garbled", "unlisted"]) queue({ ...stopped(root), session: id }, env);
+	const sessions = ["gone", "garbled", "unlisted"].map((id, i) => session(id, `fix/${id}`, { files: [files[i]!] }));
+	await sendPass(sender(env, 200, sessions).deps);
+	expect(remembered(env)).toEqual(["garbled", "gone", "unlisted"]);
+	rmSync(files[0]!);
+	const dir = join(env.XDG_STATE_HOME!, "quest", "records", "remembered");
+	const [group] = readdirSync(dir);
+	for (const name of readdirSync(join(dir, group!))) {
+		const path = join(dir, group!, name);
+		if (readFileSync(path, "utf8").includes('"garbled"')) writeFileSync(path, '{"pending":');
+	}
+	// Every branch's PR opens; only the session whose transcript is still there is queued again.
+	const pulls = ["gone", "garbled", "unlisted"].map((id, i) => opened(20 + i, `fix/${id}`, "2026-11-06T13:30:00Z"));
+	const s2 = later(env, root, "s2");
+	const next = sender(env, 200, [...sessions, s2], () => {}, pulls);
+	next.clock.now = Date.parse("2026-11-06T14:00:00Z");
+	await sendPass(next.deps);
+	expect(pending(env)).toHaveLength(1);
+	expect(remembered(env)).toEqual(["s2", "unlisted"]);
+	// token-max no longer lists it, as once its transcript is pruned: it is dropped without a notice.
+	const resend = sender(env, 200, [s2], () => {}, pulls);
+	await sendPass(resend.deps);
+	expect(resend.uploads).toEqual([]);
+	expect(pending(env)).toEqual([]);
+	expect(remembered(env)).toEqual(["s2"]);
+	expect(queue(stopped(root), env).notices).toEqual([]);
 });

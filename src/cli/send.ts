@@ -1,6 +1,7 @@
 // Sending each session's record, and the breakages its PRs name, to the Kixel Code endpoint its checkout names. The stop hook only queues the session;
 // one sender per user, run by its service manager, rebuilds each queued session's record, with its sub-agents', and
-// posts them, keeping what failed for the next pass. A record replaces its earlier copy, so a resend never doubles.
+// posts them, keeping what failed for the next pass, and queues a sent session again once a PR opens on a branch its
+// record could not name a PR for. A record replaces its earlier copy, so a resend never doubles.
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, setPriority } from "node:os";
@@ -16,7 +17,19 @@ import { readRemote, remoteRepository } from "./github";
 import { eachLine } from "./messages";
 import { questRoot } from "./rules";
 import { type Labeled, type SplitDependencies, type Steps, labelSession, readSteps, splitOf } from "./split";
-import { type Pull, type Session, fixBreakages, fold, key, readPull, sessionRecords, updatedPulls } from "./usage";
+import {
+	type Pull,
+	type Reached,
+	type Session,
+	fixBreakages,
+	fold,
+	heading,
+	key,
+	readPull,
+	sessionRecords,
+	unheaded,
+	updatedPulls,
+} from "./usage";
 import { type LoggedWait } from "./waits";
 
 /** The checkout's file naming its record endpoint, as `{"records": "https://..."}`. */
@@ -184,26 +197,18 @@ export function queue(stopped: Stopped, env: NodeJS.ProcessEnv = process.env): Q
 			`quest: ${tokensPath(env)} holds no token for ${endpoint}, so this host sends it no session records.`,
 		);
 	if (existsSync(refusal(env, endpoint, token))) return { notices, queued: false };
-	const dir = join(stateDirectory(env), "pending");
 	const start = transcriptStart(stopped.transcript);
 	if (start === null) throw new Error(`${stopped.transcript} records no instant, so its session cannot be read`);
-	const queued = randomUUID();
-	const pending: Pending = {
+	const dir = enqueue(env, {
 		harness: stopped.harness,
 		session: stopped.session,
 		start,
-		queued,
+		queued: randomUUID(),
 		root,
 		origin: repository,
 		prefix: run(["rev-parse", "--show-prefix"]).stdout.trim(),
 		endpoint,
-	};
-	mkdirSync(dir, { recursive: true, mode: 0o700 });
-	// Each stop gets a file of its own, never rewritten, so a sender removes only the stops it read. Written whole,
-	// then renamed, so the sender never reads half a file.
-	const path = join(dir, `${queued}.json`);
-	writeFileSync(`${path}.new`, JSON.stringify(pending));
-	renameSync(`${path}.new`, path);
+	});
 	const sender = senderRuns(env);
 	if (!sender.runs)
 		// Said once per outage: the PID of the sender that stopped names it, or none for a host that never ran one.
@@ -212,6 +217,19 @@ export function queue(stopped: Stopped, env: NodeJS.ProcessEnv = process.env): Q
 			`quest: no session record sender runs on this host, so this session's record waits in ${dir} with any others; start it with \`quest records install\`.`,
 		);
 	return { notices, queued: true };
+}
+
+/**
+ * Write `pending` to the queue, returning the queue's directory. Each stop gets a file of its own, never rewritten, so
+ * a sender removes only the stops it read. Written whole, then renamed, so the sender never reads half a file.
+ */
+function enqueue(env: NodeJS.ProcessEnv, pending: Pending): string {
+	const dir = join(stateDirectory(env), "pending");
+	mkdirSync(dir, { recursive: true, mode: 0o700 });
+	const path = join(dir, `${pending.queued}.json`);
+	writeFileSync(`${path}.new`, JSON.stringify(pending));
+	renameSync(`${path}.new`, path);
+	return dir;
 }
 
 /** The sender's last failure when the person has not seen it yet, marking it seen. */
@@ -383,9 +401,11 @@ async function sendOnce(deps: SendDependencies, dir: string): Promise<Sent[]> {
 				else missing.push(q);
 			}
 			// A session token-max no longer lists, as when its transcript was deleted, can never be built: it is
-			// dropped and said, so it does not hold back the rest of its group forever.
+			// dropped and said, so it does not hold back the rest of its group forever. One remembered to name a PR
+			// later is dropped silently, since its first upload sent everything but that PR.
 			for (const q of missing) {
 				settle(q);
+				if (forget(deps.env, id, q.pending)) continue;
 				notes.push(
 					`token-max lists no ${q.pending.harness} session ${q.pending.session} on this host, so its record was dropped`,
 				);
@@ -495,6 +515,8 @@ async function sendOnce(deps: SendDependencies, dir: string): Promise<Sent[]> {
 				throw new Error(`${endpoint} answered ${response.status}: ${(await response.text()).slice(0, 500)}`);
 			clearBackoff(deps.env, id);
 			writeCursor(deps.env, id, read);
+			remember(deps.env, id, { group, emit, byId, waiting: unheaded([...emit], exported, pulls) });
+			resendDue(deps.env, id, pulls, group);
 			for (const q of group) settle(q);
 			sent.push({
 				endpoint,
@@ -667,6 +689,111 @@ function backOff(deps: SendDependencies, id: string): number {
 
 function clearBackoff(env: NodeJS.ProcessEnv, id: string): void {
 	rmSync(backoffPath(env, id), { force: true });
+}
+
+/**
+ * A sent session whose tree's record could not name a PR one of its branches may yet head: the latest branch of it or
+ * a sub-agent sent with it headed no PR. It is queued again once one does, so that PR's cost and time count it.
+ */
+interface Remembered {
+	/** Its stop as last queued, queued again under a new ID to resend it. */
+	pending: Pending;
+	/** Its transcript's files: once none is left, token-max lists it no more, so it is forgotten. */
+	files: string[];
+	/** Each latest branch in its tree that headed no PR when it was last sent. */
+	waiting: Reached[];
+}
+
+/** Group `id`'s remembered sessions, a file each, so a pass reads only its own group's. */
+const rememberedDir = (env: NodeJS.ProcessEnv, id: string) => join(stateDirectory(env), "remembered", digest(id));
+const rememberedPath = (env: NodeJS.ProcessEnv, id: string, pending: Pending) =>
+	join(rememberedDir(env, id), `${digest(`${pending.harness}\0${pending.session}`)}.json`);
+
+/**
+ * Decide afresh, for each session of `group` the upload sent, whether to remember it: when the latest branch of any
+ * session in the tree it was sent with, it and its sub-agents, headed no PR. The whole tree counts, since
+ * `buildRecords` passes PRs between parent and sub-agent, so a PR opening on a sub-agent's branch changes its parent's
+ * record too.
+ */
+function remember(
+	env: NodeJS.ProcessEnv,
+	id: string,
+	sent: {
+		group: { pending: Pending }[];
+		emit: Set<Session>;
+		byId: Map<string, Session>;
+		waiting: Map<Session, Reached>;
+	},
+): void {
+	const children = new Map<string, Session[]>();
+	for (const s of sent.emit) {
+		if (s.parent === null) continue;
+		const parent = `${s.harness}\0${s.parent}`;
+		children.set(parent, [...(children.get(parent) ?? []), s]);
+	}
+	// A session that stopped twice is queued twice; its latest stop stands for it.
+	const roots = new Map(sent.group.map((q) => [`${q.pending.harness}\0${q.pending.session}`, q.pending]));
+	for (const [name, pending] of roots) {
+		const root = sent.byId.get(name);
+		if (root === undefined || !sent.emit.has(root)) continue;
+		const tree = new Set([root]);
+		for (const s of tree) for (const child of children.get(`${s.harness}\0${s.id}`) ?? []) tree.add(child);
+		const waiting = [
+			...new Map(
+				[...tree].flatMap((s) => {
+					const reached = sent.waiting.get(s);
+					return reached ? [[JSON.stringify(reached), reached] as const] : [];
+				}),
+			).values(),
+		];
+		const path = rememberedPath(env, id, pending);
+		if (waiting.length === 0) {
+			rmSync(path, { force: true });
+			continue;
+		}
+		mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+		writeFileSync(`${path}.new`, JSON.stringify({ pending, files: root.files, waiting } satisfies Remembered));
+		renameSync(`${path}.new`, path);
+	}
+}
+
+/** Forget `pending`'s session, returning whether it was remembered. */
+function forget(env: NodeJS.ProcessEnv, id: string, pending: Pending): boolean {
+	const path = rememberedPath(env, id, pending);
+	if (!existsSync(path)) return false;
+	rmSync(path, { force: true });
+	return true;
+}
+
+/**
+ * Queue again each session group `id` remembers once a PR among `pulls` heads one of its waiting branches, so the
+ * group's next pass rebuilds its tree, and forget each whose transcript is gone. The group's sessions in `sent` were
+ * just rebuilt, so they are left as `remember` decided.
+ */
+function resendDue(env: NodeJS.ProcessEnv, id: string, pulls: Pull[], sent: { pending: Pending }[]): void {
+	const dir = rememberedDir(env, id);
+	if (!existsSync(dir)) return;
+	const fresh = new Set(sent.map((q) => rememberedPath(env, id, q.pending)));
+	const heads = heading(pulls);
+	for (const name of readdirSync(dir)) {
+		const path = join(dir, name);
+		if (!name.endsWith(".json") || fresh.has(path)) continue;
+		const kept = readRemembered(path);
+		// An unreadable file loses only the resend of a record already sent once, so it never blocks the group.
+		if (kept === null || !kept.files.some((file) => existsSync(file))) rmSync(path, { force: true });
+		else if (kept.waiting.some(heads)) enqueue(env, { ...kept.pending, queued: randomUUID() });
+	}
+}
+
+function readRemembered(path: string): Remembered | null {
+	try {
+		const value = JSON.parse(readFileSync(path, "utf8")) as Partial<Remembered> | null;
+		return typeof value?.pending === "object" && Array.isArray(value.files) && Array.isArray(value.waiting)
+			? (value as Remembered)
+			: null;
+	} catch {
+		return null;
+	}
 }
 
 /** Whether a checkout still holds `dir` or the nearest of its parents that exists, as `questRoot` finds it. */

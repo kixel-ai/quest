@@ -1252,7 +1252,9 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				`${tokensPath()} pairs with that endpoint as a bearer token, one upload per endpoint and repository, ` +
 				`then again every ${SEND_INTERVAL / 1000} seconds until stopped, at low priority. A record is built as quest usage ` +
 				"builds it, from token-max's sessions on this host since the earliest queued session's first instant and " +
-				"the PRs updated since then, and replaces its earlier copy, so a resend never doubles. An endpoint that " +
+				"the PRs updated since then, and replaces its earlier copy, so a resend never doubles. A sent session whose " +
+				"latest branch, or a sub-agent's, heads no PR yet is sent again, with its sub-agents, once a pass for its " +
+				"repository reads a PR opened on that branch, until its transcript is gone. An endpoint that " +
 				"refuses the token (401 or 403) is sent nothing more until the token changes; any other failure keeps the " +
 				"sessions queued, retried after a minute and then twice as long each time up to six hours, and the next " +
 				"stop hook says so once. Before a record is built, a cheap model, " +

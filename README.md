@@ -1729,7 +1729,11 @@ latest upload, since one sender sends a session's uploads in order. The type is
 
 - `pulls` are the PRs it worked on, attributed as `quest usage` attributes
   them; a session with none yet, such as planning before its PR opens, keeps
-  its `branch`, and the next record names the PR.
+  its `branch`, and the next record names the PR. The sender remembers a sent
+  session while its latest branch, or a sub-agent's, heads no PR, and resends
+  it, with its sub-agents, once one opens: with the next session it sends from
+  that repository, since only then does it read the repository's PRs. It
+  forgets the session once the harness prunes its transcript.
 - `role` is classifying when a PR's `## Review` record names it as the
   [risk classifier](#risk-tiers), reviewing when it names it as a reviewer or
   Codex marks it a review, else the one the first quest skill it ran gives: planning
