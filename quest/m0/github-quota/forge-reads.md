@@ -29,6 +29,9 @@ The backend choice and outage behavior are in the
   Quest backend. Commands take the interface, not the GitHub client.
 - Each answer carries the time of the newest webhook behind it, so
   `quest wait` can tell a quiet PR from a stale index.
+- The caller's identity is part of the interface, not read off whichever
+  credential served the read: the Kixel Quest backend names the token's
+  person, so `quest wait` still ignores the person's own activity.
 - A read Kixel Quest's index cannot answer falls through to GitHub inside
   Kixel Quest, never back in quest.
 

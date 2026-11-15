@@ -21,11 +21,18 @@ writes to every installation on every agent host).
   serve, reads use the person's token as today.
 - Split the client's dependencies so a read and a write each say which token
   they use; a write on the installation token must not compile.
+- Keep the caller's identity apart from the read credential. `quest wait`
+  reads `viewer { login }` in the same query as the PR's activity
+  (`src/cli/wait.ts`) to ignore the person's own replies, reactions, labels,
+  and edits; on an installation token `viewer` is the App, so the person's
+  own activity would wake the waiter. Resolve the person once, from their
+  token or Kixel Quest, and pass it in.
 
 Tests: with a fake Kixel Quest and a fake GitHub, a read goes out on the
 minted token and a write on the person's; the token is minted once and
-reused until near expiry; and a repository Kixel Quest does not serve reads
-on the person's token.
+reused until near expiry; the person's own reply, reaction, label, and
+edit still do not wake `quest wait` when its reads use the minted token;
+and a repository Kixel Quest does not serve reads on the person's token.
 
 ## Waiting
 
