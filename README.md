@@ -180,6 +180,57 @@ refuses it. On an epic or milestone README, the date holds back every quest
 under it. A past date no longer blocks. `quest check` rejects anything but one
 real `YYYY-MM-DD` date.
 
+## Run recurring audits
+
+Quest ships a pack of audits every repository runs once per milestone:
+
+```console
+$ quest audit
+tree - Audit the quest tree
+deps - Audit dependencies
+```
+
+`tree` finds quests that disagree, conflict, sit in the wrong milestone, or
+plan stale work; `deps` reviews new releases, upstream health, held-back
+majors, and dependencies worth dropping. `quest audit <name>` prints what one
+checks, what each finding becomes, and how its run plans the next one.
+
+A quest runs an audit by naming it in an `## Audit` section, and holds only
+what the repository learned, such as its baseline and the scope it excludes:
+
+```markdown
+# [M] Audit dependencies
+
+## Goal
+
+Run the `deps` audit: `quest audit deps` prints what it checks, what each finding becomes, and how to plan its next run.
+
+## Audit
+
+- deps
+
+## Required
+
+- [m0](/quest/m0/README.md) - the audit runs after it
+```
+
+`quest init` plants this stub for each audit no quest names, in the milestone
+after the lowest one with work left, requiring it, and creates that milestone
+when missing; with no work left, the stubs are ready at once. It never edits a
+stub afterwards. The run's PR deletes the stub and creates the next one a
+milestone later, scheduled a week out, so improving a definition reaches every
+repository on its next run. To opt out, list the audit in the root
+`quest/README.md`:
+
+```markdown
+## Skipped audits
+
+- deps - this repository vendors nothing and has no package manager
+```
+
+`quest check` rejects an audit name Quest does not ship in either section, a
+second name in one `## Audit`, and `## Skipped audits` outside the root.
+
 ## Find what waits on you
 
 A quest waiting outside the tree says so in a `## Waiting` section, one item
@@ -1733,13 +1784,13 @@ latest upload, since one sender sends a session's uploads in order. The type is
 - `role` is classifying when a PR's `## Review` record names it as the
   [risk classifier](#risk-tiers), reviewing when it names it as a reviewer or
   Codex marks it a review, else the one the first quest skill it ran gives: planning
-  (`/quest-plan`, `/quest-audit`, `/quest-recurring`, `/quest-import`,
+  (`/quest-plan`, `/quest-recurring`, `/quest-import`,
   `/quest-grill`, `/quest-delete`, `/quest-export`), implementing
   (`/quest-start`), iterating (`/quest-iterate`), reviewing (`/quest-review`),
   merging (`/quest-merge`, `/quest-complete`), or coordinating (`/quest-run`,
   `/quest-spawn`). Without one, a sub-agent takes its parent's role unless that
   is coordinating; a session on its sub-agents' PRs only is coordinating; one
-  on a `quest-plan/`, `quest-audit/`, `quest-recurring/`, or `quest-import/`
+  on a `quest-plan/`, `quest-recurring/`, or `quest-import/`
   branch is planning; and the rest are implementing when their first request
   came before the PR opened, else iterating.
 - `waits` holds each wait a tool timed: `gate-queue` and `gate-run` for an
@@ -2168,7 +2219,6 @@ arrives with the guide sections and other skills it builds on, in one call:
 | `quest-recurring` | Plan a quest whose finishing PR creates its next occurrence, and what gates it. |
 | `quest-import` | Bring open GitHub issues into the planning conversation. |
 | `quest-export` | Turn active quests into GitHub issues before leaving Quest. |
-| `quest-audit` | Find conflicting, stale, or misprioritized quests, then resolve them. |
 | `quest-start` | Claim a ready quest, complete it, and open a PR. |
 | `quest-spawn` | Run only `quest-run`'s quest starts: triage ready quests and send agents out in parallel, asking nothing. |
 | `quest-iterate` | Iterate on an open PR to settle its open decisions, fix CI and review findings, and push. |

@@ -33,6 +33,7 @@ import {
 	size,
 	withoutFragment,
 } from "./doc";
+import { AUDIT, AUDITS, SKIPPED, auditOf, skippedOf } from "./audit";
 import { comparePaths, join } from "./path";
 import { MAINTAINER, WAITING, parseWait } from "./waiting";
 
@@ -41,14 +42,34 @@ import { MAINTAINER, WAITING, parseWait } from "./waiting";
  * literally, so a typo turns a blocked quest ready and fails nowhere else: the
  * closed vocabulary is what catches it.
  */
-export const HEADINGS = ["Goal", "Plan", "Hosts", "Waiting", "Scheduled", "Required", "Closes", "Related"];
+export const HEADINGS = [
+	"Goal",
+	"Plan",
+	"Audit",
+	"Skipped audits",
+	"Hosts",
+	"Waiting",
+	"Scheduled",
+	"Required",
+	"Closes",
+	"Related",
+];
 
 /**
  * Sections whose whole content is a list. A heading left standing after its
  * last entry was removed is a bug: an empty `Required` blocks its quest
  * forever.
  */
-export const LIST_SECTIONS = ["Hosts", "Waiting", "Scheduled", "Required", "Closes", "Related"];
+export const LIST_SECTIONS = [
+	"Audit",
+	"Skipped audits",
+	"Hosts",
+	"Waiting",
+	"Scheduled",
+	"Required",
+	"Closes",
+	"Related",
+];
 
 /** The permanent root epic; the one document nothing has to list. */
 export const ROOT = "quest/README.md";
@@ -195,6 +216,38 @@ function headings(found: Finding[], docs: Doc[], doc: Doc) {
 					: null;
 		if (message !== null) found.push({ path: doc.path, line: entry.line, message });
 	});
+
+	// `quest init` plants a stub for every audit no quest names, so a typo
+	// would plant a second run of the audit it meant.
+	const names = AUDITS.map((audit) => audit.name).join(", ");
+	entries(doc, AUDIT).forEach((entry, index) => {
+		const message =
+			auditOf(entry) === null
+				? `'## ${AUDIT}' item must be the name of an audit quest ships (${names})`
+				: index > 0
+					? `'## ${AUDIT}' names one audit; split the others into quests of their own`
+					: null;
+		if (message !== null) found.push({ path: doc.path, line: entry.line, message });
+	});
+
+	// Only the root's list stops `quest init` from planting an audit.
+	for (const heading of doc.headings) {
+		if (heading.text === SKIPPED && doc.path !== ROOT)
+			found.push({
+				path: doc.path,
+				line: heading.line,
+				message: `'## ${SKIPPED}' belongs in ${ROOT}, the only list \`quest init\` reads`,
+			});
+	}
+	for (const entry of entries(doc, SKIPPED)) {
+		if (skippedOf(entry) === null) {
+			found.push({
+				path: doc.path,
+				line: entry.line,
+				message: `'## ${SKIPPED}' item must open with the name of an audit quest ships (${names}), optionally followed by ' - why'`,
+			});
+		}
+	}
 
 	// `quest waiting` sorts on who acts, so an item that does not name its
 	// party would hide a decision the maintainer owes.

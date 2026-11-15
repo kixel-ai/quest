@@ -27,9 +27,3 @@ Keep each definition about what to look for and what a finding becomes;
 leave out the sources' baselines and repository names, which stay in each
 repository's stub. moq.pro is private: carry over its method, not its
 findings.
-
-## Required
-
-- [Ship the audit pack](/quest/m0/audit-pack/mechanism.md) - the
-  `## Audit` section, `quest audit`, planting, and the recurrence text these
-  definitions reuse

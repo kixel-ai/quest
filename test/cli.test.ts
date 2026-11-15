@@ -87,7 +87,9 @@ test("init and uninstall print each changed path and nothing else", () => {
 	const init = run("--root", root, "init");
 	expect(init.code).toBe(0);
 	expect(init.stdout).toMatch(/^(\S+\n)+$/);
-	expect(init.stdout).toContain("quest/README.md\nAGENTS.md\n");
+	expect(init.stdout).toContain(
+		"quest/README.md\nquest/m0/README.md\nquest/m1/README.md\nquest/m1/audit-tree.md\nquest/m1/audit-deps.md\nAGENTS.md\n",
+	);
 	expect(run("--root", root, "init").stdout).toBe("");
 	expect(run("--root", root, "uninstall").stdout).toMatch(/^(\S+\n)+$/);
 	expect(run("--root", root, "uninstall").stdout).toBe("");
@@ -120,7 +122,17 @@ test("guide prints the named sections in the guide's order", () => {
 test("skill rejects an unknown name", () => {
 	const out = run("skill", "nope");
 	expect(out.code).toBe(1);
-	expect(out.stderr).toMatch(/^quest: no skill named nope \(have: afk, audit, /);
+	expect(out.stderr).toMatch(/^quest: no skill named nope \(have: afk, complete, /);
+});
+
+test("audit lists the pack, and prints a definition with how every run plans the next", () => {
+	expect(run("audit").stdout).toBe("tree - Audit the quest tree\ndeps - Audit dependencies\n");
+	const out = run("audit", "deps");
+	expect(out.code).toBe(0);
+	expect(out.stdout).toMatch(/^# Dependency audit\n[\s\S]*\n# Running an audit\n[\s\S]*\n## Next run\n/);
+	const missing = run("audit", "code");
+	expect(missing.code).toBe(1);
+	expect(missing.stderr).toBe("quest: no audit named code (have: tree, deps)\n");
 });
 
 test("usage errors exit 2", () => {

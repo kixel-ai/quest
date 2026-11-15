@@ -9,6 +9,7 @@ import { Argument, Command, CommanderError, InvalidArgumentError, Option } from 
 
 import { description } from "../../package.json";
 import {
+	AUDITS,
 	type Doc,
 	type RankedQuest,
 	blockers,
@@ -47,6 +48,7 @@ import { gitHubDependencies, GitHubInputError, pullRequest, readRemote, remoteRe
 import { mergedHolds } from "../github/client";
 import { type Hold, finish, land, release, take } from "./hold";
 import { LAND_CHECK } from "../github/land";
+import { audit } from "./audits";
 import { apply, pushCommand } from "./land-apply";
 import { EFFORT_VARIABLE, EFFORTS, fix, FixerAgentError } from "./land-fix";
 import { watch, type WatchOptions } from "./land-watch";
@@ -1191,7 +1193,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"its cost counting equally toward each. Its role is classifying when a PR's ## Review record names it as the risk classifier, reviewing when it names it " +
 				"as a reviewer or Codex marks it a review, else the one the first quest skill it ran gives (planning, implementing, iterating, " +
 				"reviewing, merging, or coordinating), else its parent's unless that is coordinating, else coordinating for a session on its sub-agents' " +
-				"PRs only, planning on a quest-plan, quest-audit, quest-recurring, or quest-import branch, implementing when its " +
+				"PRs only, planning on a quest-plan, quest-recurring, or quest-import branch, implementing when its " +
 				"first request since --since came before the PR opened, and iterating otherwise. Each PR sums its sessions' " +
 				"waits by kind: queued in and running a quest gate, waiting in quest wait for PR activity or the merge queue, " +
 				"each as the tool logged it for its session, and on a person's answer to a blocking question, as its " +
@@ -1851,6 +1853,28 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 			const found = skill(name);
 			if (!found) throw new Error(`no skill named ${name} (have: ${SKILLS.map((s) => s.name).join(", ")})`);
 			out.stdout(found.instructions);
+		});
+
+	program
+		.command("audit")
+		.summary("Print a shipped audit's definition, or list the audits with no name")
+		.description(
+			"Print a shipped audit's definition, or list the audits with no name.\n\n" +
+				"A quest whose ## Audit section names an audit runs it, and the pinned binary decides what the audit checks. " +
+				"It prints what to look for and what each finding becomes, then how the run plans the next one. " +
+				"`quest init` plants a stub for each audit no quest names, unless the root quest/README.md lists it under " +
+				"## Skipped audits.",
+		)
+		.argument("[name]", "Audit to print")
+		.action((name: string | undefined) => {
+			if (name === undefined) {
+				for (const a of AUDITS) print(`${a.name} - ${a.title.replace(/^\[\w+\] /, "")}`);
+				return;
+			}
+			const text = audit(name);
+			if (text === undefined)
+				throw new Error(`no audit named ${name} (have: ${AUDITS.map((a) => a.name).join(", ")})`);
+			out.stdout(text);
 		});
 
 	const listed = (hooks: readonly HookEntry[]) =>
