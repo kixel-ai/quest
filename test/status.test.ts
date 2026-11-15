@@ -635,7 +635,7 @@ test("a base's requirements read once give the status a read of its own would, a
 	const shared = counted();
 	const needs = await requiredOf(new GitHub(shared.deps), pr, "main");
 	const before = shared.reads.length;
-	expect(await pullRequestStatus(pr, shared.deps, { branch: "main", needs })).toEqual(expected);
+	expect(await pullRequestStatus(pr, shared.deps, { ...pr, branch: "main", needs })).toEqual(expected);
 	expect(shared.reads).toHaveLength(before);
 	expect(expected.checks.pending.map((check) => check.name)).toEqual([
 		"lint",
@@ -643,9 +643,18 @@ test("a base's requirements read once give the status a read of its own would, a
 	]);
 
 	// The PR moved to another base after its requirements were read.
-	await expect(pullRequestStatus(pr, counted().deps, { branch: "release", needs })).rejects.toThrow(
+	await expect(pullRequestStatus(pr, counted().deps, { ...pr, branch: "release", needs })).rejects.toThrow(
 		"the PR's base is main, not the release whose requirements were read",
 	);
+	// Another repository's requirements are refused, whatever their branch; names ignore case.
+	const other = counted();
+	await expect(
+		pullRequestStatus(pr, other.deps, { owner: "example", repo: "policies", branch: "main", needs }),
+	).rejects.toThrow("the requirements passed for example/project#1 were read for example/policies");
+	expect(other.reads).toEqual([]);
+	expect(
+		await pullRequestStatus(pr, counted().deps, { owner: "Example", repo: "Project", branch: "main", needs }),
+	).toEqual(expected);
 });
 
 test("a required check from another app than its requirement names stays pending, and a closed PR reads no requirements", async () => {

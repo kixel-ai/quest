@@ -163,17 +163,23 @@ export interface Status {
 	starterHold: HoldReport["starter"];
 }
 
-/** What a base branch requires, as {@link requiredOf} read it for that branch. */
-export interface BaseNeeds {
+/** What a repository's base branch requires, as {@link requiredOf} read it for that repository and branch. */
+export interface BaseNeeds extends Repository {
 	branch: string;
 	needs: Needs;
 }
 
 /**
  * Read the paged PR state, then the state commands’ ownership snapshot. A caller reading many PRs passes `base`,
- * what it read of their base once, instead of each read fetching it again; it throws when the PR's base is another.
+ * what it read of their base once, instead of each read fetching it again; it throws when the PR's repository or base
+ * is another.
  */
 export async function pullRequestStatus(pr: PullRequest, deps: GitHubDependencies, base?: BaseNeeds): Promise<Status> {
+	// GitHub's owner and repository names are case-insensitive.
+	if (base !== undefined && `${base.owner}/${base.repo}`.toLowerCase() !== `${pr.owner}/${pr.repo}`.toLowerCase())
+		throw new Error(
+			`the requirements passed for ${pr.owner}/${pr.repo}#${pr.number} were read for ${base.owner}/${base.repo}`,
+		);
 	const github = new GitHub(deps);
 	const cursors: Record<"checks" | "reviews" | "threads", string | null | undefined> = {
 		checks: null,
