@@ -32,34 +32,46 @@ Decided 2026-11-14 (/quest-plan, unattended, so each is a recommendation
 the PR's review can overturn):
 
 - Which sessions does the sender remember after uploading?
-  - ✅ Each emitted session (sub-agents included) whose latest branch
-    headed no PR in the read, since `attribute` prefers the latest branch:
-    this also catches a session that moved to a new branch whose PR opens
-    later
-  - Rejected: only records with `pulls: []`, which misses that case
-- When is a remembered session resent?
+  - ✅ Each queued session, as the root of the tree it emits, when any
+    session in that tree has a latest branch that headed no PR in the
+    read. `attribute` prefers the latest branch, so this catches a session
+    that moved to a new branch whose PR opens later. The whole tree is
+    remembered because `buildRecords` (`src/cli/records.ts`) passes PRs
+    from parent to sub-agent and back, so a parent on `main` takes its
+    PR from a sub-agent's fresh branch
+  - Rejected: only records with `pulls: []`, which misses the moved
+    session; only the session whose own branch lacks a PR, which leaves a
+    parent that inherits it at `pulls: []`
+- When is a remembered tree resent?
   - ✅ On a pass for its group (endpoint, origin, prefix) whose PR read
-    holds a PR it would be attributed to, by the same rule `attribute`
-    uses, shared rather than copied: the sender queues it again, so it
-    goes through the normal path and widens token-max's window only
-    once, when it is due. Waiting for the group's next queued session is
-    the "next `quest` run" the record store's PR recommended
-  - Rejected: polling each remembered session's group on a timer, which
+    holds a PR that some member's unresolved latest branch heads, by the
+    rule `attribute` uses, shared rather than copied. A PR on an older
+    branch triggers nothing, since `attribute` falling back to it is
+    already what was sent. The sender queues the root again, so the tree
+    goes through the normal path, rebuilding every member's record, and
+    widens token-max's window only once, when it is due. Waiting for the
+    group's next queued session is the "next `quest` run" the record
+    store's PR recommended
+  - Rejected: polling each remembered tree's group on a timer, which
     spends GitHub quota every pass for a resend that can wait for the
     repository's next session
-- When is a remembered session forgotten?
-  - ✅ Once resent with a PR, or when token-max no longer lists it (its
-    transcript was pruned), silently, since nothing was lost that the
-    first upload did not already send. The harness's transcript retention
-    bounds what is kept, with no constant of our own
-  - Rejected: a fixed age; keeping it until its branch is deleted, which
-    costs a git or GitHub read per session
+- When is a remembered tree forgotten?
+  - ✅ Each upload of a root decides afresh by the rule above, so a resend
+    that still leaves a member's latest branch without a PR keeps the
+    tree; it is dropped when token-max no longer lists the root (its
+    transcript was pruned), silently, since the first upload already sent
+    everything but the PR. The harness's transcript retention bounds what
+    is kept, with no constant of our own
+  - Rejected: forgetting after one resend, which loses a branch whose PR
+    opens later still; a fixed age; keeping it until its branch is
+    deleted, which costs a git or GitHub read per session
 - Milestone? ✅ m0 under the benchmark, whose end-to-end check needs every
   PR's cost to be whole (rejected: m1).
 
 Keep what is remembered in the sender's state directory beside `pending/`,
-one small file per session, holding what matching needs: its branches with
-their times and the repositories token-max resolved for it.
+one small file per root, holding its `Pending` and, per unresolved member,
+what matching needs: its latest branch with its times and the
+repositories token-max resolved for it.
 
 ## Related
 
