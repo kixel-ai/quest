@@ -12,7 +12,8 @@ import { culpritOf, culprits } from "./breakage";
 import { fixes } from "./land-fixer";
 import { MERGER } from "./land-watch-fix";
 import { githubRepository, requireRemote } from "./github";
-import { type GitHub, type ObjectValue, type Repository, link, object } from "../github/client";
+import { type GitHub, type ObjectValue, link, object } from "../github/client";
+import type { Repository } from "../core";
 import { type OnlineReview, readOnlineReviews } from "../github/online-review";
 import {
 	type Counts,

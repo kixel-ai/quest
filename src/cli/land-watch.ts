@@ -3,17 +3,8 @@
 import { accessSync, constants, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
-import {
-	array,
-	GitHub,
-	type GitHubDependencies,
-	GitHubGraphQLError,
-	link,
-	object,
-	type ObjectValue,
-	type Repository,
-	string,
-} from "../github/client";
+import { array, GitHub, type GitHubDependencies, GitHubGraphQLError, link, object, type ObjectValue, string } from "../github/client";
+import type { Repository } from "../core";
 import { lacksApproval } from "../github/merge";
 import type { Entry, LandMethod, Plan } from "./land";
 import type { Reason } from "../github/land";

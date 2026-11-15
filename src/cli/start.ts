@@ -18,7 +18,8 @@ import { GitError, git } from "./git";
 import { requireRemote } from "./github";
 import { object, repositoryPath, string } from "../github/client";
 import { ago } from "../github/hold";
-import { type OpenPull, mergedPull, openPullRequests, pullsFrom } from "../github/claims";
+import type { OpenPull } from "../core";
+import { mergedPull, openPullRequests, pullsFrom } from "../github/claims";
 
 /** Someone else holds the quest, or the claim cannot be released; distinct from a failure. */
 export class Refusal extends Error {}

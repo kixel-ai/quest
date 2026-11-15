@@ -1,18 +1,8 @@
 // What holds a PR's head from landing besides its checks: an online reviewer's finding on the head that no writer has
 // answered, and a maintainer decision recorded in a comment after the head was committed that nothing has answered.
-import { type GitHub, type ObjectValue, type Repository, array, object, string } from "./client";
+import type { Repository, Signal } from "../core";
+import { type GitHub, type ObjectValue, array, object, string } from "./client";
 import { type Activity, bodyFindings, isBot, login, readActivity, reviewerOf } from "./online-review";
-
-/** One signal on a PR's head that holds it from landing until it is fixed or answered. */
-export interface Signal {
-	/** `finding`: an online reviewer's, on the head. `decision`: a marked comment newer than the head's commit. */
-	kind: "finding" | "decision";
-	/** The review, thread, or comment that raised it. */
-	url: string;
-	author: string;
-	/** The finding's title or thread's first line, or the decision's first line. */
-	text: string;
-}
 
 /** The picked heads whose signals a later commit carries unread, and when the pick was made. */
 export interface Carried {

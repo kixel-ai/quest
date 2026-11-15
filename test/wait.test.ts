@@ -5,9 +5,11 @@ import { join } from "node:path";
 import { expect, test } from "vitest";
 
 import { main } from "../src/cli/main";
-import { GitHubInputError, pullRequest } from "../src/cli/github";
+import { InputError } from "../src/core";
+import { pullRequest } from "../src/cli/github";
+import { GitHubForge } from "../src/github/forge";
 import { type GitHubDependencies } from "../src/github/client";
-import { waitForActivity, WaitTimeout } from "../src/cli/wait";
+import { waitForActivity, WaitTimeout, type WaitOptions } from "../src/cli/wait";
 
 const A = "a".repeat(40);
 const B = "b".repeat(40);
@@ -211,6 +213,7 @@ function setup(
 			}
 			if (parsed.pathname === "/graphql") {
 				const body = JSON.parse(String(init?.body)) as { query: string };
+				if (body.query === "query { viewer { login } }") return response({ data: { viewer: { login: "waiter" } } });
 				if (body.query.includes("statusCheckRollup")) {
 					checkCalls.push({ ...call, body });
 					return side.checks?.shift() ?? checks();
@@ -263,6 +266,11 @@ function setup(
 	return { deps, calls, sideCalls, checkCalls, editCalls, ruleCalls, sleeps, warnings, responses };
 }
 
+/** Wait on GitHub, with the fixture's clock. */
+function waitOn(pull: typeof pr, options: WaitOptions, deps: GitHubDependencies): Promise<string[]> {
+	return waitForActivity(pull, options, new GitHubForge(deps), deps);
+}
+
 function graphql(fixture: ReturnType<typeof setup>) {
 	return fixture.sideCalls
 		.filter((call) => call.path === "/graphql")
@@ -275,7 +283,7 @@ function cursor(lines: string[]): string {
 
 test("default point includes reviews already submitted on the current head and uses the fork's push time", async () => {
 	const fixture = setup([pull(), response([pushed()]), response([committed(A), reviewed()])]);
-	const lines = await waitForActivity(pr, {}, fixture.deps);
+	const lines = await waitOn(pr, {}, fixture.deps);
 	expect(lines).toHaveLength(1);
 	expect(lines[0]).toMatch(
 		/^2026-10-07T12:00:00Z reviewed reviewer https:\/\/github.com\/example\/project\/pull\/1#pullrequestreview-1 q1\./,
@@ -301,7 +309,7 @@ test("a plain push is detected by new SHA regardless of git dates, with conditio
 		],
 		[A],
 	);
-	const lines = await waitForActivity(pr, {}, fixture.deps);
+	const lines = await waitOn(pr, {}, fixture.deps);
 	expect(lines).toHaveLength(1);
 	expect(lines[0]).toMatch(new RegExp(`^${B} committed A_Person `));
 	expect(fixture.sleeps).toEqual([300_000, 300_000]);
@@ -337,7 +345,7 @@ test("force pushes, comments, inline comments, merges, closes and dequeues are p
 			event("auto_merge_enabled", 10),
 		]),
 	]);
-	const lines = await waitForActivity(pr, {}, fixture.deps);
+	const lines = await waitOn(pr, {}, fixture.deps);
 	expect(lines.map((line) => line.split(" ")[1])).toEqual([
 		"head_ref_force_pushed",
 		"commented",
@@ -368,7 +376,7 @@ test("label changes wake the waiter by label name, except the waiter's own", asy
 			label("labeled", 3, "needs review", "person"),
 		]),
 	]);
-	const lines = await waitForActivity(pr, {}, fixture.deps);
+	const lines = await waitOn(pr, {}, fixture.deps);
 	expect(lines.map((line) => line.split(" ").slice(0, 4).join(" "))).toEqual([
 		"2026-10-07T12:00:00Z unlabeled:merge github-actions[bot] https://github.com/example/project/pull/1",
 		"2026-10-07T12:00:00Z labeled:needs_review person https://github.com/example/project/pull/1",
@@ -378,16 +386,16 @@ test("label changes wake the waiter by label name, except the waiter's own", asy
 
 test("a resume cursor catches same-second activity without replaying events or commits", async () => {
 	const first = setup([pull(), response([pushed()]), response([committed(A), reviewed(1)])]);
-	const point = cursor(await waitForActivity(pr, {}, first.deps));
+	const point = cursor(await waitOn(pr, {}, first.deps));
 	const second = setup([response([committed(A), reviewed(1), reviewed(2), committed(B)])]);
-	const lines = await waitForActivity(pr, { since: point }, second.deps);
+	const lines = await waitOn(pr, { since: point }, second.deps);
 	expect(lines).toHaveLength(2);
 	expect(lines[0].split(" ")).toHaveLength(4);
 	expect(lines[1].split(" ")).toHaveLength(5);
 	expect(lines.some((line) => line.includes("review-1"))).toBe(false);
 	expect(lines.some((line) => line.startsWith(B))).toBe(true);
 	const third = setup([response([committed(A), reviewed(1), reviewed(2), committed(B), committed(C)])]);
-	const later = await waitForActivity(pr, { since: cursor(lines) }, third.deps);
+	const later = await waitOn(pr, { since: cursor(lines) }, third.deps);
 	expect(later).toHaveLength(1);
 	expect(later[0]).toMatch(new RegExp(`^${C} committed `));
 });
@@ -402,7 +410,7 @@ test("historical timestamp and SHA starts detect pushes through repository activ
 			],
 			[A, B],
 		);
-		const lines = await waitForActivity(pr, { since }, fixture.deps);
+		const lines = await waitOn(pr, { since }, fixture.deps);
 		expect(lines).toHaveLength(1);
 		expect(lines[0]).toContain(
 			`2026-10-07T12:05:00Z pushed author https://github.com/contributor/fork/commit/${B}`,
@@ -412,7 +420,7 @@ test("historical timestamp and SHA starts detect pushes through repository activ
 
 test("an explicit timestamp includes a push at that instant", async () => {
 	const fixture = setup([pull(undefined, B), response([pushed(B)]), response([committed(A), committed(B)])], [A, B]);
-	const lines = await waitForActivity(pr, { since: POINT }, fixture.deps);
+	const lines = await waitOn(pr, { since: POINT }, fixture.deps);
 	expect(lines).toHaveLength(1);
 	expect(lines[0]).toContain(`${POINT} pushed author https://github.com/contributor/fork/commit/${B}`);
 });
@@ -430,7 +438,7 @@ test("a historical force push prints once, from the timeline", async () => {
 		],
 		[B],
 	);
-	const lines = await waitForActivity(pr, { since: POINT }, fixture.deps);
+	const lines = await waitOn(pr, { since: POINT }, fixture.deps);
 	expect(lines).toHaveLength(1);
 	expect(lines[0]).toMatch(/^2026-10-07T12:05:02Z head_ref_force_pushed author /);
 });
@@ -445,26 +453,26 @@ test("the force push that created the starting head is not activity, even after 
 		],
 		[B],
 	);
-	const lines = await waitForActivity(pr, {}, first.deps);
+	const lines = await waitOn(pr, {}, first.deps);
 	expect(lines).toHaveLength(1);
 	expect(lines[0]).toContain("review-1");
 	const second = setup([
 		response([committed(B), reviewed(1, "2026-10-07T12:05:01Z"), forcePushed(B, "2026-10-07T12:05:02Z"), later]),
 	]);
-	const resumed = await waitForActivity(pr, { since: cursor(lines) }, second.deps);
+	const resumed = await waitOn(pr, { since: cursor(lines) }, second.deps);
 	expect(resumed).toHaveLength(1);
 	expect(resumed[0]).toContain("review-2");
 });
 
 test("a timed-out wait prints a cursor that still reports a push landing before the retry", async () => {
 	const first = setup([pull(), response([pushed()]), response([committed(A)])]);
-	const timeout = await waitForActivity(pr, { timeout: 10 }, first.deps).catch((error: unknown) => error);
+	const timeout = await waitOn(pr, { timeout: 10 }, first.deps).catch((error: unknown) => error);
 	expect(timeout).toBeInstanceOf(WaitTimeout);
 	const point = (timeout as WaitTimeout).cursor!;
 	expect(point).toMatch(/^q1\./);
 	// Rerunning without the cursor would take B as its starting head and stay silent.
 	const second = setup([response([committed(A), committed(B)])]);
-	const lines = await waitForActivity(pr, { since: point }, second.deps);
+	const lines = await waitOn(pr, { since: point }, second.deps);
 	expect(lines).toHaveLength(1);
 	expect(lines[0]).toMatch(new RegExp(`^${B} committed `));
 	expect(second.calls.map((call) => call.path)).toEqual([timeline]);
@@ -472,7 +480,7 @@ test("a timed-out wait prints a cursor that still reports a push landing before 
 
 test("a wait timed out during setup resumes from the head it read, so a later push is reported", async () => {
 	const first = setup([pull(), response({ message: "rate limit" }, { "retry-after": "120" }, 429)]);
-	const timeout = await waitForActivity(pr, { timeout: 10 }, first.deps).catch((error: unknown) => error);
+	const timeout = await waitOn(pr, { timeout: 10 }, first.deps).catch((error: unknown) => error);
 	expect(timeout).toMatchObject({ cursor: A });
 	const second = setup(
 		[
@@ -482,7 +490,7 @@ test("a wait timed out during setup resumes from the head it read, so a later pu
 		],
 		[A, B],
 	);
-	const lines = await waitForActivity(pr, { since: (timeout as WaitTimeout).cursor }, second.deps);
+	const lines = await waitOn(pr, { since: (timeout as WaitTimeout).cursor }, second.deps);
 	expect(lines).toHaveLength(1);
 	expect(lines[0]).toMatch(/^2026-10-07T12:05:00Z pushed author /);
 });
@@ -504,7 +512,7 @@ test("a later force push back to a SHA pushed before the starting point is activ
 		],
 		[B],
 	);
-	const lines = await waitForActivity(pr, { since: "2026-10-07T11:30:00Z" }, fixture.deps);
+	const lines = await waitOn(pr, { since: "2026-10-07T11:30:00Z" }, fixture.deps);
 	expect(lines.map((line) => line.split(" ").slice(0, 2).join(" "))).toEqual([
 		"2026-10-07T12:05:02Z head_ref_force_pushed",
 		"2026-10-07T12:30:00Z head_ref_force_pushed",
@@ -517,7 +525,7 @@ test("a push racing setup prints once, as a push", async () => {
 		response([pushed(B, "2026-10-07T12:05:00Z"), pushed()]),
 		response([committed(A), committed(B)]),
 	]);
-	const lines = await waitForActivity(pr, {}, fixture.deps);
+	const lines = await waitOn(pr, {}, fixture.deps);
 	expect(lines).toHaveLength(1);
 	expect(lines[0]).toMatch(/^2026-10-07T12:05:00Z pushed author /);
 });
@@ -533,7 +541,7 @@ test("all initial timeline pages are read, and the last known page is polled bef
 		response([], { link: `<${page3}>; rel="next"` }),
 		response([reviewed()]),
 	]);
-	const lines = await waitForActivity(pr, {}, fixture.deps);
+	const lines = await waitOn(pr, {}, fixture.deps);
 	expect(lines).toHaveLength(1);
 	expect(fixture.calls.slice(3).map((call) => call.path)).toEqual([
 		timeline,
@@ -555,7 +563,7 @@ test("a full last page is reread whole, since a 304 cannot show that a next page
 		response(full, { etag: '"full"', link: `<${page2}>; rel="next"` }),
 		response([reviewed(1, "2026-10-07T12:12:00Z")]),
 	]);
-	const lines = await waitForActivity(pr, {}, fixture.deps);
+	const lines = await waitOn(pr, {}, fixture.deps);
 	expect(lines).toHaveLength(1);
 	expect(lines[0]).toMatch(/^2026-10-07T12:12:00Z reviewed /);
 	expect(fixture.calls[4].headers.has("if-none-match")).toBe(false);
@@ -570,7 +578,7 @@ test("a review landing after the last scheduled poll is reported by a final poll
 		response(null, {}, 304),
 		response([committed(A), reviewed(1, "2026-10-07T12:18:00Z")]),
 	]);
-	const lines = await waitForActivity(pr, { timeout: 540 }, fixture.deps);
+	const lines = await waitOn(pr, { timeout: 540 }, fixture.deps);
 	expect(lines).toHaveLength(1);
 	expect(lines[0]).toMatch(/^2026-10-07T12:18:00Z reviewed /);
 	expect(fixture.sleeps).toEqual([300_000, 210_000]);
@@ -584,11 +592,11 @@ test("a review landing after the final poll is left for the timeout's cursor, ne
 		response(null, {}, 304),
 		response(null, {}, 304),
 	]);
-	const timeout = await waitForActivity(pr, { timeout: 540 }, first.deps).catch((error: unknown) => error);
+	const timeout = await waitOn(pr, { timeout: 540 }, first.deps).catch((error: unknown) => error);
 	expect(timeout).toBeInstanceOf(WaitTimeout);
 	expect(first.sleeps).toEqual([300_000, 210_000, 30_000]);
 	const second = setup([response([committed(A), reviewed(1, "2026-10-07T12:18:50Z")])]);
-	const lines = await waitForActivity(pr, { since: (timeout as WaitTimeout).cursor }, second.deps);
+	const lines = await waitOn(pr, { since: (timeout as WaitTimeout).cursor }, second.deps);
 	expect(lines).toHaveLength(1);
 	expect(lines[0]).toMatch(/^2026-10-07T12:18:50Z reviewed /);
 });
@@ -604,7 +612,7 @@ test("older initial pages are not skipped even when the last page has no recent 
 		],
 		[B, A],
 	);
-	const lines = await waitForActivity(pr, {}, fixture.deps);
+	const lines = await waitOn(pr, {}, fixture.deps);
 	expect(lines).toHaveLength(1);
 	expect(fixture.calls).toHaveLength(5);
 });
@@ -616,7 +624,7 @@ test("GitHub errors and malformed successful bodies never become activity", asyn
 		response([{ event: "reviewed", id: 1, submitted_at: "yesterday" }]),
 	]) {
 		const fixture = setup([pull(), response([pushed()]), bad]);
-		await expect(waitForActivity(pr, {}, fixture.deps)).rejects.toThrow();
+		await expect(waitOn(pr, {}, fixture.deps)).rejects.toThrow();
 		expect(fixture.sleeps).toEqual([]);
 	}
 });
@@ -629,7 +637,7 @@ test("rate limits honor Retry-After and then exponentially back off", async () =
 		response([pushed()]),
 		response([reviewed()]),
 	]);
-	await waitForActivity(pr, {}, fixture.deps);
+	await waitOn(pr, {}, fixture.deps);
 	expect(fixture.sleeps).toEqual([120_000, 120_000]);
 	expect(fixture.warnings).toHaveLength(2);
 });
@@ -647,26 +655,26 @@ test("primary rate limit reset and server poll intervals are honored", async () 
 		response([], { "x-poll-interval": "600" }),
 		response([reviewed()]),
 	]);
-	await waitForActivity(pr, {}, fixture.deps);
+	await waitOn(pr, {}, fixture.deps);
 	expect(fixture.sleeps).toEqual([60_000, 600_000]);
 });
 
 test("a server poll interval past the final poll skips it rather than polling early", async () => {
 	// A 600 s X-Poll-Interval outlasts a 540 s timeout, so no final poll runs at 510 s.
 	const fixture = setup([pull(), response([pushed()]), response([], { "x-poll-interval": "600" })]);
-	await expect(waitForActivity(pr, { timeout: 540 }, fixture.deps)).rejects.toBeInstanceOf(WaitTimeout);
+	await expect(waitOn(pr, { timeout: 540 }, fixture.deps)).rejects.toBeInstanceOf(WaitTimeout);
 	expect(fixture.sleeps).toEqual([540_000]);
 });
 
 test("persistent rate limiting eventually fails loudly instead of masking an error", async () => {
 	const fixture = setup(Array.from({ length: 7 }, () => response({ message: "secondary rate limit" }, {}, 403)));
-	await expect(waitForActivity(pr, {}, fixture.deps)).rejects.toThrow("rate limit persisted");
+	await expect(waitOn(pr, {}, fixture.deps)).rejects.toThrow("rate limit persisted");
 	expect(fixture.sleeps).toEqual([60_000, 120_000, 240_000, 480_000, 960_000, 1_920_000]);
 });
 
 test("a permission-denied 403 fails without rate-limit retries", async () => {
 	const fixture = setup([response({ message: "Resource not accessible by integration" }, {}, 403)]);
-	await expect(waitForActivity(pr, {}, fixture.deps)).rejects.toThrow("HTTP 403");
+	await expect(waitOn(pr, {}, fixture.deps)).rejects.toThrow("HTTP 403");
 	expect(fixture.sleeps).toEqual([]);
 });
 
@@ -676,12 +684,12 @@ test("timeout is distinct and limits both poll sleeps and rate-limit waits", asy
 		[response({ message: "rate limit" }, { "retry-after": "120" }, 429)],
 	]) {
 		const fixture = setup(responses);
-		await expect(waitForActivity(pr, { timeout: 10 }, fixture.deps)).rejects.toBeInstanceOf(WaitTimeout);
+		await expect(waitOn(pr, { timeout: 10 }, fixture.deps)).rejects.toBeInstanceOf(WaitTimeout);
 		expect(fixture.sleeps).toEqual([10_000]);
 	}
 	// A deadline before the PR is read can only hand back the starting point it was given.
 	const setupLimited = setup([response({ message: "rate limit" }, { "retry-after": "120" }, 429)]);
-	await expect(waitForActivity(pr, { since: POINT, timeout: 10 }, setupLimited.deps)).rejects.toMatchObject({
+	await expect(waitOn(pr, { since: POINT, timeout: 10 }, setupLimited.deps)).rejects.toMatchObject({
 		cursor: POINT,
 	});
 });
@@ -694,7 +702,7 @@ test("a head GitHub has yet to list is waited for, then starts at its listed pus
 		response([pushed(), pushed(B, "2026-10-07T11:50:00Z")]),
 		response([committed(A), reviewed(1, "2026-10-07T11:55:00Z"), reviewed(2)]),
 	]);
-	const lines = await waitForActivity(pr, {}, fixture.deps);
+	const lines = await waitOn(pr, {}, fixture.deps);
 	expect(lines).toHaveLength(1);
 	expect(lines[0]).toContain("pullrequestreview-2 q1.");
 	expect(fixture.sleeps).toEqual([15_000, 15_000]);
@@ -703,14 +711,14 @@ test("a head GitHub has yet to list is waited for, then starts at its listed pus
 
 test("a timeout while GitHub has yet to list the head resumes from that head", async () => {
 	const fixture = setup([pull(), response([]), response([])]);
-	const timeout = await waitForActivity(pr, { timeout: 20 }, fixture.deps).catch((error: unknown) => error);
+	const timeout = await waitOn(pr, { timeout: 20 }, fixture.deps).catch((error: unknown) => error);
 	expect(timeout).toBeInstanceOf(WaitTimeout);
 	expect(timeout).toMatchObject({ cursor: A });
 });
 
 test("unresolvable pushed SHA fails with a timestamp recommendation", async () => {
 	const fixture = setup([pull(), response([pushed()])]);
-	await expect(waitForActivity(pr, { since: B }, fixture.deps)).rejects.toThrow("pass a timestamp with --since");
+	await expect(waitOn(pr, { since: B }, fixture.deps)).rejects.toThrow("pass a timestamp with --since");
 });
 
 test("a SHA a merge into the branch made resolves to the merge's time, and the merge never prints as a push", async () => {
@@ -728,7 +736,7 @@ test("a SHA a merge into the branch made resolves to the merge's time, and the m
 			],
 			[B, A],
 		);
-		const lines = await waitForActivity(pr, { since: A }, fixture.deps);
+		const lines = await waitOn(pr, { since: A }, fixture.deps);
 		expect(lines).toHaveLength(1);
 		expect(lines[0]).toContain("pullrequestreview-2 q1.");
 	}
@@ -736,7 +744,7 @@ test("a SHA a merge into the branch made resolves to the merge's time, and the m
 
 test("the current head a merge into the branch made is the default point", async () => {
 	const fixture = setup([pull(), response([pushed(A, POINT, "pr_merge")]), response([committed(A), reviewed()])]);
-	const lines = await waitForActivity(pr, {}, fixture.deps);
+	const lines = await waitOn(pr, {}, fixture.deps);
 	expect(lines).toHaveLength(1);
 	expect(lines[0]).toContain("pullrequestreview-1 q1.");
 });
@@ -750,14 +758,14 @@ test("a merge into the branch after the point is reported as its new commit, not
 		],
 		[A, B],
 	);
-	const lines = await waitForActivity(pr, { since: A }, fixture.deps);
+	const lines = await waitOn(pr, { since: A }, fixture.deps);
 	expect(lines).toHaveLength(1);
 	expect(lines[0]).toMatch(new RegExp(`^${B} committed `));
 });
 
 test("a branch update that is not a move never resolves the point", async () => {
 	const fixture = setup([pull(), response([pushed(), pushed(B, POINT, "branch_deletion")])]);
-	await expect(waitForActivity(pr, { since: B }, fixture.deps)).rejects.toThrow("cannot resolve push time");
+	await expect(waitOn(pr, { since: B }, fixture.deps)).rejects.toThrow("cannot resolve push time");
 });
 
 test("SHA lookup paginates repository activity", async () => {
@@ -772,16 +780,16 @@ test("SHA lookup paginates repository activity", async () => {
 		],
 		[A, B],
 	);
-	const lines = await waitForActivity(pr, { since: A }, fixture.deps);
+	const lines = await waitOn(pr, { since: A }, fixture.deps);
 	expect(lines[0]).toContain("pushed author");
 	expect(fixture.calls[3].path).toBe("/repos/contributor/fork/activity?page=2");
 });
 
 test("deleted forks accept timestamps but cannot guess SHA push times", async () => {
 	const missing = setup([pull(null)]);
-	await expect(waitForActivity(pr, {}, missing.deps)).rejects.toThrow("pass a timestamp");
+	await expect(waitOn(pr, {}, missing.deps)).rejects.toThrow("pass a timestamp");
 	const timestamp = setup([pull(null), response([reviewed()])]);
-	expect(await waitForActivity(pr, { since: POINT }, timestamp.deps)).toHaveLength(1);
+	expect(await waitOn(pr, { since: POINT }, timestamp.deps)).toHaveLength(1);
 });
 
 test("untrusted pagination cannot leak an authorization token", async () => {
@@ -790,22 +798,22 @@ test("untrusted pagination cannot leak an authorization token", async () => {
 		response([pushed()]),
 		response([], { link: '<https://evil.example/timeline>; rel="next"' }),
 	]);
-	await expect(waitForActivity(pr, {}, fixture.deps)).rejects.toThrow("pagination URL");
+	await expect(waitOn(pr, {}, fixture.deps)).rejects.toThrow("pagination URL");
 	expect(fixture.calls).toHaveLength(4);
 });
 
 test("malformed and wrong-PR cursors fail without requests", async () => {
 	const first = setup([pull(), response([pushed()]), response([reviewed()])]);
-	const other = cursor(await waitForActivity(pr, {}, first.deps));
+	const other = cursor(await waitOn(pr, {}, first.deps));
 	for (const point of ["q1.garbage", other]) {
 		const fixture = setup([]);
-		await expect(waitForActivity({ ...pr, number: 2 }, { since: point }, fixture.deps)).rejects.toThrow(
+		await expect(waitOn({ ...pr, number: 2 }, { since: point }, fixture.deps)).rejects.toThrow(
 			"invalid --since cursor",
 		);
 		expect(fixture.calls).toEqual([]);
 	}
 	const recased = setup([]);
-	await expect(waitForActivity(pr, { since: `Q1.${other.slice(3)}` }, recased.deps)).rejects.toThrow(
+	await expect(waitOn(pr, { since: `Q1.${other.slice(3)}` }, recased.deps)).rejects.toThrow(
 		"cursors start with lower-case q1.",
 	);
 	expect(recased.calls).toEqual([]);
@@ -827,7 +835,7 @@ test("PR URL parsing and timeout usage fail before authentication", () => {
 test("a bare PR number outside a checkout says to pass the URL instead", () => {
 	const outside = mkdtempSync(join(tmpdir(), "quest-wait-"));
 	try {
-		expect(() => pullRequest("1", outside)).toThrow(GitHubInputError);
+		expect(() => pullRequest("1", outside)).toThrow(InputError);
 		expect(() => pullRequest("1", outside)).toThrow("pass the full GitHub PR URL, or run inside a checkout");
 	} finally {
 		rmSync(outside, { recursive: true });
@@ -848,7 +856,7 @@ test("auto-merge left on a moved head wakes the wait once per head, naming the h
 	const first = setup([pull(undefined, B), response([pushed(B)]), response([committed(A), committed(B)])], [A, B], {
 		checks: [pinned(B)],
 	});
-	const moved = await waitForActivity(pr, {}, first.deps);
+	const moved = await waitOn(pr, {}, first.deps);
 	expect(moved).toHaveLength(1);
 	expect(moved[0]).toMatch(
 		new RegExp(
@@ -857,7 +865,7 @@ test("auto-merge left on a moved head wakes the wait once per head, naming the h
 	);
 	// Resuming reports other activity, not the same moved head again.
 	const next = setup([response([committed(A), committed(B), reviewed(2, LATEST)])], [A, B], { checks: [pinned(B)] });
-	const lines = await waitForActivity(pr, { since: cursor(moved) }, next.deps);
+	const lines = await waitOn(pr, { since: cursor(moved) }, next.deps);
 	expect(lines).toHaveLength(1);
 	expect(lines[0]).toMatch(/ reviewed reviewer /);
 });
@@ -874,12 +882,12 @@ test("auto-merge on the current head is not activity", async () => {
 	const fixture = setup([pull(), response([pushed()]), response([committed(A)]), response([committed(A)])], [A], {
 		checks: [current(), current()],
 	});
-	await expect(waitForActivity(pr, { timeout: 60 }, fixture.deps)).rejects.toBeInstanceOf(WaitTimeout);
+	await expect(waitOn(pr, { timeout: 60 }, fixture.deps)).rejects.toBeInstanceOf(WaitTimeout);
 });
 
 test("a push racing initial setup is not swallowed by the baseline", async () => {
 	const fixture = setup([pull(), response([pushed()]), response([committed(A), committed(B)])]);
-	const lines = await waitForActivity(pr, {}, fixture.deps);
+	const lines = await waitOn(pr, {}, fixture.deps);
 	expect(lines).toHaveLength(1);
 	expect(lines[0]).toMatch(new RegExp(`^${B} committed `));
 	expect(fixture.sleeps).toEqual([]);
@@ -887,23 +895,23 @@ test("a push racing initial setup is not swallowed by the baseline", async () =>
 
 test("a changed head during the commit listing fails rather than swallowing a push", async () => {
 	const fixture = setup([pull()], [A, B]);
-	await expect(waitForActivity(pr, {}, fixture.deps)).rejects.toThrow("head changed during setup");
+	await expect(waitOn(pr, {}, fixture.deps)).rejects.toThrow("head changed during setup");
 	expect(fixture.calls).toHaveLength(2);
 });
 
 test("malformed timestamps and unexpected 304 responses fail without phantom activity", async () => {
 	const invalid = setup([]);
-	await expect(waitForActivity(pr, { since: "yesterday" }, invalid.deps)).rejects.toThrow("invalid timestamp");
+	await expect(waitOn(pr, { since: "yesterday" }, invalid.deps)).rejects.toThrow("invalid timestamp");
 	expect(invalid.calls).toHaveLength(0);
 	const cached = setup([pull(), response([pushed()]), response(null, {}, 304)]);
-	await expect(waitForActivity(pr, {}, cached.deps)).rejects.toThrow("without a cached response");
+	await expect(waitOn(pr, {}, cached.deps)).rejects.toThrow("without a cached response");
 });
 
 test("a clean review's reaction on the PR body ends the wait", async () => {
 	const fixture = setup([pull(), response([pushed()]), response([committed(A)])], [A], {
 		graphql: [reactions([reacted("r1", "2026-10-07T12:05:00Z")])],
 	});
-	const lines = await waitForActivity(pr, {}, fixture.deps);
+	const lines = await waitOn(pr, {}, fixture.deps);
 	expect(lines).toHaveLength(1);
 	expect(lines[0]).toMatch(
 		/^2026-10-07T12:05:00Z reacted:thumbs_up codex\[bot\] https:\/\/github.com\/example\/project\/pull\/1 q1\./,
@@ -922,7 +930,7 @@ test("reactions on reviews are read from every page of reviews", async () => {
 			reactions([], [review(2, [reacted("r2", POINT, "author", "EYES")])]),
 		],
 	});
-	const lines = await waitForActivity(pr, {}, fixture.deps);
+	const lines = await waitOn(pr, {}, fixture.deps);
 	expect(lines).toHaveLength(1);
 	expect(lines[0]).toContain("reacted:eyes author https://github.com/example/project/pull/1#pullrequestreview-2");
 	expect(graphql(fixture).map((body) => body.variables.after)).toEqual([null, "next"]);
@@ -936,7 +944,7 @@ test("a review-thread reply wakes the waiter, but its own activity and a thread'
 		],
 		graphql: [reactions([reacted("r1", POINT, "waiter")]), reactions([reacted("r1", POINT, "waiter")])],
 	});
-	const lines = await waitForActivity(pr, {}, fixture.deps);
+	const lines = await waitOn(pr, {}, fixture.deps);
 	expect(lines).toHaveLength(1);
 	expect(lines[0]).toMatch(
 		/^2026-10-07T12:00:00Z replied reviewer https:\/\/github.com\/example\/project\/pull\/1#discussion_r3 q1\./,
@@ -954,13 +962,13 @@ test("resuming tracks replies and reactions separately, so neither replays nor h
 	const first = setup([pull(), response([pushed()]), response([committed(A)])], [A], {
 		graphql: [reactions([reacted("r1", "2026-10-07T12:05:00Z")])],
 	});
-	const point = cursor(await waitForActivity(pr, {}, first.deps));
+	const point = cursor(await waitOn(pr, {}, first.deps));
 	// A reply older than the reaction, first visible after the waiter returned.
 	const second = setup([response([committed(A)])], [A], {
 		comments: [response([replied(2, "2026-10-07T12:03:00Z")])],
 		graphql: [reactions([reacted("r1", "2026-10-07T12:05:00Z")])],
 	});
-	const lines = await waitForActivity(pr, { since: point }, second.deps);
+	const lines = await waitOn(pr, { since: point }, second.deps);
 	expect(lines).toHaveLength(1);
 	expect(lines[0]).toMatch(/^2026-10-07T12:03:00Z replied reviewer /);
 	expect(second.sideCalls[0].path).toContain("since=2026-10-07T11:59:59.000Z");
@@ -971,7 +979,7 @@ test("resuming tracks replies and reactions separately, so neither replays nor h
 			reactions([reacted("r1", "2026-10-07T12:05:00Z"), reacted("r2", "2026-10-07T12:05:00Z")]),
 		],
 	});
-	const later = await waitForActivity(pr, { since: cursor(lines) }, third.deps);
+	const later = await waitOn(pr, { since: cursor(lines) }, third.deps);
 	expect(later).toHaveLength(1);
 	expect(later[0]).toContain("reacted:thumbs_up");
 	expect(third.sleeps).toEqual([300_000]);
@@ -982,7 +990,7 @@ test("GraphQL errors fail loudly instead of hiding reactions", async () => {
 	const fixture = setup([pull(), response([pushed()]), response([committed(A)])], [A], {
 		graphql: [response({ errors: [{ message: "Could not resolve to a PullRequest" }] })],
 	});
-	await expect(waitForActivity(pr, {}, fixture.deps)).rejects.toThrow("GitHub GraphQL error");
+	await expect(waitOn(pr, {}, fixture.deps)).rejects.toThrow("GitHub GraphQL error");
 });
 
 const LATER = "2026-10-07T12:05:00Z";
@@ -999,7 +1007,7 @@ test("a required failure wakes the wait, naming the check and linking its detail
 		],
 		protected: ["build and test", "check"],
 	});
-	const lines = await waitForActivity(pr, {}, fixture.deps);
+	const lines = await waitOn(pr, {}, fixture.deps);
 	expect(lines).toHaveLength(2);
 	expect(lines[0]).toContain("check:failed lint");
 	expect(lines[1]).toMatch(
@@ -1019,7 +1027,7 @@ test("an optional failure wakes separately, and resuming still waits for all che
 		],
 		ruled: ["check", "test"],
 	});
-	const failed = await waitForActivity(pr, {}, first.deps);
+	const failed = await waitOn(pr, {}, first.deps);
 	expect(failed).toHaveLength(1);
 	expect(failed[0]).toMatch(/^2026-10-07T12:05:00Z check:failed lint /);
 	const next = setup([response([committed(A)]), response([committed(A)])], [A], {
@@ -1039,7 +1047,7 @@ test("an optional failure wakes separately, and resuming still waits for all che
 		],
 		ruled: ["check", "test"],
 	});
-	const lines = await waitForActivity(pr, { since: cursor(failed) }, next.deps);
+	const lines = await waitOn(pr, { since: cursor(failed) }, next.deps);
 	expect(next.sleeps).toEqual([300_000]);
 	expect(lines).toHaveLength(1);
 	expect(lines[0]).toMatch(/^2026-10-07T12:08:00Z checks:passed test /);
@@ -1062,7 +1070,7 @@ test("classic protection that lists only contexts still names required checks", 
 		protected: ["check", "gate"],
 		contextsOnly: true,
 	});
-	const lines = await waitForActivity(pr, {}, fixture.deps);
+	const lines = await waitOn(pr, {}, fixture.deps);
 	expect(fixture.sleeps).toEqual([300_000]);
 	expect(lines).toHaveLength(1);
 	expect(lines[0]).toMatch(/^2026-10-07T12:08:00Z checks:passed gate /);
@@ -1073,7 +1081,7 @@ test("a gated base's quest land check, which no head carries, never holds back c
 		checks: [checks([{ name: "check", required: true, result: "SUCCESS", time: LATER }])],
 		ruled: ["check", "quest land"],
 	});
-	const lines = await waitForActivity(pr, {}, fixture.deps);
+	const lines = await waitOn(pr, {}, fixture.deps);
 	expect(lines).toHaveLength(1);
 	expect(lines[0]).toMatch(/^2026-10-07T12:05:00Z checks:passed check /);
 });
@@ -1092,7 +1100,7 @@ test("a rerun supersedes a cancelled run of a required check, which never wakes 
 		],
 		protected: ["check"],
 	});
-	const lines = await waitForActivity(pr, {}, fixture.deps);
+	const lines = await waitOn(pr, {}, fixture.deps);
 	expect(fixture.sleeps).toEqual([300_000]);
 	expect(lines).toHaveLength(1);
 	expect(lines[0]).toMatch(/^2026-10-07T12:08:00Z checks:passed check /);
@@ -1118,7 +1126,7 @@ test("a superseded workflow run's failed gate never wakes the wait, as on moq-de
 		],
 		protected: ["Release gate"],
 	});
-	const lines = await waitForActivity(pr, {}, fixture.deps);
+	const lines = await waitOn(pr, {}, fixture.deps);
 	expect(fixture.sleeps).toEqual([300_000]);
 	expect(lines).toEqual([expect.stringMatching(/^2026-10-07T12:08:00Z checks:passed Release_gate /)]);
 });
@@ -1144,7 +1152,7 @@ test("optional checks never stand in for required checks that have not started",
 			ruled: ["gate"],
 		},
 	);
-	const lines = await waitForActivity(pr, {}, fixture.deps);
+	const lines = await waitOn(pr, {}, fixture.deps);
 	expect(fixture.sleeps).toEqual([300_000, 300_000]);
 	expect(lines).toHaveLength(1);
 	expect(lines[0]).toMatch(/^2026-10-07T12:08:00Z checks:passed gate /);
@@ -1167,7 +1175,7 @@ test("a required check named on a later page of rules holds back checks:passed",
 			},
 		],
 	});
-	const lines = await waitForActivity(pr, {}, fixture.deps);
+	const lines = await waitOn(pr, {}, fixture.deps);
 	expect(fixture.sleeps).toEqual([300_000]);
 	expect(lines).toHaveLength(1);
 	expect(lines[0]).toMatch(/^2026-10-07T12:08:00Z checks:passed deploy /);
@@ -1189,7 +1197,7 @@ test("a required check from another app than its requirement names holds back ch
 		],
 		ruled: ["check"],
 	});
-	const lines = await waitForActivity(pr, {}, fixture.deps);
+	const lines = await waitOn(pr, {}, fixture.deps);
 	expect(fixture.sleeps).toEqual([300_000]);
 	expect(lines).toEqual([expect.stringMatching(/^2026-10-07T12:08:00Z checks:passed check /)]);
 });
@@ -1226,7 +1234,7 @@ test("a cancelled check a newer run replaced never fails the wait, which stays b
 			[run(1, "completed"), { ...run(2, "completed"), run_started_at: "2026-10-07T12:02:00Z" }],
 		],
 	});
-	const lines = await waitForActivity(pr, {}, fixture.deps);
+	const lines = await waitOn(pr, {}, fixture.deps);
 	expect(fixture.sleeps).toEqual([300_000]);
 	expect(lines).toEqual([expect.stringMatching(/^2026-10-07T12:08:00Z checks:passed check /)]);
 });
@@ -1255,7 +1263,7 @@ test("a required workflow requires its jobs, keeps optional checks optional, and
 			rules: [workflowRule],
 		},
 	);
-	const lines = await waitForActivity(pr, {}, fixture.deps);
+	const lines = await waitOn(pr, {}, fixture.deps);
 	expect(fixture.sleeps).toEqual([300_000, 300_000]);
 	expect(lines).toHaveLength(1);
 	expect(lines[0]).toMatch(/^2026-10-07T12:08:00Z checks:passed gate /);
@@ -1271,7 +1279,7 @@ test("a required workflow's job counts toward checks:passed when another workflo
 		],
 		rules: [workflowRule],
 	});
-	const lines = await waitForActivity(pr, {}, fixture.deps);
+	const lines = await waitOn(pr, {}, fixture.deps);
 	expect(lines).toHaveLength(1);
 	expect(lines[0]).toMatch(/ checks:passed /);
 });
@@ -1286,7 +1294,7 @@ test("a failing job in a required workflow wakes the wait", async () => {
 		],
 		rules: [workflowRule],
 	});
-	const lines = await waitForActivity(pr, {}, fixture.deps);
+	const lines = await waitOn(pr, {}, fixture.deps);
 	expect(lines).toHaveLength(1);
 	expect(lines[0]).toMatch(/^2026-10-07T12:08:00Z checks:failed build /);
 });
@@ -1302,7 +1310,7 @@ test("checks:passed is dated when the head goes idle, after required checks fini
 		],
 		protected: ["check"],
 	});
-	const lines = await waitForActivity(pr, { since: LATER }, fixture.deps);
+	const lines = await waitOn(pr, { since: LATER }, fixture.deps);
 	expect(fixture.sleeps).toEqual([300_000]);
 	expect(lines).toHaveLength(1);
 	expect(lines[0]).toMatch(/^2026-10-07T12:08:00Z checks:passed check /);
@@ -1321,7 +1329,7 @@ test("with no required checks, an unfinished workflow run holds back checks:pass
 			]),
 		],
 	});
-	const lines = await waitForActivity(pr, {}, fixture.deps);
+	const lines = await waitOn(pr, {}, fixture.deps);
 	expect(fixture.sleeps).toEqual([300_000]);
 	expect(lines).toHaveLength(1);
 	expect(lines[0]).toMatch(/^2026-10-07T12:08:00Z checks:passed gate /);
@@ -1345,7 +1353,7 @@ test("a repository with no required checks requires every check, commit statuses
 			],
 		},
 	);
-	const lines = await waitForActivity(pr, {}, fixture.deps);
+	const lines = await waitOn(pr, {}, fixture.deps);
 	expect(fixture.sleeps).toEqual([300_000, 300_000]);
 	expect(lines).toHaveLength(1);
 	expect(lines[0]).toMatch(
@@ -1358,7 +1366,7 @@ test("results reached before an explicit starting point are not reported", async
 		checks: [checks([{ name: "check", required: true, result: "FAILURE", time: LATER }])],
 		protected: ["check"],
 	});
-	const timeout = await waitForActivity(pr, { since: LATEST, timeout: 10 }, fixture.deps).catch(
+	const timeout = await waitOn(pr, { since: LATEST, timeout: 10 }, fixture.deps).catch(
 		(error: unknown) => error,
 	);
 	expect(timeout).toBeInstanceOf(WaitTimeout);
@@ -1372,20 +1380,20 @@ test("a resumed wait never replays a reported result, but a push starts over for
 		checks: [failing(A)],
 		...protect,
 	});
-	const reported = await waitForActivity(pr, {}, first.deps);
+	const reported = await waitOn(pr, {}, first.deps);
 	expect(reported[0]).toContain("checks:failed check");
 	// The same failure is not reported again; the push is.
 	const second = setup([response([committed(A)]), response([committed(A), committed(B)])], [A], {
 		checks: [failing(A), failing(A)],
 		...protect,
 	});
-	const pushedLines = await waitForActivity(pr, { since: cursor(reported) }, second.deps);
+	const pushedLines = await waitOn(pr, { since: cursor(reported) }, second.deps);
 	expect(second.sleeps).toEqual([300_000]);
 	expect(pushedLines).toHaveLength(1);
 	expect(pushedLines[0]).toMatch(new RegExp(`^${B} committed `));
 	// The new head's failure is reported even though the old head's was.
 	const third = setup([response([committed(A), committed(B)])], [A], { checks: [failing(B, LATEST)], ...protect });
-	const again = await waitForActivity(pr, { since: cursor(pushedLines) }, third.deps);
+	const again = await waitOn(pr, { since: cursor(pushedLines) }, third.deps);
 	expect(again).toHaveLength(1);
 	expect(again[0]).toMatch(/^2026-10-07T12:08:00Z checks:failed check /);
 	// A later pass on that head is still reported once.
@@ -1393,7 +1401,7 @@ test("a resumed wait never replays a reported result, but a push starts over for
 		checks: [checks([{ name: "check", required: true, result: "SUCCESS", time: "2026-10-07T12:09:00Z" }], B)],
 		...protect,
 	});
-	const passed = await waitForActivity(pr, { since: cursor(again) }, fourth.deps);
+	const passed = await waitOn(pr, { since: cursor(again) }, fourth.deps);
 	expect(passed).toHaveLength(1);
 	expect(passed[0]).toContain("checks:passed check");
 });
@@ -1403,12 +1411,12 @@ test("a timed-out wait's cursor still reports a result reached during the first 
 		checks: [checks([{ name: "check", required: true }])],
 		protected: ["check"],
 	});
-	const timeout = await waitForActivity(pr, { timeout: 10 }, first.deps).catch((error: unknown) => error);
+	const timeout = await waitOn(pr, { timeout: 10 }, first.deps).catch((error: unknown) => error);
 	const second = setup([response([committed(A)])], [A], {
 		checks: [checks([{ name: "check", required: true, result: "SUCCESS", time: LATER }])],
 		protected: ["check"],
 	});
-	const lines = await waitForActivity(pr, { since: (timeout as WaitTimeout).cursor }, second.deps);
+	const lines = await waitOn(pr, { since: (timeout as WaitTimeout).cursor }, second.deps);
 	expect(lines).toHaveLength(1);
 	expect(lines[0]).toContain("checks:passed check");
 });
@@ -1423,7 +1431,7 @@ test("checks are read from every page, and a head racing the read waits for the 
 		],
 		protected: ["check", "test"],
 	});
-	const lines = await waitForActivity(pr, {}, fixture.deps);
+	const lines = await waitOn(pr, {}, fixture.deps);
 	expect(fixture.sleeps).toEqual([300_000]);
 	expect(lines).toHaveLength(1);
 	expect(lines[0]).toMatch(/^2026-10-07T12:08:00Z checks:failed test /);
@@ -1449,14 +1457,14 @@ test("edited bot comments wake once, including different edits in the same secon
 	const first = setup([pull(), response([pushed()]), response([committed(A)])], [A], {
 		edits: [response([edited(1)])],
 	});
-	const lines = await waitForActivity(pr, {}, first.deps);
+	const lines = await waitOn(pr, {}, first.deps);
 	expect(lines).toHaveLength(1);
 	expect(lines[0]).toMatch(/^2026-10-07T12:05:00Z edited codex\[bot\] /);
 	expect(Buffer.from(cursor(lines).slice(3), "base64url").toString()).not.toContain("Review completed");
 	const resumed = setup([response([committed(A)]), response([committed(A)])], [A], {
 		edits: [response([edited(1)]), response([edited(1, LATER, "Security review completed")])],
 	});
-	const changed = await waitForActivity(pr, { since: cursor(lines) }, resumed.deps);
+	const changed = await waitOn(pr, { since: cursor(lines) }, resumed.deps);
 	expect(resumed.sleeps).toEqual([300_000]);
 	expect(changed[0]).toContain(" edited codex[bot] ");
 });
@@ -1471,7 +1479,7 @@ test("edits reread every creation-ordered page, so an old first-page comment can
 			response([edited(1)]),
 		],
 	});
-	expect((await waitForActivity(pr, {}, fixture.deps))[0]).toContain(" edited codex[bot] ");
+	expect((await waitOn(pr, {}, fixture.deps))[0]).toContain(" edited codex[bot] ");
 	expect(fixture.editCalls.map((call) => call.path)).toEqual([
 		`${base}/issues/1/comments?per_page=100&since=2026-10-07T11:59:59.000Z`,
 		page2,
@@ -1484,14 +1492,14 @@ test("a later reaction does not hide an older edit, and old cursors learn the ed
 		graphql: [reactions([reacted("r1", LATEST)])],
 	});
 	const previous = JSON.parse(
-		Buffer.from(cursor(await waitForActivity(pr, {}, first.deps)).slice(3), "base64url").toString(),
+		Buffer.from(cursor(await waitOn(pr, {}, first.deps)).slice(3), "base64url").toString(),
 	);
 	delete previous.marks.edits;
 	const old = `q1.${Buffer.from(JSON.stringify(previous)).toString("base64url")}`;
 	const next = setup([response([committed(A)])], [A], {
 		edits: [response([edited(1), edited(2, LATEST, "My reply", "waiter")])],
 	});
-	const lines = await waitForActivity(pr, { since: old }, next.deps);
+	const lines = await waitOn(pr, { since: old }, next.deps);
 	expect(lines).toHaveLength(1);
 	expect(lines[0]).toContain(" edited codex[bot] ");
 });
@@ -1506,7 +1514,7 @@ test("a later failing optional check cannot name the aggregate required pass", a
 			]),
 		],
 	});
-	const lines = await waitForActivity(pr, {}, fixture.deps);
+	const lines = await waitOn(pr, {}, fixture.deps);
 	expect(lines).toHaveLength(2);
 	expect(lines[0]).toMatch(/^2026-10-07T12:08:00Z check:failed optional /);
 	expect(lines[1]).toMatch(/^2026-10-07T12:08:00Z checks:passed check /);

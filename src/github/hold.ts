@@ -1,11 +1,10 @@
 // Reading who holds a PR: its `quest:*` labels, the events that added them, and a draft its starter still holds.
 // Taking and releasing holds stays in the CLI.
-import { handedBack, isHoldLabel, latestHold } from "../core";
+import { type HoldFact, type PullRequest, type StarterHold, handedBack, isHoldLabel, latestHold } from "../core";
 import {
 	GitHub,
 	type GitHubDependencies,
 	type ObjectValue,
-	type PullRequest,
 	array,
 	object,
 	repositoryPath,
@@ -63,22 +62,11 @@ export interface Snapshot {
 	events: LabelEvent[];
 }
 
-/** A hold label on a PR, and the event that took it when the timeline still shows it. */
-export interface HoldFact {
-	label: string;
-	/** Null when the acquisition is older than the available timeline. */
-	token: string | null;
-	takenAt: string | null;
-	age: string | null;
-	/** GitHub's verified event URL; the opaque GraphQL token is not a browser anchor. */
-	eventUrl: string | null;
-}
-
 /** The PR head a hold read saw, its holds, and its starter's hold on a draft not handed back. */
 export interface HoldReport {
 	head: string;
 	holds: HoldFact[];
-	starter: { lastActive: string; age: string; url: string } | null;
+	starter: StarterHold | null;
 }
 
 /** Read `pr` and its hold labels. */

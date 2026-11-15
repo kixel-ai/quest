@@ -28,6 +28,7 @@ import {
 	unblocked,
 	onMaintainer,
 	waiting,
+	InputError,
 } from "../core";
 import {
 	AgentInputError,
@@ -40,11 +41,13 @@ import {
 	stopAgent,
 	stopAll,
 } from "./agent";
-import { held, openDrafts, reach, target, upstream, upstreamRefs } from "./claims";
+import { type ClaimDependencies, held, openDrafts, reach, target, upstream, upstreamRefs } from "./claims";
+import { type ForgeDependencies, forgeFor } from "./forge";
 import { PENDING_MS } from "./admission";
 import { gate } from "./gate";
-import { gitHubDependencies, GitHubInputError, pullRequest, readRemote, remoteRepository } from "./github";
-import { mergedHolds } from "../github/client";
+import { gitHubDependencies, pullRequest, readRemote, remoteRepository } from "./github";
+import { type GitHubDependencies, mergedHolds } from "../github/client";
+import { setTimeout as sleep } from "node:timers/promises";
 import { type Hold, finish, land, release, take } from "./hold";
 import { LAND_CHECK } from "../github/land";
 import { apply, pushCommand } from "./land-apply";
@@ -106,7 +109,6 @@ import { CONTEXT, GUIDE, GUIDE_SECTIONS, SKILLS, guideSections, sectionHeading, 
 import { type Terminal, Theme } from "./theme";
 import { type Snapshot, checkout, collect, load, snapshot, under } from "./tree";
 import { statusLines } from "./status";
-import { pullRequestStatus } from "../github/status";
 import { TOKEN_MAX_MISSING, daysBefore, runTokenMax, usage, usageDependencies, usageLines } from "./usage";
 import { waitForActivity, WaitTimeout } from "./wait";
 import { version } from "./version";
@@ -135,6 +137,17 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 	const warn = (line: string): void => {
 		out.stderr(`quest: ${line}\n`);
 	};
+	const forgeDependencies = (quota?: GitHubDependencies["quota"]): ForgeDependencies => ({
+		env: process.env,
+		fetch: globalThis.fetch,
+		now: Date.now,
+		github: () => gitHubDependencies(warn, quota),
+	});
+	const claimDependencies = (): ClaimDependencies => ({
+		github: () => gitHubDependencies(warn),
+		forge: (repository) => forgeFor(repository, forgeDependencies()),
+		warn,
+	});
 	const theme = out.terminal ? new Theme(out.terminal) : null;
 
 	const program = new Command("quest")
@@ -396,7 +409,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				}
 				// Readiness comes from the upstream default branch, so a stale checkout cannot offer
 				// a deleted quest or one whose prerequisite has since finished.
-				const deps = { github: () => gitHubDependencies(warn), warn };
+				const deps = claimDependencies();
 				settle(
 					(async () => {
 						const up = await reach(root(), options.remote, deps);
@@ -455,7 +468,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		.action((options: { json?: boolean; maintainer?: boolean; limit?: number; remote: string }) => {
 			const tree = checkout(root(), warn);
 			if (!valid(tree)) return;
-			settle(openDrafts(root(), options.remote, { github: () => gitHubDependencies(warn), warn }), (drafts) => {
+			settle(openDrafts(root(), options.remote, claimDependencies()), (drafts) => {
 				const found = waiting(tree.docs, today(), drafts)
 					.map((quest) =>
 						options.maintainer ? { ...quest, waits: quest.waits.filter(onMaintainer) } : quest,
@@ -512,7 +525,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		.option("--release", "Release the claim instead: delete the empty claim branch and close its PR")
 		.option("--remote <name>", "Remote to push the claim to", "origin")
 		.action((path: string, options: { release?: boolean; remote: string }) => {
-			const deps = { github: () => gitHubDependencies(warn), warn };
+			const deps = claimDependencies();
 			if (options.release) {
 				settle(releaseQuest(root(), find(load(root()), path).path, options.remote, deps), (released) => {
 					print(`deleted ${released.branch}`);
@@ -582,7 +595,9 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 					return false;
 				}
 			};
-			pending = waitForActivity(pr, options, gitHubDependencies(warn, "wait")).then(
+			pending = forgeFor(pr, forgeDependencies("wait"))
+				.then((forge) => waitForActivity(pr, options, forge, { now: Date.now, sleep }))
+				.then(
 				(lines) => {
 					for (const line of lines) print(line);
 					return logged(lines[0]?.split(" ")[1] ?? null) ? 0 : 1;
@@ -591,7 +606,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 					if (error instanceof WaitTimeout && error.cursor) print(error.cursor);
 					warn(error instanceof Error ? error.message : String(error));
 					if (error instanceof WaitTimeout) return logged(null) ? 3 : 1;
-					return error instanceof GitHubInputError ? 2 : 1;
+					return error instanceof InputError ? 2 : 1;
 				},
 			);
 		});
@@ -632,8 +647,10 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		.option("--json", "Print a deterministic JSON object")
 		.action((value: string, options: { json?: boolean }) => {
 			const pr = pullRequest(value, root());
-			pending = pullRequestStatus(pr, gitHubDependencies(warn)).then(
-				(status) => {
+			pending = forgeFor(pr, forgeDependencies())
+				.then((forge) => forge.status(pr))
+				.then(
+				({ value: status }) => {
 					if (options.json) print(JSON.stringify(status));
 					else for (const line of statusLines(status)) print(line);
 					return 0;
@@ -966,7 +983,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 	const merged = async (repository: string, commit: string) => {
 		const origin = readRemote(repository, "origin");
 		if (origin === null) return false; // No forge to ask.
-		const up = await upstream(repository, origin, { github: () => gitHubDependencies(warn), warn });
+		const up = await upstream(repository, origin, claimDependencies());
 		return up.github !== null && mergedHolds(up.github.client, up.github.repository, commit);
 	};
 	worktree
@@ -1222,7 +1239,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		)
 		.option("--json", "Print one JSON object")
 		.action((options: { since?: string; quest?: string; pr?: number; ssh?: string[]; json?: boolean }) => {
-			const github = { github: () => gitHubDependencies(warn), warn };
+			const github = claimDependencies();
 			const since = options.since ?? daysBefore(new Date(), 7);
 			settle(
 				usage(
@@ -1548,7 +1565,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 					options.responses === undefined
 						? undefined
 						: readFileSync(options.responses === "-" ? 0 : options.responses, "utf8");
-				const github = { github: () => gitHubDependencies(warn), warn };
+				const github = claimDependencies();
 				const run = review(
 					{ ...options, root: root(), exclude: options.excludeModel, responses, fresh: options.new },
 					{
@@ -1700,7 +1717,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 							given === 3 ? { at: options.defect!, fix: options.fix!, what: options.what! } : undefined,
 						env: process.env,
 					},
-					{ github: () => gitHubDependencies(warn), warn },
+					claimDependencies(),
 				);
 				pending = run.then((entry) => {
 					print(JSON.stringify(entry));
@@ -1735,7 +1752,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		.argument("<from>", "Quest file or epic directory, as /quest/..., quest/..., or a filesystem path")
 		.argument("<to>", "Its new path, which must not exist")
 		.action((from: string, to: string) => {
-			pending = moveQuest(root(), from, to, { github: () => gitHubDependencies(warn), warn }).then(
+			pending = moveQuest(root(), from, to, claimDependencies()).then(
 				report,
 				(error: unknown) => {
 					warn(error instanceof Error ? error.message : String(error));
@@ -1946,7 +1963,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 			// Help and version exit 0; any other parse failure is a usage error.
 			return error.exitCode === 0 ? 0 : 2;
 		}
-		if (error instanceof UsageError || error instanceof GitHubInputError) {
+		if (error instanceof UsageError || error instanceof InputError) {
 			out.stderr(`error: ${error.message}\n`);
 			return 2;
 		}

@@ -1,7 +1,7 @@
 // What a PR body says about breakage: the culprits its `## Caused by` names, and, for a culprit, how it was made and
 // checked, as its own body records it.
 import { type Culprit, FINDERS, type Finder, SIZES, type Seat, type Size, recordedRisk } from "../core";
-import type { Repository } from "../github/client";
+import type { Repository } from "../core";
 import { recorded } from "./models-record";
 import { parseReview } from "./review-record";
 import type { Pull } from "./usage";

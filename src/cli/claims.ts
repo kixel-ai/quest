@@ -3,20 +3,16 @@
 // and `quest start` records a claim the same way, judging readiness by the upstream tree.
 import { git } from "./git";
 import { type Remote, readRemote, remoteRepository, requireRemote } from "./github";
-import { type GitHubDependencies, type Repository, GitHub, object, repositoryPath, string } from "../github/client";
-import {
-	type Claim,
-	type Holdings,
-	type OpenPull,
-	held as githubHeld,
-	openPullRequests,
-	questBranches,
-} from "../github/claims";
+import { type GitHubDependencies, GitHub, object, repositoryPath, string } from "../github/client";
+import type { Claim, Forge, Holdings, OpenPull, Repository } from "../core";
+import { questBranches } from "../github/claims";
 import { type Snapshot, snapshot } from "./tree";
 
 export interface ClaimDependencies {
 	/** Called only when the remote is on GitHub, so other forges need no token. */
 	github(): GitHubDependencies;
+	/** The forge answering reads of a repository on GitHub, such as its claims and open PRs. */
+	forge(repository: Repository): Promise<Forge>;
 	warn(message: string): void;
 }
 
@@ -39,6 +35,8 @@ export interface Upstream {
 		defaultBranch: string;
 		/** Where this checkout's tree sits in the repository: empty at the top level, else a path ending in `/`. */
 		prefix: string;
+		/** The forge answering reads of `repository`, chosen on first use. */
+		forge(): Promise<Forge>;
 	} | null;
 }
 
@@ -73,13 +71,21 @@ export async function upstream(root: string, remote: Remote, deps: ClaimDependen
 	// The README where this checkout's tree sits, which may be below the top level.
 	const prefix = git(root, ["rev-parse", "--show-prefix"]);
 	const up = await base(client, self, prefix);
+	let forge: Promise<Forge> | undefined;
 	return {
 		// Reach an ancestor the way the remote is reached, so the same credentials work.
 		git: up === self ? remote.name : /^https:/.test(source.url) ? up.https : up.ssh,
 		get push() {
 			return remote.used().push;
 		},
-		github: { client, repository: up.repository, head, defaultBranch: up.defaultBranch, prefix },
+		github: {
+			client,
+			repository: up.repository,
+			head,
+			defaultBranch: up.defaultBranch,
+			prefix,
+			forge: () => (forge ??= deps.forge(up.repository)),
+		},
 	};
 }
 
@@ -173,7 +179,7 @@ export async function reach(root: string, name: string, deps: ClaimDependencies)
 }
 
 /**
- * Which of `branches` someone holds, as {@link githubHeld} decides it on GitHub. `tips` are the
+ * Which of `branches` someone holds, as the upstream's forge decides it on GitHub. `tips` are the
  * upstream's `quest/*` branches, when already read; the fork's are read through git too. Off GitHub,
  * every branch pushed upstream holds its quest.
  */
@@ -191,15 +197,13 @@ export async function held(
 				.map((branch) => ({ branch, url: null, pull: null })),
 			landed: new Map(),
 		};
-	const { client, repository, head } = up.github;
-	return githubHeld(
-		client,
-		{
-			upstream: { repository, tips },
-			...(same(head, repository) ? {} : { fork: { repository: head, tips: remoteBranches(root, up.push) } }),
-		},
-		branches,
-	);
+	const { repository, head } = up.github;
+	const forge = await up.github.forge();
+	const sources = {
+		upstream: { repository, tips },
+		...(same(head, repository) ? {} : { fork: { repository: head, tips: remoteBranches(root, up.push) } }),
+	};
+	return (await forge.held(sources, branches)).value;
 }
 
 /**
@@ -220,7 +224,7 @@ export async function openDrafts(root: string, name: string, deps: ClaimDependen
 			deps.warn(`${name} is not on GitHub, so draft PRs were skipped`);
 			return [];
 		}
-		const pulls = await openPullRequests(up.github.client, up.github.repository);
+		const pulls = (await (await up.github.forge()).pulls(up.github.repository)).value;
 		return pulls.filter((pull) => pull.draft).sort((a, b) => a.number - b.number);
 	} catch (error) {
 		deps.warn(`draft PRs were skipped: ${error instanceof Error ? error.message : String(error)}`);
