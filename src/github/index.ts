@@ -11,13 +11,16 @@ export {
 	type Repository,
 } from "./client";
 export {
+	type BaseNeeds,
 	type Check,
 	type Reaction,
 	type Review,
 	type ReviewRecord,
 	type Status,
+	type Needs,
 	type Thread,
 	pullRequestStatus,
+	requiredOf,
 } from "./status";
 export { type HoldFact, type HoldReport } from "./hold";
 export { type Signal } from "./signals";

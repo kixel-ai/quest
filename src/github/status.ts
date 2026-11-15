@@ -163,8 +163,23 @@ export interface Status {
 	starterHold: HoldReport["starter"];
 }
 
-/** Read the paged PR state, then the state commands’ ownership snapshot. */
-export async function pullRequestStatus(pr: PullRequest, deps: GitHubDependencies): Promise<Status> {
+/** What a repository's base branch requires, as {@link requiredOf} read it for that repository and branch. */
+export interface BaseNeeds extends Repository {
+	branch: string;
+	needs: Needs;
+}
+
+/**
+ * Read the paged PR state, then the state commands’ ownership snapshot. A caller reading many PRs passes `base`,
+ * what it read of their base once, instead of each read fetching it again; it throws when the PR's repository or base
+ * is another.
+ */
+export async function pullRequestStatus(pr: PullRequest, deps: GitHubDependencies, base?: BaseNeeds): Promise<Status> {
+	// GitHub's owner and repository names are case-insensitive.
+	if (base !== undefined && `${base.owner}/${base.repo}`.toLowerCase() !== `${pr.owner}/${pr.repo}`.toLowerCase())
+		throw new Error(
+			`the requirements passed for ${pr.owner}/${pr.repo}#${pr.number} were read for ${base.owner}/${base.repo}`,
+		);
 	const github = new GitHub(deps);
 	const cursors: Record<"checks" | "reviews" | "threads", string | null | undefined> = {
 		checks: null,
@@ -214,6 +229,11 @@ export async function pullRequestStatus(pr: PullRequest, deps: GitHubDependencie
 		if (cursors.reviews !== undefined) page(current.reviews, "reviews", reviewNodes);
 		if (cursors.threads !== undefined) page(current.reviewThreads, "threads", threadNodes);
 	}
+	const baseRef = string(first!.baseRefName);
+	if (base !== undefined && base.branch !== baseRef)
+		throw new Error(
+			`the PR's base is ${baseRef}, not the ${base.branch} whose requirements were read; read them again`,
+		);
 	const ownership = await readHoldStatus(pr, deps);
 	if (ownership.head !== first!.headRefOid)
 		throw new Error("the PR head changed while reading its holds; rerun quest status");
@@ -221,9 +241,9 @@ export async function pullRequestStatus(pr: PullRequest, deps: GitHubDependencie
 	const { checks: current } = await currentChecks(github, pr, head, contexts);
 	// Only an open PR can still merge, and a closed one's base may be gone.
 	const needs: Needs =
-		first!.state === "OPEN"
-			? await requiredOf(github, pr, string(first!.baseRefName))
-			: { checks: [], workflows: [] };
+		first!.state !== "OPEN"
+			? { checks: [], workflows: [] }
+			: (base?.needs ?? (await requiredOf(github, pr, baseRef)));
 	const status = summarize(first!, rollup, current, needs, reviewNodes, threadNodes);
 	status.reviewRecord = await reviewRecord(github, pr, first!, deps.warn);
 	status.risk = risk(typeof first!.body === "string" ? first!.body : "", head, status.reviewRecord);

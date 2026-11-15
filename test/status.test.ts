@@ -1,9 +1,9 @@
 import { describe, expect, test } from "vitest";
 
-import type { GitHubDependencies } from "../src/github/client";
+import { GitHub, type GitHubDependencies } from "../src/github/client";
 import { main } from "../src/cli/main";
 import { statusLines } from "../src/cli/status";
-import { pullRequestStatus } from "../src/github/status";
+import { pullRequestStatus, requiredOf } from "../src/github/status";
 
 const A = "a".repeat(40);
 const B = "b".repeat(40);
@@ -607,6 +607,54 @@ test("a required check or workflow nothing reports is pending, except the gate's
 	// With no checks on the head at all, the requirements still leave it pending.
 	const empty = setup([pull({ checks: null, reviews: page([]), threads: page([]) })], { rules });
 	expect((await pullRequestStatus(pr, empty.deps)).checks.state).toBe("pending");
+});
+
+test("a base's requirements read once give the status a read of its own would, and another base's are refused", async () => {
+	const rules = [
+		{ type: "required_status_checks", parameters: { required_status_checks: [{ context: "lint" }] } },
+		{ type: "workflows", parameters: { workflows: [{ path: ".github/workflows/pr.yml", repository_id: 1 }] } },
+	];
+	const body = () =>
+		pull({ checks: page([run("test", "COMPLETED", "SUCCESS", false)]), reviews: page([]), threads: page([]) });
+	/** The fixture, recording each request for the base's rules. */
+	const counted = () => {
+		const fixture = setup([body()], { rules });
+		const reads: string[] = [];
+		const fetch = fixture.deps.fetch;
+		fixture.deps.fetch = (url, init) => {
+			const path = new URL(String(url)).pathname;
+			if (/\/(branches|rules\/branches|repositories)\//.test(path)) reads.push(path);
+			return fetch(url, init);
+		};
+		return { deps: fixture.deps, reads };
+	};
+	const own = counted();
+	const expected = await pullRequestStatus(pr, own.deps);
+	expect(own.reads).not.toEqual([]);
+
+	const shared = counted();
+	const needs = await requiredOf(new GitHub(shared.deps), pr, "main");
+	const before = shared.reads.length;
+	expect(await pullRequestStatus(pr, shared.deps, { ...pr, branch: "main", needs })).toEqual(expected);
+	expect(shared.reads).toHaveLength(before);
+	expect(expected.checks.pending.map((check) => check.name)).toEqual([
+		"lint",
+		"example/project:.github/workflows/pr.yml",
+	]);
+
+	// The PR moved to another base after its requirements were read.
+	await expect(pullRequestStatus(pr, counted().deps, { ...pr, branch: "release", needs })).rejects.toThrow(
+		"the PR's base is main, not the release whose requirements were read",
+	);
+	// Another repository's requirements are refused, whatever their branch; names ignore case.
+	const other = counted();
+	await expect(
+		pullRequestStatus(pr, other.deps, { owner: "example", repo: "policies", branch: "main", needs }),
+	).rejects.toThrow("the requirements passed for example/project#1 were read for example/policies");
+	expect(other.reads).toEqual([]);
+	expect(
+		await pullRequestStatus(pr, counted().deps, { owner: "Example", repo: "Project", branch: "main", needs }),
+	).toEqual(expected);
 });
 
 test("a required check from another app than its requirement names stays pending, and a closed PR reads no requirements", async () => {
