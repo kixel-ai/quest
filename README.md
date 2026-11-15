@@ -188,12 +188,21 @@ Quest ships a pack of audits every repository runs once per milestone:
 $ quest audit
 tree - Audit the quest tree
 deps - Audit dependencies
+code - Audit the code
+cost - Audit build and CI cost
+docs - Audit the docs
+tests - Audit test coverage
 ```
 
 `tree` finds quests that disagree, conflict, sit in the wrong milestone, or
 plan stale work; `deps` reviews new releases, upstream health, held-back
-majors, and dependencies worth dropping. `quest audit <name>` prints what one
-checks, what each finding becomes, and how its run plans the next one.
+majors, and dependencies worth dropping; `code` deletes dead code, simplifies
+overbuilt code, and prunes stale lint suppressions; `cost` weighs each CI job,
+gate step, test, build second, and artifact byte against what it earns; `docs`
+checks claims, examples, links, and exports against the code; and `tests`
+finds untested behavior and tests CI never runs. `quest audit <name>` prints
+what one checks, what each finding becomes, and how its run plans the next
+one.
 
 A quest runs an audit by naming it in an `## Audit` section, and holds only
 what the repository learned, such as its baseline and the scope it excludes:
