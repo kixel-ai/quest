@@ -1133,18 +1133,13 @@ it, as in arbitrary-UID containers, uses
 only its UID can write it. `quest agent` keeps its admissions beside them, in
 `agents-v2/<hostname>`.
 
-Two kinds of command go ahead of the rest. `quest gate --quick <command>` waits
-at most a minute, then starts the command whatever the host's load, memory, and
-place in the queue;
-pass it only for cheap commands, such as a formatter or `quest check`, that cost
-less to run than to hold back. A check that lands PRs goes first: with
-`QUEST_GATE_PRIORITY=1` in its environment, every gate inside the check waits
+A check that lands PRs goes ahead of the rest: with `QUEST_GATE_PRIORITY=1` in
+its environment, every gate inside the check waits
 for memory but never for load or the queue, whether or not other gated commands
 run, and its command gets `MBX_SCHEDULER_PRIORITY=normal` unless it sets its
 own, so [mbx](https://github.com/jdx/mr-boxington), where installed, schedules
-its compiles ahead of lower-priority builds. Both kinds of command
-record their admissions, so the other callers count them against the host's
-headroom. Set the variable where the check starts, such as a merge queue
+its compiles ahead of lower-priority builds. Its admissions are recorded, so
+the other callers count them against the host's headroom. Set the variable where the check starts, such as a merge queue
 build's workflow, rather than relying on a slot in
 the host's ledger: a container's gates keep a ledger of their own, yet wait on
 the host's load. `quest agent` drops the variable, as it drops an admission.
@@ -1217,8 +1212,8 @@ first one as Just's copy, not as a second signal: a SIGTERM to Just's process
 group reaches the gate both directly and through Just. A repeated SIGTERM still
 kills, though when sent to Just or the gate alone, or when the two copies
 arrive together, it takes a third; a repeated Ctrl-C, which Just does not
-forward, kills at the second. There is no timeout except `--quick`'s: any other
-command waits its turn for as long as the host stays busy.
+forward, kills at the second. There is no timeout: a command waits its turn for as long
+as the host stays busy.
 
 ### Record each run
 

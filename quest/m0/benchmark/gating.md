@@ -81,5 +81,3 @@ Baseline, 2026-11-01 to 11-15:
 
 - [Mistake audit](/quest/m0/mistake-audit.md) - reads these records as a
   class each week
-- [Remove the gate's quick flag](/quest/m0/gate-quick.md) - the same rule
-  change leaves the flag no use
