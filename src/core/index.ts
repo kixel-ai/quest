@@ -33,6 +33,7 @@ export {
 	type Size,
 	size,
 } from "./doc";
+export { AUDIT, AUDITS, type Audit, SKIPPED, auditOf, covered, skippedOf } from "./audit";
 export { type ClosedPull, handBackWaits, handedBack, landed, withoutHandBack } from "./claim";
 export { reviewSection } from "./review";
 export {
@@ -80,6 +81,7 @@ export {
 	installedStubs,
 	lines,
 	newline,
+	planAudits,
 	planInit,
 	questReadme,
 } from "./init";

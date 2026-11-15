@@ -8,6 +8,7 @@ import {
 	readFileSync,
 	readdirSync,
 	readlinkSync,
+	rmSync,
 	symlinkSync,
 	writeFileSync,
 } from "node:fs";
@@ -15,9 +16,11 @@ import { dirname, join, relative } from "node:path";
 
 import { expect, test } from "vitest";
 
+import { check, formatFinding, ready } from "../src/core";
 import { CONTEXT_LIMIT, hook } from "../src/cli/hooks";
 import { REFERENCE_LINE, init, stubFindings, uninstall } from "../src/cli/setup";
 import { SKILLS } from "../src/cli/skills";
+import { checkout, load } from "../src/cli/tree";
 import { tempDir } from "./fixture";
 
 const read = (dir: string, path: string) => readFileSync(join(dir, path), "utf8");
@@ -254,12 +257,12 @@ const READY_STUB =
 	"---\nname: quest-ready\ndescription: Mark a draft PR ready for review, wait for an automated review, then decide whether to merge.\n---\n\nRun `quest skill ready` and follow its output.\nIf `quest` is not installed, follow https://github.com/kixelated/quest/blob/main/SETUP.md first.\n";
 
 /** A current skill's stub as an earlier release wrote it, with another description and setup link. */
-const OLD_AUDIT_STUB =
-	"---\nname: quest-audit\ndescription: Audit outstanding quests for disagreements, then resolve them with /quest-plan.\n---\n\nRun `quest skill audit` and follow its output.\nIf `quest` is not installed, follow https://github.com/kixelated/quest/blob/main/SETUP.md first.\n";
+const OLD_IMPORT_STUB =
+	"---\nname: quest-import\ndescription: Audit outstanding quests for disagreements, then resolve them with /quest-plan.\n---\n\nRun `quest skill import` and follow its output.\nIf `quest` is not installed, follow https://github.com/kixelated/quest/blob/main/SETUP.md first.\n";
 
 /** Claude Code's inline stub of a current skill, with another description and fallback text. */
-const OLD_INLINE_AUDIT_STUB =
-	'---\nname: quest-audit\ndescription: Audit the quest tree.\nallowed-tools: Bash(quest skill audit) PowerShell(quest skill audit)\n---\n\n!`quest skill audit; echo "install quest if that failed"`\n';
+const OLD_INLINE_IMPORT_STUB =
+	'---\nname: quest-import\ndescription: Audit the quest tree.\nallowed-tools: Bash(quest skill import) PowerShell(quest skill import)\n---\n\n!`quest skill import; echo "install quest if that failed"`\n';
 
 function write(dir: string, path: string, content: string) {
 	mkdirSync(dirname(join(dir, path)), { recursive: true });
@@ -269,40 +272,40 @@ function write(dir: string, path: string, content: string) {
 test("init removes stubs of retired skills and refreshes older stubs of current ones", () => {
 	const dir = tempDir();
 	init(dir);
-	const audit = SKILLS.find((skill) => skill.name === "audit")!;
+	const imported = SKILLS.find((skill) => skill.name === "import")!;
 	for (const skills of [".claude/skills", ".agents/skills"]) {
 		const eol = skills === ".agents/skills" ? "\r\n" : "\n";
 		write(dir, `${skills}/quest-ready/SKILL.md`, READY_STUB.replaceAll("\n", eol));
-		write(dir, `${skills}/quest-audit/SKILL.md`, OLD_AUDIT_STUB.replaceAll("\n", eol));
+		write(dir, `${skills}/quest-import/SKILL.md`, OLD_IMPORT_STUB.replaceAll("\n", eol));
 	}
 	expect(init(dir)).toEqual([
-		".claude/skills/quest-audit/SKILL.md",
-		".agents/skills/quest-audit/SKILL.md",
+		".claude/skills/quest-import/SKILL.md",
+		".agents/skills/quest-import/SKILL.md",
 		".claude/skills/quest-ready/SKILL.md",
 		".agents/skills/quest-ready/SKILL.md",
 	]);
 	expect(existsSync(join(dir, ".claude/skills/quest-ready"))).toBe(false);
 	expect(existsSync(join(dir, ".agents/skills/quest-ready"))).toBe(false);
-	expect(read(dir, ".claude/skills/quest-audit/SKILL.md")).toBe(audit.stubs[".claude/skills"]);
-	expect(read(dir, ".agents/skills/quest-audit/SKILL.md")).toBe(
-		audit.stubs[".agents/skills"].replaceAll("\n", "\r\n"),
+	expect(read(dir, ".claude/skills/quest-import/SKILL.md")).toBe(imported.stubs[".claude/skills"]);
+	expect(read(dir, ".agents/skills/quest-import/SKILL.md")).toBe(
+		imported.stubs[".agents/skills"].replaceAll("\n", "\r\n"),
 	);
 	expect(init(dir)).toEqual([]);
 });
 
 test.skipIf(process.platform === "win32")("init leaves a linked older stub of a current skill", () => {
 	const dir = tempDir();
-	write(dir, "stub.md", OLD_AUDIT_STUB);
-	write(dir, "elsewhere/quest-audit/SKILL.md", OLD_AUDIT_STUB);
-	mkdirSync(join(dir, ".claude/skills/quest-audit"), { recursive: true });
-	symlinkSync("../../../stub.md", join(dir, ".claude/skills/quest-audit/SKILL.md"));
+	write(dir, "stub.md", OLD_IMPORT_STUB);
+	write(dir, "elsewhere/quest-import/SKILL.md", OLD_IMPORT_STUB);
+	mkdirSync(join(dir, ".claude/skills/quest-import"), { recursive: true });
+	symlinkSync("../../../stub.md", join(dir, ".claude/skills/quest-import/SKILL.md"));
 	mkdirSync(join(dir, ".agents/skills"), { recursive: true });
-	symlinkSync("../../elsewhere/quest-audit", join(dir, ".agents/skills/quest-audit"));
+	symlinkSync("../../elsewhere/quest-import", join(dir, ".agents/skills/quest-import"));
 	const changed = init(dir);
-	expect(changed).not.toContain(".claude/skills/quest-audit/SKILL.md");
-	expect(changed).not.toContain(".agents/skills/quest-audit/SKILL.md");
-	expect(read(dir, "stub.md")).toBe(OLD_AUDIT_STUB);
-	expect(read(dir, "elsewhere/quest-audit/SKILL.md")).toBe(OLD_AUDIT_STUB);
+	expect(changed).not.toContain(".claude/skills/quest-import/SKILL.md");
+	expect(changed).not.toContain(".agents/skills/quest-import/SKILL.md");
+	expect(read(dir, "stub.md")).toBe(OLD_IMPORT_STUB);
+	expect(read(dir, "elsewhere/quest-import/SKILL.md")).toBe(OLD_IMPORT_STUB);
 });
 
 test("init keeps a retired stub's directory when it holds other files", () => {
@@ -333,29 +336,29 @@ for (const [name, content] of [
 
 test("init refreshes an inline stub, and moves each directory to its own kind", () => {
 	const dir = tempDir();
-	const audit = SKILLS.find((skill) => skill.name === "audit")!;
-	write(dir, ".claude/skills/quest-audit/SKILL.md", OLD_INLINE_AUDIT_STUB);
-	write(dir, ".agents/skills/quest-audit/SKILL.md", OLD_INLINE_AUDIT_STUB);
+	const imported = SKILLS.find((skill) => skill.name === "import")!;
+	write(dir, ".claude/skills/quest-import/SKILL.md", OLD_INLINE_IMPORT_STUB);
+	write(dir, ".agents/skills/quest-import/SKILL.md", OLD_INLINE_IMPORT_STUB);
 	init(dir);
-	expect(read(dir, ".claude/skills/quest-audit/SKILL.md")).toBe(audit.stubs[".claude/skills"]);
-	expect(read(dir, ".agents/skills/quest-audit/SKILL.md")).toBe(audit.stubs[".agents/skills"]);
-	write(dir, ".claude/skills/quest-audit/SKILL.md", OLD_AUDIT_STUB);
-	expect(init(dir)).toEqual([".claude/skills/quest-audit/SKILL.md"]);
-	expect(read(dir, ".claude/skills/quest-audit/SKILL.md")).toBe(audit.stubs[".claude/skills"]);
+	expect(read(dir, ".claude/skills/quest-import/SKILL.md")).toBe(imported.stubs[".claude/skills"]);
+	expect(read(dir, ".agents/skills/quest-import/SKILL.md")).toBe(imported.stubs[".agents/skills"]);
+	write(dir, ".claude/skills/quest-import/SKILL.md", OLD_IMPORT_STUB);
+	expect(init(dir)).toEqual([".claude/skills/quest-import/SKILL.md"]);
+	expect(read(dir, ".claude/skills/quest-import/SKILL.md")).toBe(imported.stubs[".claude/skills"]);
 });
 
 for (const [layout, link] of [
 	[
 		"a linked skill directory",
-		(dir: string) => symlinkSync("../../.claude/skills/quest-audit", join(dir, ".agents/skills/quest-audit")),
+		(dir: string) => symlinkSync("../../.claude/skills/quest-import", join(dir, ".agents/skills/quest-import")),
 	],
 	[
 		"a linked SKILL.md",
 		(dir: string) => {
-			mkdirSync(join(dir, ".agents/skills/quest-audit"));
+			mkdirSync(join(dir, ".agents/skills/quest-import"));
 			symlinkSync(
-				"../../../.claude/skills/quest-audit/SKILL.md",
-				join(dir, ".agents/skills/quest-audit/SKILL.md"),
+				"../../../.claude/skills/quest-import/SKILL.md",
+				join(dir, ".agents/skills/quest-import/SKILL.md"),
 			);
 		},
 	],
@@ -364,34 +367,34 @@ for (const [layout, link] of [
 		`init gives ${layout} shared by both directories the stub every agent follows`,
 		() => {
 			const dir = tempDir();
-			const audit = SKILLS.find((skill) => skill.name === "audit")!;
-			write(dir, ".claude/skills/quest-audit/SKILL.md", OLD_INLINE_AUDIT_STUB);
+			const imported = SKILLS.find((skill) => skill.name === "import")!;
+			write(dir, ".claude/skills/quest-import/SKILL.md", OLD_INLINE_IMPORT_STUB);
 			mkdirSync(join(dir, ".agents/skills"), { recursive: true });
 			link(dir);
-			expect(init(dir)).toContain(".claude/skills/quest-audit/SKILL.md");
-			expect(read(dir, ".agents/skills/quest-audit/SKILL.md")).toBe(audit.stubs[".agents/skills"]);
+			expect(init(dir)).toContain(".claude/skills/quest-import/SKILL.md");
+			expect(read(dir, ".agents/skills/quest-import/SKILL.md")).toBe(imported.stubs[".agents/skills"]);
 			expect(init(dir)).toEqual([]);
 		},
 	);
 
 for (const [name, content] of [
-	["a stub with added instructions", `${OLD_AUDIT_STUB}Then tell the team.\n`],
-	["a stub with an added frontmatter field", OLD_AUDIT_STUB.replace("\n---\n\n", "\nallowed-tools: Bash\n---\n\n")],
+	["a stub with added instructions", `${OLD_IMPORT_STUB}Then tell the team.\n`],
+	["a stub with an added frontmatter field", OLD_IMPORT_STUB.replace("\n---\n\n", "\nallowed-tools: Bash\n---\n\n")],
 	[
 		"an inline stub allowing more",
-		OLD_INLINE_AUDIT_STUB.replace("PowerShell(quest skill audit)", "PowerShell(quest skill audit) Bash"),
+		OLD_INLINE_IMPORT_STUB.replace("PowerShell(quest skill import)", "PowerShell(quest skill import) Bash"),
 	],
 	[
 		"an inline stub calling another skill",
-		OLD_INLINE_AUDIT_STUB.replace("`quest skill audit;", "`quest skill plan;"),
+		OLD_INLINE_IMPORT_STUB.replace("`quest skill import;", "`quest skill plan;"),
 	],
-	["an inline stub with added instructions", `${OLD_INLINE_AUDIT_STUB}Then tell the team.\n`],
+	["an inline stub with added instructions", `${OLD_INLINE_IMPORT_STUB}Then tell the team.\n`],
 ] as const)
 	test(`init keeps ${name} of a current skill`, () => {
 		const dir = tempDir();
-		write(dir, ".claude/skills/quest-audit/SKILL.md", content);
-		expect(() => init(dir)).toThrow(".claude/skills/quest-audit/SKILL.md is not a Quest stub");
-		expect(read(dir, ".claude/skills/quest-audit/SKILL.md")).toBe(content);
+		write(dir, ".claude/skills/quest-import/SKILL.md", content);
+		expect(() => init(dir)).toThrow(".claude/skills/quest-import/SKILL.md is not a Quest stub");
+		expect(read(dir, ".claude/skills/quest-import/SKILL.md")).toBe(content);
 	});
 
 test("init leaves a user's skill without the quest- prefix", () => {
@@ -420,12 +423,12 @@ test("uninstall removes stubs that older versions installed", () => {
 	const dir = tempDir();
 	for (const skills of [".claude/skills", ".agents/skills"]) {
 		write(dir, `${skills}/quest-ready/SKILL.md`, READY_STUB);
-		write(dir, `${skills}/quest-audit/SKILL.md`, OLD_AUDIT_STUB);
+		write(dir, `${skills}/quest-import/SKILL.md`, OLD_IMPORT_STUB);
 	}
 	expect(uninstall(dir)).toEqual([
-		".claude/skills/quest-audit/SKILL.md",
+		".claude/skills/quest-import/SKILL.md",
 		".claude/skills/quest-ready/SKILL.md",
-		".agents/skills/quest-audit/SKILL.md",
+		".agents/skills/quest-import/SKILL.md",
 		".agents/skills/quest-ready/SKILL.md",
 	]);
 	expect(existsSync(join(dir, ".claude"))).toBe(false);
@@ -463,16 +466,16 @@ test("stub check flags missing, outdated, and edited stubs, and the session hook
 	expect(context().some(flagged)).toBe(false);
 
 	// An older version's stub.
-	write(dir, ".claude/skills/quest-audit/SKILL.md", OLD_AUDIT_STUB);
+	write(dir, ".claude/skills/quest-import/SKILL.md", OLD_IMPORT_STUB);
 	expect(stubFindings(dir)).toEqual([
-		".claude/skills/quest-audit/SKILL.md: is outdated; run the repository's pinned `quest init` and commit the result",
+		".claude/skills/quest-import/SKILL.md: is outdated; run the repository's pinned `quest init` and commit the result",
 	]);
 	expect(context().every(flagged)).toBe(true);
 
 	// An edited stub init refuses to rewrite.
-	write(dir, ".claude/skills/quest-audit/SKILL.md", "my own skill\n");
+	write(dir, ".claude/skills/quest-import/SKILL.md", "my own skill\n");
 	expect(stubFindings(dir)).toEqual([
-		".claude/skills/quest-audit/SKILL.md is not a Quest stub; remove or rename it before running `quest init`",
+		".claude/skills/quest-import/SKILL.md is not a Quest stub; remove or rename it before running `quest init`",
 	]);
 	expect(context().every(flagged)).toBe(true);
 	expect(context()[0].length).toBeLessThanOrEqual(CONTEXT_LIMIT);
@@ -528,4 +531,98 @@ test("quest check reports a malformed risk file at the repository's root", () =>
 	);
 	write(dir, "RISK.md", "# Risk\n\n## High\n\n- `src/billing/` - charges customers\n");
 	expect(run()).toMatchObject({ status: 0, stderr: "" });
+});
+
+/** `quest check`'s findings on the tree under `dir`. */
+function findings(dir: string): string[] {
+	const tree = checkout(dir, () => {});
+	return check(tree.docs, tree.exists).map(formatFinding);
+}
+
+const QUEST = "# [S] Work\n\n## Goal\n\nWork.\n";
+
+test("a fresh init plants each audit after an empty m0, ready at once", () => {
+	const dir = tempDir();
+	const changed = init(dir);
+	expect(changed).toEqual(
+		expect.arrayContaining([
+			"quest/m0/README.md",
+			"quest/m1/README.md",
+			"quest/m1/audit-tree.md",
+			"quest/m1/audit-deps.md",
+		]),
+	);
+	const stub = read(dir, "quest/m1/audit-deps.md");
+	expect(stub).toMatch(/^# \[M\] Audit dependencies\n\n## Goal\n\n.*`quest audit deps`.*\n\n## Audit\n\n- deps\n$/);
+	expect(findings(dir)).toEqual([]);
+	expect(ready(load(dir), "2026-11-10")).toEqual(["quest/m1/audit-deps.md", "quest/m1/audit-tree.md"]);
+	expect(init(dir)).toEqual([]);
+});
+
+test("init plants each audit in the milestone after the lowest one with work left, requiring it", () => {
+	const dir = tempDir();
+	init(dir);
+	for (const path of ["quest/m1/audit-tree.md", "quest/m1/audit-deps.md", "quest/m1/README.md"])
+		rmSync(join(dir, path));
+	// m0 is finished; m1 holds work, so the stubs wait for it in a new m2.
+	write(dir, "quest/m1/README.md", "# Next\n\n## Goal\n\nNext.\n");
+	write(dir, "quest/m1/work.md", QUEST);
+	expect(init(dir)).toEqual(["quest/m2/README.md", "quest/m2/audit-tree.md", "quest/m2/audit-deps.md"]);
+	expect(read(dir, "quest/m2/audit-tree.md")).toContain(
+		"\n## Required\n\n- [m1](/quest/m1/README.md) - the audit runs after it\n",
+	);
+	expect(findings(dir)).toEqual([]);
+	expect(ready(load(dir), "2026-11-10")).toEqual(["quest/m1/work.md"]);
+});
+
+test("init plants no audit a quest names or the root skips, and never edits a planted stub", () => {
+	const dir = tempDir();
+	write(
+		dir,
+		"quest/README.md",
+		"# Quests\n\n## Goal\n\nWork.\n\n## Skipped audits\n\n- deps - nothing to depend on\n",
+	);
+	write(dir, "quest/m0/README.md", "# Now\n\n## Goal\n\nNow.\n");
+	write(dir, "quest/m0/tree.md", `${QUEST}\n## Audit\n\n- tree\n`);
+	expect(init(dir).filter((path) => path.startsWith("quest/"))).toEqual([]);
+	expect(existsSync(join(dir, "quest/m1"))).toBe(false);
+
+	write(dir, "quest/README.md", "# Quests\n\n## Goal\n\nWork.\n");
+	expect(init(dir)).toEqual(["quest/m1/README.md", "quest/m1/audit-deps.md"]);
+	write(dir, "quest/m1/audit-deps.md", "# [L] Edited\n\n## Goal\n\nOurs.\n\n## Audit\n\n- deps\n");
+	expect(init(dir)).toEqual([]);
+});
+
+test("init refuses a stub's path that other work holds, writing nothing", () => {
+	const dir = tempDir();
+	write(dir, "quest/README.md", "# Quests\n\n## Goal\n\nWork.\n");
+	write(dir, "quest/m0/README.md", "# Now\n\n## Goal\n\nNow.\n");
+	write(dir, "quest/m0/work.md", QUEST);
+	write(dir, "quest/m1/README.md", "# Next\n\n## Goal\n\nNext.\n");
+	write(dir, "quest/m1/audit-deps.md", QUEST);
+	const before = snapshot(dir);
+	expect(() => init(dir)).toThrow("quest/m1/audit-deps.md is in the way of the `deps` audit's stub");
+	expect(snapshot(dir)).toEqual(before);
+});
+
+test("a held audit path leaves the skill stub findings in place", () => {
+	const dir = tempDir();
+	init(dir);
+	write(dir, "quest/m0/work.md", QUEST);
+	rmSync(join(dir, "quest/m1/audit-deps.md"));
+	write(dir, "quest/m1/audit-deps.md", QUEST);
+	rmSync(join(dir, ".claude/skills/quest-start"), { recursive: true });
+	expect(stubFindings(dir)).toEqual([
+		".claude/skills/quest-start/SKILL.md: is missing; run the repository's pinned `quest init` and commit the result",
+	]);
+});
+
+test("init refuses a quest whose branch a new milestone would nest under", () => {
+	const dir = tempDir();
+	write(dir, "quest/README.md", "# Quests\n\n## Goal\n\nWork.\n");
+	write(dir, "quest/m0/README.md", "# Now\n\n## Goal\n\nNow.\n");
+	write(dir, "quest/m0/work.md", QUEST);
+	write(dir, "quest/m1.md", QUEST);
+	expect(() => init(dir)).toThrow("quest/m1.md is in the way of milestone m1");
+	expect(existsSync(join(dir, "quest/m1"))).toBe(false);
 });
