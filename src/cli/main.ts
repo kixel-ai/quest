@@ -9,6 +9,7 @@ import { Argument, Command, CommanderError, InvalidArgumentError, Option } from 
 
 import { description } from "../../package.json";
 import {
+	AUDITS,
 	type Doc,
 	type RankedQuest,
 	blockers,
@@ -42,11 +43,12 @@ import {
 } from "./agent";
 import { held, openDrafts, reach, target, upstream, upstreamRefs } from "./claims";
 import { PENDING_MS } from "./admission";
-import { gate, QUICK_MS } from "./gate";
+import { gate } from "./gate";
 import { gitHubDependencies, GitHubInputError, pullRequest, readRemote, remoteRepository } from "./github";
 import { mergedHolds } from "../github/client";
 import { type Hold, finish, land, release, take } from "./hold";
 import { LAND_CHECK } from "../github/land";
+import { audit } from "./audits";
 import { apply, pushCommand } from "./land-apply";
 import { EFFORT_VARIABLE, EFFORTS, fix, FixerAgentError } from "./land-fix";
 import { watch, type WatchOptions } from "./land-watch";
@@ -172,8 +174,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"quest review, long-running servers, and quick tools such as formatters out of the gate. Nested gate " +
 				"calls run immediately. Limits come from the host; there is " +
 				"no configuration.\n\n" +
-				`--quick waits at most ${QUICK_MS / 1000} seconds, then starts the command anyway; pass it only for ` +
-				"cheap commands such as formatters. With QUEST_GATE_PRIORITY=1 in the environment, as a check " +
+				"With QUEST_GATE_PRIORITY=1 in the environment, as a check " +
 				"that lands PRs should set, the command waits for memory but never for load, and gets " +
 				"MBX_SCHEDULER_PRIORITY=normal unless it sets its own.\n\n" +
 				"Once the command exits, or is cancelled and exits, its remaining descendants are killed; a second " +
@@ -191,11 +192,10 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"its time queued and running under $XDG_STATE_HOME/quest/waits for the session's record; a log it cannot " +
 				"write fails the gate.",
 		)
-		.option("--quick", `Start a cheap command after at most ${QUICK_MS / 1000} seconds of waiting`)
 		.argument("<command>", "Executable to run")
 		.argument("[args...]", "Arguments forwarded verbatim")
-		.action((command: string, args: string[], options: { quick?: boolean }) => {
-			pending = gate([command, ...args], options).catch((error: unknown) => {
+		.action((command: string, args: string[]) => {
+			pending = gate([command, ...args]).catch((error: unknown) => {
 				warn(error instanceof Error ? error.message : String(error));
 				return 1;
 			});
@@ -585,7 +585,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 					return false;
 				}
 			};
-			pending = waitForActivity(pr, options, gitHubDependencies(warn)).then(
+			pending = waitForActivity(pr, options, gitHubDependencies(warn, "wait")).then(
 				(lines) => {
 					for (const line of lines) print(line);
 					return logged(lines[0]?.split(" ")[1] ?? null) ? 0 : 1;
@@ -1192,7 +1192,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"its cost counting equally toward each. Its role is classifying when a PR's ## Review record names it as the risk classifier, reviewing when it names it " +
 				"as a reviewer or Codex marks it a review, else the one the first quest skill it ran gives (planning, implementing, iterating, " +
 				"reviewing, merging, or coordinating), else its parent's unless that is coordinating, else coordinating for a session on its sub-agents' " +
-				"PRs only, planning on a quest-plan, quest-audit, quest-recurring, or quest-import branch, implementing when its " +
+				"PRs only, planning on a quest-plan, quest-recurring, or quest-import branch, implementing when its " +
 				"first request since --since came before the PR opened, and iterating otherwise. Each PR sums its sessions' " +
 				"waits by kind: queued in and running a quest gate, waiting in quest wait for PR activity or the merge queue, " +
 				"each as the tool logged it for its session, and on a person's answer to a blocking question, as its " +
@@ -1855,6 +1855,28 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 			out.stdout(found.instructions);
 		});
 
+	program
+		.command("audit")
+		.summary("Print a shipped audit's definition, or list the audits with no name")
+		.description(
+			"Print a shipped audit's definition, or list the audits with no name.\n\n" +
+				"A quest whose ## Audit section names an audit runs it, and the pinned binary decides what the audit checks. " +
+				"It prints what to look for and what each finding becomes, then how the run plans the next one. " +
+				"`quest init` plants a stub for each audit no quest names, unless the root quest/README.md lists it under " +
+				"## Skipped audits.",
+		)
+		.argument("[name]", "Audit to print")
+		.action((name: string | undefined) => {
+			if (name === undefined) {
+				for (const a of AUDITS) print(`${a.name} - ${a.title.replace(/^\[\w+\] /, "")}`);
+				return;
+			}
+			const text = audit(name);
+			if (text === undefined)
+				throw new Error(`no audit named ${name} (have: ${AUDITS.map((a) => a.name).join(", ")})`);
+			out.stdout(text);
+		});
+
 	const listed = (hooks: readonly HookEntry[]) =>
 		hooks.map((h) => (h.matcher ? `${h.event} (${h.matcher})` : h.event)).join(", ");
 	program
@@ -2011,19 +2033,19 @@ function positiveSeconds(value: string): number {
 
 /**
  * Stop option parsing before a gated executable, keeping its own flags intact.
- * Quest's global options still apply on either side of `gate`, and its own `--quick` after it.
+ * Quest's global options still apply on either side of `gate`.
  */
 export function gateBoundary(argv: string[]): string[] {
-	const skip = (index: number, own: string[] = []) => {
+	const skip = (index: number) => {
 		for (;;) {
 			if (argv[index] === "--root") index += 2;
-			else if (argv[index]?.startsWith("--root=") || own.includes(argv[index])) index += 1;
+			else if (argv[index]?.startsWith("--root=")) index += 1;
 			else return index;
 		}
 	};
 	const index = skip(0);
 	if (argv[index] !== "gate") return argv;
-	const command = skip(index + 1, ["--quick"]);
+	const command = skip(index + 1);
 	if (!argv[command] || argv[command].startsWith("-")) return argv;
 	return [...argv.slice(0, command), "--", ...argv.slice(command)];
 }

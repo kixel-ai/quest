@@ -95,25 +95,15 @@ export const SETTLE_MS = 5000;
 export const RECENT_MS = 60_000;
 
 /**
- * The longest a quick command waits for room: the time the load average takes
- * to reflect new work, so it waits out at most one burst's lag.
- */
-export const QUICK_MS = RECENT_MS;
-
-/**
  * How a caller is admitted ahead of the rest.
  *
  * - `priority`: wait only for memory, never for load, whether or not another
  *   gated command runs. Its admissions still count against every other caller's
  *   headroom, so it goes first while the host is loaded. For work whose own
  *   runner bounds it, such as a check that lands PRs.
- * - `quick`: wait at most QUICK_MS, then start whatever the load and memory.
- *   For a command too cheap to be worth holding back, such as a formatter or a
- *   linter. Once started, it holds a slot like any admission.
  */
 export interface Precedence {
 	priority?: boolean;
-	quick?: boolean;
 }
 
 /** The memory one gated build or test stack is assumed to need. */
@@ -509,13 +499,11 @@ export function room(limits: Limits, host: Host, reserved: number): Waiting | nu
  * lasts until its caller is admitted, cancelled, or its gate ends; one whose
  * gate's start time is unknown, as on Windows, could pass for a reused process
  * ID, so its caller refreshes it, and it frees a minute after the last refresh.
- * A priority caller goes ahead of the queue, and a quick one starts at its
- * deadline whatever its place (see `Precedence`).
+ * A priority caller goes ahead of the queue (see `Precedence`).
  *
  * Each caller decides against the newest ledger and publishes atomically, so
  * concurrent callers never exceed the rule and one always wins while it has
- * room. No admission timeout except a quick caller's. Resolves with the
- * admission's id.
+ * room. There is no admission timeout. Resolves with the admission's id.
  */
 export async function admit(
 	limits: Limits,
@@ -529,7 +517,6 @@ export async function admit(
 	const place = randomUUID();
 	// Every admission names its gate's start, so a reused process ID holds no slot.
 	const self = { pid: process.pid, start: processStart(process.pid) };
-	const deadline = precedence.quick ? host.now() + QUICK_MS : Infinity;
 
 	/** One decision against the newest ledger: true once admitted. */
 	const turn = async (): Promise<boolean> => {
@@ -575,8 +562,6 @@ export async function admit(
 		// An admission takes the place of this caller's entry in the queue.
 		const admitted = (at: number) =>
 			host.publish(ledger, [...kept.filter((admission) => admission.id !== place), { id, at, ...self }]);
-		// Recorded like any admission, so it still counts against the others' headroom.
-		if (now >= deadline) return admitted(now);
 		// Priority ignores load, whether or not a gated command runs; memory still applies.
 		const { used, load, memory } = standing(limits, host, [...running], precedence.priority);
 		let wait = SETTLE_MS;
@@ -599,7 +584,7 @@ export async function admit(
 				}
 			}
 		}
-		await host.sleep(Math.min(wait, deadline - now), signal);
+		await host.sleep(wait, signal);
 		return false;
 	};
 
@@ -898,8 +883,6 @@ const message = (error: unknown) => (error instanceof Error ? error.message : St
 
 /** How `gate` admits its command. */
 export interface GateOptions {
-	/** Wait at most QUICK_MS (see `Precedence`). */
-	quick?: boolean;
 	/** The admission ledger and host measures; this user's on this host when omitted. */
 	host?: Host;
 }
@@ -1024,7 +1007,6 @@ async function gated(
 			};
 			const precedence = {
 				priority: process.env[PRIORITY] === "1",
-				quick: options.quick,
 			};
 			const host = options.host ?? fileHost(claimDirectory());
 			admitted = { host, id: await admit(hostLimits(), host, cancel.signal, notice, precedence) };

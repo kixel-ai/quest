@@ -56,16 +56,16 @@ test("Claude Code's stub inlines the skill and pre-approves only its own call, i
 
 test("a skill prints its own instructions first, then what it builds on, each once", () => {
 	const plan = skill("plan")!;
-	const text = skill("audit")!.instructions;
-	expect(text.startsWith(skill("audit")!.body.trim())).toBe(true);
-	// audit builds on plan, which builds on grill: each appears once, in that order.
+	const text = skill("import")!.instructions;
+	expect(text.startsWith(skill("import")!.body.trim())).toBe(true);
+	// import builds on plan, which builds on grill: each appears once, in that order.
 	const planAt = text.indexOf(`# /quest-plan\n\n${plan.body.trim()}`);
 	const grillAt = text.indexOf(`# /quest-grill\n\n${skill("grill")!.body.trim()}`);
 	expect(planAt).toBeGreaterThan(0);
 	expect(grillAt).toBeGreaterThan(planAt);
 	expect(text.split("# /quest-grill").length).toBe(2);
 	// The guide follows with every section any of them names, once and in the guide's order.
-	const sections = [...new Set([...skill("audit")!.guide, ...plan.guide, ...skill("grill")!.guide])];
+	const sections = [...new Set([...skill("import")!.guide, ...plan.guide, ...skill("grill")!.guide])];
 	expect(text.endsWith(`# Quest guide\n\n${guideSections(sections)}\n`)).toBe(true);
 	expect(text.split("\n## Questions\n").length).toBe(2);
 });

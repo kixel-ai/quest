@@ -38,6 +38,10 @@ The observable outcome and important boundaries.
 
 Current decisions, open questions, or implementation guidance.
 
+## Audit
+
+- deps
+
 ## Hosts
 
 - macos - the operating systems the work must run on, such as a camera check
@@ -71,6 +75,9 @@ Size the title `[XS]` to `[XL]` by the agent's effort to implement, verify, and 
 Much code that is mechanical stays small, such as applying one rename the same way across the tree, sized XS.
 Little code that is mostly judgment is larger, such as a 30-line rewording of a skill, sized M rather than XS.
 An epic carries no size until its last child is deleted; its README is then the epic's remaining work.
+
+`Audit` names the one audit quest ships that the quest runs; `quest audit` lists them, and `quest audit <name>` prints one with how its run plans the next.
+`quest init` plants a stub for each audit no quest names, unless the root README lists it, optionally followed by ` - why`, under `## Skipped audits`.
 
 `Hosts` lists the operating systems the work must run on: `linux`, `macos`, or `windows`, each optionally followed by ` - why`.
 A quest without it runs anywhere; `quest unblocked --json` reports the list as `hosts` so a dispatcher routes work without reading prose.
@@ -157,7 +164,7 @@ it over, saying how long ago it was last active.
 A quest's branch is its path without `.md`.
 For example, `quest/m1/foo/bar.md` is branch `quest/m1/foo/bar`.
 Only claims use that namespace: no other branch is named `quest` or starts with `quest/`, since git cannot hold a branch named after another's directory.
-Branches for `/quest-plan`, `/quest-audit`, and other skill PRs use a prefix of their own, such as `quest-plan/<slug>`.
+Branches for `/quest-plan`, `/quest-recurring`, and other skill PRs use a prefix of their own, such as `quest-plan/<slug>`.
 If `quest start` names a branch in the way, stop and report it; never delete or rename it yourself.
 Never rename an open PR's head branch either: GitHub closes the PR.
 Its warning that the quest's local branch already exists is not that refusal: the claim succeeded, and the branch holds an earlier attempt.

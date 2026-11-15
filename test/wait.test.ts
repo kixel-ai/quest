@@ -191,6 +191,7 @@ function setup(
 	const warnings: string[] = [];
 	const deps: GitHubDependencies = {
 		token: "test-token",
+		quota: "wait",
 		now: () => now,
 		sleep: async (ms) => {
 			sleeps.push(ms);

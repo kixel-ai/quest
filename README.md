@@ -180,6 +180,57 @@ refuses it. On an epic or milestone README, the date holds back every quest
 under it. A past date no longer blocks. `quest check` rejects anything but one
 real `YYYY-MM-DD` date.
 
+## Run recurring audits
+
+Quest ships a pack of audits every repository runs once per milestone:
+
+```console
+$ quest audit
+tree - Audit the quest tree
+deps - Audit dependencies
+```
+
+`tree` finds quests that disagree, conflict, sit in the wrong milestone, or
+plan stale work; `deps` reviews new releases, upstream health, held-back
+majors, and dependencies worth dropping. `quest audit <name>` prints what one
+checks, what each finding becomes, and how its run plans the next one.
+
+A quest runs an audit by naming it in an `## Audit` section, and holds only
+what the repository learned, such as its baseline and the scope it excludes:
+
+```markdown
+# [M] Audit dependencies
+
+## Goal
+
+Run the `deps` audit: `quest audit deps` prints what it checks, what each finding becomes, and how to plan its next run.
+
+## Audit
+
+- deps
+
+## Required
+
+- [m0](/quest/m0/README.md) - the audit runs after it
+```
+
+`quest init` plants this stub for each audit no quest names, in the milestone
+after the lowest one with work left, requiring it, and creates that milestone
+when missing; with no work left, the stubs are ready at once. It never edits a
+stub afterwards. The run's PR deletes the stub and creates the next one a
+milestone later, scheduled a week out, so improving a definition reaches every
+repository on its next run. To opt out, list the audit in the root
+`quest/README.md`:
+
+```markdown
+## Skipped audits
+
+- deps - this repository vendors nothing and has no package manager
+```
+
+`quest check` rejects an audit name Quest does not ship in either section, a
+second name in one `## Audit`, and `## Skipped audits` outside the root.
+
 ## Find what waits on you
 
 A quest waiting outside the tree says so in a `## Waiting` section, one item
@@ -1133,18 +1184,13 @@ it, as in arbitrary-UID containers, uses
 only its UID can write it. `quest agent` keeps its admissions beside them, in
 `agents-v2/<hostname>`.
 
-Two kinds of command go ahead of the rest. `quest gate --quick <command>` waits
-at most a minute, then starts the command whatever the host's load, memory, and
-place in the queue;
-pass it only for cheap commands, such as a formatter or `quest check`, that cost
-less to run than to hold back. A check that lands PRs goes first: with
-`QUEST_GATE_PRIORITY=1` in its environment, every gate inside the check waits
+A check that lands PRs goes ahead of the rest: with `QUEST_GATE_PRIORITY=1` in
+its environment, every gate inside the check waits
 for memory but never for load or the queue, whether or not other gated commands
 run, and its command gets `MBX_SCHEDULER_PRIORITY=normal` unless it sets its
 own, so [mbx](https://github.com/jdx/mr-boxington), where installed, schedules
-its compiles ahead of lower-priority builds. Both kinds of command
-record their admissions, so the other callers count them against the host's
-headroom. Set the variable where the check starts, such as a merge queue
+its compiles ahead of lower-priority builds. Its admissions are recorded, so
+the other callers count them against the host's headroom. Set the variable where the check starts, such as a merge queue
 build's workflow, rather than relying on a slot in
 the host's ledger: a container's gates keep a ledger of their own, yet wait on
 the host's load. `quest agent` drops the variable, as it drops an admission.
@@ -1217,8 +1263,8 @@ first one as Just's copy, not as a second signal: a SIGTERM to Just's process
 group reaches the gate both directly and through Just. A repeated SIGTERM still
 kills, though when sent to Just or the gate alone, or when the two copies
 arrive together, it takes a third; a repeated Ctrl-C, which Just does not
-forward, kills at the second. There is no timeout except `--quick`'s: any other
-command waits its turn for as long as the host stays busy.
+forward, kills at the second. There is no timeout: a command waits its turn for as long
+as the host stays busy.
 
 ### Record each run
 
@@ -1733,13 +1779,13 @@ latest upload, since one sender sends a session's uploads in order. The type is
 - `role` is classifying when a PR's `## Review` record names it as the
   [risk classifier](#risk-tiers), reviewing when it names it as a reviewer or
   Codex marks it a review, else the one the first quest skill it ran gives: planning
-  (`/quest-plan`, `/quest-audit`, `/quest-recurring`, `/quest-import`,
+  (`/quest-plan`, `/quest-recurring`, `/quest-import`,
   `/quest-grill`, `/quest-delete`, `/quest-export`), implementing
   (`/quest-start`), iterating (`/quest-iterate`), reviewing (`/quest-review`),
   merging (`/quest-merge`, `/quest-complete`), or coordinating (`/quest-run`,
   `/quest-spawn`). Without one, a sub-agent takes its parent's role unless that
   is coordinating; a session on its sub-agents' PRs only is coordinating; one
-  on a `quest-plan/`, `quest-audit/`, `quest-recurring/`, or `quest-import/`
+  on a `quest-plan/`, `quest-recurring/`, or `quest-import/`
   branch is planning; and the rest are implementing when their first request
   came before the PR opened, else iterating.
 - `waits` holds each wait a tool timed: `gate-queue` and `gate-run` for an
@@ -2196,7 +2242,6 @@ arrives with the guide sections and other skills it builds on, in one call:
 | `quest-recurring` | Plan a quest whose finishing PR creates its next occurrence, and what gates it. |
 | `quest-import` | Bring open GitHub issues into the planning conversation. |
 | `quest-export` | Turn active quests into GitHub issues before leaving Quest. |
-| `quest-audit` | Find conflicting, stale, or misprioritized quests, then resolve them. |
 | `quest-start` | Claim a ready quest, complete it, and open a PR. |
 | `quest-spawn` | Run only `quest-run`'s quest starts: triage ready quests and send agents out in parallel, asking nothing. |
 | `quest-iterate` | Iterate on an open PR to settle its open decisions, fix CI and review findings, and push. |

@@ -16,13 +16,21 @@ export interface PullRequest extends Repository {
 	number: number;
 }
 
-/** What the client needs from its host: `fetch`, a clock, a way to pause, the token, and where warnings go. */
+/**
+ * What the client needs from its host: `fetch`, a clock, a way to pause, the token, where warnings
+ * go, and what to do once the token's hourly quota is spent.
+ */
 export interface GitHubDependencies {
 	fetch: typeof fetch;
 	now(): number;
 	sleep(milliseconds: number): Promise<unknown>;
 	token: string;
 	warn(message: string): void;
+	/**
+	 * `wait` sleeps until a spent quota resets, up to an hour, for a daemon or a waiter whose job is to
+	 * outlast it; `fail` fails at once, naming the reset, so a one-shot command never stalls on it.
+	 */
+	quota: "wait" | "fail";
 }
 
 /** A request or pause reached the client's deadline; the caller decides what that means. */
@@ -214,13 +222,21 @@ export class GitHub {
 
 	/**
 	 * Wait out a rate limit, the `limits`th in a row, as its headers say: Retry-After, else the
-	 * primary limit's reset, else a minute doubling each time. Fails with `persisted` after six.
+	 * primary limit's reset, else a minute doubling each time. Fails with `persisted` after six, and
+	 * at once on a spent quota unless `quota` says to wait.
 	 */
 	private async waitOut(headers: Headers, limits: number, persisted: string): Promise<void> {
 		if (limits >= 6) throw new Error(persisted);
 		const retry = seconds(headers.get("retry-after"));
 		const reset =
 			headers.get("x-ratelimit-remaining") === "0" ? seconds(headers.get("x-ratelimit-reset")) : undefined;
+		if (retry === undefined && reset !== undefined && this.deps.quota === "fail") {
+			const minutes = Math.max(1, Math.ceil((reset - this.deps.now()) / 60_000));
+			const resource = headers.get("x-ratelimit-resource") ?? "API";
+			throw new Error(
+				`GitHub's ${resource} rate limit for this token is spent until ${new Date(reset).toISOString()}, ${minutes} minute${minutes === 1 ? "" : "s"} from now`,
+			);
+		}
 		const delay = retry ?? (reset === undefined ? 60_000 * 2 ** limits : Math.max(1000, reset - this.deps.now()));
 		this.deps.warn(`GitHub rate limited this request; waiting ${Math.ceil(delay / 1000)} seconds`);
 		await this.pause(delay);
