@@ -17,9 +17,9 @@ fail on unknown shapes; both; dropping it); ✅ m1 (rejected: m0), since the
 gap is two days on one host and does not recur.
 
 - Codex 0.146 writes no `content_item_metadata` or `content_item_kinds` on
-  user turns, only `turn_id`. On the maintainer's nixos host, 6
+  user turns, only `turn_id`. On one of the maintainer's hosts, 6
   interactive sessions (2026-10-15 and 16) hold 33 such turns in the window,
-  and one aborts the whole run; that kept nixos out of the transcript audit
+  and one aborts the whole run; that kept the host out of the transcript audit
   behind [#764](https://github.com/moq-dev/quest/pull/764). Sub-agent
   sessions of that version are already skipped by their object `source`.
 - In those sessions, injected parts open with `<environment_context>` or
