@@ -284,6 +284,45 @@ test("a repository Kixel Quest serves is matched by the base its PRs open on, no
 	expect(sent).toMatchObject({ repository: "acme/proj", records: 1 });
 });
 
+test("a token Kixel Quest refuses at GET /forge drops the queue and stops sending until it changes", async () => {
+	const env = home();
+	const root = checkout();
+	queue(stopped(root), env);
+	const refusing = sender(env, 200, [session("s1", "quest/m0/a")]);
+	const fetch = refusing.deps.fetch;
+	refusing.deps.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
+		String(input) === `${URL_}/forge`
+			? new Response("", { status: 401 })
+			: fetch(input, init)) as typeof globalThis.fetch;
+	expect(await sendPass(refusing.deps)).toEqual([
+		{ endpoint: ENDPOINT, repository: "acme/proj", records: 0, breakages: 0, refused: true },
+	]);
+	expect(pending(env)).toEqual([]);
+	expect(queue(stopped(root), env)).toEqual({
+		notices: [expect.stringContaining("refused this host's token (401)")],
+		queued: false,
+	});
+});
+
+test("a refusal at upload stops the pass's other repositories and drops what is queued", async () => {
+	const env = home();
+	queue(stopped(checkout()), env);
+	const other = checkout();
+	execFileSync("git", ["-C", other, "remote", "set-url", "origin", "https://github.com/acme/other.git"]);
+	queue({ ...stopped(other), session: "s2" }, env);
+	const refusing = sender(
+		env,
+		403,
+		[session("s1", "quest/m0/a"), session("s2", "main", { repositories: ["acme/other"] })],
+		undefined,
+		[],
+		["acme/proj", "acme/other"],
+	);
+	expect(await sendPass(refusing.deps)).toHaveLength(1);
+	expect(refusing.uploads).toHaveLength(1);
+	expect(pending(env)).toEqual([]);
+});
+
 test("a Kixel Quest that cannot say what it serves fails the pass, keeping the queue", async () => {
 	const env = home();
 	queue(stopped(checkout()), env);

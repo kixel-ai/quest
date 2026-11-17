@@ -12,7 +12,7 @@ import { type BreakageRecord, type Finder, type RecordUpload, type Repository, p
 import { culpritOf } from "./breakage";
 import { CLOCK_SKEW, type GitHubDependencies, GitHub } from "../github/client";
 import { baseRepository } from "./claims";
-import { KixelQuest } from "./forge";
+import { KixelQuest, Refused } from "./forge";
 import { discoveryEnv } from "./git";
 import { readRemote, remoteRepository } from "./github";
 import { eachLine } from "./messages";
@@ -283,6 +283,8 @@ export async function sendPass(deps: SendDependencies): Promise<Sent[]> {
 	}
 }
 
+const groupId = (p: Pending) => JSON.stringify([p.origin, p.prefix]);
+
 async function sendOnce(deps: SendDependencies, dir: string): Promise<Sent[]> {
 	const queued = readdirSync(join(dir, "pending"))
 		.filter((name) => name.endsWith(".json"))
@@ -299,7 +301,7 @@ async function sendOnce(deps: SendDependencies, dir: string): Promise<Sent[]> {
 	}
 	const groups = new Map<string, typeof queued>();
 	for (const q of queued) {
-		const id = JSON.stringify([q.pending.origin, q.pending.prefix]);
+		const id = groupId(q.pending);
 		groups.set(id, [...(groups.get(id) ?? []), q]);
 	}
 	// A group backing off sits the pass out, so it neither reruns token-max nor widens the others' window.
@@ -323,6 +325,16 @@ async function sendOnce(deps: SendDependencies, dir: string): Promise<Sent[]> {
 		github: deps.github,
 		remedy: "its records stay queued",
 	});
+	/** Kixel Quest refused the token, which every group shares: nothing more is sent, and what is queued is dropped. */
+	const refuseAll = (status: number, repository: string, records: number, breakages: number) => {
+		refuse(deps.env, url, token);
+		for (const q of queued) settle(q);
+		for (const q of queued) clearBackoff(deps.env, groupId(q.pending));
+		notes.push(
+			`${url} refused this host's token (${status}), so it is sent no more session records until the token changes`,
+		);
+		sent.push({ endpoint: `${url}/records`, repository, records, breakages, refused: true });
+	};
 	const bases = new Map<string, Repository>();
 	for (const [id, group] of [...groups]) {
 		const { origin, prefix } = group[0]!.pending;
@@ -340,6 +352,10 @@ async function sendOnce(deps: SendDependencies, dir: string): Promise<Sent[]> {
 			);
 			if (unserved !== null) notes.push(unserved);
 		} catch (error) {
+			if (error instanceof Refused) {
+				refuseAll(error.status, origin, 0, 0);
+				return finish(deps, dir, sent, failures, notes);
+			}
 			failed(id, origin, error);
 		}
 		groups.delete(id);
@@ -471,20 +487,8 @@ async function sendOnce(deps: SendDependencies, dir: string): Promise<Sent[]> {
 			const endpoint = `${url}/records`;
 			const response = await post(deps.fetch, endpoint, token, upload);
 			if (response.status === 401 || response.status === 403) {
-				refuse(deps.env, url, token);
-				clearBackoff(deps.env, id);
-				for (const q of group) settle(q);
-				notes.push(
-					`${endpoint} refused this host's token (${response.status}), so it is sent no more session records until the token changes`,
-				);
-				sent.push({
-					endpoint,
-					repository: key(repository),
-					records: upload.records.length,
-					breakages: upload.breakages.length,
-					refused: true,
-				});
-				continue;
+				refuseAll(response.status, key(repository), upload.records.length, upload.breakages.length);
+				break;
 			}
 			if (!response.ok)
 				throw new Error(`${endpoint} answered ${response.status}: ${(await response.text()).slice(0, 500)}`);

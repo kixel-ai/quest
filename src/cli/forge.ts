@@ -59,6 +59,16 @@ export async function forgeFor(repository: Repository, deps: ForgeDependencies, 
 		: new GitHubForge(deps.github());
 }
 
+/** Kixel Quest refused the person's token, as a sender must tell from a failure that may pass. */
+export class Refused extends Error {
+	constructor(
+		message: string,
+		readonly status: number,
+	) {
+		super(message);
+	}
+}
+
 /** Kixel Quest's read API, with a person's token. */
 export class KixelQuest {
 	#info: Promise<ForgeInfo> | undefined;
@@ -149,7 +159,11 @@ export class KixelQuest {
 			throw failed(error instanceof Error ? error.message : String(error));
 		}
 		if (response.status === 401 || response.status === 403)
-			throw failed(`it refused the token ${tokensPath(this.deps.env)} pairs with it (HTTP ${response.status})`);
+			throw new Refused(
+				failed(`it refused the token ${tokensPath(this.deps.env)} pairs with it (HTTP ${response.status})`)
+					.message,
+				response.status,
+			);
 		// A malformed wait point is the caller's to fix on any forge; the other reads take no free-form argument, so
 		// their 400 means the CLI and Kixel Quest disagree on the wire, which reading GitHub sidesteps.
 		if (response.status === 400 && path === "/forge/watch")
