@@ -18,7 +18,7 @@ import type { Repository } from "../core";
 import { land } from "./hold";
 import { commandEnvironment, contexts, git, type RemoteRead } from "./land";
 import { push, remoteHead } from "./land-head";
-import { Refusal } from "./start";
+import { Refusal } from "../core";
 import { excerpt, save } from "./land-daemon";
 
 /** The one branch each target's bump PR uses. */

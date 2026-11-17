@@ -3,10 +3,9 @@
 import { DEFAULT, PATHS, reviewSection } from "../core";
 import { recorded } from "./models-record";
 import { type ClaimDependencies, upstream } from "./claims";
-import { repositoryPath } from "../github/client";
+import { pullsFrom } from "../github/claims";
 import { git } from "./git";
 import { requireRemote } from "./github";
-import { string } from "../github/client";
 import {
 	type PullModels,
 	type Reviewed,
@@ -293,27 +292,31 @@ export type Recorded = { url: string } | { skipped: string };
 
 /**
  * The open PR from `branch` into the base `<remote>/<branch>` names, found among the upstream's PRs from the
- * repository the base's remote pushes to, as claims find a branch's PR; or why there is none.
+ * repository the base's remote pushes to, as claims find a branch's PR; or why there is none. It reads the forge
+ * itself, never an index that may lag, since its body is rewritten.
  */
-async function openPull(root: string, baseRef: string, branch: string, deps: ClaimDependencies) {
+async function openPull(
+	root: string,
+	baseRef: string,
+	branch: string,
+	deps: ClaimDependencies,
+): Promise<{ url: string; body: string; edit(body: string): Promise<void> } | { skipped: string }> {
 	// The checkout's top level: a subdirectory would look for the quest tree below it.
 	const top = git(root, ["rev-parse", "--show-toplevel"]);
 	const { remote, branch: base } = parseBase(top, baseRef);
 	const up = await upstream(top, requireRemote(top, remote), deps);
-	if (up.github === null) return { skipped: `${remote} is not on GitHub` };
-	const { client, repository, head } = up.github;
-	const from = `${head.owner}:${branch}`;
-	const query = `state=open&head=${encodeURIComponent(from)}&base=${encodeURIComponent(base)}&per_page=100`;
-	const [pull] = await client.all(`${repositoryPath(repository)}/pulls?${query}`);
-	if (pull === undefined) return { skipped: `no open PR from ${from} into ${base}` };
-	const path = `${repositoryPath(repository)}/pulls/${Number(pull.number)}`;
+	const hosting = up.hosting;
+	if (hosting === null) return { skipped: `${remote} is not on GitHub or Kixel Quest` };
+	const { repository, head } = hosting;
+	const name = `${head.owner}/${head.repo}`.toLowerCase();
+	const pull = pullsFrom((await hosting.live().pulls(repository)).value, branch).find(
+		(each) => each.base === base && each.head?.toLowerCase() === name,
+	);
+	if (pull === undefined) return { skipped: `no open PR from ${head.owner}:${branch} into ${base}` };
 	return {
-		client,
-		path,
-		number: Number(pull.number),
-		repository,
-		url: string(pull.html_url),
-		body: typeof pull.body === "string" ? pull.body : "",
+		url: pull.url,
+		body: pull.body,
+		edit: (body) => hosting.writes().edit({ ...repository, number: pull.number }, { title: null, body }),
 	};
 }
 
@@ -335,6 +338,6 @@ export async function recordRounds(root: string, reviewed: Reviewed, deps: Claim
 	const pull = await openPull(root, shared!.base.ref, shared!.branch, deps);
 	if ("skipped" in pull) return pull;
 	const next = withReview(pull.body, reviewRecord(reviewed));
-	if (next !== pull.body) await pull.client.request(pull.path, { method: "PATCH", body: { body: next } });
+	if (next !== pull.body) await pull.edit(next);
 	return { url: pull.url };
 }

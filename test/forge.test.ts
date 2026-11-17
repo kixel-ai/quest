@@ -239,6 +239,7 @@ function claimsGitHub(): GitHubDependencies {
 		number,
 		html_url: `https://github.com/example/project/pull/${number}`,
 		head: { ref, sha: "c".repeat(40), repo: { full_name: "example/project" } },
+		base: { ref: "main" },
 		draft: true,
 		created_at: `2026-10-0${number}T00:00:00Z`,
 		updated_at: `2026-10-0${number}T01:00:00Z`,
@@ -442,7 +443,12 @@ describe("wait deadlines and arguments", () => {
 		expect(viewers).toBe(2);
 		const server = kixelQuest(unreachableGitHub);
 		let now = 0;
-		const kixel = new KixelQuest(URL_, TOKEN, { ...dependencies(server.fetch, unreachableGitHub), now: () => now });
+		const kixel = new KixelQuest(
+			URL_,
+			TOKEN,
+			{ ...dependencies(server.fetch, unreachableGitHub), now: () => now },
+			false,
+		);
 		now = 10;
 		await expect(kixel.info(5)).rejects.toThrow("its deadline passed");
 		expect((await kixel.info()).login).toBe("waiter");
@@ -531,7 +537,7 @@ describe("choosing the forge", () => {
 
 	test("a Kixel Quest 400 on a read without a free-form argument names the setting that reads GitHub", async () => {
 		const server = kixelQuest(unreachable, { fail: 400 });
-		const kixel = new KixelQuest(URL_, TOKEN, dependencies(server.fetch, unreachable));
+		const kixel = new KixelQuest(URL_, TOKEN, dependencies(server.fetch, unreachable), false);
 		const error = await new KixelQuestForge(kixel).pulls(repository).catch((e: unknown) => e);
 		expect(error).not.toBeInstanceOf(InputError);
 		expect((error as Error).message).toBe(
@@ -541,7 +547,7 @@ describe("choosing the forge", () => {
 
 	test("the person is the token's, not the reading credential's", async () => {
 		const server = kixelQuest(unreachable, { login: "kixelated" });
-		const forge = new KixelQuestForge(new KixelQuest(URL_, TOKEN, dependencies(server.fetch, unreachable)));
+		const forge = new KixelQuestForge(new KixelQuest(URL_, TOKEN, dependencies(server.fetch, unreachable), false));
 		expect(await forge.viewer()).toBe("kixelated");
 		expect(await new GitHubForge(claimsGitHub(), "kixelated").viewer()).toBe("kixelated");
 	});

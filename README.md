@@ -644,6 +644,40 @@ webhook behind it. A 400 with `{"error"}` refuses a bad argument, such as a
 malformed `--since`, which `quest` reports as a usage error. `quest/core` exports each read's types and their parsers;
 `quest/github`'s `GitHubForge` answers the same reads from GitHub.
 
+### Work on a repository Kixel Quest hosts
+
+A repository can move off GitHub with Kixel Quest as its whole forge. Its
+remote is then a Kixel Quest URL, `https://kixel.quest/<owner>/<repo>.git`,
+and its PRs are `https://kixel.quest/<owner>/<repo>/pull/<number>`; that alone
+tells `quest` the repository lives there, so every read and write goes to
+Kixel Quest, with the token `records.json` pairs with it, and never to GitHub.
+`QUEST_FORGE=github` cannot reach such a repository, and a failure there names
+no override. `quest start` claims with a draft PR there, `quest iterate`,
+`ready`, and `release` take and give back holds that Kixel Quest records rather
+than labels, and `quest merge --land <sha>` records a pick of that head, which
+Kixel Quest's queue lands by fast-forwarding the base and drops once the head
+moves, so it takes no `--squash`, `--rebase`, or `--direct`. `quest review`
+records its rounds in the PR body there too.
+
+Where `gh` cannot reach, `quest pr` opens, edits, and comments on PRs and
+resolves review threads, with `gh pr`'s flags; it works on GitHub too:
+
+```sh
+quest pr create --title "Plan the forge" --body-file .tmp/body.md --draft
+quest pr edit 12 --body-file .tmp/body.md
+quest pr comment 12 --thread <thread-id> --body "Fixed in the head."
+quest pr resolve 12 <thread-id>
+```
+
+The writes are `POST /forge/<write>`, beside the reads: `open`, `close`,
+`edit`, `comment`, `resolve`, `hold`, `ready`, `release`, and `pick`, each
+answering `{"value", "asOf"}` with `asOf` null. A 409 with `{"error"}` refuses
+the write as things stand, such as a PR another session holds, a second open
+PR on a claimed quest branch, or a pick of a head that moved, and `quest`
+reports it as a refusal; a 400 refuses a malformed argument as a usage error.
+`quest/core` exports the `ForgeWrites` interface and each write's types and
+parsers, and the CLI's `GitHubWrites` makes the same writes to GitHub.
+
 ## Own a pull request
 
 Before a session pushes to an existing PR, it takes the PR, so two agents
@@ -655,6 +689,9 @@ quest ready 128 <token>      # drop "Waiting" and mark it ready
 quest release 128 <token>    # hand it back
 quest merge 128 --land <sha> # auto-merge bound to that head; takes no label
 ```
+
+`quest ready 128` without a token only marks a draft ready, refusing while any
+session holds it, for a draft its starter reviewed without taking a hold.
 
 A taken PR carries the `quest:active` label while an agent works on it.
 Sessions often share a GitHub account, so taking it prints a hold token: the
@@ -715,7 +752,9 @@ GitHub keeps auto-merge across a writer's push, so disable it before pushing
 to the PR; `quest status` and `quest wait` report a head that moved since.
 The commands accept the same PR argument and authentication as
 `quest wait`, and exit 0 when done, 3 when refused, 2 for invalid arguments,
-and 1 for other failures.
+and 1 for other failures. On a repository
+[Kixel Quest hosts](#work-on-a-repository-kixel-quest-hosts), they write there
+instead.
 
 This repository lands through GitHub's merge queue. Its required `Queue` check
 passes a merge group only when the group's build, `just check` and `just test`

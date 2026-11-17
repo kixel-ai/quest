@@ -30,6 +30,7 @@ import {
 	onMaintainer,
 	waiting,
 	InputError,
+	Refusal,
 } from "../core";
 import {
 	AgentInputError,
@@ -42,21 +43,29 @@ import {
 	stopAgent,
 	stopAll,
 } from "./agent";
-import type { Repository } from "../core";
+import type { ForgeWrites, Hold, Repository } from "../core";
+import { GitHubWrites } from "./writes";
 import { type ClaimDependencies, held, openDrafts, reach, target, upstream, upstreamRefs } from "./claims";
-import { type ForgeDependencies, forgeFor } from "./forge";
+import {
+	type ForgeDependencies,
+	type Located,
+	forgeFor,
+	hostedForge,
+	hostedRepository,
+	kixelUrl,
+	locate as locatePull,
+} from "./forge";
 import { PENDING_MS } from "./admission";
 import { gate } from "./gate";
-import { gitHubDependencies, pullRequest, readRemote, remoteRepository } from "./github";
+import { gitHubDependencies, pullRequest, readRemote, remoteRepository, requireRemote } from "./github";
 import { type GitHubDependencies, mergedHolds } from "../github/client";
 import { setTimeout as sleep } from "node:timers/promises";
-import { type Hold, finish, land, release, take } from "./hold";
 import { LAND_CHECK } from "../github/land";
 import { audit } from "./audits";
 import { apply, pushCommand } from "./land-apply";
 import { EFFORT_VARIABLE, EFFORTS, fix, FixerAgentError } from "./land-fix";
 import { watch, type WatchOptions } from "./land-watch";
-import { landed, landingCheck } from "./landed";
+import { currentBranch, landed, landingCheck } from "./landed";
 import { type Report, fixHeadings, fixLinks, moveQuest, removeQuest } from "./move";
 import { type ResolveOptions, resolveFile } from "./resolve";
 import {
@@ -107,7 +116,7 @@ import {
 } from "./send";
 import { installSender, uninstallSender } from "./service";
 import { heal, init, stubFindings, uninstall } from "./setup";
-import { Refusal, describe, notUpstream, releaseQuest, startQuest } from "./start";
+import { describe, notUpstream, releaseQuest, startQuest } from "./start";
 import { CONTEXT, GUIDE, GUIDE_SECTIONS, SKILLS, guideSections, sectionHeading, skill } from "./skills";
 import { type Terminal, Theme } from "./theme";
 import { type Snapshot, checkout, collect, load, snapshot, under } from "./tree";
@@ -149,13 +158,34 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 	const claimDependencies = (): ClaimDependencies => ({
 		github: () => gitHubDependencies(warn),
 		forge: (repository) => forgeFor(repository, forgeDependencies()),
+		kixel: {
+			hosted: (...urls) => hostedRepository(kixelUrl(process.env), ...urls),
+			forge: (repository) => hostedForge(repository, forgeDependencies()),
+		},
 		warn,
 	});
+	/** The forge taking writes to the PR `value` names: Kixel Quest for a repository it hosts, else GitHub. */
+	const located = (value: string): Located & { writes: ForgeWrites } => {
+		const at = locatePull(value, root(), process.env);
+		return {
+			...at,
+			writes: at.hosted
+				? hostedForge(at.pull, forgeDependencies())
+				: new GitHubWrites(gitHubDependencies(warn), landingCheck(root())),
+		};
+	};
 	const theme = out.terminal ? new Theme(out.terminal) : null;
+	const PR_ARGUMENT = "GitHub or Kixel Quest PR URL, or a PR number in origin";
+	const FORGE_WRITES =
+		"On GitHub, uses GH_TOKEN, GITHUB_TOKEN, or gh auth token. On a repository Kixel Quest hosts, named by a " +
+		"Kixel Quest PR URL (<url>/<owner>/<repo>/pull/<number>) or an origin remote there (<url>/<owner>/<repo>.git), " +
+		"it writes to Kixel Quest with the token $XDG_CONFIG_HOME/quest/records.json pairs with it, and holds are " +
+		"Kixel Quest's records rather than labels; QUEST_KIXEL_URL names another Kixel Quest. ";
 	const FORGE_READS =
 		"Where Kixel Quest serves the repository and $XDG_CONFIG_HOME/quest/records.json pairs a token with it, " +
 		"these reads go to Kixel Quest's index instead, sparing the GitHub quota, and its failure fails the command; " +
-		"QUEST_FORGE=github reads GitHub, and QUEST_KIXEL_URL names another Kixel Quest. ";
+		"QUEST_FORGE=github reads GitHub, and QUEST_KIXEL_URL names another Kixel Quest. A repository Kixel Quest " +
+		"hosts, named by a Kixel Quest PR URL or origin remote, is read there alone. ";
 
 	const program = new Command("quest")
 		.description(description)
@@ -338,7 +368,8 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 			(result) => done(result) ?? 0,
 			(error: unknown) => {
 				warn(error instanceof Error ? error.message : String(error));
-				return error instanceof FixerAgentError ? error.exitCode : error instanceof Refusal ? 3 : 1;
+				if (error instanceof FixerAgentError) return error.exitCode;
+				return error instanceof Refusal ? 3 : error instanceof InputError ? 2 : 1;
 			},
 		);
 	};
@@ -523,8 +554,9 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"parents whose default branch has quest/README.md, or the remote's repository when its parent has " +
 				"none, so a fork with its own quests claims on itself. A fork of that upstream pushes the branch to " +
 				"itself and opens the PR on the upstream, and so does a remote that fetches from upstream but pushes " +
-				"to a fork. A failed lookup of a parent's README is an error. Off GitHub, only the branch is pushed, " +
-				"with a warning.\n\n" +
+				"to a fork. A failed lookup of a parent's README is an error. On a remote Kixel Quest hosts " +
+				"(<url>/<owner>/<repo>.git), the claim and its draft PR are Kixel Quest's, which refuses a second " +
+				"open PR on the branch. Elsewhere, only the branch is pushed, with a warning.\n\n" +
 				"--release deletes the quest's branch on the remote, with a lease on its tip, and closes its PR, only " +
 				"while that tip is still an empty commit.\n\n" +
 				"Uses GH_TOKEN, GITHUB_TOKEN, or gh auth token on GitHub. " +
@@ -594,11 +626,11 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"$XDG_STATE_HOME/quest/waits for the session's record, named by the first activity's type, or by none on " +
 				"timeout; a log it cannot write exits 1 after printing the activity.",
 		)
-		.argument("<pr>", "GitHub PR URL, or a PR number in origin")
+		.argument("<pr>", PR_ARGUMENT)
 		.option("--since <point>", "ISO timestamp, branch-tip SHA, or resume cursor (default: current head push time)")
 		.option("--timeout <seconds>", "Maximum wait in seconds", positiveSeconds)
 		.action((value: string, options: { since?: string; timeout?: number }) => {
-			const pr = pullRequest(value, root());
+			const { pull: pr, hosted } = locatePull(value, root(), process.env);
 			const started = new Date().toISOString();
 			// An agent session's wait is logged for its record, named by the first activity, or by none on timeout.
 			const logged = (until: string | null): boolean => {
@@ -612,7 +644,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 			};
 			const choice = {
 				choose: (repository: Repository, deadline: number) =>
-					forgeFor(repository, forgeDependencies("wait"), deadline),
+					forgeFor(repository, forgeDependencies("wait"), deadline, hosted),
 			};
 			pending = waitForActivity(pr, options, choice, { now: Date.now, sleep }).then(
 				(lines) => {
@@ -662,11 +694,11 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"Exits 0 for any PR state, 2 for invalid arguments, " +
 				"and 1 for other failures.",
 		)
-		.argument("<pr>", "GitHub PR URL, or a PR number in origin")
+		.argument("<pr>", PR_ARGUMENT)
 		.option("--json", "Print a deterministic JSON object")
 		.action((value: string, options: { json?: boolean }) => {
-			const pr = pullRequest(value, root());
-			pending = forgeFor(pr, forgeDependencies())
+			const { pull: pr, hosted } = locatePull(value, root(), process.env);
+			pending = forgeFor(pr, forgeDependencies(), Infinity, hosted)
 				.then((forge) => forge.status(pr))
 				.then(
 					({ value: status }) => {
@@ -691,9 +723,9 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		"unless the token is still the latest add of its label. When two sessions add the label at once, the " +
 		"first added keeps the PR; GitHub records no event when a label already on the PR is added again, so two " +
 		"takes within the same moment are not told apart.\n\n" +
-		"Uses GH_TOKEN, GITHUB_TOKEN, or gh auth token. Exits 0 when done, 3 when refused, 2 for invalid " +
-		"arguments, and 1 for other failures.";
-	const printToken = (work: Promise<Hold>) => settle(work, (hold) => print(hold.token));
+		FORGE_WRITES +
+		"Exits 0 when done, 3 when refused, 2 for invalid arguments, and 1 for other failures.";
+	const printToken = (work: Promise<Hold | null>) => settle(work, (hold) => (hold ? print(hold.token) : undefined));
 
 	program
 		.command("iterate")
@@ -702,10 +734,11 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 			"Take a PR to work on it, such as to settle its decisions, fix CI and review findings, and push. " +
 				`Given the token of a hold this session already has, it keeps that hold.\n\n${OWNERSHIP}`,
 		)
-		.argument("<pr>", "GitHub PR URL, or a PR number in origin")
+		.argument("<pr>", PR_ARGUMENT)
 		.argument("[token]", "Hold token this session already has")
 		.action((value: string, token: string | undefined) => {
-			printToken(take(pullRequest(value, root()), token, gitHubDependencies(warn)));
+			const { pull, writes } = located(value);
+			printToken(writes.hold(pull, token ?? null));
 		});
 
 	program
@@ -713,12 +746,14 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		.summary("Hand a PR this session holds to reviewers")
 		.description(
 			"Hand a PR this session holds to reviewers: remove the body's Waiting section and mark a " +
-				`draft ready for review. The hold stays; it prints the token again.\n\n${OWNERSHIP}`,
+				"draft ready for review. The hold stays; it prints the token again. Without a token, it only marks " +
+				`a draft ready, refusing while any session holds the PR, and prints nothing.\n\n${OWNERSHIP}`,
 		)
-		.argument("<pr>", "GitHub PR URL, or a PR number in origin")
-		.argument("<token>", "Hold token printed by iterate")
-		.action((value: string, token: string) => {
-			printToken(finish(pullRequest(value, root()), token, gitHubDependencies(warn)));
+		.argument("<pr>", PR_ARGUMENT)
+		.argument("[token]", "Hold token printed by iterate")
+		.action((value: string, token: string | undefined) => {
+			const { pull, writes } = located(value);
+			printToken(writes.ready(pull, token ?? null));
 		});
 
 	program
@@ -747,25 +782,21 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"AGENTS.md; never retry with --direct unless the user asks. GitHub keeps auto-merge across a " +
 				"writer's push, so disable it before pushing to the PR; quest status and quest wait report a head " +
 				"that moved since auto-merge was enabled.\n\n" +
+				"On a repository Kixel Quest hosts, it records a pick of that head instead, which Kixel Quest's queue " +
+				"lands by fast-forwarding the base and drops once the head moves; it takes no --squash, --rebase, or " +
+				"--direct, and refuses what Kixel Quest refuses.\n\n" +
 				OWNERSHIP,
 		)
-		.argument("<pr>", "GitHub PR URL, or a PR number in origin")
+		.argument("<pr>", PR_ARGUMENT)
 		.requiredOption("--land <sha>", "Land this full 40-character head SHA")
 		.addOption(new Option("--squash", "Squash and merge").conflicts("rebase"))
 		.option("--rebase", "Rebase and merge")
 		.option("--direct", "Merge at once when repository auto-merge is disabled; wait for checks to pass first")
 		.action((value: string, options: { land: string; squash?: boolean; rebase?: boolean; direct?: boolean }) => {
-			const pr = pullRequest(value, root());
 			if (!/^[\da-f]{40}$/i.test(options.land)) throw new UsageError("--land needs a full 40-character SHA");
-			const method = options.squash ? "squash" : options.rebase ? "rebase" : undefined;
-			settle(
-				land(
-					pr,
-					{ sha: options.land, method, direct: options.direct, check: landingCheck(root()) },
-					gitHubDependencies(warn),
-				),
-				() => undefined,
-			);
+			const { pull, writes } = located(value);
+			const method = options.squash ? "squash" : options.rebase ? "rebase" : null;
+			settle(writes.pick(pull, { head: options.land, method, direct: options.direct ?? false }), () => undefined);
 		});
 
 	const landCommand = program.command("land").summary("Land queued PRs through a host daemon");
@@ -907,11 +938,113 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"released, with a warning. Unlike the other PR state commands, it works on a merged or closed PR.\n\n" +
 				OWNERSHIP,
 		)
-		.argument("<pr>", "GitHub PR URL, or a PR number in origin")
+		.argument("<pr>", PR_ARGUMENT)
 		.argument("<token>", "Hold token printed when the label was taken")
 		.action((value: string, token: string) => {
-			settle(release(pullRequest(value, root()), token, gitHubDependencies(warn)), (label) =>
-				print(`released ${label}`),
+			const { pull, writes } = located(value);
+			settle(writes.release(pull, token), (hold) => print(`released ${hold.label}`));
+		});
+
+	const pr = program
+		.command("pr")
+		.summary("Open, edit, and comment on pull requests, and resolve their review threads")
+		.description(
+			"Open, edit, and comment on pull requests, and resolve their review threads, on GitHub or on a " +
+				"repository Kixel Quest hosts, where gh cannot reach. Flags follow gh pr's.\n\n" +
+				FORGE_WRITES +
+				"Exits 0 when done, 3 when refused, 2 for invalid arguments, and 1 for other failures.",
+		);
+	const bodyOptions = (command: Command) =>
+		command
+			.addOption(new Option("-b, --body <text>", "Body text").conflicts("bodyFile"))
+			.option("-F, --body-file <file>", "Read the body from a file, or - for stdin");
+	/** The body the options give, `null` when they give none. */
+	const body = (options: { body?: string; bodyFile?: string }): string | null =>
+		options.body ??
+		(options.bodyFile === undefined ? null : readFileSync(options.bodyFile === "-" ? 0 : options.bodyFile, "utf8"));
+	bodyOptions(
+		pr
+			.command("create")
+			.description(
+				"Open a PR from a branch already pushed to the remote, onto its default branch unless --base names " +
+					"another, and print its URL. The remote's upstream holds it, as quest start finds it: on GitHub, a " +
+					"fork's PR opens on the repository it came from.",
+			)
+			.requiredOption("-t, --title <title>", "Title")
+			.option("-B, --base <branch>", "Branch to merge into (default: the upstream's default branch)")
+			.option("-H, --head <branch>", "Branch to merge from (default: the current branch)")
+			.option("-d, --draft", "Open it as a draft")
+			.option("--remote <name>", "Remote the branch was pushed to", "origin"),
+	).action(
+		(options: {
+			title: string;
+			body?: string;
+			bodyFile?: string;
+			base?: string;
+			head?: string;
+			draft?: boolean;
+			remote: string;
+		}) => {
+			const text = body(options);
+			if (text === null) throw new UsageError("pass --body or --body-file");
+			const branch = options.head ?? currentBranch(root(), "--head");
+			settle(
+				(async () => {
+					const up = await upstream(root(), requireRemote(root(), options.remote), claimDependencies());
+					if (up.hosting === null) throw new Error(`${options.remote} is not on GitHub or Kixel Quest`);
+					const { repository, head, defaultBranch } = up.hosting;
+					return up.hosting.writes().open({
+						repository,
+						head,
+						branch,
+						base: options.base ?? defaultBranch,
+						title: options.title,
+						body: text,
+						draft: options.draft ?? false,
+					});
+				})(),
+				(opened) => print(opened.url),
+			);
+		},
+	);
+	bodyOptions(
+		pr
+			.command("edit")
+			.description("Replace a PR's title, body, or both.")
+			.argument("<pr>", PR_ARGUMENT)
+			.option("-t, --title <title>", "New title"),
+	).action((value: string, options: { title?: string; body?: string; bodyFile?: string }) => {
+		const change = { title: options.title ?? null, body: body(options) };
+		if (change.title === null && change.body === null) throw new UsageError("pass --title, --body, or --body-file");
+		const { pull, writes } = located(value);
+		settle(writes.edit(pull, change), () => undefined);
+	});
+	bodyOptions(
+		pr
+			.command("comment")
+			.description(
+				"Comment on a PR, or reply in a review thread with --thread, naming the thread's ID as quest status " +
+					"prints it, and print the comment's URL.",
+			)
+			.argument("<pr>", PR_ARGUMENT)
+			.option("--thread <id>", "Reply in this review thread"),
+	).action((value: string, options: { thread?: string; body?: string; bodyFile?: string }) => {
+		const text = body(options);
+		if (text === null) throw new UsageError("pass --body or --body-file");
+		const { pull, writes } = located(value);
+		settle(writes.comment(pull, { body: text, thread: options.thread ?? null }), (url) => print(url));
+	});
+	pr.command("resolve")
+		.description("Resolve review threads, each named by its ID as quest status prints it.")
+		.argument("<pr>", PR_ARGUMENT)
+		.argument("<threads...>", "Review thread IDs")
+		.action((value: string, threads: string[]) => {
+			const { pull, writes } = located(value);
+			settle(
+				(async () => {
+					for (const thread of threads) await writes.resolve(pull, thread);
+				})(),
+				() => undefined,
 			);
 		});
 

@@ -165,9 +165,10 @@ function questAt(root: string, commit: string, branch: string, relative: string)
 	return git(root, ["cat-file", "-e", `${commit}:${relative}${path}`]).status === 0 ? path : null;
 }
 
-function currentBranch(root: string): string {
+/** The branch checked out at `root`, failing on a detached HEAD with a hint to pass `flag`. */
+export function currentBranch(root: string, flag = "--branch"): string {
 	const head = git(root, ["symbolic-ref", "--quiet", "--short", "HEAD"]);
-	if (head.status !== 0) throw new Error("HEAD is not on a branch; pass --branch with the PR's head branch");
+	if (head.status !== 0) throw new Error(`HEAD is not on a branch; pass ${flag} with the PR's head branch`);
 	return head.stdout.trim();
 }
 

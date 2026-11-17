@@ -8,7 +8,7 @@ import { GitHub, type GitHubDependencies, object, string } from "../github/clien
 import type { PullRequest } from "../core";
 import { discoveryEnv } from "./git";
 import { contains, git, gitEnvironment, tryGit } from "./land";
-import { Refusal } from "./start";
+import { Refusal } from "../core";
 
 /** GitHub refuses a comment body longer than this many characters. */
 export const COMMENT_LIMIT = 65_536;

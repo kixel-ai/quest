@@ -6,16 +6,18 @@ import { execFileSync } from "node:child_process";
 import { appendFileSync, cpSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { describe, expect, test, vi } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 
 import { claims, openDrafts, target } from "../src/cli/claims";
 import { githubRepository, readRemote, remoteRepository } from "../src/cli/github";
 import { type GitHubDependencies, type ObjectValue } from "../src/github/client";
 import { GitHubForge } from "../src/github/forge";
 import { type Output, main } from "../src/cli/main";
-import { Refusal, releaseQuest, startQuest } from "../src/cli/start";
+import { Refusal } from "../src/core";
+import { releaseQuest, startQuest } from "../src/cli/start";
 import { ago } from "../src/github/hold";
 import { EPIC_README, GIT_SETTINGS, TWO, Tree, configure, initRepository, template, tempDir } from "./fixture";
+import { FakeKixelQuest, KIXEL, kixelEnv } from "./kixel-fakes";
 
 const ONE = "quest/m0/epic/one.md";
 const BRANCH = "quest/m0/epic/one";
@@ -171,7 +173,12 @@ class FakeGitHub {
 			return json(status, status === 200 ? { type: "file", path: match[2] } : { message: "Not Found" });
 		}
 		match = /^\/repos\/([^/]+\/[^/]+)\/pulls$/.exec(url.pathname);
-		if (match && method === "GET") return json(200, this.list(match[1], url.searchParams));
+		// GitHub names the base branch where this fake keeps the base repository.
+		if (match && method === "GET")
+			return json(
+				200,
+				this.list(match[1], url.searchParams).map((pull) => ({ ...pull, base: { ref: "main" } })),
+			);
 		if (match && method === "POST") {
 			const [owner, ref] = String(body.head).includes(":") ? String(body.head).split(":") : [null, body.head];
 			const headRepo = owner ? `${owner}/${match[1].split("/")[1]}` : match[1];
@@ -609,6 +616,65 @@ describe("start on GitHub", () => {
 	});
 });
 
+describe("start on Kixel Quest", () => {
+	const REMOTE = `${KIXEL}/example/project.git`;
+
+	/** A clone whose origin is on the fake Kixel Quest, reaching a bare repository, with GitHub out of reach. */
+	function hosted(): { bare: string; work: string; kixel: FakeKixelQuest } {
+		const kixel = new FakeKixelQuest();
+		for (const [name, value] of Object.entries(kixelEnv())) vi.stubEnv(name, value);
+		vi.stubEnv("GH_TOKEN", "");
+		vi.stubEnv("GITHUB_TOKEN", "");
+		vi.stubGlobal("fetch", kixel.fetch);
+		const bare = upstream();
+		return { bare, work: clone(REMOTE, { [REMOTE]: bare }), kixel };
+	}
+	afterEach(() => {
+		vi.unstubAllEnvs();
+		vi.unstubAllGlobals();
+	});
+
+	test("claims with a draft PR there, refuses a second claim, and releases it", async () => {
+		const { bare, work, kixel } = hosted();
+		const first = await cli("--root", work, "start", ONE);
+		expect(first).toEqual({ code: 0, stdout: `${kixel.url(1)}\n`, stderr: "" });
+		expect(tip(bare)).toBe(git(work, "rev-parse", BRANCH));
+		const [pull] = kixel.pulls;
+		expect(pull).toMatchObject({ branch: BRANCH, base: "main", draft: true, title: "One" });
+		expect(pull!.body).toBe(`Claims \`${ONE}\`.`);
+
+		const second = await cli("--root", work, "start", ONE);
+		expect(second.code).toBe(3);
+		expect(second.stderr).toContain(`quest: ${ONE} is held by ${kixel.url(1)} (draft, last active`);
+
+		const released = await cli("--root", work, "start", "--release", ONE);
+		expect(released).toEqual({
+			code: 0,
+			stdout: `deleted ${BRANCH}\nclosed ${kixel.url(1)}\n`,
+			stderr: "",
+		});
+		expect([tip(bare), pull!.state]).toEqual(["", "closed"]);
+	});
+
+	test("a refused open takes the claim branch back", async () => {
+		const { bare, work, kixel } = hosted();
+		// Kixel Quest refuses an open PR that another claim took in the moment since the held check.
+		kixel.fail = { status: 409, error: "someone claimed it first", call: "open" };
+		const out = await cli("--root", work, "start", ONE);
+		expect(out).toEqual({ code: 3, stdout: "", stderr: "quest: someone claimed it first\n" });
+		expect(tip(bare)).toBe("");
+	});
+
+	test("pr create opens a PR from a pushed branch onto the default branch", async () => {
+		const { work, kixel } = hosted();
+		git(work, "switch", "-q", "-c", "quest-plan/forge");
+		git(work, "push", "-q", "origin", "refs/heads/quest-plan/forge:refs/heads/quest-plan/forge");
+		const out = await cli("--root", work, "pr", "create", "--title", "Plan", "--body", "Why.", "--draft");
+		expect(out).toEqual({ code: 0, stdout: `${kixel.url(1)}\n`, stderr: "" });
+		expect(kixel.pulls[0]).toMatchObject({ branch: "quest-plan/forge", base: "main", title: "Plan", body: "Why." });
+	});
+});
+
 describe("start on another forge", () => {
 	/** A clone whose origin is a plain bare repository path. */
 	function plain(): { bare: string; work: string } {
@@ -622,7 +688,7 @@ describe("start on another forge", () => {
 		expect(first).toEqual({
 			code: 0,
 			stdout: `${BRANCH}\n`,
-			stderr: "quest: origin is not on GitHub, so the claim branch was pushed without a PR\n",
+			stderr: "quest: origin is not on GitHub or Kixel Quest, so the claim branch was pushed without a PR\n",
 		});
 		expect(tip(bare)).not.toBe("");
 
@@ -701,7 +767,7 @@ describe("start on another forge", () => {
 			code: 0,
 			stdout: "0\tquest/m0/epic/three.md\n",
 			stderr:
-				"quest: origin is not on GitHub, so only its branches were checked for claims\n" +
+				"quest: origin is not on GitHub or Kixel Quest, so only its branches were checked for claims\n" +
 				`quest: skipped ${ONE}: held by branch ${BRANCH}, with no open PR\n`,
 		});
 		expect((await cli("--root", work, "unblocked", "--unclaimed", "--remote", "nope")).stderr).toBe(
@@ -723,7 +789,7 @@ describe("start on another forge", () => {
 		expect(await cli("--root", behind, "unblocked", "--unclaimed")).toEqual({
 			code: 0,
 			stdout: "0\tquest/m0/epic/two.md\n",
-			stderr: "quest: origin is not on GitHub, so only its branches were checked for claims\n",
+			stderr: "quest: origin is not on GitHub or Kixel Quest, so only its branches were checked for claims\n",
 		});
 		const finished = await cli("--root", behind, "start", ONE);
 		expect(finished.code).toBe(3);
@@ -791,7 +857,7 @@ test("openDrafts skips drafts with a warning when GitHub cannot be read", async 
 	expect(await openDrafts(work, "nope", offline)).toEqual([]);
 	expect(warnings).toEqual([
 		"draft PRs were skipped: set GH_TOKEN or GITHUB_TOKEN, or sign in with gh auth login",
-		"origin is not on GitHub, so draft PRs were skipped",
+		"origin is not on GitHub or Kixel Quest, so draft PRs were skipped",
 		"no nope remote, so draft PRs were skipped",
 	]);
 });

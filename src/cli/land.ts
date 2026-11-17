@@ -21,7 +21,7 @@ import type { WorkflowRun } from "../github/checks";
 import { appOf } from "../github/checks";
 import { classifyCheck, reported, type Needs } from "../github/status";
 import { type Carried, describe, readSignals } from "../github/signals";
-import type { Method } from "./hold";
+import type { Method } from "../core";
 import { committedSources } from "./tree";
 
 /** How the watcher's own queue lands each PR: as a squash commit, or as a merge commit keeping its ancestry. */
