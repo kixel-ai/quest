@@ -1357,17 +1357,23 @@ run on Linux or macOS, including those the agent's parallel shells and
 subagents start, then appends one JSON line to that file, however the run ends:
 
 ```json
-{"command":["cargo","test"],"directory":"/home/me/src/app","started":"2026-11-12T19:40:01.120Z","admitted":"2026-11-12T19:40:31.452Z","unit":"quest-gate-0d6c3f9e-5a51-4c1b-9d0e-2f4b8a7c6e10.scope","exit":0,"cancelled":false,"error":null}
+{"command":["cargo","test"],"directory":"/home/me/src/app","started":"2026-11-12T19:40:01.120Z","admitted":"2026-11-12T19:40:31.452Z","ended":"2026-11-12T19:41:02.810Z","cpu":58210,"unit":"quest-gate-0d6c3f9e-5a51-4c1b-9d0e-2f4b8a7c6e10.scope","exit":0,"cancelled":false,"error":null}
 ```
 
-- `started` and `admitted` give the wait. A run cancelled before admission has
-  a null `admitted`.
+- `started`, `admitted`, and `ended` give the wait (`admitted` minus `started`)
+  and the wall time (`ended` minus `admitted`). A run cancelled before
+  admission has a null `admitted`; `ended` is set however the run ends.
+- `cpu` is the CPU milliseconds the command and its descendants used, read from
+  its scope's `cpu.stat` as the wait log's is. It is null where the gate owns
+  the command only as a process group, such as on macOS, and for a run that
+  never ran.
 - `unit` is the command's systemd user scope, null where the gate owns it
   another way, such as on macOS. Once the scope ends, systemd logs
   `<unit>: Consumed 1.386s CPU time over 1.357s wall clock time, 8.1M memory
   peak.` to the user journal (`journalctl --user -u <unit>`) at info level when
   the scope used a notable amount, such as a second of CPU, and at debug level
-  otherwise. The memory peak needs systemd 255 and Linux 5.19.
+  otherwise. The journal still holds the memory peak, which needs systemd 255
+  and Linux 5.19.
 - `exit` is the status the gate returns, `cancelled` whether it was cancelled,
   and `error` the gate's own failure, such as a scope it cannot confirm
   stopped.

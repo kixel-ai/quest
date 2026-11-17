@@ -1544,13 +1544,17 @@ describe.skipIf(process.platform === "win32")("the run record", () => {
 		(process.listeners(name).at(-1) as () => void)();
 	}
 
-	test("an outermost run appends one line with its wait, scope, and exit", async () => {
+	test("an outermost run appends one line with its wait, end, CPU, scope, and exit", async () => {
 		const dir = tempDir();
 		const file = join(dir, "record.jsonl");
 		const cgroup = join(dir, "cgroup");
 		outermost(file);
 		const scoped = owner(process.env).unit !== undefined;
-		const command = ["/bin/sh", "-c", `cat /proc/self/cgroup > ${quote(cgroup)} 2>/dev/null; exit 3`];
+		const command = [
+			"/bin/sh",
+			"-c",
+			`cat /proc/self/cgroup > ${quote(cgroup)} 2>/dev/null; i=0; while [ $i -lt 20000 ]; do i=$((i+1)); done; exit 3`,
+		];
 		const before = Date.now();
 		expect(await gate(command, { host: ledger() })).toBe(3);
 		const after = Date.now();
@@ -1558,12 +1562,16 @@ describe.skipIf(process.platform === "win32")("the run record", () => {
 		expect(rest).toEqual([]);
 		expect(statSync(file).mode & 0o777).toBe(0o600);
 		expect(line).toMatchObject({ command, directory: process.cwd(), exit: 3, cancelled: false, error: null });
-		const times = [before, Date.parse(line.started), Date.parse(line.admitted), after];
+		const times = [before, Date.parse(line.started), Date.parse(line.admitted), Date.parse(line.ended), after];
 		expect(times).toEqual([...times].sort((a, b) => a - b));
 		// The unit names the scope the command actually ran in, so a reader can find its journal lines.
-		if (scoped)
+		if (scoped) {
 			expect(readFileSync(cgroup, "utf8").trim()).toMatch(new RegExp(`/${line.unit.replaceAll(".", "\\.")}$`));
-		else expect(line.unit).toBeNull();
+			expect(line.cpu).toBeGreaterThan(0);
+		} else {
+			expect(line.unit).toBeNull();
+			expect(line.cpu).toBeNull();
+		}
 	});
 
 	test("in an agent session, an outermost run logs its command, wait, run, and CPU for the session's record", async () => {
@@ -1604,7 +1612,7 @@ describe.skipIf(process.platform === "win32")("the run record", () => {
 		expect(readdirSync(dir)).toEqual([]);
 	});
 
-	test("a run cancelled while queued is recorded with no admission or scope", async () => {
+	test("a run cancelled while queued is recorded with no admission, CPU, or scope", async () => {
 		const dir = tempDir();
 		const file = join(dir, "record.jsonl");
 		const ran = join(dir, "ran");
@@ -1618,6 +1626,8 @@ describe.skipIf(process.platform === "win32")("the run record", () => {
 		expect(lines(file)).toEqual([
 			expect.objectContaining({
 				admitted: null,
+				ended: expect.any(String),
+				cpu: null,
 				unit: null,
 				exit: 128 + constants.signals.SIGHUP,
 				cancelled: true,
