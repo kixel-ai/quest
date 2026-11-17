@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import { forgeJson, parseForgeAnswer, parseForgeRequest } from "../src/core";
+import { upstream } from "../src/cli/claims";
 import { hostedRepository, locate } from "../src/cli/forge";
 import { type Output, main } from "../src/cli/main";
 import { GitHubWrites } from "../src/cli/writes";
@@ -186,6 +187,52 @@ describe("where a PR lives", () => {
 		expect(locate("7", work, env)).toEqual({ pull: { ...REPOSITORY, number: 7 }, hosted: false });
 	});
 
+	// A rewrite to the other forge's mirror never moves a number's writes there: the configured URL wins.
+	test("a number in an origin rewritten to the other forge names the configured one", async () => {
+		const work = tempDir();
+		const run = (...args: string[]) => execFileSync("git", args, { cwd: work, stdio: "ignore" });
+		run("init", "-q");
+		run("remote", "add", "origin", `${KIXEL}/example/project.git`);
+		run("config", `url.https://github.com/example/.insteadOf`, `${KIXEL}/example/`);
+		expect(locate("7", work, env)).toEqual({ pull: { ...REPOSITORY, number: 7 }, hosted: true });
+		const pull = kixel.add({ branch: "feature" });
+		// The fake fails the test on any request to GitHub.
+		expect(await cli("--root", work, "pr", "comment", String(pull.number), "--body", "Hi")).toMatchObject({
+			code: 0,
+		});
+		expect(kixel.calls.map(({ call }) => call)).toEqual(["comment"]);
+
+		run("remote", "set-url", "origin", "https://github.com/example/project.git");
+		run("config", "--unset", `url.https://github.com/example/.insteadOf`);
+		run("config", `url.${KIXEL}/example/.insteadOf`, "https://github.com/example/");
+		expect(locate("7", work, env)).toEqual({ pull: { ...REPOSITORY, number: 7 }, hosted: false });
+	});
+
+	test("a claim's upstream is the configured Kixel Quest repository, never a GitHub mirror a rewrite names", async () => {
+		const work = tempDir();
+		const run = (...args: string[]) => execFileSync("git", args, { cwd: work, stdio: "ignore" });
+		run("init", "-q", "-b", "main");
+		run("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "init");
+		// git reaches the checkout itself, so the default branch is read without a network.
+		run("remote", "add", "origin", work);
+		const mirror = "https://github.com/example/project.git";
+		const remote = {
+			name: "origin",
+			configured: { fetch: `${KIXEL}/example/project.git`, push: null },
+			used: () => ({ fetch: mirror, push: mirror }),
+		};
+		const github = () => {
+			throw new Error("asked GitHub");
+		};
+		const found = await upstream(work, remote, {
+			github,
+			forge: github,
+			kixel: { hosted: (url) => hostedRepository(KIXEL, url), forge: github },
+			warn: () => undefined,
+		});
+		expect([found.hosting?.repository, found.github]).toEqual([REPOSITORY, null]);
+	});
+
 	test("a remote on Kixel Quest names its repository, with or without credentials or .git", () => {
 		for (const url of [
 			`${KIXEL}/example/project.git`,
@@ -314,6 +361,18 @@ describe("GitHub's writes", () => {
 		const { writes, requests } = github(node);
 		await expect(writes.resolve(pull(), "T")).rejects.toThrow("T is not a review thread on example/project#3");
 		expect(requests).toHaveLength(1);
+	});
+
+	test("opens a PR from a fork, naming its repository for one owner's two repositories", async () => {
+		const { writes, requests } = github(onPull);
+		const opening = { repository: REPOSITORY, branch: "b", base: "main", title: "T", body: "", draft: true };
+		// The fake answers `{}`, which the PR row's parse refuses; only the request matters here.
+		await writes.open({ ...opening, head: { owner: "example", repo: "fork" } }).catch(() => undefined);
+		await writes.open({ ...opening, head: REPOSITORY }).catch(() => undefined);
+		expect(requests.map(({ body }) => [body.head, body.head_repo])).toEqual([
+			["example:b", "example/fork"],
+			["b", undefined],
+		]);
 	});
 
 	function pull() {

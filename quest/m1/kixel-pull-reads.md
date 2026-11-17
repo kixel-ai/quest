@@ -17,19 +17,16 @@ cannot reach Kixel Quest, and nothing tells it to use `quest pr` instead.
   `quest/core` like the others: the body, title, comments, and reviews, as
   `quest pr view <pr>` prints them. GitHub's backend reads them as `gh pr view
   --comments` shows them.
-- Recommended: have `quest hook` deny `gh pr` and `gh api` calls in a checkout
-  whose origin is on Kixel Quest, naming the `quest pr` command to run, rather
-  than a prose rule in `quest context` that every task loads. Adding it to the
-  checked rules in `src/cli/rules.ts` adds a line to the Checked section
-  `quest context` prints, so confirm the wording with the maintainer first.
+- `quest hook` denies `gh pr` and `gh api` calls in a checkout whose origin
+  is on Kixel Quest, naming the `quest pr` command to run, through a checked
+  rule in `src/cli/rules.ts` that adds one line to the Checked section `quest
+  context` prints: ✅ hook denial with a Checked line (rejected: a prose rule in
+  `quest context` only; neither). The maintainer settled this in
+  [moq-dev/quest#769](https://github.com/moq-dev/quest/pull/769#issuecomment-6944655958),
+  since an agent without it tries `gh`, fails, and has no pointer to the
+  command that works.
 
 Tests: against the fake Kixel Quest, `quest pr view` prints a PR's body and
 comments; and the hook denies `gh pr view` in a checkout whose origin is on
 Kixel Quest while it lets the same call through on a GitHub checkout.
 
-## Waiting
-
-- Maintainer: whether the hook should steer `gh` calls on Kixel Quest
-  checkouts to `quest pr`, which adds a checked rule to `quest context`.
-  Recommended: yes, since an agent without it tries `gh`, fails, and has no
-  pointer to the command that works.

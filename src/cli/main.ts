@@ -159,7 +159,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		github: () => gitHubDependencies(warn),
 		forge: (repository) => forgeFor(repository, forgeDependencies()),
 		kixel: {
-			hosted: (...urls) => hostedRepository(kixelUrl(process.env), ...urls),
+			hosted: (url) => hostedRepository(kixelUrl(process.env), url),
 			forge: (repository) => hostedForge(repository, forgeDependencies()),
 		},
 		warn,

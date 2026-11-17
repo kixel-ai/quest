@@ -29,7 +29,7 @@ import {
 } from "../core";
 import type { GitHubDependencies } from "../github/client";
 import { GitHubForge } from "../github/forge";
-import { pullRequest, readRemote, remoteRepository } from "./github";
+import { pullRequest, readRemote, remoteHost } from "./github";
 import { checkedEndpoint, tokenFor, tokensPath } from "./send";
 
 /** Kixel Quest's own URL. */
@@ -111,9 +111,8 @@ export function locate(value: string, root: string, env: NodeJS.ProcessEnv): Loc
 		} catch {
 			// Not a checkout: pullRequest says so.
 		}
-		const hosted = origin === null ? null : hostedRepository(base, origin.configured.fetch, origin.used().fetch);
-		if (hosted !== null && remoteRepository(origin!).repository === null)
-			return { pull: { ...hosted, number: Number(value) }, hosted: true };
+		const host = origin === null ? null : remoteHost(origin, (url) => hostedRepository(base, url));
+		if (host?.forge === "kixel") return { pull: { ...host.repository, number: Number(value) }, hosted: true };
 	} else if (value.startsWith(`${base}/`)) {
 		const match = /^([\w.-]+)\/([\w.-]+)\/pull\/([1-9]\d*)\/?(?:[?#].*)?$/.exec(value.slice(base.length + 1));
 		if (!match) throw new InputError(`expected a Kixel Quest PR URL, ${base}/<owner>/<repo>/pull/<number>`);
@@ -122,23 +121,20 @@ export function locate(value: string, root: string, env: NodeJS.ProcessEnv): Loc
 	return { pull: pullRequest(value, root), hosted: false };
 }
 
-/** The repository the first of `urls` on Kixel Quest at `base` names, as `<base>/<owner>/<repo>[.git]`, or null. */
-export function hostedRepository(base: string, ...urls: string[]): Repository | null {
+/** The repository `value` on Kixel Quest at `base` names, as `<base>/<owner>/<repo>[.git]`, or null. */
+export function hostedRepository(base: string, value: string): Repository | null {
 	const at = new URL(base);
 	const prefix = at.pathname.replace(/\/+$/, "");
-	for (const value of urls) {
-		let url: URL;
-		try {
-			url = new URL(value);
-		} catch {
-			continue;
-		}
-		// Credentials in the URL, as a helper may leave, name the same repository.
-		if (url.protocol !== at.protocol || url.host !== at.host || !url.pathname.startsWith(`${prefix}/`)) continue;
-		const match = /^([\w.-]+)\/([\w.-]+?)(?:\.git)?\/?$/.exec(url.pathname.slice(prefix.length + 1));
-		if (match) return { owner: match[1]!, repo: match[2]! };
+	let url: URL;
+	try {
+		url = new URL(value);
+	} catch {
+		return null;
 	}
-	return null;
+	// Credentials in the URL, as a helper may leave, name the same repository.
+	if (url.protocol !== at.protocol || url.host !== at.host || !url.pathname.startsWith(`${prefix}/`)) return null;
+	const match = /^([\w.-]+)\/([\w.-]+?)(?:\.git)?\/?$/.exec(url.pathname.slice(prefix.length + 1));
+	return match ? { owner: match[1]!, repo: match[2]! } : null;
 }
 
 /** Kixel Quest's forge API, with a person's token. */

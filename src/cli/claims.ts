@@ -2,7 +2,7 @@
 // `src/github/claims.ts` decides them. Commands that must not disturb held work look here first,
 // and `quest start` records a claim the same way, judging readiness by the upstream tree.
 import { git } from "./git";
-import { type Remote, readRemote, remoteRepository, requireRemote } from "./github";
+import { type Remote, readRemote, remoteHost, remoteRepository, requireRemote } from "./github";
 import { type GitHubDependencies, GitHub, object, repositoryPath, string } from "../github/client";
 import type { Claim, Forge, ForgeWrites, Holdings, OpenPull, Repository } from "../core";
 import { questBranches } from "../github/claims";
@@ -18,8 +18,8 @@ export interface ClaimDependencies {
 	forge(repository: Repository): Promise<Forge>;
 	/** Kixel Quest, for remotes on it; without it, no remote is. */
 	kixel?: {
-		/** The repository the first of `urls` on Kixel Quest names, or null for none. */
-		hosted(...urls: string[]): Repository | null;
+		/** The repository `url` on Kixel Quest names, or null for none. */
+		hosted(url: string): Repository | null;
 		/** Kixel Quest's backend for a repository it hosts, which both reads and writes there. */
 		forge(repository: Repository): Forge & ForgeWrites;
 	};
@@ -73,11 +73,12 @@ export interface Upstream {
  * remote pushes, which may be a fork even when it fetches from upstream.
  */
 export async function upstream(root: string, remote: Remote, deps: ClaimDependencies): Promise<Upstream> {
-	const source = remoteRepository(remote);
-	if (source.repository === null) {
-		const repository = deps.kixel?.hosted(remote.configured.fetch, remote.used().fetch) ?? null;
-		let kixel: (Forge & ForgeWrites) | undefined;
-		const forge = () => (kixel ??= deps.kixel!.forge(repository!));
+	const kixel = deps.kixel;
+	const source = remoteHost(remote, kixel ? (url) => kixel.hosted(url) : null);
+	if (source?.forge !== "github") {
+		const repository = source?.repository ?? null;
+		let hosted: (Forge & ForgeWrites) | undefined;
+		const forge = () => (hosted ??= kixel!.forge(repository!));
 		return {
 			git: remote.name,
 			get push() {

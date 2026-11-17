@@ -33,8 +33,12 @@ export class GitHubWrites implements ForgeWrites {
 
 	async open({ repository, head, branch, base, title, body, draft }: Opening): Promise<OpenPull> {
 		const fork = head.owner !== repository.owner || head.repo !== repository.repo;
+		// GitHub needs `head_repo` to tell apart two repositories of one owner, such as an organization's fork.
+		const from = fork
+			? { head: `${head.owner}:${branch}`, head_repo: `${head.owner}/${head.repo}` }
+			: { head: branch };
 		const response = await this.#github.request(`${repositoryPath(repository)}/pulls`, {
-			body: { title, head: fork ? `${head.owner}:${branch}` : branch, base, draft, body },
+			body: { title, ...from, base, draft, body },
 		});
 		const row = object(await response.json());
 		return {
