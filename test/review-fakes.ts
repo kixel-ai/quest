@@ -81,7 +81,11 @@ const logged = (call) => {
  * names. FAKE_LIMITED fails a turn on the account's usage limit with the real
  * CLI's error, naming its reset unless set to `unknown`. FAKE_CLASSIFY fails
  * the classifier's turn of each `<harness>-rejected` or `<harness>-limited` it
- * lists, the same way. FAKE_REPLY replaces the findings reply.
+ * lists, the same way. FAKE_FAILS limits FAKE_LOGGED_OUT, FAKE_REJECTED, and
+ * FAKE_LIMITED to the harnesses and models it lists, comma-separated, so one
+ * reviewer fails while the next runs. FAKE_QUOTED fails Claude Code's findings
+ * turn with a reply that only quotes a limit's message. FAKE_REPLY replaces the
+ * findings reply.
  */
 export const FAKES: Record<string, string> = {
 	claude: `
@@ -90,13 +94,17 @@ const argv = process.argv.slice(2);
 const stdin = fs.readFileSync(0, "utf8");
 const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => /^(CLAUDE|CODEX|ANTHROPIC|FAKE_HOST|PATH$)/.test(k)));
 logged({ argv, stdin, env, cwd: process.cwd() });
+// FAKE_FAILS limits the FAKE_* failures to the harnesses and models it lists.
+const model = argv.includes("--model") ? argv[argv.indexOf("--model") + 1] : argv.includes("-m") ? argv[argv.indexOf("-m") + 1] : undefined;
+const only = process.env.FAKE_FAILS?.split(",");
+const fake = (name) => (!only || only.includes("claude") || only.includes(model) ? process.env[name] : undefined);
 const credential = ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN"].some((k) => process.env[k]);
 const provider = Object.entries(process.env).some(([k, v]) => k.startsWith("CLAUDE_CODE_USE_") && v === "1");
-const loggedIn = !process.env.FAKE_LOGGED_OUT || credential || provider;
+const loggedIn = !fake("FAKE_LOGGED_OUT") || credential || provider;
 if (argv[0] === "auth") process.exit(loggedIn ? 0 : 1);
 const at = (flag) => argv[argv.indexOf(flag) + 1];
 const result = (fields) => console.log(JSON.stringify({ type: "result", is_error: false, ...fields }));
-const rejected = process.env.FAKE_REJECTED ?? (loggedIn ? undefined : "status");
+const rejected = fake("FAKE_REJECTED") ?? (loggedIn ? undefined : "status");
 if (rejected) {
 	const session_id = at("--session-id") ?? at("--resume");
 	if (rejected === "status") {
@@ -108,9 +116,14 @@ if (rejected) {
 	}
 	process.exit(1);
 }
+// A turn that fails without the CLI's error, its reply only quoting a limit's message.
+if (process.env.FAKE_QUOTED && argv.includes("--resume")) {
+	result({ session_id: at("--resume"), result: "The diff prints: You've hit your weekly limit · resets Nov 5, 3pm (UTC)" });
+	process.exit(1);
+}
 // The limit hits the findings turn, after the review turn passed.
-if (process.env.FAKE_LIMITED && argv.includes("--resume")) {
-	if (process.env.FAKE_LIMITED !== "unknown") {
+if (fake("FAKE_LIMITED") && argv.includes("--resume")) {
+	if (fake("FAKE_LIMITED") !== "unknown") {
 		console.log(JSON.stringify({ type: "rate_limit_event", rate_limit_info: { status: "rejected", resetsAt: 1900000000 } }));
 	}
 	result({ session_id: at("--resume"), is_error: true, result: "You've hit your weekly limit · resets Nov 5, 3pm (UTC)" });
@@ -162,7 +175,11 @@ const argv = process.argv.slice(2);
 const stdin = fs.readFileSync(0, "utf8");
 const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => /^(CLAUDE|CODEX|ANTHROPIC|FAKE_HOST|PATH$)/.test(k)));
 logged({ argv, stdin, env, cwd: process.cwd() });
-if (argv[0] === "login") process.exit(process.env.FAKE_LOGGED_OUT && !process.env.CODEX_ACCESS_TOKEN ? 1 : 0);
+// FAKE_FAILS limits the FAKE_* failures to the harnesses and models it lists.
+const model = argv.includes("--model") ? argv[argv.indexOf("--model") + 1] : argv.includes("-m") ? argv[argv.indexOf("-m") + 1] : undefined;
+const only = process.env.FAKE_FAILS?.split(",");
+const fake = (name) => (!only || only.includes("codex") || only.includes(model) ? process.env[name] : undefined);
+if (argv[0] === "login") process.exit(fake("FAKE_LOGGED_OUT") && !process.env.CODEX_ACCESS_TOKEN ? 1 : 0);
 if (process.env.FAKE_HANG) {
 	// It takes a while to exit when asked to, as a CLI saving its session does.
 	process.on("SIGTERM", () => setTimeout(() => process.exit(143), 300));
@@ -171,8 +188,8 @@ if (process.env.FAKE_HANG) {
 	return;
 }
 const event = (value) => console.log(JSON.stringify(value));
-const loggedIn = !process.env.FAKE_LOGGED_OUT || process.env.CODEX_API_KEY || process.env.CODEX_ACCESS_TOKEN;
-const rejected = process.env.FAKE_REJECTED ?? (loggedIn ? undefined : "turn");
+const loggedIn = !fake("FAKE_LOGGED_OUT") || process.env.CODEX_API_KEY || process.env.CODEX_ACCESS_TOKEN;
+const rejected = fake("FAKE_REJECTED") ?? (loggedIn ? undefined : "turn");
 if (rejected === "turn") {
 	const message = "unexpected status 401 Unauthorized: Missing bearer or basic authentication in header, url: https://api.openai.com/v1/responses";
 	event({ type: "thread.started", thread_id: "thread-1" });
@@ -184,10 +201,10 @@ if (rejected) {
 	console.error("Error: Your access token could not be refreshed because your refresh token was revoked. Please log out and sign in again.");
 	process.exit(1);
 }
-if (process.env.FAKE_LIMITED) {
-	const message = process.env.FAKE_LIMITED === "retried"
+if (fake("FAKE_LIMITED")) {
+	const message = fake("FAKE_LIMITED") === "retried"
 		? "exceeded retry limit, last status: 429 Too Many Requests"
-		: process.env.FAKE_LIMITED === "unknown"
+		: fake("FAKE_LIMITED") === "unknown"
 		? "You've hit your usage limit."
 		: "You've hit your usage limit. Visit https://chatgpt.com/settings/usage to purchase more credits or try again at Nov 5th, 2026 3:15 PM.";
 	event({ type: "thread.started", thread_id: "thread-1" });
@@ -316,6 +333,8 @@ export function setup(host: "CLAUDECODE" | "CODEX_THREAD_ID" | null = "CLAUDECOD
 		"FAKE_LOGGED_OUT",
 		"FAKE_REJECTED",
 		"FAKE_LIMITED",
+		"FAKE_FAILS",
+		"FAKE_QUOTED",
 		"FAKE_HANG",
 		"FAKE_DISPOSITION",
 		"FAKE_RISK",

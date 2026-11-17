@@ -52,15 +52,51 @@ export class UnansweredError extends ReviewInputError {
 /** `--responses` is missing after a round with findings, or given with no round to answer. */
 export class ResponsesError extends ReviewInputError {}
 
-/** The reviewer's account hit its usage limit on `model`, which resets at `until` (epoch milliseconds) if the CLI named it. */
-export class ReviewLimitError extends Error {
+/**
+ * A model cannot run, as its CLI or provider reported before it saved any finding: the CLI is not installed or
+ * logged out, which rules out every model of `harness`, or, as a {@link ReviewLimitError}, one model hit its usage
+ * limit. `reason` is the short form the review record names it by.
+ */
+export class ReviewerUnavailableError extends Error {
 	constructor(
 		readonly harness: HarnessName,
+		readonly reason: string,
+		message: string,
+	) {
+		super(message);
+	}
+}
+
+/** The reviewer's account hit its usage limit on `model`, which resets at `until` (epoch milliseconds) if the CLI named it. */
+export class ReviewLimitError extends ReviewerUnavailableError {
+	constructor(
+		harness: HarnessName,
 		readonly until: number | null,
 		readonly model: string,
 	) {
 		const resets = until === null ? "unknown" : new Date(until).toISOString().replace(/\.\d{3}Z$/, "Z");
-		super(`${harness} hit its usage limit; resets ${resets}`);
+		super(harness, `usage limit, resets ${resets}`, `${harness} hit its usage limit; resets ${resets}`);
+	}
+}
+
+/** A reviewer the size ranks that a run passed over, since it could not run, and why. */
+export interface Skip extends Model {
+	reason: string;
+}
+
+/** Every eligible reviewer of the size was unavailable, each for the reason `skipped` names. */
+export class ReviewOutageError extends Error {
+	constructor(
+		size: Size,
+		readonly skipped: Skip[],
+		messages: string[],
+	) {
+		// Models out for the same reason, as every model of a logged-out CLI, share it.
+		const why = [...new Set(messages)].map((message) => {
+			const models = skipped.filter((_, i) => messages[i] === message).map((s) => `${s.model} ${s.effort}`);
+			return `${models.join(" and ")} (${message})`;
+		});
+		super(`no eligible ${size} reviewer could run: ${why.join(", ")}`);
 	}
 }
 
@@ -289,6 +325,17 @@ export function pickReviewer(size: Size, choice: Choice, avoided: (entry: Model)
 }
 
 /**
+ * The reviewers a run tries in turn, each when those before it cannot run: every entry of the size's list whose
+ * model is not avoided, or only the one `--harness`, `--model`, or `--effort` names, so a run that names its
+ * reviewer never measures another.
+ */
+export function rankedReviewers(size: Size, choice: Choice, avoided: (entry: Model) => boolean): Model[] {
+	const first = pickReviewer(size, choice, avoided);
+	if (choice.harness !== undefined || choice.model !== undefined || choice.effort !== undefined) return [first];
+	return REVIEWERS[size].filter((entry) => !avoided(entry));
+}
+
+/**
  * The size that picks a round's reviewer: `given`, or else the size of the
  * quest a `quest/` branch names, read from the base's tip so the change cannot
  * lower its own review, or else the size the PR's `## Models` record names
@@ -384,6 +431,8 @@ export interface Reviewed {
 	rounds: Round[];
 	tallies: Tally[];
 	risk: Risk;
+	/** The size's reviewers ranked before the one that ran, which could not run, in the order they were tried. */
+	skipped: Skip[];
 }
 
 /**
@@ -601,9 +650,11 @@ const claude: Reviewer = {
 			reply(code, stderr) {
 				const reply = text(result?.result);
 				const failed = code !== 0 || result === undefined || result.is_error === true;
-				if (failed && !limited && LIMIT.test(`${reply ?? ""}\n${stderr}`)) {
+				// Only the CLI's own error, never a reply the model wrote, which may quote a limit's message.
+				const error = result?.is_error === true ? (reply ?? "") : "";
+				if (failed && !limited && LIMIT.test(`${error}\n${stderr}`)) {
 					// Older releases end the message with `|<epoch seconds>` of the reset.
-					const epoch = /\|(\d{10})\b/.exec(reply ?? "")?.[1];
+					const epoch = /\|(\d{10})\b/.exec(error)?.[1];
 					limited = { until: epoch ? Number(epoch) * 1000 : null };
 				}
 				if (result === undefined) return { error: "claude printed no result", limited };
@@ -812,6 +863,7 @@ const TAIL = 16 * 1024;
  * Run one turn in `cwd`, forwarding termination signals so the reviewer never
  * outlives the command. The CLI is found on PATH's absolute directories, never
  * in the checkout under review, and the CLI's own commands keep only those too.
+ * `argv[0]` is a harness's CLI, named as the harness is.
  */
 function run(
 	argv: string[],
@@ -830,7 +882,7 @@ function run(
 		try {
 			program = requireProgram(argv[0], env);
 		} catch (error) {
-			reject(new ReviewInputError((error as Error).message));
+			reject(new ReviewerUnavailableError(argv[0] as HarnessName, "not installed", (error as Error).message));
 			return;
 		}
 		const child = spawn(program, argv.slice(1), {
@@ -864,7 +916,15 @@ function run(
 		child.stdin.end(stdin);
 		child.once("error", (error: NodeJS.ErrnoException) => {
 			done();
-			reject(error.code === "ENOENT" ? new ReviewInputError(`${argv[0]} is not installed`) : error);
+			reject(
+				error.code === "ENOENT"
+					? new ReviewerUnavailableError(
+							argv[0] as HarnessName,
+							"not installed",
+							`${argv[0]} is not installed`,
+						)
+					: error,
+			);
 		});
 		child.once("close", (code) => {
 			done();
@@ -923,7 +983,7 @@ async function prepare(harness: HarnessName, cwd: string, env: NodeJS.ProcessEnv
 	const withCredentials = { ...connected, ...pick(env, credentials) };
 	const rejected = `${harness} rejected ${names(credentials)}${through}; replace it, or run \`${reviewer.login}\``;
 	if (routes.length > 0) {
-		if (!(await loggedIn(withCredentials))) throw new ReviewInputError(loggedOut);
+		if (!(await loggedIn(withCredentials))) throw new ReviewerUnavailableError(harness, "logged out", loggedOut);
 		return {
 			harness,
 			reviewer,
@@ -937,7 +997,7 @@ async function prepare(harness: HarnessName, cwd: string, env: NodeJS.ProcessEnv
 			credentials.length > 0 ? `; quest review strips ${names(credentials)} while a stored login exists` : "";
 		return { harness, reviewer, env: connected, unauthorized: `${loggedOut}${ignored}`, signal };
 	}
-	if (credentials.length === 0) throw new ReviewInputError(loggedOut);
+	if (credentials.length === 0) throw new ReviewerUnavailableError(harness, "logged out", loggedOut);
 	return { harness, reviewer, env: withCredentials, unauthorized: rejected, signal };
 }
 
@@ -966,7 +1026,7 @@ async function turn(cli: Cli, call: Turn, cwd: string, model: string): Promise<R
 		// A login can expire or be revoked while the status check still passes. A CLI may report it
 		// only on stderr, behind a reader's fallback error such as "claude printed no result".
 		if (reply.status === 401 || cli.reviewer.unauthorized.test(`${reply.error ?? ""}\n${stderr}`)) {
-			throw new ReviewInputError(cli.unauthorized);
+			throw new ReviewerUnavailableError(cli.harness, "login rejected", cli.unauthorized);
 		}
 		if (reply.limited) throw new ReviewLimitError(cli.harness, reply.limited.until, model);
 		if (cli.harness === "codex" && cli.env.OPENAI_BASE_URL && RETRIED_429.test(`${reply.error ?? ""}\n${stderr}`))
@@ -1695,7 +1755,7 @@ export interface Answer<T = unknown> {
  */
 export async function ask<T>(entries: readonly Model[], question: Question<T>): Promise<Answer<T>> {
 	const schemaFile = saveSchema(question.dir, question.schema);
-	const failures: (ReviewInputError | ReviewLimitError)[] = [];
+	const failures: (ReviewInputError | ReviewerUnavailableError)[] = [];
 	const spent: Answer<T>["spent"] = [];
 	for (const entry of entries) {
 		let reply: Reply;
@@ -1719,7 +1779,7 @@ export async function ask<T>(entries: readonly Model[], question: Question<T>): 
 				entry.model,
 			);
 		} catch (error) {
-			if (!(error instanceof ReviewInputError || error instanceof ReviewLimitError)) throw error;
+			if (!(error instanceof ReviewerUnavailableError)) throw error;
 			failures.push(error);
 			continue;
 		}
@@ -1744,7 +1804,7 @@ export async function ask<T>(entries: readonly Model[], question: Question<T>): 
  * earliest, else each model's reason.
  */
 function unanswered(
-	failures: (ReviewInputError | ReviewLimitError)[],
+	failures: (ReviewInputError | ReviewerUnavailableError)[],
 	{ who, task }: Question<unknown>,
 	spent: Answer<unknown>["spent"],
 ): Error {
@@ -1774,7 +1834,9 @@ export function settle(classified: Classified, rounds: Round[]): Risk {
 /**
  * Review the checkout's committed branch: one round of each reviewer on the same head, the size's pick and its
  * shadow while it runs, or only `--harness`'s, each resuming its session on the branch unless `fresh`.
- * Every reviewer runs at once, and the first to fail stops the others and fails the whole, saving no round.
+ * Every reviewer runs at once, and the first to fail stops the others and fails the whole, saving no round. A pick
+ * that cannot run, logged out, not installed, or at its usage limit, passes the round to the size's next eligible
+ * reviewer, unless the options name the reviewer; once none is left, the run fails as an outage.
  */
 export async function review(options: ReviewOptions, deps: ReviewDependencies): Promise<Reviewed> {
 	// Native Windows installs the reviewer CLIs as batch shims, which `run` cannot start without a shell.
@@ -1799,10 +1861,9 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 	const record = needed ? await deps.models?.(root, baseRef, branch) : undefined;
 	const sized = reviewSize(root, baseSha, options.sizeBranch ?? branch, options.size, recordedSize(record, options));
 	const avoided = authored(options, deps.env, recordedLatest(record, options));
-	const routed = pickReviewer(sized.size, options, avoided);
+	const candidates = rankedReviewers(sized.size, options, avoided);
 	// A named reviewer runs without the shadow, as for a repository whose instructions name its own.
 	const auto = options.harness === undefined;
-	const shadow = auto ? shadowOf(routed) : null;
 
 	const statePath = sessionFile(git(root, ["rev-parse", "--path-format=absolute", "--git-common-dir"]), branch);
 	const dir = dirname(statePath);
@@ -1818,6 +1879,108 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 		next += session.rounds.at(-1)!.findings.length;
 	}
 	const sessions = all.filter(runs);
+	const plan = (routed: Model) => seatsFor({ routed, auto, sessions, firsts, responses: options.responses });
+
+	// The first candidate's seats are checked before the classifier spends a turn.
+	let at = 0;
+	let planned = plan(candidates[0]!);
+
+	const head = git(root, ["rev-parse", "HEAD"]);
+	let mergeBase: string;
+	try {
+		mergeBase = git(root, ["merge-base", baseSha, head]);
+	} catch {
+		throw new ReviewInputError(`HEAD shares no history with ${baseRef}`);
+	}
+	const change: Change = { base: baseRef, mergeBase, head };
+	const changed = git(root, ["diff", "--name-only", "-z", `${mergeBase}..${head}`])
+		.split("\0")
+		.filter(Boolean);
+	const files = baseInstructions(root, baseSha, changed);
+	const rules = exists(root, baseSha, "REVIEW.md") ? { sha: baseSha, text: show(root, baseSha, "REVIEW.md") } : null;
+	// Digests of content only, so a base that moved without changing them restates nothing.
+	const given = { instructions: digest(JSON.stringify(files)), rules: rules && digest(rules.text) };
+	// The tier picks how much review a change needs, so it is set before any reviewer runs.
+	const classified = await classify({
+		root,
+		baseSha,
+		change,
+		dir,
+		env: deps.env,
+		signal: options.signal,
+		saved: options.fresh ? undefined : saved?.classified,
+	});
+
+	const shared = {
+		root,
+		branch,
+		base: { ref: baseRef, sha: baseSha },
+		sized,
+		change,
+		files,
+		rules,
+		given,
+		classified: classified.value,
+		dir,
+		env: deps.env,
+	};
+	const skipped: Skip[] = [];
+	const messages: string[] = [];
+	// A login or a missing CLI rules out its harness's every model; a usage limit only the model that hit it.
+	const down = new Map<HarnessName, ReviewerUnavailableError>();
+	let done: Seated[];
+	for (;;) {
+		try {
+			done = await runSeats(shared, planned.seats, options.responses, options.signal);
+			break;
+		} catch (error) {
+			if (!(error instanceof ReviewerUnavailableError) || candidates.length === 1) throw error;
+			if (!(error instanceof ReviewLimitError)) down.set(error.harness, error);
+			let why: ReviewerUnavailableError | undefined = error;
+			while (why !== undefined) {
+				skipped.push({ ...candidates[at]!, reason: why.reason });
+				messages.push(why.message);
+				at++;
+				why = at < candidates.length ? down.get(candidates[at]!.harness) : undefined;
+			}
+			if (at === candidates.length) throw new ReviewOutageError(sized.size, skipped, messages);
+			planned = plan(candidates[at]!);
+		}
+	}
+	const { seats, kept } = planned;
+	const tallies = tallied(
+		options.fresh ? dropped(saved) : (saved?.tallies ?? []),
+		done.map((each, i) => ({ round: each.round, settles: seats[i]!.session })),
+	);
+	const { usage: _, ...value } = classified.value;
+	save(statePath, {
+		branch,
+		sessions: [...done.map((each) => each.session), ...kept],
+		tallies,
+		classified: { key: classified.key, value },
+	} satisfies State);
+	const rounds = done.map((each) => each.round);
+	// A reviewer this run left out, such as a shadow with nothing to settle, still judged the head its last round reviewed.
+	const standing = kept.map((session) => session.last).filter((round) => round.head === head);
+	return { rounds, tallies, risk: settle(classified.value, [...rounds, ...standing]), skipped };
+}
+
+/** What picks a run's seats: the routed reviewer, whether the size picked it, and the branch's sessions. */
+interface Seating {
+	routed: Model;
+	auto: boolean;
+	sessions: Session[];
+	/** Each session's first finding number, as the last run printed them. */
+	firsts: Map<Session, number>;
+	responses: string | undefined;
+}
+
+/**
+ * The seats a run of `routed` fills, the saved sessions it keeps without a round, and the refusals that stop it
+ * before any reviewer runs: a session whose findings no seat settles, or responses missing or given for nothing.
+ */
+function seatsFor({ routed, auto, sessions, firsts, responses }: Seating): { seats: Seat[]; kept: Session[] } {
+	const shadow = auto ? shadowOf(routed) : null;
 	const seated = (session: Session | undefined) => ({
 		session,
 		first: session === undefined ? 1 : firsts.get(session)!,
@@ -1827,8 +1990,9 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 	];
 	const unseated = () => sessions.filter((each) => !seats.some((seat) => seat.session === each));
 	const unsettled = (list: Session[]) => list.filter((each) => each.rounds.at(-1)!.findings.length > 0);
-	// When the latest writer changed the size's pick, the new pick's first session settles the open findings
-	// of the reviewer it replaces, by their numbers, so they are never dropped unanswered.
+	// When the latest writer, or a reviewer that could not run, changed the size's pick, the new pick's first
+	// session settles the open findings of the reviewer it replaces, by their numbers, so they are never dropped
+	// unanswered.
 	const replaced =
 		auto && seats[0]!.session === undefined ? unsettled(unseated()).find((each) => !each.shadow) : undefined;
 	if (replaced !== undefined) seats[0] = { ...seats[0]!, ...seated(replaced) };
@@ -1864,63 +2028,32 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 			`${names} still ${held.length > 1 ? "have" : "has"} findings to settle on this branch; settle them in a run of ${run} with --responses, or pass --new to drop them`,
 		);
 	}
-	if (seats.every((seat) => seat.session === undefined) && options.responses !== undefined) {
+	if (seats.every((seat) => seat.session === undefined) && responses !== undefined) {
 		throw new ResponsesError(
 			"--responses answers a previous round, and each reviewer of this run has none to resume",
 		);
 	}
 	const settling = seats.reduce((sum, seat) => sum + (seat.session?.rounds.at(-1)!.findings.length ?? 0), 0);
-	if (settling > 0 && options.responses === undefined) {
+	if (settling > 0 && responses === undefined) {
 		throw new ResponsesError(
 			`the last round reported ${settling} finding(s); pass --responses with a fix or refutation for each`,
 		);
 	}
+	return { seats, kept };
+}
 
-	const head = git(root, ["rev-parse", "HEAD"]);
-	let mergeBase: string;
-	try {
-		mergeBase = git(root, ["merge-base", baseSha, head]);
-	} catch {
-		throw new ReviewInputError(`HEAD shares no history with ${baseRef}`);
-	}
-	const change: Change = { base: baseRef, mergeBase, head };
-	const changed = git(root, ["diff", "--name-only", "-z", `${mergeBase}..${head}`])
-		.split("\0")
-		.filter(Boolean);
-	const files = baseInstructions(root, baseSha, changed);
-	const rules = exists(root, baseSha, "REVIEW.md") ? { sha: baseSha, text: show(root, baseSha, "REVIEW.md") } : null;
-	// Digests of content only, so a base that moved without changing them restates nothing.
-	const given = { instructions: digest(JSON.stringify(files)), rules: rules && digest(rules.text) };
-	// The tier picks how much review a change needs, so it is set before any reviewer runs.
-	const classified = await classify({
-		root,
-		baseSha,
-		change,
-		dir,
-		env: deps.env,
-		signal: options.signal,
-		saved: options.fresh ? undefined : saved?.classified,
-	});
-
+/** Every seat's round at once, the first failure stopping the others and failing the whole. */
+async function runSeats(
+	shared: Omit<Shared, "signal">,
+	seats: Seat[],
+	responses: string | undefined,
+	stop: AbortSignal | undefined,
+): Promise<Seated[]> {
 	const controller = new AbortController();
-	const signal = options.signal ? AbortSignal.any([options.signal, controller.signal]) : controller.signal;
-	const shared: Shared = {
-		root,
-		branch,
-		base: { ref: baseRef, sha: baseSha },
-		sized,
-		change,
-		files,
-		rules,
-		given,
-		classified: classified.value,
-		dir,
-		env: deps.env,
-		signal,
-	};
+	const signal = stop ? AbortSignal.any([stop, controller.signal]) : controller.signal;
 	const results = await Promise.allSettled(
 		seats.map((seat) =>
-			reviewWith(shared, seat, options.responses).catch((error: unknown) => {
+			reviewWith({ ...shared, signal }, seat, responses).catch((error: unknown) => {
 				controller.abort(error);
 				throw error;
 			}),
@@ -1928,22 +2061,7 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 	);
 	// The first failure stopped the others, so it is the one to report.
 	if (controller.signal.aborted) throw controller.signal.reason;
-	const done = results.map((result) => (result as PromiseFulfilledResult<Seated>).value);
-	const tallies = tallied(
-		options.fresh ? dropped(saved) : (saved?.tallies ?? []),
-		done.map((each, i) => ({ round: each.round, settles: seats[i]!.session })),
-	);
-	const { usage: _, ...value } = classified.value;
-	save(statePath, {
-		branch,
-		sessions: [...done.map((each) => each.session), ...kept],
-		tallies,
-		classified: { key: classified.key, value },
-	} satisfies State);
-	const rounds = done.map((each) => each.round);
-	// A reviewer this run left out, such as a shadow with nothing to settle, still judged the head its last round reviewed.
-	const standing = kept.map((session) => session.last).filter((round) => round.head === head);
-	return { rounds, tallies, risk: settle(classified.value, [...rounds, ...standing]) };
+	return results.map((result) => (result as PromiseFulfilledResult<Seated>).value);
 }
 
 /**
@@ -2246,11 +2364,12 @@ export function nextStep(rounds: Round[]): string {
 const flat = (text: string) => text.replace(/\s+/g, " ").trim();
 
 /**
- * The plain report: the size, base, and head the reviewers share, the head's risk and how it was classified, then
+ * The plain report: the size, base, and head the reviewers share, the head's risk and how it was classified, each
+ * reviewer skipped since it could not run, then
  * each reviewer's round, one record per line, and its findings, numbered across the reviewers in order, each with its
  * body indented.
  */
-export function roundLines({ rounds, risk }: Pick<Reviewed, "rounds" | "risk">): string[] {
+export function roundLines({ rounds, risk, skipped }: Pick<Reviewed, "rounds" | "risk" | "skipped">): string[] {
 	const [shared] = rounds;
 	const { classified } = risk;
 	const by = classified.by;
@@ -2262,6 +2381,7 @@ export function roundLines({ rounds, risk }: Pick<Reviewed, "rounds" | "risk">):
 		`classified ${classified.tier} ${by.kind} ${flat(classified.reason)}`,
 		...(by.kind === "model" ? [`classifier ${by.harness} ${by.model} ${by.effort} ${by.session}`] : []),
 		...classified.usage.map((u) => `usage ${u.turn} input ${u.input} cached ${u.cached} output ${u.output}`),
+		...skipped.map((skip) => `skipped ${skip.harness} ${skip.model} ${skip.effort} ${skip.reason}`),
 	];
 	let number = 0;
 	for (const round of rounds) {

@@ -27,8 +27,7 @@ Decided 2026-11-15 (maintainer, `/quest-plan` here):
   remote (rejected: a committed `.quest.json` naming the endpoint, which no
   repository had committed yet and which could drift from what Kixel Quest
   indexes). Kixel Quest says which repositories it serves; the rest use
-  GitHub. Session records route the same way
-  ([records endpoint](/quest/m0/benchmark/records-endpoint.md)).
+  GitHub. Session records route the same way.
 - ✅ Kixel Quest is used only by a person holding a Kixel Quest token, which
   its admin-managed allow-list gives out; outside contributors stay a
   non-goal for now (rejected: a self-serve contributor role, picked and then

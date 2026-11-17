@@ -1361,17 +1361,23 @@ run on Linux or macOS, including those the agent's parallel shells and
 subagents start, then appends one JSON line to that file, however the run ends:
 
 ```json
-{"command":["cargo","test"],"directory":"/home/me/src/app","started":"2026-11-12T19:40:01.120Z","admitted":"2026-11-12T19:40:31.452Z","unit":"quest-gate-0d6c3f9e-5a51-4c1b-9d0e-2f4b8a7c6e10.scope","exit":0,"cancelled":false,"error":null}
+{"command":["cargo","test"],"directory":"/home/me/src/app","started":"2026-11-12T19:40:01.120Z","admitted":"2026-11-12T19:40:31.452Z","ended":"2026-11-12T19:41:02.810Z","cpu":58210,"unit":"quest-gate-0d6c3f9e-5a51-4c1b-9d0e-2f4b8a7c6e10.scope","exit":0,"cancelled":false,"error":null}
 ```
 
-- `started` and `admitted` give the wait. A run cancelled before admission has
-  a null `admitted`.
+- `started`, `admitted`, and `ended` give the wait (`admitted` minus `started`)
+  and the wall time (`ended` minus `admitted`). A run cancelled before
+  admission has a null `admitted`; `ended` is set however the run ends.
+- `cpu` is the CPU milliseconds the command and its descendants used, read from
+  its scope's `cpu.stat` as the wait log's is. It is null where the gate owns
+  the command only as a process group, such as on macOS, and for a run that
+  never ran.
 - `unit` is the command's systemd user scope, null where the gate owns it
   another way, such as on macOS. Once the scope ends, systemd logs
   `<unit>: Consumed 1.386s CPU time over 1.357s wall clock time, 8.1M memory
   peak.` to the user journal (`journalctl --user -u <unit>`) at info level when
   the scope used a notable amount, such as a second of CPU, and at debug level
-  otherwise. The memory peak needs systemd 255 and Linux 5.19.
+  otherwise. The journal still holds the memory peak, which needs systemd 255
+  and Linux 5.19.
 - `exit` is the status the gate returns, `cancelled` whether it was cancelled,
   and `error` the gate's own failure, such as a scope it cannot confirm
   stopped.
@@ -1452,13 +1458,13 @@ whole branch at the PR's size.
 committed branch before it is pushed for review, at an effort set by the PR's
 size. Each size ranks its reviewers, the same for every repository:
 
-| PR size | Reviewer | When Sol changed it last |
-|---|---|---|
-| XS | Codex `gpt-6.1-sol` medium | Claude Code `claude-opus-5-5` low |
-| S | Codex `gpt-6.1-sol` medium | Claude Code `claude-opus-5-5` low |
-| M, or none | Codex `gpt-6.1-sol` high | Claude Code `claude-opus-5-5` medium |
-| L | Codex `gpt-6.1-sol` xhigh | Claude Code `claude-opus-5-5` high |
-| XL | Codex `gpt-6.1-sol` xhigh | Claude Code `claude-opus-5-5` xhigh |
+| PR size | Reviewer | When Sol changed it last | Last |
+|---|---|---|---|
+| XS | Codex `gpt-6.1-sol` medium | Claude Code `claude-opus-5-5` low | Claude Code `claude-sonnet-5-5` medium |
+| S | Codex `gpt-6.1-sol` medium | Claude Code `claude-opus-5-5` low | Claude Code `claude-sonnet-5-5` medium |
+| M, or none | Codex `gpt-6.1-sol` high | Claude Code `claude-opus-5-5` medium | Claude Code `claude-sonnet-5-5` medium |
+| L | Codex `gpt-6.1-sol` xhigh | Claude Code `claude-opus-5-5` high | Claude Code `claude-sonnet-5-5` high |
+| XL | Codex `gpt-6.1-sol` xhigh | Claude Code `claude-opus-5-5` xhigh | Claude Code `claude-sonnet-5-5` high |
 
 Beside it, the shadow, the pick's model one effort lower (Sol low for an XS
 PR), reviews the same head in its own session, so the routing can be retuned
@@ -1472,6 +1478,25 @@ a shadow at its own effort while the old shadow still has findings, so none
 is left unanswered. The reviewers run at once;
 the first to fail, such as on a usage limit, stops the others, and the round
 saves none.
+
+A reviewer that cannot run passes the round to the next whose model is not
+the latest writer's, so Sonnet reviews what Opus changed last while Sol is
+out. That is a failure the CLI or provider reports before any finding is
+saved, never text in the diff or a reply: a CLI that is not installed, logged
+out, or has its login rejected passes over every model of that CLI, and a
+model at its usage limit passes over only itself. The run prints a `skipped`
+line for each reviewer it passed over, and the record names it in its
+header:
+
+```markdown
+- Skipped: Codex, gpt-6.1-sol, high effort: usage limit, resets 2026-11-18T03:00:00Z
+```
+
+The new reviewer settles the open findings of the one it replaces, and the
+shadow follows it. Only when every eligible reviewer is out does the run fail,
+exiting 3 with each one's error. A reviewer `--harness`, `--model`, or
+`--effort` names never passes the round on, so a controlled run, such as
+`quest eval run`'s, measures the reviewer it names.
 
 A quest branch takes its quest's size, read from the base branch's tip so a
 change cannot lower its own review; any other PR, such as a skill's own, takes
@@ -1491,10 +1516,8 @@ reviewers' sessions for the pick's next run, and refuses while one has
 findings to settle, so a head never passes one reviewer alone while the other's
 findings are open. When the latest writer changes the size's pick to one with
 no session on the branch, its first session settles the open findings of the
-reviewer it replaces, and the new pick's shadow settles the old shadow's. An unknown harness, a size whose
-every reviewer is avoided, or a missing or logged-out CLI, is an error
-rather than a same-model review, as is a login the API rejects mid-round, such
-as an expired or revoked token. The reviewer reaches its model as the user's own CLI does:
+reviewer it replaces, and the new pick's shadow settles the old shadow's. An unknown harness or a size whose
+every reviewer is avoided is an error rather than a same-model review. The reviewer reaches its model as the user's own CLI does:
 Claude Code keeps `ANTHROPIC_BASE_URL`, `ANTHROPIC_CUSTOM_HEADERS`, and its
 cloud providers' `CLAUDE_CODE_USE_*` switches and settings, so a gateway such
 as CLIProxyAPI, Bedrock, Vertex, or Foundry works, and Codex keeps
@@ -1628,11 +1651,14 @@ and prints `record skipped: <why>`. It edits as the user the GitHub token names
 record only on a PR whose author has write access, so review your
 own PRs with your own token. A record GitHub refuses fails the command after the
 round's report, with exit status 1. It exits 0 once the round
-finishes, whatever it found, 2 for invalid arguments or a checkout or CLI that
-cannot be reviewed, including a login the API rejects, 3 when a reviewer's
-account hit its usage limit, and 1 for other failures. A usage limit prints one
-line, `error: <harness> hit its usage limit; resets <time>`, where `<time>` is
-the reset as an ISO 8601 UTC timestamp, or `unknown` when the CLI named none.
+finishes, whatever it found, 2 for invalid arguments or a checkout that
+cannot be reviewed, 3 when no eligible reviewer could run, each not installed,
+logged out, its login rejected, or at its usage limit, and 1 for other
+failures. The only eligible reviewer's usage limit prints one line,
+`error: <harness> hit its usage limit; resets <time>`, where `<time>` is the
+reset as an ISO 8601 UTC timestamp, or `unknown` when the CLI named none; with
+several, it prints `error: no eligible <size> reviewer could run: <model>
+<effort> (<error>), ...`.
 Through a gateway that pools accounts, such as CLIProxyAPI, the limit is the
 pool's: Claude Code shows its "All credentials for model ... are cooling down",
 and Codex, sent to `OPENAI_BASE_URL`, gives up on the gateway's 429 after its
@@ -1942,23 +1968,20 @@ are read from the transcript on this host, and only their names and times
 leave it. The split's notes are lines a model wrote, told to name no one and
 quote no message.
 
-A checkout names its endpoint in a committed `.quest.json`:
+Records go to [Kixel Quest](https://kixel.quest), the same one the
+[forge reads](#read-through-kixel-quest) use, at its `/records`, with the token
+`$XDG_CONFIG_HOME/quest/records.json` (`~/.config`) pairs with its URL. No
+repository commits a config file: a record names its repository by `owner/repo`
+from its checkout's `origin` (the repository its PRs open on, for a fork), and
+the token is sent only to the URL the user's own file pairs it with. The URL is
+`https://kixel.quest`, or HTTPS (HTTP to `localhost`) `QUEST_KIXEL_URL` for
+another Kixel Quest, such as one running locally. A user holding no token for
+it sends nothing, and the hook says so once as a system message.
 
-```json
-{ "records": "https://kixel.example/records" }
-```
-
-and each user pairs a token with it in `$XDG_CONFIG_HOME/quest/records.json`
-(`~/.config`), so a checkout naming another endpoint, as a hostile branch
-might, is never sent the token or a record:
-
-```json
-{ "https://kixel.example/records": "token" }
-```
-
-The endpoint must be HTTPS, or HTTP to `localhost`. A checkout naming none, or
-an endpoint the user holds no token for, sends nothing, and the hook says so
-once as a system message.
+Kixel Quest refuses a whole upload naming a repository it does not index or
+the sender cannot read, so the sender asks `GET /forge` which repositories it
+serves and sends only those. The rest are dropped from this host's queue, so an
+unserved repository costs no GitHub requests, and the next stop says so once.
 
 The `Stop` hook [`quest setup`](#configure-your-agent) installs for Claude Code
 and Codex only queues the session under `$XDG_STATE_HOME/quest/records`. One
@@ -1980,23 +2003,23 @@ once per outage.
 
 Each pass runs token-max on this host from the earliest queued session's first
 instant, reads the PRs updated since then, or since its last upload for that
-endpoint and repository read them, if earlier, so a fix merged after its
+repository read them, if earlier, so a fix merged after its
 sessions were sent still goes with the next one, labels each session's new
 steps for its [time split](#time-splits), and posts
 `{"records": [...], "breakages": [...]}`, the breakages being those the merged
 PRs among them name under `## Caused by`, as `quest usage` reports them, with
-`Authorization: Bearer <token>`, one upload per endpoint and repository, each
+`Authorization: Bearer <token>`, one upload per repository, each
 queued session with its sub-agents, which stop without the hook naming them.
 Each upload is checked with `parseUpload` before it is posted. A 2xx drops the
 sessions from the queue, unless the hook queued one again meanwhile. A 401 or
-403 drops them and sends that endpoint nothing more until the token changes.
+403 drops them and sends Kixel Quest nothing more until the token changes.
 Any other failure keeps them queued, and the next stop says so once. A failing
-endpoint and repository back off, waiting a minute and doubling up to six
-hours, and sit out the passes meanwhile, so they never widen the others'
+repository backs off, waiting a minute and doubling up to six
+hours, and sits out the passes meanwhile, so it never widens the others'
 window. token-max missing is retried each pass.
 
 A deploy or alert reports what it found with `quest records incident`, which
-posts one breakage at once to the checkout's endpoint and fails loud on any
+posts one breakage at once to Kixel Quest and fails loud on any
 answer but a 2xx, since nothing retries it:
 
 ```console

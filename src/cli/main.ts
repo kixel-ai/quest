@@ -53,7 +53,6 @@ import {
 	forgeFor,
 	hostedForge,
 	hostedRepository,
-	kixelUrl,
 	locate as locatePull,
 } from "./forge";
 import { PENDING_MS } from "./admission";
@@ -84,7 +83,8 @@ import {
 } from "./models";
 import {
 	ReviewInputError,
-	ReviewLimitError,
+	ReviewOutageError,
+	ReviewerUnavailableError,
 	processDependencies as reviewDependencies,
 	ask,
 	review,
@@ -107,18 +107,11 @@ import { CHECKED_CONTEXT, USER_ASKED, questRoot } from "./rules";
 import { messageLines, messages } from "./messages";
 import { logWait, pullWaitKind, readWaits } from "./waits";
 import { readCalls } from "./calls";
-import {
-	CHECKOUT_CONFIG,
-	SEND_INTERVAL,
-	background,
-	parseInstant,
-	reportIncident,
-	runSender,
-	tokensPath,
-} from "./send";
+import { SEND_INTERVAL, background, parseInstant, reportIncident, runSender } from "./send";
 import { installSender, uninstallSender } from "./service";
 import { heal, init, stubFindings, uninstall } from "./setup";
 import { describe, notUpstream, releaseQuest, startQuest } from "./start";
+import { KIXEL_QUEST_URL, kixelUrl, tokensPath } from "./tokens";
 import { CONTEXT, GUIDE, GUIDE_SECTIONS, SKILLS, guideSections, sectionHeading, skill } from "./skills";
 import { type Terminal, Theme } from "./theme";
 import { type Snapshot, checkout, collect, load, snapshot, under } from "./tree";
@@ -234,8 +227,9 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"kill-on-close Job Object. Exits with the command's status, or 128 plus the signal's number once " +
 				"cancelled.\n\n" +
 				"With QUEST_GATE_RECORD naming an absolute path, an outermost gate on Linux or macOS appends one JSON " +
-				"line per run to that file, however the run ends: its command, directory, when it started and was " +
-				"admitted, its systemd scope, whose journal holds its CPU time and peak memory, and its exit status. " +
+				"line per run to that file, however the run ends: its command, directory, when it started, was " +
+				"admitted, and ended, its CPU milliseconds (null without a systemd scope), its systemd scope, whose " +
+				"journal holds its peak memory, and its exit status. " +
 				"A file it cannot write fails the gate.\n\n" +
 				"In an agent session, where CLAUDE_CODE_SESSION_ID or CODEX_THREAD_ID is set, an outermost gate also logs " +
 				"its time queued and running under $XDG_STATE_HOME/quest/waits for the session's record; a log it cannot " +
@@ -1433,21 +1427,20 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 			);
 		});
 
-	const recordsCommand = program
-		.command("records")
-		.summary("Send agent sessions' records to the Kixel Code endpoint their checkout names");
+	const recordsCommand = program.command("records").summary("Send agent sessions' records to Kixel Quest");
 	recordsCommand
 		.command("sender")
 		.summary("Run the user's record sender until stopped, as its service does")
 		.description(
-			"Send each session record the stop hook queued, with the records of its sub-agents on this host, to the " +
-				`endpoint its checkout's ${CHECKOUT_CONFIG} names as records, posting {"records": [...], "breakages": [...]}, the breakages the merged PRs among them name under ## Caused by, with the token ` +
-				`${tokensPath()} pairs with that endpoint as a bearer token, one upload per endpoint and repository, ` +
+			"Send each session record the stop hook queued, with the records of its sub-agents on this host, to " +
+				`Kixel Quest's /records (https://kixel.quest, or the one ${KIXEL_QUEST_URL} names), posting {"records": [...], "breakages": [...]}, the breakages the merged PRs among them name under ## Caused by, with the token ` +
+				`${tokensPath()} pairs with its URL as a bearer token, one upload per repository, ` +
 				`then again every ${SEND_INTERVAL / 1000} seconds until stopped, at low priority. A record is built as quest usage ` +
 				"builds it, from token-max's sessions on this host since the earliest queued session's first instant and " +
-				"the PRs updated since then, and replaces its earlier copy, so a resend never doubles. A sent session whose " +
+				"the PRs updated since then, and replaces its earlier copy, so a resend never doubles. A repository Kixel " +
+				"Quest does not serve, as it says on GET /forge, has its sessions dropped, said once. A sent session whose " +
 				"latest branch, or a sub-agent's, heads no PR yet is sent again, with its sub-agents, once a pass for its " +
-				"repository reads a PR opened on that branch, until its transcript is gone. An endpoint that " +
+				"repository reads a PR opened on that branch, until its transcript is gone. A Kixel Quest that " +
 				"refuses the token (401 or 403) is sent nothing more until the token changes; any other failure keeps the " +
 				"sessions queued, retried after a minute and then twice as long each time up to six hours, and the next " +
 				"stop hook says so once. Before a record is built, a cheap model, " +
@@ -1488,13 +1481,13 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 			"A stable ID for the incident, such as the alert's URL; a later report with it replaces this one",
 		)
 		.description(
-			"Post one breakage to the endpoint this checkout's " +
-				`${CHECKOUT_CONFIG} names, with the token ${tokensPath()} pairs with it, as {"records": [], "breakages": [...]}. ` +
+			"Post one breakage to Kixel Quest's /records " +
+				`(https://kixel.quest, or the one ${KIXEL_QUEST_URL} names), with the token ${tokensPath()} pairs with its URL, as {"records": [], "breakages": [...]}. ` +
 				"Without --pr the incident is open, its culprit unknown; report the same ID again with --pr to close it on " +
 				"its culprit, whose tier, size, writers, and local reviewers are read from its PR body, or name it on the " +
 				"culprit's ## Caused by line of the fix, as (incident <id>), whose record then replaces it. It posts at once " +
 				"and retries nothing, for a deploy or alert to call.\n\nUses GH_TOKEN, GITHUB_TOKEN, or gh auth token. " +
-				"Exits 0 when the endpoint took it, 2 for invalid arguments, and 1 for other failures, refusal included.",
+				"Exits 0 when Kixel Quest took it, 2 for invalid arguments, and 1 for other failures, refusal included.",
 		)
 		.addOption(new Option("--found <by>", "Who or what found it").choices(FINDERS).makeOptionMandatory())
 		.option("--pr <number>", "The PR that caused it", positiveInteger("--pr"))
@@ -1588,11 +1581,12 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		(size) => `${size} ${REVIEWERS[size].map((e) => `${e.harness} ${e.model} ${e.effort}`).join(", then ")}`,
 	).join("; ");
 	const classifiers = CLASSIFIERS.map((e) => `${e.harness} ${e.model} ${e.effort}`).join(", then ");
-	/** quest review's exit code for `error`: 2 for a usage error, 3 at a usage limit, else 1. */
+	/** quest review's exit code for `error`: 2 for a usage error, 3 when no reviewer could run, else 1. */
 	const reviewFailure = (error: unknown): number => {
-		if (error instanceof ReviewInputError || error instanceof ReviewLimitError) {
+		const outage = error instanceof ReviewerUnavailableError || error instanceof ReviewOutageError;
+		if (error instanceof ReviewInputError || outage) {
 			out.stderr(`error: ${error.message}\n`);
-			return error instanceof ReviewInputError ? 2 : 3;
+			return outage ? 3 : 2;
 		}
 		warn(error instanceof Error ? error.message : String(error));
 		return 1;
@@ -1603,7 +1597,12 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		.description(
 			"Review the checkout's committed branch against its base with a reviewer its size picks, never the " +
 				`model that changed it last. Each size ranks its reviewers (harness, model, effort): ${reviewers}. The ` +
-				"first whose model is not avoided reviews, and beside it, on the same head in its own session, the shadow: " +
+				"first whose model is not avoided reviews. One that cannot run, as its CLI or provider reports before any " +
+				"finding is saved, passes the round to the next whose model is not avoided: a CLI that is not installed, " +
+				"logged out, or has its login rejected passes over every model of that CLI, and a model at its usage limit " +
+				"only itself; the run's report and record name each it passed over and why. A reviewer --harness, --model, " +
+				"or --effort names never passes the round on. Beside the reviewer, on the same head in its own session, runs the shadow, " +
+				"which follows the round to the reviewer it passes to: " +
 				"the pick's model one effort lower (low, medium, high, xhigh), skipped when the pick runs at low or an " +
 				"effort off that ladder, so each effort step can be compared with the one below it. The shadow runs on a " +
 				"branch's first run of the pick, then only while it has findings to settle or once the pick changed so it is " +
@@ -1673,7 +1672,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"and can only raise it: the head's tier is the riskiest, with the reason of the first to judge it so.\n\n" +
 				"Prints the size and where it came from, base, and head, its risk tier and reason, the classifier's tier, " +
 				"how it was set (model, paths, or default), and reason, and for a model a classifier line (harness, model, " +
-				"effort, session) and its usage line, then for each reviewer its harness, model, and " +
+				"effort, session) and its usage line, a skipped line (harness, model, effort, reason) for each reviewer passed over, then for each reviewer its harness, model, and " +
 				"effort, followed by shadow for the shadow, session, round, an " +
 				"unchanged line for a repeated round, a usage line per turn (input tokens, the " +
 				"part read from the prompt cache, and output), a score from 0 to 10 for how ready the head is to land with " +
@@ -1683,20 +1682,22 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"`next checkpoint` when a reviewer's every third round reports other findings, to compare the current approach " +
 				"with the best long-term approach worked out from first principles before fixing them, `next respond` to fix or refute the findings, or `next done`. A reply without a valid score " +
 				"fails as any malformed reply does. --json prints " +
-				"one object: `rounds`, one per reviewer, `tallies`, every reviewer's findings across the branch's rounds, `risk`, the head's tier with its classification, `record`, and `next`.\n\n" +
+				"one object: `rounds`, one per reviewer, `tallies`, every reviewer's findings across the branch's rounds, `risk`, the head's tier with its classification, `skipped`, each reviewer passed over with its reason, `record`, and `next`.\n\n" +
 				"After each round, it rewrites the `## Review` section of the branch's open PR into the base, as the " +
 				"user the GitHub token names, keeping the rest of the body, and prints `record <url>`: the reviewed " +
 				"head, named in full only once no reviewer reports a finding, the base, the head's risk tier and reason, " +
-				"the classifier's tier and who set it, and each reviewer, its Reviewer line ending in `, shadow` for the shadow, its " +
+				"the classifier's tier and who set it, a `- Skipped:` line for each reviewer passed over, and each reviewer, its Reviewer line ending in `, shadow` for the shadow, its " +
 				"session and round, score, the tier it raised the risk to and why, its tally of findings across the branch's rounds, and each finding with its disposition. With no " +
 				"such PR, or a remote off GitHub, it prints `record skipped: <why>` and changes nothing.\n\n" +
 				"Exits 0 once the round finishes, whatever it found, 2 for invalid arguments " +
-				"or a checkout or CLI that cannot be reviewed, including a login the API rejects, 3 when a reviewer's " +
-				"account hit its usage limit, and 1 for other failures, including a PR GitHub will not show or a record it " +
+				"or a checkout that cannot be reviewed, 3 when no eligible reviewer could run, each not installed, logged " +
+				"out, its login rejected, or at its usage limit, and 1 for other failures, including a PR GitHub will not show or a record it " +
 				"refuses. A malformed `## Models` field the round reads, such as a Size line naming no size or an " +
-				"Implementer line naming no model it can read, is a usage error, unless --size or --exclude-model replaces it. A usage limit prints one line, " +
+				"Implementer line naming no model it can read, is a usage error, unless --size or --exclude-model replaces it. A usage limit of the only " +
+				"eligible reviewer prints one line, " +
 				"`error: <harness> hit its usage limit; resets <time>`, where <time> is the reset as an ISO 8601 UTC " +
-				"timestamp, or `unknown` when the CLI named none.",
+				"timestamp, or `unknown` when the CLI named none; with several, it prints `error: no eligible <size> " +
+				"reviewer could run: <model> <effort> (<error>), ...`, each error as the only reviewer's would read.",
 		)
 		.option("--base <remote/branch>", "Base branch to review against (default: origin's default branch)")
 		.addOption(
@@ -1755,7 +1756,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 					},
 				);
 				pending = run.then(async (reviewed) => {
-					const { rounds, tallies, risk } = reviewed;
+					const { rounds, tallies, risk, skipped } = reviewed;
 					// The rounds are saved in their sessions either way, so their report prints before a failed record.
 					let record: Recorded | undefined;
 					let failure: unknown;
@@ -1770,6 +1771,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 								rounds,
 								tallies,
 								risk,
+								skipped,
 								record: record ?? null,
 								next: nextStep(rounds),
 							}),
@@ -1807,14 +1809,15 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"this build, with the review rules of this checkout, its committed REVIEW.md at HEAD, so a change to the " +
 				"reviewer table, the prompts, or REVIEW.md is scored before it lands. The reviewers are the size's pick, " +
 				"avoiding the case's writer, and its shadow, as quest review runs them, or --harness's alone, at its " +
-				"entry's model and effort unless --model and --effort override them. Cases run one at a time, their reviewers " +
+				"entry's model and effort unless --model and --effort override them. A reviewer that cannot run fails the run " +
+				"rather than passing the case to the next, so the score measures the reviewers it names. Cases run one at a time, their reviewers " +
 				"at once, and the first failure stops the run and fails it.\n\n" +
 				"Prints the set's counts and rules, a line per seat (pick, shadow, and, without --harness, either: what " +
 				"the case's seats found together, as a run of the pick and its shadow finds it) with defects found and clean findings by severity, the same by size and tier, " +
 				"each case's rounds with score, defects found, findings, tokens the CLI reported, and session, and the " +
 				"run's cost at API list price as token-max prices its sessions, or unpriced without token-max. --json prints " +
-				"one object. Exits as quest review does: 2 for invalid arguments or a set that cannot be read, 3 at a " +
-				"usage limit, 1 for other failures.",
+				"one object. Exits as quest review does: 2 for invalid arguments or a set that cannot be read, 3 for a " +
+				"reviewer that is not installed, logged out, or at its usage limit, 1 for other failures.",
 		)
 		.option("--set <file>", `The eval set (default: ${EVAL_FILE} at the checkout's root)`)
 		.addOption(
@@ -2128,8 +2131,8 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"Stop and SubagentStop refuse to end the " +
 				"turn, naming each command, while a `quest gate` command the ending agent started runs in Claude " +
 				"Code's background: one whose background ID its transcript holds. Otherwise Claude Code's and Codex's Stop " +
-				`queue the session's record for the endpoint the checkout's ${CHECKOUT_CONFIG} names, for quest records ` +
-				"sender to send; a checkout naming none, an endpoint the user holds no token for, or a host whose sender " +
+				"queue the session's record for Kixel Quest, for quest records " +
+				"sender to send; a user holding no token for it, or a host whose sender " +
 				"does not run says so once as a system message, as does a sender's failure. Exits 1 on malformed input or an event it " +
 				"does not handle.",
 		)
