@@ -45,8 +45,8 @@ export class ProtectedEdit extends Error {}
 
 /**
  * The failure log a handback quotes: the lines the fixer cited, else the tail of the gate's failing
- * output, so a fixer that failed for its own reasons still shows why the gate dropped the PR. The
- * fixer's own output stays in its job log on the host; the comment's reason names its error.
+ * output, so a fixer that failed for its own reasons still shows why the gate dropped the PR. Its
+ * own output's tail follows in `outputSection`; the whole stays in its job log on the host.
  */
 export function handbackLog(log: string, lines?: [number, number]): string {
 	if (!lines) return readLog(log, "tail").trimEnd().split("\n").slice(-100).join("\n");
@@ -59,7 +59,11 @@ export function handbackLog(log: string, lines?: [number, number]): string {
 		.trimEnd();
 }
 
-/** Read a bounded window of a log, or "" when it is missing or not a regular file. */
+/**
+ * Read a bounded window of a log, or "" when it is missing or not a regular file. A tail window that
+ * starts mid-file drops its partial first line, or all of it without a line break, so a cut never splits a token from the prefix that
+ * `redactTokens` matches.
+ */
 function readLog(path: string, window: "head" | "tail"): string {
 	if (!path || !existsSync(path)) return "";
 	const fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
@@ -67,8 +71,12 @@ function readLog(path: string, window: "head" | "tail"): string {
 		const stat = fstatSync(fd);
 		if (!stat.isFile()) return "";
 		const buffer = Buffer.alloc(Math.min(stat.size, 16_384));
-		const length = readSync(fd, buffer, 0, buffer.length, window === "head" ? 0 : stat.size - buffer.length);
-		return buffer.subarray(0, length).toString("utf8");
+		const start = window === "head" ? 0 : stat.size - buffer.length;
+		const length = readSync(fd, buffer, 0, buffer.length, start);
+		const text = buffer.subarray(0, length).toString("utf8");
+		if (start === 0) return text;
+		const newline = text.indexOf("\n");
+		return newline < 0 ? "" : text.slice(newline + 1);
 	} finally {
 		closeSync(fd);
 	}
@@ -113,6 +121,8 @@ export interface Process {
 	/** Packs fetched from the daemon's repository at launch; their objects are already there. */
 	packs?: string[];
 	error?: string;
+	/** The tail of a failed fixer's own output, which its handback quotes so the failure names its cause. */
+	output?: string;
 }
 
 /**
@@ -412,14 +422,20 @@ export function settle(
 	const restarted = job.daemon && daemon && job.daemon !== daemon ? "; the daemon restarted while it ran" : "";
 	if (existsSync(`${path}.exit`)) {
 		const code = readFileSync(`${path}.exit`, "utf8");
-		if (job.terminating !== undefined) job.error = "fixer timed out; run /quest-iterate";
-		else if (code !== "0") job.error = `fixer ${exited(code)}${restarted}; run /quest-iterate`;
-		else
+		if (job.terminating === undefined && code === "0")
 			try {
 				read();
 			} catch (error) {
+				// The wrapper succeeded, so its output is the agent's transcript, not the cause.
 				job.error = `invalid fixer result: ${String(error)}; run /quest-iterate`;
 			}
+		else {
+			job.error =
+				job.terminating !== undefined
+					? "fixer timed out; run /quest-iterate"
+					: `fixer ${exited(code)}${restarted}; run /quest-iterate`;
+			job.output = outputTail(path);
+		}
 	} else if (deps.now() > deadline(path, job, deps.now(), timeout)) {
 		if (job.terminating === undefined) {
 			job.terminating = deps.now();
@@ -438,12 +454,38 @@ export function settle(
 			} catch {}
 		}
 		job.error = "fixer timed out; run /quest-iterate to diagnose and retry";
+		job.output = outputTail(path);
 	}
 	// Without a launch identity (an unreadable /proc), only its exit status or the timeout can end the job.
 	else if (!job.identity || (job.pid && identity(job.pid) === job.identity)) return false;
-	else job.error = `fixer stopped without recording an exit status${restarted}; run /quest-iterate`;
+	else {
+		job.error = `fixer stopped without recording an exit status${restarted}; run /quest-iterate`;
+		job.output = outputTail(path);
+	}
 	save(path, job);
 	return true;
+}
+
+/** Lines of a failed fixer's output its handback quotes: enough for a stack trace's end, few enough to skip its noise. */
+const OUTPUT_LINES = 20;
+const OUTPUT_LIMIT = 2_000;
+
+/**
+ * The last lines the fixer wrapper at job `path` printed, tokens redacted, or "" when it printed
+ * nothing. Redacting before the cut keeps a cut through a token's prefix from posting the rest.
+ */
+export function outputTail(path: string): string {
+	const tail = redactTokens(readLog(`${path}.log`, "tail").trimEnd().split("\n").slice(-OUTPUT_LINES).join("\n"));
+	return tail.length > OUTPUT_LIMIT ? tail.slice(-OUTPUT_LIMIT) : tail;
+}
+
+/**
+ * The handback section quoting a failed fixer's `output`, so a crash before the agent started, such as
+ * a launcher refusing the upload, names its cause on the PR. Empty when it does not fit in `room`.
+ */
+export function outputSection(output: string, room: number): string {
+	const section = `\n\nThe fixer's output ended with:\n\n<pre>${excerpt(redactTokens(output))}</pre>`;
+	return section.length <= room ? section : "";
 }
 
 /** New commits descend from the pin. Protected content/modes at the head must match the pin or its merge with `base`, the base the fixer was given. */
