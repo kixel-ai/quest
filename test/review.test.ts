@@ -93,10 +93,10 @@ test("each size's reviewer is the first whose model is not the latest writer's",
 	const ranked = (choice: Parameters<typeof rankedReviewers>[1], wrote: typeof claude) =>
 		rankedReviewers("L", choice, wrote).map(({ harness, model, effort }) => `${harness} ${model} ${effort}`);
 	const byOpus = authored({}, {}, "claude-opus-5-5");
-	expect(ranked({}, byOpus)).toEqual(["codex gpt-6.1-sol xhigh", "claude claude-sonnet-5-5 medium"]);
+	expect(ranked({}, byOpus)).toEqual(["codex gpt-6.1-sol xhigh", "claude claude-sonnet-5-5 high"]);
 	expect(ranked({}, authored({}, {}, "gpt-6.1-sol"))).toEqual([
 		"claude claude-opus-5-5 high",
-		"claude claude-sonnet-5-5 medium",
+		"claude claude-sonnet-5-5 high",
 	]);
 	// An unknown writer under Claude Code avoids every Claude model, so Sol has none after it.
 	expect(ranked({}, claude)).toEqual(["codex gpt-6.1-sol xhigh"]);
@@ -275,12 +275,12 @@ fakes.for([
 	[
 		"CODEX_THREAD_ID",
 		"reset",
-		"no eligible M reviewer could run: claude-opus-5-5 medium and claude-sonnet-5-5 low (claude hit its usage limit; resets 2030-03-17T17:46:40Z)",
+		"no eligible M reviewer could run: claude-opus-5-5 medium and claude-sonnet-5-5 medium (claude hit its usage limit; resets 2030-03-17T17:46:40Z)",
 	],
 	[
 		"CODEX_THREAD_ID",
 		"unknown",
-		"no eligible M reviewer could run: claude-opus-5-5 medium and claude-sonnet-5-5 low (claude hit its usage limit; resets unknown)",
+		"no eligible M reviewer could run: claude-opus-5-5 medium and claude-sonnet-5-5 medium (claude hit its usage limit; resets unknown)",
 	],
 ] as const)(
 	"a usage limit with no reviewer left exits 3 with its reset, and records no round (%s, %s)",
@@ -306,18 +306,18 @@ fakes("a reviewer at its usage limit passes the round to the next eligible one, 
 	const plain = await quest("--root", s.repo, "review", ...OPUS_WROTE);
 	expect(plain.code, plain.stderr).toBe(0);
 	expect(plain.stdout).toContain(`\nskipped codex gpt-6.1-sol high usage limit, resets ${codexReset}\n`);
-	// Sonnet runs at low, with no step below it, so no shadow follows it.
-	expect(plain.stdout).toContain("\nreviewer claude claude-sonnet-5-5 low\nsession ");
-	expect(plain.stdout).not.toContain(" shadow\n");
-	// Only Sonnet ran a turn after Sol's limit, and Opus, the writer, never ran.
+	// Sonnet's shadow follows it, one effort lower.
+	expect(plain.stdout).toContain("\nreviewer claude claude-sonnet-5-5 medium\nsession ");
+	expect(plain.stdout).toContain("\nreviewer claude claude-sonnet-5-5 low shadow\nsession ");
+	// Only Sonnet and its shadow ran turns after Sol's limit, and Opus, the writer, never ran.
 	const turns = s.calls().filter((c) => effortOf(c) !== null);
 	expect(turns.filter((c) => c.argv.includes("claude-opus-5-5"))).toEqual([]);
-	expect(turns.filter((c) => c.argv.includes("claude-sonnet-5-5"))).toHaveLength(2);
+	expect(turns.filter((c) => c.argv.includes("claude-sonnet-5-5"))).toHaveLength(4);
 
 	// The responses answer Sonnet's finding, which Sol settles once it is back, as a replaced reviewer's.
 	vi.stubEnv("FAKE_LIMITED", undefined);
 	const responses = join(s.bin, "..", "responses.md");
-	writeFileSync(responses, "1. Fixed: the average divides by the count.\n");
+	writeFileSync(responses, "1. Fixed: the average divides by the count.\n2. Fixed: the same.\n");
 	write(s.repo, "src/lib.ts", "export const x = 3;\n");
 	git(s.repo, "commit", "-qam", "fix");
 	const back = await quest("--root", s.repo, "review", ...OPUS_WROTE, "--responses", responses, "--json");
@@ -328,7 +328,8 @@ fakes("a reviewer at its usage limit passes the round to the next eligible one, 
 		"codex gpt-6.1-sol high",
 		"codex gpt-6.1-sol medium shadow",
 	]);
-	expect(rounds[0].earlier.findings.map((f: Settled) => f.disposition)).toEqual(["fixed"]);
+	// Sol settles Sonnet's finding, and Sol's shadow Sonnet's shadow's.
+	expect(rounds.map((r: Round) => r.earlier?.findings.map((f) => f.disposition))).toEqual([["fixed"], ["fixed"]]);
 });
 
 fakes("a model at its usage limit passes the round to its CLI's next model, whose shadow follows it", async () => {
@@ -348,8 +349,8 @@ fakes("a model at its usage limit passes the round to its CLI's next model, whos
 		},
 	]);
 	expect(rounds.map((r: Round) => `${r.model} ${r.effort}${r.shadow ? " shadow" : ""}`)).toEqual([
-		"claude-sonnet-5-5 medium",
-		"claude-sonnet-5-5 low shadow",
+		"claude-sonnet-5-5 high",
+		"claude-sonnet-5-5 medium shadow",
 	]);
 });
 
@@ -364,7 +365,7 @@ fakes("a reviewer CLI that is not installed passes the round to the next eligibl
 	const result = await quest("--root", s.repo, "review", ...OPUS_WROTE);
 	expect(result.code, result.stderr).toBe(0);
 	expect(result.stdout).toContain("\nskipped codex gpt-6.1-sol high not installed\n");
-	expect(result.stdout).toContain("\nreviewer claude claude-sonnet-5-5 low\n");
+	expect(result.stdout).toContain("\nreviewer claude claude-sonnet-5-5 medium\n");
 });
 
 fakes.each([
