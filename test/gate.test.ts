@@ -43,7 +43,7 @@ import {
 } from "../src/cli/gate";
 import { forwards, foregroundStat, statProcess } from "../src/cli/interrupt";
 import { gateBoundary, main } from "../src/cli/main";
-import { alive as ownerAlive, questScope } from "../src/cli/supervise";
+import { measuredRun, alive as ownerAlive, questScope } from "../src/cli/supervise";
 import { readWaits } from "../src/cli/waits";
 import { created, onTerminal, run, signalled, tempDir } from "./fixture";
 
@@ -1096,6 +1096,30 @@ describe.runIf(process.platform === "linux")("a systemd scope", () => {
 		expect(await result).toBe(0);
 		expect(owned.cpu()).toBeGreaterThanOrEqual(Math.floor(seen / 1000));
 		await until(() => host.usage(unit) === undefined);
+	});
+
+	test("keeps a successful command's exit status when its CPU cannot be read", async () => {
+		const warn = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+		try {
+			const result = await measuredRun(
+				`quest-gate-${randomUUID()}.scope`,
+				process.cwd(),
+				["/bin/sh", "-c", "exit 0"],
+				{
+					cancel: cancellation().cancel,
+					within: null,
+					usage: () => {
+						throw Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" });
+					},
+				},
+			);
+			expect(result).toEqual({ status: 0, cpu: null });
+			expect(warn.mock.calls.map(([text]) => String(text)).join("")).toMatch(
+				/cannot read the CPU .* used: .*EACCES/,
+			);
+		} finally {
+			warn.mockRestore();
+		}
 	});
 
 	test("reads a short command's CPU however soon systemd removes its scope", async () => {

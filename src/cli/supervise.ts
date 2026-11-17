@@ -73,6 +73,8 @@ export interface RunOptions {
 	within?: string | null;
 	/** The slice the scope runs in; the user manager's default, `app.slice`, when omitted. */
 	slice?: string;
+	/** Reads the CPU microseconds a measured run's cgroup used; `cgroupUsage` when omitted. */
+	usage?(group: string): number | null;
 }
 
 export interface Scopes {
@@ -479,9 +481,10 @@ function contain(
 			let cpu: number | null = null;
 			try {
 				// Read before anything else, while the holder keeps the cgroup; a run cancelled hard may have lost it.
-				if (describe.measure && group) cpu = cgroupUsage(group);
+				if (describe.measure && group) cpu = (options.usage ?? cgroupUsage)(group);
 			} catch (error) {
-				failure ??= error as Error;
+				// The reading only informs the record, so it never changes how the run ends.
+				process.stderr.write(`quest: cannot read the CPU ${describe.name} used: ${error}\n`);
 			}
 			hold?.destroy();
 			try {

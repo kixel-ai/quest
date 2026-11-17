@@ -1770,7 +1770,7 @@ latest upload, since one sender sends a session's uploads in order. The type is
 `parseUpload`, which refuse a malformed record whole:
 
 ```json
-{"harness":"claude","session":"7ef44bda-fb9b-436f-9ed8-9013d0f38d46","parent":null,"repository":"acme/app","branch":"quest/m0/login","quest":"quest/m0/login.md","pulls":[42],"role":"implementing","models":[{"model":"claude-opus-5-5","effort":"high","input":230,"cacheWrite":211500,"cacheRead":15800000,"output":88800,"cost":6.64,"complete":true}],"cost":6.64,"complete":true,"start":"2026-11-14T00:06:12.270Z","end":"2026-11-14T00:31:40.120Z","waits":[{"kind":"gate-queue","start":"2026-11-14T00:22:07.386Z","end":"2026-11-14T00:22:07.402Z","until":null},{"kind":"gate-run","start":"2026-11-14T00:22:07.402Z","end":"2026-11-14T00:24:51.020Z","until":null}],"gated":[{"command":"just test","start":"2026-11-14T00:22:07.386Z","admitted":"2026-11-14T00:22:07.402Z","end":"2026-11-14T00:24:51.020Z","cpu":1214300}],"shell":[{"calls":[{"command":"git status --short","start":"2026-11-14T00:21:58.004Z","end":"2026-11-14T00:21:58.051Z"}],"cpu":30,"shared":false}],"split":null}
+{"harness":"claude","session":"7ef44bda-fb9b-436f-9ed8-9013d0f38d46","parent":null,"repository":"acme/app","branch":"quest/m0/login","quest":"quest/m0/login.md","pulls":[42],"role":"implementing","models":[{"model":"claude-opus-5-5","effort":"high","input":230,"cacheWrite":211500,"cacheRead":15800000,"output":88800,"cost":6.64,"complete":true}],"cost":6.64,"complete":true,"start":"2026-11-14T00:06:12.270Z","end":"2026-11-14T00:31:40.120Z","waits":[{"kind":"gate-queue","start":"2026-11-14T00:22:07.386Z","end":"2026-11-14T00:22:07.402Z","until":null},{"kind":"gate-run","start":"2026-11-14T00:22:07.402Z","end":"2026-11-14T00:24:51.020Z","until":null}],"gated":[{"command":"just test","start":"2026-11-14T00:22:07.386Z","admitted":"2026-11-14T00:22:07.402Z","end":"2026-11-14T00:24:51.020Z","cpu":1214300}],"shell":[{"calls":[{"command":"git status","start":"2026-11-14T00:21:58.004Z","end":"2026-11-14T00:21:58.051Z"}],"cpu":30,"shared":false}],"split":null}
 ```
 
 - `pulls` are the PRs it worked on, attributed as `quest usage` attributes
@@ -2335,7 +2335,7 @@ Claude Code's and Codex's `Stop` hooks queue the session's
 also sample the CPU each shell call used, and Claude Code's `Stop` and
 `SubagentStop` which background commands still run.
 
-It checks a body given by `--body`, a `body=` field, `git commit -m`,
+The footer check reads a body given by `--body`, a `body=` field, `git commit -m`,
 `--body-file -` with a here-document, or a body file. A file
 is read only when its command is the only one on the command line; after
 another command, or piped into `gh`, a body passes unread, since it may hold

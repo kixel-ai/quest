@@ -52,15 +52,17 @@ Agent's choices, for the implementer to revisit. Each run:
   can still name a PR that left the work to a planned follow-up or kept
   older behavior.
 - Read both kinds of gating mistake from each record's `gated` and
-  `shell` lists: gated runs ranked by least CPU, and shell groups by most,
-  with no threshold, judging each command's class rather than one cheap
-  run of a usually heavy command. A `command` holds only program names and
+  `shell` lists: gated runs ranked by least CPU, and unshared shell groups
+  by most, with no threshold, judging each command's class rather than one
+  cheap run of a usually heavy command. List `shared` groups apart, as CPU
+  no command owns: their `cpu` also covers another session's calls in the
+  cgroup, such as a sub-agent's build, so ranking them per command would
+  make a cheap parent command look CPU-heavy. A `command` holds only program names and
   subcommands, such as `cd; cargo build`, so judge the class by those. Count
   `nix build` apart, since
   `nix-daemon` builds outside its gate's scope. A `shell` group's `cpu` is
   null outside a cgroup that holds the session alone, as in a terminal, so
-  say how many groups were unmeasured; a `shared` group's CPU also covers
-  another session's calls in its cgroup, such as a sub-agent's. Records only hold calls from hosts
+  say how many groups were unmeasured. Records only hold calls from hosts
   whose hooks `quest setup` updated since that PR.
 - `quest messages` returns every human turn as a `kind: "message"` entry,
   beside the `kind: "answer"` entries tallied below, so set aside machine-written
