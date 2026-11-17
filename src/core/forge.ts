@@ -1,5 +1,5 @@
 // What quest reads from and writes to a forge, as interfaces with a backend per forge: pull request, check, review,
-// hold, and queue state, claims, and activity to wait on; and opening, editing, readying, commenting on, holding,
+// hold, and queue state, claims, activity to wait on, and a PR's discussion; and opening, editing, readying, commenting on, holding,
 // and picking PRs. Its types are the wire format Kixel Quest serves them in, so both sides parse the same shapes and
 // neither guesses.
 import { TIERS, type Tier } from "./risk";
@@ -154,6 +154,53 @@ export interface Status {
 	duplicates: Duplicate[];
 }
 
+/** A comment on a PR, or in one of its review threads. */
+export interface Comment {
+	author: string;
+	body: string;
+	createdAt: string;
+	url: string;
+}
+
+/** A submitted review and its body; its inline comments are in its threads. */
+export interface PostedReview {
+	reviewer: string;
+	/** approved, changes_requested, commented, or dismissed. */
+	state: string;
+	body: string;
+	commit: string | null;
+	submittedAt: string;
+	url: string;
+}
+
+/** A review thread on a line of the diff, and its comments, oldest first. */
+export interface ReviewThread {
+	/** The ID `quest pr comment --thread` and `quest pr resolve` take. */
+	id: string;
+	path: string;
+	/** The line on the current diff, or the original line once outdated. */
+	line: number | null;
+	outdated: boolean;
+	resolved: boolean;
+	comments: Comment[];
+}
+
+/** A PR's title, body, and discussion, as `quest pr view` prints them. */
+export interface PullView {
+	url: string;
+	title: string;
+	author: string;
+	state: Status["state"];
+	draft: boolean;
+	body: string;
+	/** Comments on the PR itself, oldest first. */
+	comments: Comment[];
+	/** Every submitted review, oldest first. */
+	reviews: PostedReview[];
+	/** Every review thread, resolved ones included, by its first comment. */
+	threads: ReviewThread[];
+}
+
 /** An open PR, from any head repository, as the claim checks read it. */
 export interface OpenPull {
 	number: number;
@@ -259,6 +306,8 @@ export interface Forge {
 	held(sources: ClaimSources, branches: string[]): Promise<Answer<Holdings>>;
 	/** Polls of a PR's activity, starting from `options.since`. */
 	watch(pull: PullRequest, options: WatchOptions): Watch;
+	/** A PR's title, body, comments, reviews, and review threads. */
+	view(pull: PullRequest): Promise<Answer<PullView>>;
 }
 
 /** A PR to open: `branch` in `head` (the repository itself, or a fork of it) onto `base` in `repository`. */
@@ -329,6 +378,7 @@ export interface ForgeCalls {
 	held: { request: { sources: ClaimSources; branches: string[] }; value: Holdings };
 	/** `from` is a `--since` point or a cursor; null starts at the head's push time. */
 	watch: { request: { pull: PullRequest; from: string | null }; value: WatchPoll };
+	view: { request: { pull: PullRequest }; value: PullView };
 	open: { request: { opening: Opening }; value: OpenPull };
 	close: { request: { pull: PullRequest }; value: null };
 	edit: { request: { pull: PullRequest; title: string | null; body: string | null }; value: null };
@@ -345,7 +395,7 @@ export interface ForgeCalls {
 export type ForgeCall = keyof ForgeCalls;
 
 /** The reads, as their paths name them. */
-export const FORGE_READS = ["status", "pulls", "held", "watch"] as const satisfies readonly ForgeCall[];
+export const FORGE_READS = ["status", "pulls", "held", "watch", "view"] as const satisfies readonly ForgeCall[];
 
 /** The writes, as their paths name them; Kixel Quest serves them only for a repository it hosts. */
 export const FORGE_WRITES = [
@@ -543,6 +593,38 @@ const openPull = shape<OpenPull>({
 	body: string,
 });
 
+const comment = shape<Comment>({ author: string, body: string, createdAt: time, url: string });
+
+const pullView = shape<PullView>({
+	url: string,
+	title: string,
+	author: string,
+	state: oneOf(["open", "closed", "merged"]),
+	draft: boolean,
+	body: string,
+	comments: list(comment),
+	reviews: list(
+		shape<PostedReview>({
+			reviewer: string,
+			state: string,
+			body: string,
+			commit: nullable(string),
+			submittedAt: time,
+			url: string,
+		}),
+	),
+	threads: list(
+		shape<ReviewThread>({
+			id: string,
+			path: string,
+			line: nullable(count),
+			outdated: boolean,
+			resolved: boolean,
+			comments: list(comment),
+		}),
+	),
+});
+
 const holdings = shape<Holdings>({
 	claims: list(shape<Claim>({ branch, url: nullable(string), pull: nullable(openPull) })),
 	landed: mapOf(branch, sha),
@@ -576,6 +658,7 @@ const REQUESTS: { [C in ForgeCall]: Parse<ForgeCalls[C]["request"]> } = {
 		branches: list(branch),
 	}),
 	watch: shape({ pull: pullRequest, from: nullable(name) }),
+	view: shape({ pull: pullRequest }),
 	open: shape({
 		opening: shape<Opening>({
 			repository,
@@ -602,6 +685,7 @@ const VALUES: { [C in ForgeCall]: Parse<ForgeCalls[C]["value"]> } = {
 	pulls: list(openPull),
 	held: holdings,
 	watch: watchPoll,
+	view: pullView,
 	open: openPull,
 	close: none,
 	edit: none,

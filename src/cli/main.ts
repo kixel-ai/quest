@@ -45,6 +45,7 @@ import {
 } from "./agent";
 import type { ForgeWrites, Hold, Repository } from "../core";
 import { GitHubWrites } from "./writes";
+import { GitHubForge } from "../github/forge";
 import { type ClaimDependencies, held, openDrafts, reach, target, upstream, upstreamRefs } from "./claims";
 import {
 	type ForgeDependencies,
@@ -114,7 +115,7 @@ import { KIXEL_QUEST_URL, kixelUrl, tokensPath } from "./tokens";
 import { CONTEXT, GUIDE, GUIDE_SECTIONS, SKILLS, guideSections, sectionHeading, skill } from "./skills";
 import { type Terminal, Theme } from "./theme";
 import { type Snapshot, checkout, collect, load, snapshot, under } from "./tree";
-import { statusLines } from "./status";
+import { statusLines, viewLines } from "./status";
 import { TOKEN_MAX_MISSING, daysBefore, runTokenMax, usage, usageDependencies, usageLines } from "./usage";
 import { waitForActivity, WaitTimeout } from "./wait";
 import { version } from "./version";
@@ -946,13 +947,33 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 
 	const pr = program
 		.command("pr")
-		.summary("Open, edit, and comment on pull requests, and resolve their review threads")
+		.summary("Read, open, edit, and comment on pull requests, and resolve their review threads")
 		.description(
-			"Open, edit, and comment on pull requests, and resolve their review threads, on GitHub or on a " +
+			"Read, open, edit, and comment on pull requests, and resolve their review threads, on GitHub or on a " +
 				"repository Kixel Quest hosts, where gh cannot reach. Flags follow gh pr's.\n\n" +
 				FORGE_WRITES +
 				"Exits 0 when done, 3 when refused, 2 for invalid arguments, and 1 for other failures.",
 		);
+	pr.command("view")
+		.description(
+			"Print a PR's title, body, comments, reviews, and review threads with their comments, resolved ones " +
+				"included. Plain output prints url, state, draft, author, and title lines; then each post after a -- " +
+				"line, as a header line and its text: the body under a body line, each comment " +
+				"(comment <author> <time> <url>) and review (review <state> <reviewer> <time> <url>) by time, and each " +
+				"review thread (thread <id> current|outdated resolved|unresolved <path>:<line>) followed by its " +
+				"comments. --json prints the same as one deterministic object. It reads the forge itself, never Kixel " +
+				"Quest's index, so a comment just posted shows.",
+		)
+		.argument("<pr>", PR_ARGUMENT)
+		.option("--json", "Print a deterministic JSON object")
+		.action((value: string, options: { json?: boolean }) => {
+			const { pull, hosted } = locatePull(value, root(), process.env);
+			const forge = hosted ? hostedForge(pull, forgeDependencies()) : new GitHubForge(gitHubDependencies(warn));
+			settle(forge.view(pull), ({ value: view }) => {
+				if (options.json) print(JSON.stringify(view));
+				else for (const line of viewLines(view)) print(line);
+			});
+		});
 	const bodyOptions = (command: Command) =>
 		command
 			.addOption(new Option("-b, --body <text>", "Body text").conflicts("bodyFile"))

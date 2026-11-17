@@ -17,6 +17,7 @@ import {
 	type Opening,
 	type Pick,
 	type PullRequest,
+	type PullView,
 	type Repository,
 	type Status,
 	type Watch,
@@ -303,6 +304,10 @@ export class KixelQuestForge implements Forge, ForgeWrites {
 				return answer;
 			},
 		};
+	}
+
+	view(pull: PullRequest): Promise<Answer<PullView>> {
+		return this.kixel.call("view", { pull });
 	}
 
 	async open(opening: Opening): Promise<OpenPull> {

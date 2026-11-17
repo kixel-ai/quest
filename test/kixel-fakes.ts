@@ -11,6 +11,7 @@ import {
 	FORGE_CALLS,
 	type Hold,
 	type OpenPull,
+	type PostedReview,
 	forgeJson,
 	handedBack,
 	parseForgeRequest,
@@ -35,6 +36,8 @@ export interface KixelPull {
 	/** Review threads by ID, and whether each is resolved. */
 	threads: Map<string, boolean>;
 	comments: { body: string; thread: string | null }[];
+	/** Reviews others submitted. */
+	reviews: PostedReview[];
 	hold: Hold | null;
 	/** The head a pick named, while it stands. */
 	picked: string | null;
@@ -72,6 +75,7 @@ export class FakeKixelQuest {
 			sha: HEAD,
 			threads: new Map(),
 			comments: [],
+			reviews: [],
 			hold: null,
 			picked: null,
 			...pull,
@@ -127,6 +131,36 @@ export class FakeKixelQuest {
 					return request.sources.upstream.tips?.has(branch) ? [{ branch, url: null, pull: null }] : [];
 				});
 				return { claims, landed: new Map() };
+			}
+			case "view": {
+				const posted = (body: string, index: number) => ({
+					author: "agent",
+					body,
+					createdAt: new Date(pull!.created + index + 1).toISOString(),
+					url: `${this.url(pull!.number)}#comment-${index + 1}`,
+				});
+				const comments = pull!.comments.map((comment, index) => ({
+					...comment,
+					posted: posted(comment.body, index),
+				}));
+				return {
+					url: this.url(pull!.number),
+					title: pull!.title,
+					author: "agent",
+					state: pull!.state,
+					draft: pull!.draft,
+					body: pull!.body,
+					comments: comments.filter((each) => each.thread === null).map((each) => each.posted),
+					reviews: pull!.reviews,
+					threads: [...pull!.threads].map(([id, resolved]) => ({
+						id,
+						path: "src/main.ts",
+						line: 1,
+						outdated: false,
+						resolved,
+						comments: comments.filter((each) => each.thread === id).map((each) => each.posted),
+					})),
+				};
 			}
 			case "open": {
 				const { branch, base, title, body, draft } = request.opening;

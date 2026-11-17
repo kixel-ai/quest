@@ -54,11 +54,11 @@ export function bodyFindings(body: string): { title: string; key: string }[] {
 	});
 }
 
-const THREAD_COMMENT = "author { __typename login } authorAssociation body url pullRequestReview { id }";
+const THREAD_COMMENT = "author { __typename login } authorAssociation body createdAt url pullRequestReview { id }";
 const FIELDS = {
 	reviews: "id url state author { __typename login } authorAssociation body submittedAt commit { oid }",
 	reviewThreads:
-		"id isResolved resolvedBy { __typename login } " +
+		"id isResolved isOutdated path line originalLine resolvedBy { __typename login } " +
 		`comments(first: 100) { pageInfo { hasNextPage endCursor } nodes { ${THREAD_COMMENT} } }`,
 	comments: "author { __typename login } authorAssociation body createdAt url",
 	// Each edit's `diff` is the whole body as that edit left it, so the earliest one is the body the PR opened with.

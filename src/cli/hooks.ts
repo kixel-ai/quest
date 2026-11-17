@@ -341,7 +341,7 @@ export function hook(input: unknown, deps: HookDependencies = { env: process.env
 			)
 				throw new Error("expected a PreToolUse hook's JSON input with tool_name and tool_input");
 			if (!usesQuest(value.cwd)) return "";
-			const rules = broken({ tool: value.tool_name, input: value.tool_input, cwd: value.cwd });
+			const rules = broken({ tool: value.tool_name, input: value.tool_input, cwd: value.cwd }, deps.env);
 			if (rules.length === 0) {
 				if (value.tool_name === "Bash" && typeof value.tool_input.command === "string")
 					logCall(

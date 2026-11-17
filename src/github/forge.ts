@@ -6,6 +6,7 @@ import type {
 	Holdings,
 	OpenPull,
 	PullRequest,
+	PullView,
 	Repository,
 	Status,
 	Watch,
@@ -14,6 +15,7 @@ import type {
 import { held, openPullRequests } from "./claims";
 import { GitHub, type GitHubDependencies, object, string } from "./client";
 import { pullRequestStatus } from "./status";
+import { pullView } from "./view";
 import { watchPull } from "./wait";
 
 /** Reads from GitHub with the dependencies' token. */
@@ -59,6 +61,10 @@ export class GitHubForge implements Forge {
 	watch(pull: PullRequest, options: WatchOptions): Watch {
 		const github = new GitHub(this.deps, options.deadline);
 		return watchPull(github, this.deps, pull, options.since, { viewer: () => this.#viewerOn(github) });
+	}
+
+	async view(pull: PullRequest): Promise<Answer<PullView>> {
+		return live(await pullView(new GitHub(this.deps), pull));
 	}
 }
 

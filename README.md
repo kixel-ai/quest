@@ -660,17 +660,21 @@ Kixel Quest's queue lands by fast-forwarding the base and drops once the head
 moves, so it takes no `--squash`, `--rebase`, or `--direct`. `quest review`
 records its rounds in the PR body there too.
 
-Where `gh` cannot reach, `quest pr` opens, edits, and comments on PRs and
-resolves review threads, with `gh pr`'s flags; it works on GitHub too:
+Where `gh` cannot reach, `quest pr` reads, opens, edits, and comments on PRs
+and resolves review threads, with `gh pr`'s flags; it works on GitHub too.
+`quest pr view` prints a PR's body, comments, reviews, and every review thread
+with its comments, read from the forge itself rather than an index:
 
 ```sh
+quest pr view 12
 quest pr create --title "Plan the forge" --body-file .tmp/body.md --draft
 quest pr edit 12 --body-file .tmp/body.md
 quest pr comment 12 --thread <thread-id> --body "Fixed in the head."
 quest pr resolve 12 <thread-id>
 ```
 
-The writes are `POST /forge/<write>`, beside the reads: `open`, `close`,
+Its read is `POST /forge/view`, answering the same `{"value", "asOf"}`. The
+writes are `POST /forge/<write>`, beside the reads: `open`, `close`,
 `edit`, `comment`, `resolve`, `hold`, `ready`, `release`, and `pick`, each
 answering `{"value", "asOf"}` with `asOf` null. A 409 with `{"error"}` refuses
 the write as things stand, such as a PR another session holds, a second open
@@ -2428,7 +2432,14 @@ hook on shell commands and file edits denies, with the rule as the reason:
   or `comment`, or `gh api` with a `body` field) without a `(Written by ...)`
   line;
 - a scratch file written under `/tmp`, outside the checkout, by a redirection,
-  `tee`, `mkdir`, `mktemp`, `git clone` or `worktree add`, or a file edit.
+  `tee`, `mkdir`, `mktemp`, `git clone` or `worktree add`, or a file edit;
+- in a checkout whose origin is on [Kixel Quest](#work-on-a-repository-kixel-quest-hosts),
+  a `gh pr` or `gh api` call aimed at that repository, which `gh` cannot reach:
+  one naming no repository, through `--repo`, `GH_REPO`, a PR URL, or an
+  endpoint's `repos/<owner>/<repo>`, or naming that one by its owner and name
+  or on Kixel Quest; a URL or host elsewhere, such as github.com, names
+  another repository. The reason names the `quest` command to run, such as
+  `quest pr view`.
 
 For Claude Code, `Stop` and `SubagentStop` hooks refuse to end an agent's turn
 while a `quest gate` command it started still runs in the background, naming
