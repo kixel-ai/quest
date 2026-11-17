@@ -14,7 +14,8 @@ Planned 2026-11-15 with the maintainer in rind's `/quest-run` of 2026-11-14 and 
 Found 2026-11-17 in this quest's first PR, which also makes a failed fixer's handback quote the tail of its own output after the gate's failure:
 
 - Each of those runs' job logs on the maintainer's host holds one line, `quest land check: upload exceeds 256 MiB`: the host's fixer client tars Quest's prepared checkout, `.git` and working tree, and refuses past its 256 MiB upload cap. Quest's checkout for kixel-ai/rind#789 tars to 382 MB, 97 MB of `.git` and 274 MB of working tree (235 MB of it `thirdparty/` test vectors and proofs). Quest's checkout is as small as the round allows (only the base, the PR, and the configured tags and branches), so the cause is in the host's fixer service.
-- That fix is kixel-ai/dotfiles' work, per this repository's `AGENTS.md`. Recommended there: upload only `.git` and check the base out in the container, since the working tree is `HEAD`'s and the result already returns as `.git`; that puts rind at about 97 MB. Raising or compressing the cap only defers the next large repository.
+- That fix is kixel-ai/dotfiles' work, per this repository's `AGENTS.md`. ✅ The host's fixer client uploads only `.git` and checks the base out inside the container, since the working tree is `HEAD`'s and the result already returns as `.git`; that puts rind at about 97 MB (rejected: raising the 256 MiB cap; compressing the upload, each of which only defers the next large repository). Settled by the maintainer on 2026-11-17 in moq-dev/quest#763.
+- ✅ A failed fixer's handback quotes its output in every repository, public ones included, with tokens redacted before the tail is cut (rejected: private repositories only; never quoting output). Settled by the maintainer on 2026-11-17 in moq-dev/quest#763.
 - Finish this quest once rind's next dropped PR gets a real fixer run.
 
 ## Waiting

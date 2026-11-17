@@ -59,7 +59,11 @@ export function handbackLog(log: string, lines?: [number, number]): string {
 		.trimEnd();
 }
 
-/** Read a bounded window of a log, or "" when it is missing or not a regular file. */
+/**
+ * Read a bounded window of a log, or "" when it is missing or not a regular file. A tail window that
+ * starts mid-file drops its partial first line, so a cut never splits a token from the prefix that
+ * `redactTokens` matches.
+ */
 function readLog(path: string, window: "head" | "tail"): string {
 	if (!path || !existsSync(path)) return "";
 	const fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
@@ -67,8 +71,10 @@ function readLog(path: string, window: "head" | "tail"): string {
 		const stat = fstatSync(fd);
 		if (!stat.isFile()) return "";
 		const buffer = Buffer.alloc(Math.min(stat.size, 16_384));
-		const length = readSync(fd, buffer, 0, buffer.length, window === "head" ? 0 : stat.size - buffer.length);
-		return buffer.subarray(0, length).toString("utf8");
+		const start = window === "head" ? 0 : stat.size - buffer.length;
+		const length = readSync(fd, buffer, 0, buffer.length, start);
+		const text = buffer.subarray(0, length).toString("utf8");
+		return start > 0 ? text.slice(text.indexOf("\n") + 1) : text;
 	} finally {
 		closeSync(fd);
 	}
@@ -462,9 +468,12 @@ export function settle(
 const OUTPUT_LINES = 20;
 const OUTPUT_LIMIT = 2_000;
 
-/** The last lines the fixer wrapper at job `path` printed, or "" when it printed nothing. */
-function outputTail(path: string): string {
-	const tail = readLog(`${path}.log`, "tail").trimEnd().split("\n").slice(-OUTPUT_LINES).join("\n");
+/**
+ * The last lines the fixer wrapper at job `path` printed, tokens redacted, or "" when it printed
+ * nothing. Redacting before the cut keeps a cut through a token's prefix from posting the rest.
+ */
+export function outputTail(path: string): string {
+	const tail = redactTokens(readLog(`${path}.log`, "tail").trimEnd().split("\n").slice(-OUTPUT_LINES).join("\n"));
 	return tail.length > OUTPUT_LIMIT ? tail.slice(-OUTPUT_LIMIT) : tail;
 }
 
