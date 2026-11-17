@@ -338,6 +338,20 @@ test("gh calls reaching for a repository Kixel Quest hosts are denied, naming th
 	expect(run("GH_REPO=example/other gh api 'repos/{owner}/project/pulls'")).toEqual([RULES.kixel]);
 	expect(run("GH_REPO=example/project gh api 'repos/:owner/:repo/pulls'")).toEqual([RULES.kixel]);
 	expect(run("GH_REPO=example/project gh api graphql -F owner='{owner}' -f query=q")).toEqual([RULES.kixel]);
+	// Filled placeholders keep `GH_REPO`'s host, or `--hostname` over it.
+	expect(run("GH_REPO=github.com/example/project gh api 'repos/{owner}/{repo}/pulls'")).toEqual([]);
+	expect(run("GH_REPO=https://github.com/example/project gh api 'repos/{owner}/{repo}/pulls'")).toEqual([]);
+	expect(run("GH_REPO=localhost:8787/example/project gh api 'repos/{owner}/{repo}/pulls'")).toEqual([RULES.kixel]);
+	expect(run("GH_REPO=http://localhost:8787/example/project gh api 'repos/{owner}/{repo}/pulls'")).toEqual([
+		RULES.kixel,
+	]);
+	expect(run("GH_REPO=github.com/example/project gh api graphql -F owner='{owner}' -f query=q")).toEqual([]);
+	expect(run("GH_REPO=example/project gh api --hostname github.com graphql -F owner='{owner}' -f query=q")).toEqual(
+		[],
+	);
+	expect(
+		run("GH_REPO=github.com/example/project gh api --hostname localhost:8787 'repos/{owner}/{repo}/pulls'"),
+	).toEqual([RULES.kixel]);
 	expect(run("gh api repos/moq-dev/quest/pulls/3")).toEqual([]);
 	expect(run("gh api graphql -f query='{ viewer { login } }'")).toEqual([]);
 	expect(run("gh api user")).toEqual([]);

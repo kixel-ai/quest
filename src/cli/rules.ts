@@ -8,9 +8,10 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 
 import { REFERENCE_MARKER, type Repository, lines } from "../core";
-import { hostedRepository, kixelUrl } from "./forge";
+import { hostedRepository } from "./forge";
 import { readRemote, remoteHost } from "./github";
 import { parse } from "./shell";
+import { kixelUrl } from "./tokens";
 
 const EM_DASH = String.fromCharCode(0x2014);
 
@@ -671,16 +672,18 @@ function kixel({ args, env }: GhCall, check: Check) {
 		if (placeholders && ghRepo === undefined) named = null;
 		else {
 			const [owner, repo] = ghRepo?.split("/").slice(-2) ?? [];
+			// `--hostname` picks the host the repository is on; filled placeholders also carry `GH_REPO`'s own.
+			const on =
+				host ?? (placeholders ? /^(?:[a-z]+:\/\/)?([^/]+)\/[^/]+\/[^/]+$/i.exec(ghRepo!)?.[1] : undefined);
+			const at = (slug: string) => (on === undefined ? slug : `${on}/${slug}`);
 			const path = endpoint.replace(PLACEHOLDER, (_, braced, bare) =>
 				(braced ?? bare) === "owner" ? owner! : repo!,
 			);
 			const match = /^\/?repos\/([^/?#]+\/[^/?#]+)/.exec(path);
 			// A full URL names its host, which is GitHub's API or another forge, never Kixel Quest's.
-			if (match !== null && !/^https?:\/\//.test(endpoint))
-				// `--hostname` picks the host the endpoint's repository is on.
-				named = host === undefined ? match[1]! : `${host}/${match[1]!}`;
+			if (match !== null && !/^https?:\/\//.test(endpoint)) named = at(match[1]!);
 			// A `-F` field, as in a GraphQL query, names the repository `GH_REPO` does.
-			else if (placeholders) named = ghRepo!;
+			else if (placeholders) named = at(`${owner}/${repo}`);
 			else return;
 		}
 	}
