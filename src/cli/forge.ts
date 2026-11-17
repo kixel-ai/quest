@@ -21,12 +21,8 @@ import {
 } from "../core";
 import type { GitHubDependencies } from "../github/client";
 import { GitHubForge } from "../github/forge";
-import { checkedEndpoint, tokenFor, tokensPath } from "./send";
+import { kixelUrl, tokenFor, tokensPath } from "./tokens";
 
-/** Kixel Quest's own URL. */
-export const KIXEL_QUEST = "https://kixel.quest";
-/** The variable naming another Kixel Quest, such as one running locally. */
-export const KIXEL_QUEST_URL = "QUEST_KIXEL_URL";
 /** The variable that, set to `github`, reads GitHub even where Kixel Quest serves the repository. */
 export const FORGE = "QUEST_FORGE";
 
@@ -37,6 +33,8 @@ export interface ForgeDependencies {
 	now(): number;
 	/** Called only once a read goes to GitHub, so Kixel Quest's reads need no GitHub token. */
 	github(): GitHubDependencies;
+	/** What a Kixel Quest failure tells the person to do; by default, to read GitHub instead. */
+	remedy?: string;
 }
 
 /** The Kixel Quest `env` names, with the person's token for it; null without a token, or when reads are on GitHub. */
@@ -45,7 +43,7 @@ export function kixelQuest(deps: ForgeDependencies): KixelQuest | null {
 	if (forced !== undefined && forced !== "" && forced !== "github")
 		throw new Error(`${FORGE} is ${forced}; set it to github to read GitHub, or leave it unset`);
 	if (forced === "github") return null;
-	const url = checkedEndpoint(deps.env[KIXEL_QUEST_URL] || KIXEL_QUEST, KIXEL_QUEST_URL).replace(/\/+$/, "");
+	const url = kixelUrl(deps.env);
 	const token = tokenFor(url, deps.env);
 	return token === null ? null : new KixelQuest(url, token, deps);
 }
@@ -117,7 +115,7 @@ export class KixelQuest {
 	/** A failed request, naming the setting that reads GitHub instead. */
 	#failed(method: string, path: string, why: string): Error {
 		return new Error(
-			`Kixel Quest (${this.url}) failed ${method} ${path}: ${why}; set ${FORGE}=github to read GitHub`,
+			`Kixel Quest (${this.url}) failed ${method} ${path}: ${why}; ${this.deps.remedy ?? `set ${FORGE}=github to read GitHub`}`,
 		);
 	}
 

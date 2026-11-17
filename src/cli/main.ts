@@ -96,18 +96,11 @@ import {
 import { CHECKED_CONTEXT, USER_ASKED, questRoot } from "./rules";
 import { messageLines, messages } from "./messages";
 import { logWait, pullWaitKind, readWaits } from "./waits";
-import {
-	CHECKOUT_CONFIG,
-	SEND_INTERVAL,
-	background,
-	parseInstant,
-	reportIncident,
-	runSender,
-	tokensPath,
-} from "./send";
+import { SEND_INTERVAL, background, parseInstant, reportIncident, runSender } from "./send";
 import { installSender, uninstallSender } from "./service";
 import { heal, init, stubFindings, uninstall } from "./setup";
 import { Refusal, describe, notUpstream, releaseQuest, startQuest } from "./start";
+import { KIXEL_QUEST_URL, tokensPath } from "./tokens";
 import { CONTEXT, GUIDE, GUIDE_SECTIONS, SKILLS, guideSections, sectionHeading, skill } from "./skills";
 import { type Terminal, Theme } from "./theme";
 import { type Snapshot, checkout, collect, load, snapshot, under } from "./tree";
@@ -1274,21 +1267,20 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 			);
 		});
 
-	const recordsCommand = program
-		.command("records")
-		.summary("Send agent sessions' records to the Kixel Code endpoint their checkout names");
+	const recordsCommand = program.command("records").summary("Send agent sessions' records to Kixel Quest");
 	recordsCommand
 		.command("sender")
 		.summary("Run the user's record sender until stopped, as its service does")
 		.description(
-			"Send each session record the stop hook queued, with the records of its sub-agents on this host, to the " +
-				`endpoint its checkout's ${CHECKOUT_CONFIG} names as records, posting {"records": [...], "breakages": [...]}, the breakages the merged PRs among them name under ## Caused by, with the token ` +
-				`${tokensPath()} pairs with that endpoint as a bearer token, one upload per endpoint and repository, ` +
+			"Send each session record the stop hook queued, with the records of its sub-agents on this host, to " +
+				`Kixel Quest's /records (https://kixel.quest, or the one ${KIXEL_QUEST_URL} names), posting {"records": [...], "breakages": [...]}, the breakages the merged PRs among them name under ## Caused by, with the token ` +
+				`${tokensPath()} pairs with its URL as a bearer token, one upload per repository, ` +
 				`then again every ${SEND_INTERVAL / 1000} seconds until stopped, at low priority. A record is built as quest usage ` +
 				"builds it, from token-max's sessions on this host since the earliest queued session's first instant and " +
-				"the PRs updated since then, and replaces its earlier copy, so a resend never doubles. A sent session whose " +
+				"the PRs updated since then, and replaces its earlier copy, so a resend never doubles. A repository Kixel " +
+				"Quest does not serve, as it says on GET /forge, stays queued, unsent. A sent session whose " +
 				"latest branch, or a sub-agent's, heads no PR yet is sent again, with its sub-agents, once a pass for its " +
-				"repository reads a PR opened on that branch, until its transcript is gone. An endpoint that " +
+				"repository reads a PR opened on that branch, until its transcript is gone. A Kixel Quest that " +
 				"refuses the token (401 or 403) is sent nothing more until the token changes; any other failure keeps the " +
 				"sessions queued, retried after a minute and then twice as long each time up to six hours, and the next " +
 				"stop hook says so once. Before a record is built, a cheap model, " +
@@ -1328,13 +1320,13 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 			"A stable ID for the incident, such as the alert's URL; a later report with it replaces this one",
 		)
 		.description(
-			"Post one breakage to the endpoint this checkout's " +
-				`${CHECKOUT_CONFIG} names, with the token ${tokensPath()} pairs with it, as {"records": [], "breakages": [...]}. ` +
+			"Post one breakage to Kixel Quest's /records " +
+				`(https://kixel.quest, or the one ${KIXEL_QUEST_URL} names), with the token ${tokensPath()} pairs with its URL, as {"records": [], "breakages": [...]}. ` +
 				"Without --pr the incident is open, its culprit unknown; report the same ID again with --pr to close it on " +
 				"its culprit, whose tier, size, writers, and local reviewers are read from its PR body, or name it on the " +
 				"culprit's ## Caused by line of the fix, as (incident <id>), whose record then replaces it. It posts at once " +
 				"and retries nothing, for a deploy or alert to call.\n\nUses GH_TOKEN, GITHUB_TOKEN, or gh auth token. " +
-				"Exits 0 when the endpoint took it, 2 for invalid arguments, and 1 for other failures, refusal included.",
+				"Exits 0 when Kixel Quest took it, 2 for invalid arguments, and 1 for other failures, refusal included.",
 		)
 		.addOption(new Option("--found <by>", "Who or what found it").choices(FINDERS).makeOptionMandatory())
 		.option("--pr <number>", "The PR that caused it", positiveInteger("--pr"))
@@ -1964,8 +1956,8 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				`user asked for passes with the \`${USER_ASKED}\` prefix. Stop and SubagentStop refuse to end the ` +
 				"turn, naming each command, while a `quest gate` command the ending agent started runs in Claude " +
 				"Code's background: one whose background ID its transcript holds. Otherwise Claude Code's and Codex's Stop " +
-				`queue the session's record for the endpoint the checkout's ${CHECKOUT_CONFIG} names, for quest records ` +
-				"sender to send; a checkout naming none, an endpoint the user holds no token for, or a host whose sender " +
+				"queue the session's record for Kixel Quest, for quest records " +
+				"sender to send; a user holding no token for it, or a host whose sender " +
 				"does not run says so once as a system message, as does a sender's failure. Exits 1 on malformed input or an event it " +
 				"does not handle.",
 		)

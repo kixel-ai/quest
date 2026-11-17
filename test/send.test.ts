@@ -6,38 +6,32 @@ import { expect, test } from "vitest";
 
 import { REFERENCE_LINE, parseUpload } from "../src/core";
 import { hook } from "../src/cli/hooks";
-import {
-	type SendDependencies,
-	parseInstant,
-	queue,
-	reportIncident,
-	runSender,
-	sendPass,
-	tokensPath,
-} from "../src/cli/send";
+import { type SendDependencies, parseInstant, queue, reportIncident, runSender, sendPass } from "../src/cli/send";
+import { tokensPath } from "../src/cli/tokens";
 import type { Session } from "../src/cli/usage";
 import { tempDir } from "./fixture";
 
-const ENDPOINT = "https://kixel.example/records";
+/** The Kixel Quest the tests' users hold a token for, as `QUEST_KIXEL_URL` names it, and where it takes records. */
+const URL_ = "https://kixel.example";
+const ENDPOINT = `${URL_}/records`;
 
-/** A checkout that uses Quest, with a GitHub origin, naming `endpoint` when given. */
-function checkout(endpoint?: unknown): string {
+/** A checkout that uses Quest, with a GitHub origin. */
+function checkout(): string {
 	const dir = tempDir();
 	execFileSync("git", ["init", "-q", dir]);
 	execFileSync("git", ["-C", dir, "remote", "add", "origin", "https://github.com/acme/proj.git"]);
 	writeFileSync(join(dir, "AGENTS.md"), `${REFERENCE_LINE}\n`);
-	if (endpoint !== undefined) writeFileSync(join(dir, ".quest.json"), JSON.stringify({ records: endpoint }));
 	return dir;
 }
 
-/** A user's state and config, with a token for `ENDPOINT` unless told otherwise, and a sender running. */
+/** A user's state and config, with a token for `URL_` unless told otherwise, and a sender running. */
 function home(token: string | null = "secret"): NodeJS.ProcessEnv {
-	const env = { XDG_STATE_HOME: tempDir(), XDG_CONFIG_HOME: tempDir() };
+	const env = { XDG_STATE_HOME: tempDir(), XDG_CONFIG_HOME: tempDir(), QUEST_KIXEL_URL: URL_ };
 	mkdirSync(join(env.XDG_STATE_HOME, "quest", "records"), { recursive: true });
 	writeFileSync(senderPid(env), String(process.pid));
 	if (token !== null) {
 		mkdirSync(join(env.XDG_CONFIG_HOME, "quest"));
-		writeFileSync(tokensPath(env), JSON.stringify({ [ENDPOINT]: token }));
+		writeFileSync(tokensPath(env), JSON.stringify({ [URL_]: token }));
 	}
 	return env;
 }
@@ -52,27 +46,27 @@ const senderPid = (env: NodeJS.ProcessEnv) => join(env.XDG_STATE_HOME!, "quest",
 
 const stopped = (cwd: string) => ({ harness: "claude", session: "s1", transcript: transcript(), cwd });
 
-test("a checkout naming no endpoint, or one without the user's token, queues nothing and says so once", () => {
+test("a user without a token queues nothing and is told once", () => {
 	const env = home(null);
-	const bare = checkout();
-	expect(queue(stopped(bare), env)).toEqual({
-		notices: [expect.stringContaining("acme/proj names no Kixel Code endpoint in .quest.json")],
-		queued: false,
-	});
-	expect(queue(stopped(bare), env)).toEqual({ notices: [], queued: false });
-	const named = checkout(ENDPOINT);
-	expect(queue(stopped(named), env).notices).toEqual([expect.stringContaining(`holds no token for ${ENDPOINT}`)]);
-	expect(queue(stopped(named), env).notices).toEqual([]);
+	const root = checkout();
+	expect(queue(stopped(root), env).notices).toEqual([expect.stringContaining(`holds no token for ${URL_}`)]);
+	expect(queue(stopped(root), env)).toEqual({ notices: [], queued: false });
 	// Outside a checkout that uses Quest, nothing is said.
 	expect(queue(stopped(tempDir()), env)).toEqual({ notices: [], queued: false });
 });
 
-test("a checkout's endpoint must be HTTPS, or HTTP to this host", () => {
-	const env = home();
-	expect(() => queue(stopped(checkout("http://kixel.example/records")), env)).toThrow("not an HTTPS URL");
-	expect(() => queue(stopped(checkout(7)), env)).toThrow("not a URL");
-	expect(queue(stopped(checkout("http://127.0.0.1:8080/records")), env).notices).toEqual([
-		expect.stringContaining("holds no token for http://127.0.0.1:8080/records"),
+test("the Kixel Quest URL defaults to kixel.quest, and must be HTTPS, or HTTP to this host", () => {
+	const root = checkout();
+	const env = home(null);
+	delete env.QUEST_KIXEL_URL;
+	expect(queue(stopped(root), env).notices).toEqual([
+		expect.stringContaining("holds no token for https://kixel.quest"),
+	]);
+	expect(() => queue(stopped(root), { ...env, QUEST_KIXEL_URL: "http://kixel.example" })).toThrow("not an HTTPS URL");
+	expect(() => queue(stopped(root), { ...env, QUEST_KIXEL_URL: "kixel" })).toThrow("not a URL");
+	// A trailing slash names the same Kixel Quest, so the token pairs with it.
+	expect(queue(stopped(root), { ...env, QUEST_KIXEL_URL: "http://127.0.0.1:8080/" }).notices).toEqual([
+		expect.stringContaining("holds no token for http://127.0.0.1:8080,"),
 	]);
 });
 
@@ -110,8 +104,10 @@ function sender(
 	sessions: Session[] | null,
 	during: () => void = () => {},
 	pulls: object[] = [],
+	served: string[] = ["acme/proj"],
 ) {
 	const uploads: { token: string; body: unknown }[] = [];
+	const asked: string[] = [];
 	const windows: Date[] = [];
 	const slept: number[] = [];
 	const clock = clockOf(env);
@@ -119,15 +115,17 @@ function sender(
 		new Response(JSON.stringify(value), { headers: { "content-type": "application/json" } });
 	const github = async (input: string | URL | Request) => {
 		const url = new URL(String(input));
-		if (url.pathname === "/repos/acme/proj")
+		const named = /^\/repos\/acme\/(proj|other)$/.exec(url.pathname)?.[1];
+		if (named)
 			return json({
 				owner: { login: "acme" },
-				name: "proj",
+				name: named,
 				default_branch: "main",
-				clone_url: "https://github.com/acme/proj.git",
-				ssh_url: "git@github.com:acme/proj.git",
+				clone_url: `https://github.com/acme/${named}.git`,
+				ssh_url: `git@github.com:acme/${named}.git`,
 				fork: false,
 			});
+		if (url.pathname === "/repos/acme/other/pulls") return json([]);
 		if (url.pathname === "/repos/acme/proj/pulls/3") return json(CULPRIT);
 		if (url.pathname === "/repos/acme/proj/pulls")
 			return json([
@@ -173,6 +171,12 @@ function sender(
 		},
 		interval: 60_000,
 		fetch: (async (input: string | URL | Request, init?: RequestInit) => {
+			// Kixel Quest says which repositories it serves, at GET /forge, before anything is posted.
+			if (String(input) === `${URL_}/forge`) {
+				expect(init?.method).toBe("GET");
+				asked.push(String((init?.headers as Record<string, string>).Authorization));
+				return json({ login: "me", repositories: served });
+			}
 			expect(String(input)).toBe(ENDPOINT);
 			uploads.push({
 				token: String((init?.headers as Record<string, string>).authorization),
@@ -182,7 +186,7 @@ function sender(
 			return new Response("", { status: typeof status === "number" ? status : status() });
 		}) as typeof fetch,
 	};
-	return { deps, uploads, windows, slept, clock };
+	return { deps, uploads, asked, windows, slept, clock };
 }
 
 /** A merged PR older than any window, which later PRs name as a culprit. */
@@ -204,7 +208,7 @@ const pending = (env: NodeJS.ProcessEnv) => readdirSync(join(env.XDG_STATE_HOME!
 
 test("the sender posts each queued session with its sub-agents, from its transcript's start", async () => {
 	const env = home();
-	const root = checkout(ENDPOINT);
+	const root = checkout();
 	expect(queue(stopped(root), env)).toEqual({ notices: [], queued: true });
 	const sessions = [
 		session("s1", "quest/m0/a"),
@@ -226,9 +230,76 @@ test("the sender posts each queued session with its sub-agents, from its transcr
 	expect(pending(env)).toEqual([]);
 });
 
+test("a repository Kixel Quest does not serve stays queued, unsent and without token-max, and is said once", async () => {
+	const env = home();
+	const root = checkout();
+	queue(stopped(root), env);
+	const refusing = sender(env, 200, [session("s1", "quest/m0/a")], undefined, [], ["acme/other"]);
+	expect(await sendPass(refusing.deps)).toEqual([]);
+	expect(refusing.asked).toEqual(["Bearer secret"]);
+	expect(refusing.uploads).toEqual([]);
+	expect(refusing.windows).toEqual([]);
+	expect(pending(env)).toHaveLength(1);
+	expect(queue(stopped(root), env).notices).toEqual([
+		expect.stringContaining(`${URL_} does not serve acme/proj, so its sessions' records stay queued`),
+	]);
+	// Said once, and it stays queued while Kixel Quest does not serve it; once it does, the session is sent.
+	await sendPass(refusing.deps);
+	expect(queue(stopped(root), env).notices).toEqual([]);
+	const serving = sender(env, 200, [session("s1", "quest/m0/a")]);
+	expect(await sendPass(serving.deps)).toEqual([
+		{ endpoint: ENDPOINT, repository: "acme/proj", records: 1, breakages: 0, refused: false },
+	]);
+	expect(pending(env)).toEqual([]);
+});
+
+test("a repository Kixel Quest serves is matched by the base its PRs open on, not a fork's origin", async () => {
+	const env = home();
+	const root = checkout();
+	execFileSync("git", ["-C", root, "remote", "set-url", "origin", "https://github.com/me/proj.git"]);
+	queue(stopped(root), env);
+	const pass = sender(env, 200, [session("s1", "quest/m0/a", { repositories: ["me/proj"] })]);
+	const github = pass.deps.github;
+	pass.deps.github = () => ({
+		...github(),
+		fetch: (async (input: string | URL | Request, init?: RequestInit) => {
+			const url = new URL(String(input));
+			if (url.pathname === "/repos/me/proj")
+				return new Response(
+					JSON.stringify({
+						owner: { login: "me" },
+						name: "proj",
+						default_branch: "main",
+						clone_url: "https://github.com/me/proj.git",
+						ssh_url: "git@github.com:me/proj.git",
+						fork: true,
+						parent: { owner: { login: "acme" }, name: "proj" },
+					}),
+				);
+			if (url.pathname === "/repos/acme/proj/contents/quest/README.md") return new Response("{}");
+			return (github().fetch as typeof fetch)(input, init);
+		}) as typeof fetch,
+	});
+	const [sent] = await sendPass(pass.deps);
+	expect(sent).toMatchObject({ repository: "acme/proj", records: 1 });
+});
+
+test("a Kixel Quest that cannot say what it serves fails the pass, keeping the queue", async () => {
+	const env = home();
+	queue(stopped(checkout()), env);
+	const down = sender(env, 200, [session("s1", "quest/m0/a")]);
+	const fetch = down.deps.fetch;
+	down.deps.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
+		String(input) === `${URL_}/forge`
+			? new Response("", { status: 503 })
+			: fetch(input, init)) as typeof globalThis.fetch;
+	await expect(sendPass(down.deps)).rejects.toThrow("failed GET /forge: HTTP 503; its records stay queued");
+	expect(pending(env)).toHaveLength(1);
+});
+
 test("the sender labels each session's steps and sends its split; one no model could label is sent unsplit", async () => {
 	const env = home();
-	const root = checkout(ENDPOINT);
+	const root = checkout();
 	queue(stopped(root), env);
 	const file = join(tempDir(), "s1.jsonl");
 	writeFileSync(
@@ -275,7 +346,7 @@ test("the sender labels each session's steps and sends its split; one no model c
 
 test("a failed upload stays queued and is said once; a refused token stops sending", async () => {
 	const env = home();
-	const root = checkout(ENDPOINT);
+	const root = checkout();
 	queue(stopped(root), env);
 	const failing = sender(env, 500, [session("s1", "quest/m0/a")]);
 	await expect(sendPass(failing.deps)).rejects.toThrow("answered 500");
@@ -295,20 +366,20 @@ test("a failed upload stays queued and is said once; a refused token stops sendi
 		queued: false,
 	});
 	// A new token is tried again.
-	writeFileSync(tokensPath(env), JSON.stringify({ [ENDPOINT]: "fresh" }));
+	writeFileSync(tokensPath(env), JSON.stringify({ [URL_]: "fresh" }));
 	expect(queue(stopped(root), env).queued).toBe(true);
 });
 
 test("the sender fails loud without token-max, keeping the queue", async () => {
 	const env = home();
-	queue(stopped(checkout(ENDPOINT)), env);
+	queue(stopped(checkout()), env);
 	await expect(sendPass(sender(env, 200, null).deps)).rejects.toThrow("token-max is not installed");
 	expect(pending(env)).toHaveLength(1);
 });
 
 test("a failing group backs off, doubling, without widening the others' window", async () => {
 	const env = home();
-	const root = checkout(ENDPOINT);
+	const root = checkout();
 	queue(stopped(root), env);
 	const failing = sender(env, 500, [session("s1", "quest/m0/a")]);
 	await expect(sendPass(failing.deps)).rejects.toThrow("tried again in 1 minutes");
@@ -321,25 +392,31 @@ test("a failing group backs off, doubling, without widening the others' window",
 	failing.clock.now += 60_000;
 	expect(await sendPass(failing.deps)).toEqual([]);
 	// Another repository's stop, queued later, is sent from its own start meanwhile.
-	const other = checkout(ENDPOINT);
+	const other = checkout();
 	execFileSync("git", ["-C", other, "remote", "set-url", "origin", "https://github.com/acme/other.git"]);
 	writeFileSync(join(other, "later.jsonl"), `{"type":"user","timestamp":"2026-11-06T11:00:00Z"}\n`);
 	queue({ ...stopped(other), session: "s2", transcript: join(other, "later.jsonl") }, env);
-	const others = sender(env, 200, [session("s2", "main", { repositories: ["acme/other"] })]);
-	// The stand-in GitHub knows no acme/other, so that group fails too, after token-max read only its window.
-	await expect(sendPass(others.deps)).rejects.toThrow("acme/other");
+	const others = sender(
+		env,
+		200,
+		[session("s2", "main", { repositories: ["acme/other"] })],
+		undefined,
+		[],
+		["acme/proj", "acme/other"],
+	);
+	expect(await sendPass(others.deps)).toHaveLength(1);
 	expect(others.windows).toEqual([new Date("2026-11-06T11:00:00Z")]);
-	// Once its wait ends, the first group is tried again and sent, and only the other's stop stays queued.
+	// Once its wait ends, the first group is tried again and sent.
 	failing.clock.now += 60_000;
 	const fixed = sender(env, 200, [session("s1", "quest/m0/a")]);
-	await expect(sendPass(fixed.deps)).rejects.toThrow("acme/other");
+	expect(await sendPass(fixed.deps)).toHaveLength(1);
 	expect(fixed.uploads).toHaveLength(1);
-	expect(pending(env)).toHaveLength(1);
+	expect(pending(env)).toEqual([]);
 });
 
 test("an unreadable backoff file reads as none, so it blocks no group", async () => {
 	const env = home();
-	queue(stopped(checkout(ENDPOINT)), env);
+	queue(stopped(checkout()), env);
 	const failing = sender(env, 500, [session("s1", "quest/m0/a")]);
 	await expect(sendPass(failing.deps)).rejects.toThrow("tried again in 1 minutes");
 	const dir = join(env.XDG_STATE_HOME!, "quest", "records", "backoff");
@@ -354,7 +431,7 @@ test("an unreadable backoff file reads as none, so it blocks no group", async ()
 
 test("an upload this version's own parseUpload refuses fails on the host, never posted", async () => {
 	const env = home();
-	queue(stopped(checkout(ENDPOINT)), env);
+	queue(stopped(checkout()), env);
 	const { deps, uploads } = sender(env, 200, [session("s1", "quest/m0/a", { cost: -1 })]);
 	await expect(sendPass(deps)).rejects.toThrow("its own parseUpload refuses");
 	expect(uploads).toEqual([]);
@@ -363,7 +440,7 @@ test("an upload this version's own parseUpload refuses fails on the host, never 
 
 test("a session token-max no longer lists is dropped and said, without holding back the rest", async () => {
 	const env = home();
-	const root = checkout(ENDPOINT);
+	const root = checkout();
 	queue(stopped(root), env);
 	queue({ ...stopped(root), session: "gone" }, env);
 	const { deps, uploads } = sender(env, 200, [session("s1", "quest/m0/a")]);
@@ -379,19 +456,17 @@ test("a session token-max no longer lists is dropped and said, without holding b
 
 test("a sub-agent is sent only where its own checkout routes it", async () => {
 	const env = home();
-	const root = checkout(ENDPOINT);
+	const root = checkout();
 	queue(stopped(root), env);
-	const other = checkout(ENDPOINT);
+	const other = checkout();
 	execFileSync("git", ["-C", other, "remote", "set-url", "origin", "https://github.com/acme/fork.git"]);
 	const sessions = [
 		session("s1", "quest/m0/a"),
-		// Live checkouts: this one, another of the same origin and endpoint, one opted out, and another origin's.
+		// Live checkouts: this one, another of the same origin, and another origin's.
 		session("here", "quest/m0/a", { parent: "s1", cwd: root }),
-		session("twin", "quest/m0/a", { parent: "s1", cwd: checkout(ENDPOINT) }),
-		session("optedOut", "quest/m0/a", { parent: "s1", cwd: checkout() }),
+		session("twin", "quest/m0/a", { parent: "s1", cwd: checkout() }),
 		// A deleted folder routes by the checkout still holding its nearest existing parent.
 		session("hereGone", "quest/m0/a", { parent: "s1", cwd: join(root, "deleted", "sub") }),
-		session("optedOutGone", "quest/m0/a", { parent: "s1", cwd: join(checkout(), "deleted", "sub") }),
 		// A deleted nested clone of another repository, inside this checkout.
 		session("nestedGone", "main", {
 			parent: "s1",
@@ -417,7 +492,7 @@ test("a sub-agent is sent only where its own checkout routes it", async () => {
 
 test("an origin that a URL rewrite points at GitHub is read as configured", () => {
 	const env = home();
-	const root = checkout(ENDPOINT);
+	const root = checkout();
 	execFileSync("git", ["-C", root, "remote", "set-url", "origin", "gh:acme/proj"]);
 	execFileSync("git", ["-C", root, "config", "url.https://github.com/.insteadOf", "gh:"]);
 	expect(queue(stopped(root), env).queued).toBe(true);
@@ -429,7 +504,7 @@ test("an origin that a URL rewrite points at GitHub is read as configured", () =
 
 test("Claude Code's and Codex's Stop queue the session", () => {
 	const env = home();
-	const cwd = checkout(ENDPOINT);
+	const cwd = checkout();
 	const deps = { env };
 	const base = { hook_event_name: "Stop", cwd, session_id: "c1", transcript_path: transcript() };
 	expect(hook({ ...base, background_tasks: [] }, deps)).toBe("");
@@ -439,7 +514,7 @@ test("Claude Code's and Codex's Stop queue the session", () => {
 	expect(hook({ ...base, hook_event_name: "SubagentStop", background_tasks: [] }, deps)).toBe("");
 	expect(pending(env)).toHaveLength(2);
 	// What it cannot queue, it says instead of failing the hook.
-	writeFileSync(join(cwd, ".quest.json"), "{");
+	writeFileSync(tokensPath(env), "{");
 	expect(JSON.parse(hook({ ...base, background_tasks: [] }, deps)).systemMessage).toContain(
 		"cannot queue this session's record",
 	);
@@ -451,7 +526,7 @@ test("Claude Code's and Codex's Stop queue the session", () => {
 test("the sender passes every interval, records its PID, and outlives a failed pass", async () => {
 	const env = home();
 	writeFileSync(senderPid(env), "");
-	const root = checkout(ENDPOINT);
+	const root = checkout();
 	queue(stopped(root), env);
 	let status = 500;
 	const { deps, uploads, slept, clock } = sender(env, () => status, [session("s1", "quest/m0/a")]);
@@ -476,7 +551,7 @@ test("the sender passes every interval, records its PID, and outlives a failed p
 
 test("a stop with no sender running queues the session and says so once per outage", () => {
 	const env = home();
-	const root = checkout(ENDPOINT);
+	const root = checkout();
 	writeFileSync(senderPid(env), "999999999");
 	const down = queue(stopped(root), env);
 	expect(down).toEqual({
@@ -495,7 +570,7 @@ test("a stop with no sender running queues the session and says so once per outa
 
 test("a stop queued while its earlier record uploads stays queued", async () => {
 	const env = home();
-	const root = checkout(ENDPOINT);
+	const root = checkout();
 	queue(stopped(root), env);
 	const first = sender(env, 200, [session("s1", "quest/m0/a")], () => {
 		if (first.uploads.length === 1) queue(stopped(root), env);
@@ -510,7 +585,7 @@ test("a stop queued while its earlier record uploads stays queued", async () => 
 
 test("a queued session for an endpoint that refused its token is dropped unsent", async () => {
 	const env = home();
-	const root = checkout(ENDPOINT);
+	const root = checkout();
 	queue(stopped(root), env);
 	const refusing = sender(env, 403, [session("s1", "quest/m0/a")]);
 	// Queued before the refusal, so queue() could not drop it.
@@ -527,7 +602,7 @@ test("a queued session for an endpoint that refused its token is dropped unsent"
 
 test("the sender sends the breakages a merged fix in its window names, reading an older culprit", async () => {
 	const env = home();
-	queue(stopped(checkout(ENDPOINT)), env);
+	queue(stopped(checkout()), env);
 	const fix = {
 		...CULPRIT,
 		number: 8,
@@ -563,7 +638,7 @@ test("the sender sends the breakages a merged fix in its window names, reading a
 
 test("an incident is posted at once, open until reported again with its culprit, and fails loud", async () => {
 	const env = home();
-	const root = checkout(ENDPOINT);
+	const root = checkout();
 	const { deps, uploads } = sender(env, 200, []);
 	const report = (pull: number | null) =>
 		reportIncident(
@@ -600,14 +675,11 @@ test("an incident is posted at once, open until reported again with its culprit,
 	await expect(
 		reportIncident({ cwd: root, id: "x", found: "person", pull: null, at: 0 }, sender(home(null), 200, []).deps),
 	).rejects.toThrow("holds no token");
-	await expect(
-		reportIncident({ cwd: checkout(), id: "x", found: "person", pull: null, at: 0 }, deps),
-	).rejects.toThrow("names no record endpoint");
 });
 
 test("a fix that merges after its sessions were sent reaches the store with the next session", async () => {
 	const env = home();
-	const root = checkout(ENDPOINT);
+	const root = checkout();
 	queue(stopped(root), env);
 	const fix = (merged: boolean) => ({
 		...CULPRIT,
@@ -640,7 +712,7 @@ test("a fix that merges after its sessions were sent reaches the store with the 
 
 test("an incident reported from a subdirectory as `.`, as with no --root, finds its checkout", async () => {
 	const env = home();
-	const root = checkout(ENDPOINT);
+	const root = checkout();
 	mkdirSync(join(root, "sub"));
 	const { deps } = sender(env, 200, []);
 	const before = process.cwd();
@@ -655,7 +727,7 @@ test("an incident reported from a subdirectory as `.`, as with no --root, finds 
 
 test("a merged fix naming an open incident sends one record under the incident, once however many name it", async () => {
 	const env = home();
-	queue(stopped(checkout(ENDPOINT)), env);
+	queue(stopped(checkout()), env);
 	const fix = (number: number, updated: string) => ({
 		...CULPRIT,
 		number,
@@ -728,7 +800,7 @@ function later(env: NodeJS.ProcessEnv, root: string, id: string): Session {
 
 test("a session sent before its branch's PR opened is resent with the PR on its group's next pass", async () => {
 	const env = home();
-	const root = checkout(ENDPOINT);
+	const root = checkout();
 	queue(stopped(root), env);
 	const first = session("s1", "fix/x", { files: [transcript()] });
 	const before = sender(env, 200, [first]);
@@ -757,7 +829,7 @@ test("a session sent before its branch's PR opened is resent with the PR on its 
 
 test("a pass that fails before its resends are queued reads their PRs again, even ones older than its sessions", async () => {
 	const env = home();
-	const root = checkout(ENDPOINT);
+	const root = checkout();
 	queue(stopped(root), env);
 	const first = session("s1", "fix/x", { files: [transcript()] });
 	await sendPass(sender(env, 200, [first]).deps);
@@ -793,7 +865,7 @@ test("a pass that fails before its resends are queued reads their PRs again, eve
 
 test("a resend names every PR its earlier upload did, even one its own window misses", async () => {
 	const env = home();
-	const root = checkout(ENDPOINT);
+	const root = checkout();
 	const at = (time: string) => Date.parse(`2026-11-06T${time}:00Z`);
 	// s0 starts at 10:00, so the first upload reads PR 7, last updated at 11:00; s1 starts after that update.
 	queue({ ...stopped(root), session: "s0" }, env);
@@ -835,7 +907,7 @@ test("a resend names every PR its earlier upload did, even one its own window mi
 
 test("a moved session and a sub-agent's fresh branch wait for their own PRs; a PR on an older branch triggers nothing", async () => {
 	const env = home();
-	const root = checkout(ENDPOINT);
+	const root = checkout();
 	queue(stopped(root), env);
 	const at = (time: string) => Date.parse(`2026-11-06T${time}:00Z`);
 	// s1 moved from quest/m0/a, whose PR 7 is open, to fix/y; its sub-agent works on fix/sub.
@@ -889,7 +961,7 @@ test("a moved session and a sub-agent's fresh branch wait for their own PRs; a P
 
 test("a remembered session is forgotten once its transcript is gone, unreadable, or unlisted, without a notice", async () => {
 	const env = home();
-	const root = checkout(ENDPOINT);
+	const root = checkout();
 	const files = [transcript(), transcript(), transcript()];
 	for (const id of ["gone", "garbled", "unlisted"]) queue({ ...stopped(root), session: id }, env);
 	const sessions = ["gone", "garbled", "unlisted"].map((id, i) => session(id, `fix/${id}`, { files: [files[i]!] }));
