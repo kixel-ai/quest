@@ -48,6 +48,11 @@ export interface Pending {
 	origin: string;
 	prefix: string;
 	endpoint: string;
+	/**
+	 * On a resend, the instant, epoch ms, its earlier upload read PRs from, so the resend reads at least as far back and
+	 * names every PR that upload did.
+	 */
+	read?: number;
 }
 
 /** Where the sender keeps its queue and what it has said. */
@@ -386,13 +391,15 @@ async function sendOnce(deps: SendDependencies, dir: string): Promise<Sent[]> {
 			const [owner, repo] = origin.split("/") as [string, string];
 			const repository = await baseRepository(client, { owner, repo }, prefix);
 			// PRs are read from the last upload's read, if earlier, so a fix that merged after its sessions were sent,
-			// as through the merge queue, still reaches the store with the next session.
+			// as through the merge queue, still reaches the store with the next session. A resend reads from its earlier
+			// upload's read too, if earlier, so it drops no PR that upload named.
 			const read = deps.now() - CLOCK_SKEW;
-			const pulls: Pull[] = await updatedPulls(
-				client,
-				repository,
-				Math.min(since, readCursor(deps.env, id) ?? since),
+			const from = Math.min(
+				since,
+				readCursor(deps.env, id) ?? since,
+				...group.map((q) => q.pending.read ?? Number.POSITIVE_INFINITY),
 			);
+			const pulls: Pull[] = await updatedPulls(client, repository, from);
 			const emit = new Set<Session>();
 			const missing: typeof group = [];
 			for (const q of group) {
@@ -514,9 +521,10 @@ async function sendOnce(deps: SendDependencies, dir: string): Promise<Sent[]> {
 			if (!response.ok)
 				throw new Error(`${endpoint} answered ${response.status}: ${(await response.text()).slice(0, 500)}`);
 			clearBackoff(deps.env, id);
-			writeCursor(deps.env, id, read);
-			remember(deps.env, id, { group, emit, byId, waiting: unheaded([...emit], exported, pulls) });
+			remember(deps.env, id, { group, emit, byId, from, waiting: unheaded([...emit], exported, pulls) });
 			resendDue(deps.env, id, pulls, group);
+			// Only once every resend these PRs call for is queued, so a pass that fails before then reads them again.
+			writeCursor(deps.env, id, read);
 			for (const q of group) settle(q);
 			sent.push({
 				endpoint,
@@ -696,7 +704,7 @@ function clearBackoff(env: NodeJS.ProcessEnv, id: string): void {
  * a sub-agent sent with it headed no PR. It is queued again once one does, so that PR's cost and time count it.
  */
 interface Remembered {
-	/** Its stop as last queued, queued again under a new ID to resend it. */
+	/** Its stop as last queued, with where that upload read PRs from, queued again under a new ID to resend it. */
 	pending: Pending;
 	/** Its transcript's files: once none is left, token-max lists it no more, so it is forgotten. */
 	files: string[];
@@ -722,6 +730,8 @@ function remember(
 		group: { pending: Pending }[];
 		emit: Set<Session>;
 		byId: Map<string, Session>;
+		/** Where the upload's PR read began. */
+		from: number;
 		waiting: Map<Session, Reached>;
 	},
 ): void {
@@ -752,7 +762,14 @@ function remember(
 			continue;
 		}
 		mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
-		writeFileSync(`${path}.new`, JSON.stringify({ pending, files: root.files, waiting } satisfies Remembered));
+		writeFileSync(
+			`${path}.new`,
+			JSON.stringify({
+				pending: { ...pending, read: sent.from },
+				files: root.files,
+				waiting,
+			} satisfies Remembered),
+		);
 		renameSync(`${path}.new`, path);
 	}
 }
@@ -788,7 +805,18 @@ function resendDue(env: NodeJS.ProcessEnv, id: string, pulls: Pull[], sent: { pe
 function readRemembered(path: string): Remembered | null {
 	try {
 		const value = JSON.parse(readFileSync(path, "utf8")) as Partial<Remembered> | null;
-		return typeof value?.pending === "object" && Array.isArray(value.files) && Array.isArray(value.waiting)
+		return typeof value?.pending === "object" &&
+			value.pending !== null &&
+			Array.isArray(value.files) &&
+			value.files.every((file) => typeof file === "string") &&
+			Array.isArray(value.waiting) &&
+			value.waiting.every(
+				(each) =>
+					typeof each?.name === "string" &&
+					typeof each.first === "number" &&
+					Array.isArray(each.repositories) &&
+					each.repositories.every((r) => typeof r === "string"),
+			)
 			? (value as Remembered)
 			: null;
 	} catch {

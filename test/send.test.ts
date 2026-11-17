@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { expect, test } from "vitest";
@@ -754,6 +754,84 @@ test("a session sent before its branch's PR opened is resent with the PR on its 
 	expect(remembered(env)).toEqual(["s2"]);
 });
 
+test("a pass that fails before its resends are queued reads their PRs again, even ones older than its sessions", async () => {
+	const env = home();
+	const root = checkout(ENDPOINT);
+	queue(stopped(root), env);
+	const first = session("s1", "fix/x", { files: [transcript()] });
+	await sendPass(sender(env, 200, [first]).deps);
+	expect(remembered(env)).toEqual(["s1"]);
+	// The PR opens at 12:30, before s2 starts, so only the cursor's read still reaches it.
+	const s2 = later(env, root, "s2");
+	const pr = opened(9, "fix/x", "2026-11-06T12:30:00Z");
+	const queueDir = join(env.XDG_STATE_HOME!, "quest", "records", "pending");
+	// The upload succeeds, then queueing s1's resend fails: the queue's directory is a file for the rest of the pass.
+	const failing = sender(
+		env,
+		200,
+		[first, s2],
+		() => {
+			renameSync(queueDir, `${queueDir}.away`);
+			writeFileSync(queueDir, "");
+		},
+		[pr],
+	);
+	failing.clock.now = Date.parse("2026-11-06T14:00:00Z");
+	await expect(sendPass(failing.deps)).rejects.toThrow("EEXIST");
+	rmSync(queueDir);
+	renameSync(`${queueDir}.away`, queueDir);
+	expect(pending(env)).toHaveLength(1);
+	const retry = sender(env, 200, [first, s2], () => {}, [pr]);
+	retry.clock.now += 120_000;
+	await sendPass(retry.deps);
+	expect(pending(env)).toHaveLength(1);
+	const resend = sender(env, 200, [first, s2], () => {}, [pr]);
+	await sendPass(resend.deps);
+	expect(parseUpload(resend.uploads[0]!.body).records.map((r) => [r.session, r.pulls])).toEqual([["s1", [9]]]);
+});
+
+test("a resend names every PR its earlier upload did, even one its own window misses", async () => {
+	const env = home();
+	const root = checkout(ENDPOINT);
+	const at = (time: string) => Date.parse(`2026-11-06T${time}:00Z`);
+	// s0 starts at 10:00, so the first upload reads PR 7, last updated at 11:00; s1 starts after that update.
+	queue({ ...stopped(root), session: "s0" }, env);
+	writeFileSync(join(root, "s1.jsonl"), `{"type":"user","timestamp":"2026-11-06T11:30:00Z"}\n`);
+	queue({ ...stopped(root), transcript: join(root, "s1.jsonl") }, env);
+	const s0 = session("s0", "main", { files: [transcript()] });
+	const late = { start: at("11:30"), end: at("11:50") };
+	const s1 = session("s1", "quest/m0/a", {
+		...late,
+		files: [join(root, "s1.jsonl")],
+		branches: [{ name: "quest/m0/a", first: at("11:30"), last: at("11:40") }],
+	});
+	const sub = session("sub", "fix/sub", {
+		...late,
+		parent: "s1",
+		branches: [{ name: "fix/sub", first: at("11:30"), last: at("11:40") }],
+	});
+	const first = sender(env, 200, [s0, s1, sub]);
+	await sendPass(first.deps);
+	expect(parseUpload(first.uploads[0]!.body).records.map((r) => [r.session, r.pulls])).toEqual([
+		["s0", []],
+		["s1", [7]],
+		["sub", [7]],
+	]);
+	// The sub-agent's PR opens, so the tree is resent, alone in its group's pass.
+	const s2 = later(env, root, "s2");
+	const pr = opened(11, "fix/sub", "2026-11-06T13:30:00Z");
+	const next = sender(env, 200, [s0, s1, sub, s2], () => {}, [pr]);
+	next.clock.now = at("14:00");
+	await sendPass(next.deps);
+	const resend = sender(env, 200, [s0, s1, sub, s2], () => {}, [pr]);
+	await sendPass(resend.deps);
+	expect(resend.windows).toEqual([new Date(late.start)]);
+	expect(parseUpload(resend.uploads[0]!.body).records.map((r) => [r.session, r.pulls])).toEqual([
+		["s1", [7]],
+		["sub", [11]],
+	]);
+});
+
 test("a moved session and a sub-agent's fresh branch wait for their own PRs; a PR on an older branch triggers nothing", async () => {
 	const env = home();
 	const root = checkout(ENDPOINT);
@@ -821,7 +899,9 @@ test("a remembered session is forgotten once its transcript is gone, unreadable,
 	const [group] = readdirSync(dir);
 	for (const name of readdirSync(join(dir, group!))) {
 		const path = join(dir, group!, name);
-		if (readFileSync(path, "utf8").includes('"garbled"')) writeFileSync(path, '{"pending":');
+		// Its JSON parses, but a waiting entry is null, which would throw on every pass if read as a branch.
+		const kept = readFileSync(path, "utf8");
+		if (kept.includes('"garbled"')) writeFileSync(path, JSON.stringify({ ...JSON.parse(kept), waiting: [null] }));
 	}
 	// Every branch's PR opens; only the session whose transcript is still there is queued again.
 	const pulls = ["gone", "garbled", "unlisted"].map((id, i) => opened(20 + i, `fix/${id}`, "2026-11-06T13:30:00Z"));
