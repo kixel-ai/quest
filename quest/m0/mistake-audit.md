@@ -51,6 +51,19 @@ Agent's choices, for the implementer to revisit. Each run:
   merged fix's bullet that opens with the culprit's link, but a culprit
   can still name a PR that left the work to a planned follow-up or kept
   older behavior.
+- Read both kinds of gating mistake from each record's `gated` and
+  `shell` lists: gated runs ranked by least CPU, and unshared shell groups
+  by most, with no threshold, judging each command's class rather than one
+  cheap run of a usually heavy command. List `shared` groups apart, as CPU
+  no command owns: their `cpu` also covers another session's calls in the
+  cgroup, such as a sub-agent's build, so ranking them per command would
+  make a cheap parent command look CPU-heavy. A `command` holds only program names and
+  subcommands, such as `cd; cargo build`, so judge the class by those. Count
+  `nix build` apart, since
+  `nix-daemon` builds outside its gate's scope. A `shell` group's `cpu` is
+  null outside a cgroup that holds the session alone, as in a terminal, so
+  say how many groups were unmeasured. Records only hold calls from hosts
+  whose hooks `quest setup` updated since that PR.
 - `quest messages` returns every human turn as a `kind: "message"` entry,
   beside the `kind: "answer"` entries tallied below, so set aside machine-written
   ones yourself: bare skill invocations, pasted relays and logs, accepted
@@ -114,8 +127,13 @@ Check first next run:
   [moq-dev/quest#652](https://github.com/moq-dev/quest/pull/652) lands.
 - Gating mistakes, after `quest context` said on 2026-11-15 to gate by
   CPU, not run time: `quest gate quest review` ran 591 times in the 14
-  days before, 126 of them on 11-12. Count it from transcripts until
-  [gating records](/quest/m0/benchmark/gating.md) land, then from them.
+  days before, 126 of them on 11-12, at 2.2 CPU-seconds and 0.03 cores
+  over a 58-second median run; 20% to 22% of gate scopes over 3 days used
+  under 5 CPU-seconds, together 0.2% of gated CPU, most of them usually
+  heavy commands that were cheap that time. Ungated CPU was unmeasured
+  before
+  [moq-dev/quest#747](https://github.com/moq-dev/quest/pull/747); count
+  both from the records once it lands, from transcripts for earlier days.
 - Whether moq-dev/moq and moq-dev/moq.pro planned the runtime follow-ups
   of moq-dev/quest's 2026-11-11 run PR, and whether their escapes recurred.
 

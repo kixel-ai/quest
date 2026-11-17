@@ -815,6 +815,7 @@ describe("usage", () => {
 				return exported;
 			},
 			waits: () => waits,
+			calls: () => [],
 			split: () => null,
 		});
 		return { root, deps, sessions, calls, requests };

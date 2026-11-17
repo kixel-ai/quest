@@ -1813,7 +1813,7 @@ latest upload, since one sender sends a session's uploads in order. The type is
 `parseUpload`, which refuse a malformed record whole:
 
 ```json
-{"harness":"claude","session":"7ef44bda-fb9b-436f-9ed8-9013d0f38d46","parent":null,"repository":"acme/app","branch":"quest/m0/login","quest":"quest/m0/login.md","pulls":[42],"role":"implementing","models":[{"model":"claude-opus-5-5","effort":"high","input":230,"cacheWrite":211500,"cacheRead":15800000,"output":88800,"cost":6.64,"complete":true}],"cost":6.64,"complete":true,"start":"2026-11-14T00:06:12.270Z","end":"2026-11-14T00:31:40.120Z","waits":[{"kind":"gate-queue","start":"2026-11-14T00:22:07.386Z","end":"2026-11-14T00:22:07.402Z","until":null}],"split":null}
+{"harness":"claude","session":"7ef44bda-fb9b-436f-9ed8-9013d0f38d46","parent":null,"repository":"acme/app","branch":"quest/m0/login","quest":"quest/m0/login.md","pulls":[42],"role":"implementing","models":[{"model":"claude-opus-5-5","effort":"high","input":230,"cacheWrite":211500,"cacheRead":15800000,"output":88800,"cost":6.64,"complete":true}],"cost":6.64,"complete":true,"start":"2026-11-14T00:06:12.270Z","end":"2026-11-14T00:31:40.120Z","waits":[{"kind":"gate-queue","start":"2026-11-14T00:22:07.386Z","end":"2026-11-14T00:22:07.402Z","until":null},{"kind":"gate-run","start":"2026-11-14T00:22:07.402Z","end":"2026-11-14T00:24:51.020Z","until":null}],"gated":[{"command":"just test","start":"2026-11-14T00:22:07.386Z","admitted":"2026-11-14T00:22:07.402Z","end":"2026-11-14T00:24:51.020Z","cpu":1214300}],"shell":[{"calls":[{"command":"git status","start":"2026-11-14T00:21:58.004Z","end":"2026-11-14T00:21:58.051Z"}],"cpu":30,"shared":false}],"split":null}
 ```
 
 - `pulls` are the PRs it worked on, attributed as `quest usage` attributes
@@ -1849,6 +1849,48 @@ latest upload, since one sender sends a session's uploads in order. The type is
   session on another host in `quest usage --ssh`, or one whose transcript has
   lines token-max could not read either. Like token costs, waits count only
   those that ended since the window's start.
+- `gated` lists each outermost `quest gate` run: its `command`, when it
+  asked to start, when it was `admitted` (null when it ended queued), when it
+  ended, and the CPU milliseconds its command used, read from its systemd
+  scope once it exits, or null where the gate owns no scope, as on macOS or
+  Windows. The gate logs
+  each run as one line among the waits, and the record takes its
+  `gate-queue` and `gate-run` waits from it. `nix build` counts little here,
+  since `nix-daemon` builds outside the scope.
+- `shell` lists its shell calls, each with its `command`, in groups: calls that
+  overlapped, in parallel or in the background, are one group. A group's
+  `cpu` is the milliseconds the session's own cgroup used from its first
+  call's start to its last call's end, which counts what ran outside the
+  gate, and the harness meanwhile, but no gated command, whose scope is
+  elsewhere. Quest's tool hooks sample that counter around each call into
+  `$XDG_STATE_HOME/quest/calls`, kept like the waits, and only where the
+  cgroup holds the session alone: one tree of processes whose top is the
+  harness, the process Claude Code names in `CLAUDE_PID` or one named
+  `codex`, as when an app such as T3 Code starts each agent session in a
+  systemd scope of its own. A terminal's scope has the terminal's shell on
+  top, so its groups, like those on macOS, have a null `cpu`.
+  A call Claude Code moved to the background runs until the first turn end
+  that no longer lists it; a call that never returned, as one denied, is
+  left out. Codex's calls end when the tool returns, so a command it left
+  running counts only until then. A group shared by sessions in one cgroup,
+  as a sub-agent's with its parent's, is in each of their records, listing
+  only that session's calls, with `shared` true. Both lists are null for a
+  session on another host; `gated` counts the runs that ended since the
+  window's start, and `shell` the groups that started since then. To find
+  where a group began, `quest usage` reads the call log from the day before
+  the window's, and earlier days while a call it read began on one; only a
+  background call handed off and finished within one turn of over a day can
+  still split a group at the window's start.
+- A `command` keeps only the programs it ran, in order and each once, with
+  the subcommand of those that take one, such as `cd; cargo build; tail`:
+  never arguments, assignments, redirections, or here-document bodies, since
+  a command line can carry a secret and records leave the host. Programs
+  such as `git`, `cargo`, `just`, `nix`, and `npm` keep their subcommand
+  when it is one of a fixed list of common ones, such as `build`, `check`,
+  and `test`; any other's first argument is data and stays. A program counts
+  only as a shell builtin or one the host can run, on `PATH` or by its path,
+  so a variable, or a word Quest's reading of the script mistook for a
+  program, is `?`.
 - `split` is where the rest of its time went, as the next section describes;
   null until every step is labeled, and for a session on another host.
 
@@ -2335,10 +2377,13 @@ the ID Claude Code gave it on backgrounding it, so a sibling's gate does not
 hold an agent. Claude Code lists a command only while it runs, so the
 refusal ends with the gate. Codex runs no such hook. Once the turn can end,
 Claude Code's and Codex's `Stop` hooks queue the session's
-[record](#session-records).
+[record](#session-records). For that record, the `PreToolUse` hook and a
+`PostToolUse` hook on shell commands, with Claude Code's `PostToolUseFailure`,
+also sample the CPU each shell call used, and Claude Code's `Stop` and
+`SubagentStop` which background commands still run.
 
-`quest` must be on the `PATH` the agent starts with, as for the worktree `--body`, a `body=` field,
-`git commit -m`, `--body-file -` with a here-document, or a body file. A file
+The footer check reads a body given by `--body`, a `body=` field, `git commit -m`,
+`--body-file -` with a here-document, or a body file. A file
 is read only when its command is the only one on the command line; after
 another command, or piped into `gh`, a body passes unread, since it may hold
 something else by the time the command runs. `quest context` still prints these rules,

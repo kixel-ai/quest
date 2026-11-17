@@ -163,6 +163,7 @@ function sender(
 			return sessions;
 		},
 		waits: () => [],
+		calls: () => [],
 		ask: async () => {
 			throw new Error("no model can label here");
 		},

@@ -23,6 +23,7 @@ import {
 } from "../src/cli/hooks";
 import { init } from "../src/cli/setup";
 import { CONTEXT } from "../src/cli/skills";
+import { readCalls } from "../src/cli/calls";
 import { tempDir } from "./fixture";
 
 const ours = { type: "command", command: HOOK_COMMAND };
@@ -220,15 +221,82 @@ test("SessionStart adds nothing where the repository does not use Quest", () => 
 	expect(hook({ hook_event_name: "SessionStart", cwd: tempDir() })).toBe("");
 });
 
+/** Hook dependencies writing to a fresh state directory, sampling a fixed counter, with `cat` and `ls` on PATH. */
+function sampled(usage = 5_000) {
+	// Stub programs, since a host such as NixOS keeps neither in /bin or /usr/bin; Windows launches by extension.
+	const bin = tempDir();
+	const stub = process.platform === "win32" ? ".cmd" : "";
+	for (const program of ["cat", "ls"]) writeFileSync(join(bin, program + stub), "#!/bin/sh\n", { mode: 0o755 });
+	const env = { XDG_STATE_HOME: tempDir(), XDG_CONFIG_HOME: tempDir(), PATH: bin };
+	const sample = () => ({ at: "2026-11-15T10:00:00.000Z", cgroup: "/app.slice/agent.scope", usage });
+	return { env, sample, lines: () => readCalls(Date.parse("2026-11-15T00:00:00Z"), env) };
+}
+
 test("PreToolUse denies a call that breaks a checked rule, only where the repository uses Quest", () => {
 	const cwd = checkout(`${REFERENCE_LINE}\n`);
-	const call = { hook_event_name: "PreToolUse", cwd, tool_name: "Bash", tool_input: { command: "git push" } };
-	const output = JSON.parse(hook(call));
+	const deps = sampled();
+	const call = {
+		hook_event_name: "PreToolUse",
+		cwd,
+		session_id: "s1",
+		tool_use_id: "t1",
+		tool_name: "Bash",
+		tool_input: { command: "git push" },
+	};
+	const output = JSON.parse(hook(call, deps));
 	expect(output.hookSpecificOutput).toMatchObject({ hookEventName: "PreToolUse", permissionDecision: "deny" });
 	expect(output.hookSpecificOutput.permissionDecisionReason).toContain("refspec");
-	expect(hook({ ...call, tool_input: { command: "git push origin refs/heads/a:refs/heads/a" } })).toBe("");
-	expect(hook({ ...call, cwd: checkout(null) })).toBe("");
-	expect(() => hook({ hook_event_name: "PreToolUse", cwd })).toThrow("tool_name");
+	// A denied call never runs, so nothing samples it.
+	expect(deps.lines()).toEqual([]);
+	expect(hook({ ...call, tool_input: { command: "git push origin refs/heads/a:refs/heads/a" } }, deps)).toBe("");
+	expect(hook({ ...call, cwd: checkout(null) }, deps)).toBe("");
+	expect(deps.lines().map((l) => l.kind)).toEqual(["start"]);
+	expect(() => hook({ hook_event_name: "PreToolUse", cwd }, deps)).toThrow("tool_name");
+});
+
+test("the tool hooks sample each shell call's start and return, naming its session, agent, and background task", () => {
+	const cwd = checkout(`${REFERENCE_LINE}\n`);
+	const deps = sampled();
+	const claude = { cwd, session_id: "s1", agent_id: "a1", tool_use_id: "t1", tool_name: "Bash" };
+	const command = `cat > x <<'EOF'\n${"y".repeat(300)}\nEOF`;
+	expect(hook({ ...claude, hook_event_name: "PreToolUse", tool_input: { command } }, deps)).toBe("");
+	expect(
+		hook(
+			{
+				...claude,
+				hook_event_name: "PostToolUseFailure",
+				tool_input: { command },
+				tool_response: { backgroundTaskId: "b7" },
+			},
+			deps,
+		),
+	).toBe("");
+	const codex = { cwd, session_id: "c1", turn_id: "u1", tool_use_id: "t2", tool_name: "Bash" };
+	hook({ ...codex, hook_event_name: "PreToolUse", tool_input: { command: "ls -la hunter2" } }, deps);
+	hook(
+		{ ...codex, hook_event_name: "PostToolUse", tool_input: { command: "ls -la hunter2" }, tool_response: "ok" },
+		deps,
+	);
+	// Edits are no shell calls.
+	hook({ ...claude, hook_event_name: "PostToolUse", tool_name: "Write", tool_input: {} }, deps);
+	const sample = { at: "2026-11-15T10:00:00.000Z", cgroup: "/app.slice/agent.scope", usage: 5_000 };
+	expect(deps.lines()).toEqual([
+		{
+			kind: "start",
+			harness: "claude",
+			session: "s1",
+			agent: "a1",
+			call: "t1",
+			command: "cat",
+			...sample,
+		},
+		{ kind: "end", harness: "claude", session: "s1", agent: "a1", call: "t1", task: "b7", ...sample },
+		{ kind: "start", harness: "codex", session: "c1", agent: null, call: "t2", command: "ls", ...sample },
+		{ kind: "end", harness: "codex", session: "c1", agent: null, call: "t2", task: null, ...sample },
+	]);
+	expect(() =>
+		hook({ ...claude, tool_use_id: undefined, hook_event_name: "PostToolUse", tool_input: {} }, deps),
+	).toThrow("tool_use_id");
 });
 
 /** A background task as Claude Code lists it in a Stop hook's input. */
@@ -260,9 +328,16 @@ test.each([
 		],
 	};
 	// A user's own state, so a sender's failure on this host is never said here; this checkout has no origin.
-	const deps = { env: { XDG_STATE_HOME: tempDir(), XDG_CONFIG_HOME: tempDir() } };
+	const deps = sampled();
 	const output = JSON.parse(hook(stop, deps));
 	expect(output.decision).toBe("block");
+	// Every turn end records the shell tasks still running, so a background call's end is known.
+	expect(deps.lines()[0]).toMatchObject({
+		kind: "stop",
+		harness: "claude",
+		session: "s1",
+		running: ["b1", "b2", "b3"],
+	});
 	expect(output.reason).toContain("- cd repo && quest gate just test");
 	expect(output.reason).not.toContain("just check");
 	// Without a transcript, each running gate counts as the agent's.

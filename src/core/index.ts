@@ -105,13 +105,17 @@ export {
 	breakageKey,
 	parseBreakage,
 } from "./breakage";
+export { COMMAND_LIMIT, type Runs, argvName, commandName, isCommandName } from "./command";
 export {
+	type GatedRun,
 	type ModelSpend,
 	type RecordUpload,
 	ROLES,
 	type Role,
 	type SessionRecord,
 	type SessionWait,
+	type ShellCall,
+	type ShellGroup,
 	SPLIT_CATEGORIES,
 	type SplitCategory,
 	type SplitUsage,

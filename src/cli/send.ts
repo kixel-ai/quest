@@ -31,6 +31,7 @@ import {
 	updatedPulls,
 } from "./usage";
 import { type LoggedWait } from "./waits";
+import type { CallLine } from "./calls";
 
 /** The checkout's file naming its record endpoint, as `{"records": "https://..."}`. */
 export const CHECKOUT_CONFIG = ".quest.json";
@@ -261,6 +262,7 @@ export interface SendDependencies {
 	/** token-max's sessions on this host since an instant, or null when it is not installed. */
 	sessions(since: Date): Session[] | null;
 	waits(since: number): LoggedWait[];
+	calls(since: number): CallLine[];
 	/** Asks the models that split each session's time. */
 	ask: SplitDependencies["ask"];
 	fetch: typeof globalThis.fetch;
@@ -374,6 +376,7 @@ async function sendOnce(deps: SendDependencies, dir: string): Promise<Sent[]> {
 	const { kept } = fold(exported);
 	const byId = new Map(kept.flatMap((s) => (s.id === null ? [] : [[`${s.harness}\0${s.id}`, s] as const])));
 	const waits = deps.waits(since);
+	const calls = deps.calls(since);
 	const client = new GitHub(deps.github());
 	const sent: Sent[] = [];
 	const failures: string[] = [];
@@ -490,6 +493,7 @@ async function sendOnce(deps: SendDependencies, dir: string): Promise<Sent[]> {
 				evidence: exported,
 				pulls,
 				waits,
+				calls,
 				emit,
 				since,
 				split: (s, waits, from) => {
