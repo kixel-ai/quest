@@ -16,7 +16,7 @@ import { dirname, join, relative } from "node:path";
 
 import { expect, test } from "vitest";
 
-import { check, formatFinding, ready } from "../src/core";
+import { AUDITS, check, formatFinding, ready } from "../src/core";
 import { CONTEXT_LIMIT, hook } from "../src/cli/hooks";
 import { REFERENCE_LINE, init, stubFindings, uninstall } from "../src/cli/setup";
 import { SKILLS } from "../src/cli/skills";
@@ -541,33 +541,28 @@ function findings(dir: string): string[] {
 
 const QUEST = "# [S] Work\n\n## Goal\n\nWork.\n";
 
+/** The stub paths init plants in milestone `m`, in AUDITS order. */
+const stubs = (m: string) => AUDITS.map((audit) => `quest/${m}/audit-${audit.name}.md`);
+
 test("a fresh init plants each audit after an empty m0, ready at once", () => {
 	const dir = tempDir();
 	const changed = init(dir);
-	expect(changed).toEqual(
-		expect.arrayContaining([
-			"quest/m0/README.md",
-			"quest/m1/README.md",
-			"quest/m1/audit-tree.md",
-			"quest/m1/audit-deps.md",
-		]),
-	);
+	expect(changed).toEqual(expect.arrayContaining(["quest/m0/README.md", "quest/m1/README.md", ...stubs("m1")]));
 	const stub = read(dir, "quest/m1/audit-deps.md");
 	expect(stub).toMatch(/^# \[M\] Audit dependencies\n\n## Goal\n\n.*`quest audit deps`.*\n\n## Audit\n\n- deps\n$/);
 	expect(findings(dir)).toEqual([]);
-	expect(ready(load(dir), "2026-11-10")).toEqual(["quest/m1/audit-deps.md", "quest/m1/audit-tree.md"]);
+	expect(ready(load(dir), "2026-11-10")).toEqual(stubs("m1").sort());
 	expect(init(dir)).toEqual([]);
 });
 
 test("init plants each audit in the milestone after the lowest one with work left, requiring it", () => {
 	const dir = tempDir();
 	init(dir);
-	for (const path of ["quest/m1/audit-tree.md", "quest/m1/audit-deps.md", "quest/m1/README.md"])
-		rmSync(join(dir, path));
+	for (const path of [...stubs("m1"), "quest/m1/README.md"]) rmSync(join(dir, path));
 	// m0 is finished; m1 holds work, so the stubs wait for it in a new m2.
 	write(dir, "quest/m1/README.md", "# Next\n\n## Goal\n\nNext.\n");
 	write(dir, "quest/m1/work.md", QUEST);
-	expect(init(dir)).toEqual(["quest/m2/README.md", "quest/m2/audit-tree.md", "quest/m2/audit-deps.md"]);
+	expect(init(dir)).toEqual(["quest/m2/README.md", ...stubs("m2")]);
 	expect(read(dir, "quest/m2/audit-tree.md")).toContain(
 		"\n## Required\n\n- [m1](/quest/m1/README.md) - the audit runs after it\n",
 	);
@@ -580,14 +575,18 @@ test("init plants no audit a quest names or the root skips, and never edits a pl
 	write(
 		dir,
 		"quest/README.md",
-		"# Quests\n\n## Goal\n\nWork.\n\n## Skipped audits\n\n- deps - nothing to depend on\n",
+		"# Quests\n\n## Goal\n\nWork.\n\n## Skipped audits\n\n- deps - nothing to depend on\n- code\n- cost\n- docs\n- tests\n",
 	);
 	write(dir, "quest/m0/README.md", "# Now\n\n## Goal\n\nNow.\n");
 	write(dir, "quest/m0/tree.md", `${QUEST}\n## Audit\n\n- tree\n`);
 	expect(init(dir).filter((path) => path.startsWith("quest/"))).toEqual([]);
 	expect(existsSync(join(dir, "quest/m1"))).toBe(false);
 
-	write(dir, "quest/README.md", "# Quests\n\n## Goal\n\nWork.\n");
+	write(
+		dir,
+		"quest/README.md",
+		"# Quests\n\n## Goal\n\nWork.\n\n## Skipped audits\n\n- code\n- cost\n- docs\n- tests\n",
+	);
 	expect(init(dir)).toEqual(["quest/m1/README.md", "quest/m1/audit-deps.md"]);
 	write(dir, "quest/m1/audit-deps.md", "# [L] Edited\n\n## Goal\n\nOurs.\n\n## Audit\n\n- deps\n");
 	expect(init(dir)).toEqual([]);
