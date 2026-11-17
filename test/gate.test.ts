@@ -43,7 +43,8 @@ import {
 } from "../src/cli/gate";
 import { forwards, foregroundStat, statProcess } from "../src/cli/interrupt";
 import { gateBoundary, main } from "../src/cli/main";
-import { alive as ownerAlive, questScope } from "../src/cli/supervise";
+import { measuredRun, alive as ownerAlive, questScope } from "../src/cli/supervise";
+import { readWaits } from "../src/cli/waits";
 import { created, onTerminal, run, signalled, tempDir } from "./fixture";
 
 // Linux reports a /proc read that races a process's exit as ESRCH rather than ENOENT, so fail
@@ -1081,17 +1082,53 @@ describe.runIf(process.platform === "linux")("a systemd scope", () => {
 		await until(() => stopped(pid()));
 	});
 
-	test("reports its CPU use to the gate until it ends", async () => {
+	test("reports its CPU use to the gate until it ends, and in all once it ends", async () => {
 		const host = fileHost(tempDir());
 		const unit = `quest-gate-${randomUUID()}.scope`;
 		const done = join(tempDir(), "done");
 		expect(host.usage(unit)).toBeUndefined();
 		const spin = ["/bin/sh", "-c", `while [ ! -e ${quote(done)} ]; do :; done`];
-		const result = scope(unit)(spin, process.env, cancellation().cancel);
-		await until(() => (host.usage(unit) ?? 0) > 0);
+		const owned = scope(unit);
+		const result = owned(spin, process.env, cancellation().cancel);
+		let seen = 0;
+		await until(() => (seen = host.usage(unit) ?? 0) > 0);
 		writeFileSync(done, "");
 		expect(await result).toBe(0);
+		expect(owned.cpu()).toBeGreaterThanOrEqual(Math.floor(seen / 1000));
 		await until(() => host.usage(unit) === undefined);
+	});
+
+	test("keeps a successful command's exit status when its CPU cannot be read", async () => {
+		const warn = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+		try {
+			const result = await measuredRun(
+				`quest-gate-${randomUUID()}.scope`,
+				process.cwd(),
+				["/bin/sh", "-c", "exit 0"],
+				{
+					cancel: cancellation().cancel,
+					within: null,
+					usage: () => {
+						throw Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" });
+					},
+				},
+			);
+			expect(result).toEqual({ status: 0, cpu: null });
+			expect(warn.mock.calls.map(([text]) => String(text)).join("")).toMatch(
+				/cannot read the CPU .* used: .*EACCES/,
+			);
+		} finally {
+			warn.mockRestore();
+		}
+	});
+
+	test("reads a short command's CPU however soon systemd removes its scope", async () => {
+		// systemd removes an empty scope's cgroup as its command exits, sometimes before the gate sees the exit.
+		for (let i = 0; i < 20; i++) {
+			const owned = scope(`quest-gate-${randomUUID()}.scope`);
+			expect(await owned(["/bin/sh", "-c", "exit 4"], process.env, cancellation().cancel)).toBe(4);
+			expect(owned.cpu()).not.toBeNull();
+		}
 	});
 });
 
@@ -1527,6 +1564,32 @@ describe.skipIf(process.platform === "win32")("the run record", () => {
 		if (scoped)
 			expect(readFileSync(cgroup, "utf8").trim()).toMatch(new RegExp(`/${line.unit.replaceAll(".", "\\.")}$`));
 		else expect(line.unit).toBeNull();
+	});
+
+	test("in an agent session, an outermost run logs its command, wait, run, and CPU for the session's record", async () => {
+		const state = tempDir();
+		outermost("");
+		vi.stubEnv("CLAUDE_CODE_SESSION_ID", "s1");
+		vi.stubEnv("XDG_STATE_HOME", state);
+		const scoped = owner(process.env).unit !== undefined;
+		const spin = ["/bin/sh", "-c", "i=0; while [ $i -lt 20000 ]; do i=$((i+1)); done"];
+		const before = Date.now();
+		expect(await gate(spin, { host: ledger() })).toBe(0);
+		const [line, ...rest] = readWaits(before, { XDG_STATE_HOME: state });
+		expect(rest).toEqual([]);
+		expect(line).toMatchObject({
+			kind: "gate",
+			// Its shell script runs no program but the shell's own builtins.
+			command: "?",
+			sessions: [{ harness: "claude", session: "s1" }],
+			directory: process.cwd(),
+		});
+		if (line?.kind !== "gate") throw new Error("expected a gate line");
+		const times = [before, Date.parse(line.start), Date.parse(line.admitted!), Date.parse(line.end)];
+		expect(times).toEqual([...times].sort((a, b) => a - b));
+		// Only a systemd scope counts its command's CPU.
+		if (scoped) expect(line.cpu).toBeGreaterThan(0);
+		else expect(line.cpu).toBeNull();
 	});
 
 	test("a nested gate records nothing, and an empty variable is unset", async () => {

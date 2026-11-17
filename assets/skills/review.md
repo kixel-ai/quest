@@ -48,7 +48,7 @@ Once the reset passes or the login is restored, the item has cleared: whoever fi
 Push, resolve each `duplicate` line `quest status <pr>` then prints as the guide's Creation describes, then mark the PR ready for review: with `quest ready <pr> <token>`, which also drops its `## Waiting` section, or with `gh pr ready <pr>` for a draft you reviewed without a hold.
 
 Summarize the review, with its last round's score and rationale, and CI from `quest status <pr>`.
-Name any decisions the review raised without answering them, then ask the user with your recommended action:
+Name any decisions the review raised without answering them, then ask the user for the pick as `/quest-merge` describes, recommending one of:
 - `/quest-merge`: the PR is landable as `/quest-merge` defines it, or will be once fixed with no decision left for the user, such as failing checks or unaddressed automated review findings; `/quest-merge` runs `/quest-iterate` on it first.
 - `/quest-iterate`: the review raised significant issues or decisions, which it settles with the grill skill's interview.
 - skip: the PR should not be merged yet.

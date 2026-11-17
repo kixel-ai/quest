@@ -17,7 +17,7 @@ stays in the journal; and Windows, which still refuses the variable.
 Decided 2026-11-15 (maintainer, `/quest-complete` of
 [kixel-ai/kixel.quest#56](https://github.com/kixel-ai/kixel.quest/pull/56),
 then `/quest-plan`): ✅ Linux, reusing the measurement
-[gating](/quest/m0/benchmark/gating.md) adds (rejected: also a
+`measuredRun` in `src/cli/supervise.ts` makes (rejected: also a
 reaped-children lower bound on process-group gates, which means rewriting
 the group owner for a macOS host that has not arrived; no quest, with the
 job page reading the `gated` list from uploaded session records, which
@@ -40,8 +40,3 @@ Agent's choices, for the implementer to revisit:
 - Keep `unit`, which still names the scope's journal line for peak memory.
 - Update the README's "Record each run" section to say where CPU and wall
   time come from.
-
-## Required
-
-- [Gating](/quest/m0/benchmark/gating.md) - measures each gated run's CPU
-  and end time, which this copies into the record
