@@ -308,7 +308,8 @@ test("gh calls reaching for a repository Kixel Quest hosts are denied, naming th
 	expect(run("GH_REPO=example/project gh pr diff 3")).toEqual([RULES.kixel]);
 	expect(run("gh api 'repos/{owner}/{repo}/pulls/3/comments'")).toEqual([RULES.kixel]);
 	expect(run("gh api --paginate /repos/example/project/pulls/3/files")).toEqual([RULES.kixel]);
-	expect(run("bash -c 'gh pr list'")).toEqual([RULES.kixel]);
+	expect(run("bash -c 'gh pr list'")).toEqual([instead("quest pr list")]);
+	expect(run("gh pr list --limit 1000 --json number,url,files")).toEqual([instead("quest pr list")]);
 	// A call naming another repository, or one gh could not tell, reaches GitHub as asked.
 	expect(run("gh pr view 3 -R localhost:8787/example/project")).toEqual([instead("quest pr view")]);
 	expect(run("gh pr view 3 -R moq-dev/quest")).toEqual([]);

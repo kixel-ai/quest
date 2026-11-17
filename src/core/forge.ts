@@ -220,6 +220,14 @@ export interface OpenPull {
 	body: string;
 }
 
+/** An open PR and the paths it changes, as `quest pr list` prints them. */
+export interface PullFiles {
+	number: number;
+	url: string;
+	/** Every path the PR adds, changes, or removes; a rename lists its new path. */
+	files: string[];
+}
+
 /** A held quest branch, and the open PR from it if there is one. */
 export interface Claim {
 	branch: string;
@@ -302,6 +310,8 @@ export interface Forge {
 	status(pull: PullRequest): Promise<Answer<Status>>;
 	/** Every open PR in `repository`, from any head repository. */
 	pulls(repository: Repository): Promise<Answer<OpenPull[]>>;
+	/** Every open PR in `repository` with the paths it changes, by number. */
+	files(repository: Repository): Promise<Answer<PullFiles[]>>;
 	/** Which of `branches` someone holds, as `quest start` decides it. */
 	held(sources: ClaimSources, branches: string[]): Promise<Answer<Holdings>>;
 	/** Polls of a PR's activity, starting from `options.since`. */
@@ -375,6 +385,7 @@ export interface ForgeWrites {
 export interface ForgeCalls {
 	status: { request: { pull: PullRequest }; value: Status };
 	pulls: { request: { repository: Repository }; value: OpenPull[] };
+	files: { request: { repository: Repository }; value: PullFiles[] };
 	held: { request: { sources: ClaimSources; branches: string[] }; value: Holdings };
 	/** `from` is a `--since` point or a cursor; null starts at the head's push time. */
 	watch: { request: { pull: PullRequest; from: string | null }; value: WatchPoll };
@@ -395,7 +406,14 @@ export interface ForgeCalls {
 export type ForgeCall = keyof ForgeCalls;
 
 /** The reads, as their paths name them. */
-export const FORGE_READS = ["status", "pulls", "held", "watch", "view"] as const satisfies readonly ForgeCall[];
+export const FORGE_READS = [
+	"status",
+	"pulls",
+	"files",
+	"held",
+	"watch",
+	"view",
+] as const satisfies readonly ForgeCall[];
 
 /** The writes, as their paths name them; Kixel Quest serves them only for a repository it hosts. */
 export const FORGE_WRITES = [
@@ -593,6 +611,8 @@ const openPull = shape<OpenPull>({
 	body: string,
 });
 
+const pullFiles = shape<PullFiles>({ number: count, url: string, files: list(name) });
+
 const comment = shape<Comment>({ author: string, body: string, createdAt: time, url: string });
 
 const pullView = shape<PullView>({
@@ -653,6 +673,7 @@ const none: Parse<null> = (value, at) => (value === null ? null : fail(at, "null
 const REQUESTS: { [C in ForgeCall]: Parse<ForgeCalls[C]["request"]> } = {
 	status: shape({ pull: pullRequest }),
 	pulls: shape({ repository }),
+	files: shape({ repository }),
 	held: shape({
 		sources: shape<ClaimSources>({ upstream: source, fork: maybe(source) }),
 		branches: list(branch),
@@ -683,6 +704,7 @@ const REQUESTS: { [C in ForgeCall]: Parse<ForgeCalls[C]["request"]> } = {
 const VALUES: { [C in ForgeCall]: Parse<ForgeCalls[C]["value"]> } = {
 	status,
 	pulls: list(openPull),
+	files: list(pullFiles),
 	held: holdings,
 	watch: watchPoll,
 	view: pullView,

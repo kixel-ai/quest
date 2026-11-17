@@ -115,7 +115,7 @@ import { KIXEL_QUEST_URL, kixelUrl, tokensPath } from "./tokens";
 import { CONTEXT, GUIDE, GUIDE_SECTIONS, SKILLS, guideSections, sectionHeading, skill } from "./skills";
 import { type Terminal, Theme } from "./theme";
 import { type Snapshot, checkout, collect, load, snapshot, under } from "./tree";
-import { statusLines, viewLines } from "./status";
+import { pullFileLines, statusLines, viewLines } from "./status";
 import { TOKEN_MAX_MISSING, daysBefore, runTokenMax, usage, usageDependencies, usageLines } from "./usage";
 import { waitForActivity, WaitTimeout } from "./wait";
 import { version } from "./version";
@@ -973,6 +973,30 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				if (options.json) print(JSON.stringify(view));
 				else for (const line of viewLines(view)) print(line);
 			});
+		});
+	pr.command("list")
+		.description(
+			"List the open PRs with the paths each changes, of the upstream that holds origin's claims, on " +
+				"GitHub or Kixel Quest: what gh pr list --json number,url,files gives, without its cap of 100 files " +
+				"a PR; it fails on a PR with 3,000 files or more, which GitHub cuts. Plain output prints a file <url> <path> line per " +
+				"changed path, by PR number, so a grep for a path names the PRs changing it. --json prints a deterministic " +
+				"array of {number, url, files}, listing a PR without files too.",
+		)
+		.option("--json", "Print a deterministic JSON array")
+		.action((options: { json?: boolean }) => {
+			settle(
+				(async () => {
+					const up = await upstream(root(), requireRemote(root(), "origin"), claimDependencies());
+					if (up.hosting === null)
+						throw new InputError("origin names neither a github.com repository nor one on Kixel Quest");
+					// Verifies a search, so it reads GitHub itself, never an index that may lag.
+					return up.hosting.live().files(up.hosting.repository);
+				})(),
+				({ value: pulls }) => {
+					if (options.json) print(JSON.stringify(pulls));
+					else for (const line of pullFileLines(pulls)) print(line);
+				},
+			);
 		});
 	const bodyOptions = (command: Command) =>
 		command

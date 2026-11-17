@@ -38,6 +38,8 @@ export interface KixelPull {
 	comments: { body: string; thread: string | null }[];
 	/** Reviews others submitted. */
 	reviews: PostedReview[];
+	/** The paths it changes. */
+	files: string[];
 	hold: Hold | null;
 	/** The head a pick named, while it stands. */
 	picked: string | null;
@@ -76,6 +78,7 @@ export class FakeKixelQuest {
 			threads: new Map(),
 			comments: [],
 			reviews: [],
+			files: [],
 			hold: null,
 			picked: null,
 			...pull,
@@ -124,6 +127,10 @@ export class FakeKixelQuest {
 		switch (call) {
 			case "pulls":
 				return this.pulls.filter((each) => each.state === "open").map((each) => this.#open(each));
+			case "files":
+				return this.pulls
+					.filter((each) => each.state === "open")
+					.map((each) => ({ number: each.number, url: this.url(each.number), files: each.files }));
 			case "held": {
 				const claims = [...new Set<string>(request.branches)].sort().flatMap((branch): Claim[] => {
 					const open = this.pulls.find((each) => each.state === "open" && each.branch === branch);

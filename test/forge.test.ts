@@ -75,6 +75,8 @@ async function serve(forge: Forge, call: ForgeCall, request: any): Promise<unkno
 			return (await forge.status(request.pull)).value;
 		case "pulls":
 			return (await forge.pulls(request.repository)).value;
+		case "files":
+			return (await forge.files(request.repository)).value;
 		case "held":
 			return (await forge.held(request.sources, request.branches)).value;
 		case "watch":

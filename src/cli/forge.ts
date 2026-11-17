@@ -16,6 +16,7 @@ import {
 	type OpenPull,
 	type Opening,
 	type Pick,
+	type PullFiles,
 	type PullRequest,
 	type PullView,
 	type Repository,
@@ -281,6 +282,10 @@ export class KixelQuestForge implements Forge, ForgeWrites {
 
 	pulls(repository: Repository): Promise<Answer<OpenPull[]>> {
 		return this.kixel.call("pulls", { repository });
+	}
+
+	files(repository: Repository): Promise<Answer<PullFiles[]>> {
+		return this.kixel.call("files", { repository });
 	}
 
 	held(sources: ClaimSources, branches: string[]): Promise<Answer<Holdings>> {

@@ -639,7 +639,7 @@ token the same file pairs with its URL.
 Its read API lives under `/forge`, with the token as a bearer token:
 `GET /forge` answers `{"login", "repositories"}`, the person the token names
 and the lowercase `owner/repo` of each repository served to them, and
-`POST /forge/<read>` takes one of `status`, `pulls`, `held`, or `watch` and
+`POST /forge/<read>` takes one of `status`, `pulls`, `files`, `held`, `watch`, or `view` and
 answers `{"value", "asOf"}`, the read's value and the time of the newest
 webhook behind it. A 400 with `{"error"}` refuses a bad argument, such as a
 malformed `--since`, which `quest` reports as a usage error. `quest/core` exports each read's types and their parsers;
@@ -667,13 +667,21 @@ with its comments, read from the forge itself rather than an index:
 
 ```sh
 quest pr view 12
+quest pr list
 quest pr create --title "Plan the forge" --body-file .tmp/body.md --draft
 quest pr edit 12 --body-file .tmp/body.md
 quest pr comment 12 --thread <thread-id> --body "Fixed in the head."
 quest pr resolve 12 <thread-id>
 ```
 
-Its read is `POST /forge/view`, answering the same `{"value", "asOf"}`. The
+`quest pr list` prints a `file <url> <path>` line for each path each open PR
+changes, so a search for a path names the PRs changing it, and `--json` prints
+`[{"number", "url", "files"}]`; it reads the upstream that holds origin's claims
+(a fork's parent), with no 100-file cap, where `gh pr list --json files` stops
+at 100. It fails on a PR of 3,000 files or more, GitHub's REST limit, rather
+than print a possibly incomplete list.
+
+Its reads are `POST /forge/view` and `POST /forge/files`, answering the same `{"value", "asOf"}`. The
 writes are `POST /forge/<write>`, beside the reads: `open`, `close`,
 `edit`, `comment`, `resolve`, `hold`, `ready`, `release`, and `pick`, each
 answering `{"value", "asOf"}` with `asOf` null. A 409 with `{"error"}` refuses

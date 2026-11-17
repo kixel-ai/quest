@@ -5,6 +5,7 @@ import type {
 	Forge,
 	Holdings,
 	OpenPull,
+	PullFiles,
 	PullRequest,
 	PullView,
 	Repository,
@@ -14,6 +15,7 @@ import type {
 } from "../core";
 import { held, openPullRequests } from "./claims";
 import { GitHub, type GitHubDependencies, object, string } from "./client";
+import { openPullFiles } from "./files";
 import { pullRequestStatus } from "./status";
 import { pullView } from "./view";
 import { watchPull } from "./wait";
@@ -52,6 +54,10 @@ export class GitHubForge implements Forge {
 
 	async pulls(repository: Repository): Promise<Answer<OpenPull[]>> {
 		return live(await openPullRequests(new GitHub(this.deps), repository));
+	}
+
+	async files(repository: Repository): Promise<Answer<PullFiles[]>> {
+		return live(await openPullFiles(new GitHub(this.deps), repository));
 	}
 
 	async held(sources: ClaimSources, branches: string[]): Promise<Answer<Holdings>> {

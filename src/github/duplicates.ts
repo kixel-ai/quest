@@ -1,7 +1,8 @@
 // Quests a PR adds that another open PR also adds, so a follow-up some other PR already owns is
 // caught before a pick round asks about it.
 import { type Duplicate, type PullRequest, isQuest, parse } from "../core";
-import { type GitHub, array, object, repositoryPath, string } from "./client";
+import { type GitHub, object } from "./client";
+import { openFiles } from "./files";
 
 /** An open PR's added quest files, each with its title, or null when it has none. */
 export interface Added {
@@ -9,15 +10,6 @@ export interface Added {
 	url: string;
 	quests: { path: string; title: string | null }[];
 }
-
-const OPEN = `query OpenQuests($owner: String!, $repo: String!, $after: String) {
-	repository(owner: $owner, name: $repo) {
-		pullRequests(states: OPEN, first: 50, after: $after) {
-			pageInfo { hasNextPage endCursor }
-			nodes { number url headRefOid files(first: 100) { pageInfo { hasNextPage } nodes { path changeType } } }
-		}
-	}
-}`;
 
 /** Blobs read per title query. */
 const BATCH = 100;
@@ -55,39 +47,15 @@ export function duplicates(self: number, pulls: Added[]): Duplicate[] {
 }
 
 /**
- * The quests `pr` adds that another open PR in its repository also adds. Reads every open PR's added
- * files, then the titles of their quests at each PR's head, only when `pr` adds a quest.
+ * The quests `pr` adds that another open PR in its repository also adds. Reads every open PR's files, then the titles of their quests at each PR's head, only when `pr` adds a quest.
  */
 export async function duplicateQuests(github: GitHub, pr: PullRequest): Promise<Duplicate[]> {
-	const pulls: { number: number; url: string; head: string; paths: string[] }[] = [];
-	for (let after: string | null = null, more = true; more;) {
-		const data = await github.graphql(OPEN, { owner: pr.owner, repo: pr.repo, after });
-		if (data.repository === null)
-			throw new Error(`cannot read ${pr.owner}/${pr.repo}; check the repository and token`);
-		const list = object(object(data.repository).pullRequests);
-		for (const node of array(list.nodes)) {
-			const files = object(node.files);
-			const number = Number(node.number);
-			// GraphQL lists at most 100 files; REST lists up to 3,000, enough for any PR adding quests.
-			const added =
-				object(files.pageInfo).hasNextPage === true
-					? (await github.all(`${repositoryPath(pr)}/pulls/${number}/files?per_page=100`))
-							.filter((row) => row.status === "added")
-							.map((row) => string(row.filename))
-					: array(files.nodes)
-							.filter((file) => file.changeType === "ADDED")
-							.map((file) => string(file.path));
-			pulls.push({
-				number,
-				url: string(node.url),
-				head: string(node.headRefOid),
-				paths: added.filter(questFile),
-			});
-		}
-		const info = object(list.pageInfo);
-		more = info.hasNextPage === true;
-		after = more ? string(info.endCursor) : null;
-	}
+	const pulls = (await openFiles(github, pr)).map(({ number, url, head, files }) => ({
+		number,
+		url,
+		head,
+		paths: files.filter((file) => file.added && questFile(file.path)).map((file) => file.path),
+	}));
 	const own = pulls.find((pull) => pull.number === pr.number);
 	if (own === undefined || own.paths.length === 0) return [];
 	const blobs = pulls.flatMap((pull) => pull.paths.map((path) => `${pull.head}:${path}`));

@@ -1,5 +1,5 @@
-// `quest status` and `quest pr view`: a pull request's state, and its discussion, as stable plain lines.
-import type { Check, Comment, PullView, Status } from "../core";
+// `quest status`, `quest pr view`, and `quest pr list`: a pull request's state, discussion, and files, as stable plain lines.
+import type { Check, Comment, PullFiles, PullView, Status } from "../core";
 
 /** Stable plain lines: a record type, then space-separated fields, with any free text last. */
 export function statusLines(status: Status): string[] {
@@ -85,4 +85,9 @@ export function viewLines(view: PullView): string[] {
 			...t.comments.flatMap(comment),
 		]),
 	];
+}
+
+/** One `file <url> <path>` line per changed path of each PR, so a `grep` for a path names the PRs changing it. */
+export function pullFileLines(pulls: PullFiles[]): string[] {
+	return pulls.flatMap((pull) => pull.files.map((path) => `file ${pull.url} ${path}`));
 }
