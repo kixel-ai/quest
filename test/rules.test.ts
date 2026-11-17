@@ -1,5 +1,6 @@
 // The rules `quest hook` checks on a tool call, and the shell parsing they rest on.
 
+import { execFileSync } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -288,4 +289,51 @@ test("docs/context.md is the rules `quest context` prints, for agents without th
 	expect(readFileSync(join(import.meta.dirname, "../docs/context.md"), "utf8")).toBe(
 		`${CONTEXT}\n${CHECKED_CONTEXT}`,
 	);
+});
+
+test("gh calls reaching for a repository Kixel Quest hosts are denied, naming the quest command", () => {
+	const env = { QUEST_KIXEL_URL: "http://localhost:8787" };
+	const clone = (origin: string) => {
+		execFileSync("git", ["init", "-q", cwd]);
+		execFileSync("git", ["-C", cwd, "remote", "add", "origin", origin]);
+	};
+	const run = (command: string) => broken({ tool: "Bash", input: { command }, cwd }, env);
+	const instead = (command: string) => `${RULES.kixel} Run \`${command}\` instead.`;
+
+	clone("http://localhost:8787/example/project.git");
+	expect(run("gh pr view 3 --comments")).toEqual([instead("quest pr view")]);
+	expect(run("gh pr checks 3 | tail -5")).toEqual([instead("quest status")]);
+	expect(run("gh pr view http://localhost:8787/example/project/pull/3")).toEqual([instead("quest pr view")]);
+	expect(run("gh pr view 3 -R Example/Project")).toEqual([instead("quest pr view")]);
+	expect(run("GH_REPO=example/project gh pr diff 3")).toEqual([RULES.kixel]);
+	expect(run("gh api 'repos/{owner}/{repo}/pulls/3/comments'")).toEqual([RULES.kixel]);
+	expect(run("gh api --paginate /repos/example/project/pulls/3/files")).toEqual([RULES.kixel]);
+	expect(run("bash -c 'gh pr list'")).toEqual([RULES.kixel]);
+	// A call naming another repository, or one gh could not tell, reaches GitHub as asked.
+	expect(run("gh pr view 3 -R moq-dev/quest")).toEqual([]);
+	expect(run("gh pr view https://github.com/moq-dev/quest/pull/3")).toEqual([]);
+	expect(run("GH_REPO=moq-dev/quest gh api 'repos/{owner}/{repo}/pulls'")).toEqual([]);
+	expect(run("gh api repos/moq-dev/quest/pulls/3")).toEqual([]);
+	expect(run("gh api graphql -f query='{ viewer { login } }'")).toEqual([]);
+	expect(run("gh api user")).toEqual([]);
+	expect(run("gh pr view --help")).toEqual([]);
+	expect(run("gh issue list")).toEqual([]);
+	// After a cd, gh may run in another checkout.
+	expect(run("cd ../other && gh pr view 3")).toEqual([]);
+	expect(
+		broken({ tool: "Bash", input: { command: "gh pr view 3" }, cwd }, { ...env, GH_REPO: "moq-dev/quest" }),
+	).toEqual([]);
+	// The post checks still run beside it.
+	expect(run('gh pr comment 3 --body "Done."')).toEqual([RULES.footer, instead("quest pr comment")]);
+});
+
+test("gh calls in a checkout whose origin is on GitHub, or that has none, pass", () => {
+	const env = { QUEST_KIXEL_URL: "http://localhost:8787" };
+	const run = (command: string) => broken({ tool: "Bash", input: { command }, cwd }, env);
+	expect(run("gh pr view 3")).toEqual([]);
+	execFileSync("git", ["init", "-q", cwd]);
+	expect(run("gh pr view 3")).toEqual([]);
+	execFileSync("git", ["-C", cwd, "remote", "add", "origin", "https://github.com/example/project.git"]);
+	expect(run("gh pr view 3")).toEqual([]);
+	expect(run("gh api 'repos/{owner}/{repo}/pulls'")).toEqual([]);
 });
