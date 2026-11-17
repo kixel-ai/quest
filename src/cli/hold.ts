@@ -2,7 +2,15 @@
 // a time. It holds the `quest:active` label, and the ID of the timeline event
 // that added the label is its hold token, since sessions often share an account.
 // `quest merge` takes no label: the pinned auto-merge or merge-queue entry it creates is the queue signal.
-import { ACTIVE_LABEL, formatFinding, handedBack, latestHold, heldToken, withoutHandBack } from "../core";
+import {
+	ACTIVE_LABEL,
+	formatFinding,
+	handedBack,
+	heldToken,
+	latestHold,
+	type PullRequest,
+	withoutHandBack,
+} from "../core";
 import { cleanAutoMergeRefusal, immediateMerge, queueHead } from "../github/merge";
 import {
 	currentChecks,
@@ -11,7 +19,6 @@ import {
 	GitHubGraphQLError,
 	object,
 	type ObjectValue,
-	type PullRequest,
 	requirements,
 	string,
 	repositoryPath,

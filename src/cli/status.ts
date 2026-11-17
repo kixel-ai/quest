@@ -1,5 +1,5 @@
 // `quest status`: a pull request's state as stable plain lines.
-import type { Check, Status } from "../github/status";
+import type { Check, Status } from "../core";
 
 /** Stable plain lines: a record type, then space-separated fields, with any free text last. */
 export function statusLines(status: Status): string[] {

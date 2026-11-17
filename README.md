@@ -527,7 +527,8 @@ connection a few times, and fails loudly on invalid responses.
 There is no deadline unless `--timeout <seconds>` is supplied. Activity exits 0,
 timeout exits 3, invalid arguments exit 2, and other failures exit 1; interrupt
 with Ctrl-C to stop waiting. A timeout prints a resume point as its only line:
-a cursor, or the given `--since` (else the head SHA) if setup had not finished.
+a cursor, or the given `--since` (else the head SHA, or through Kixel Quest the
+time the wait started) if setup had not finished.
 Retry with it, not the original command, so activity that landed during the
 first wait is still reported.
 
@@ -613,6 +614,35 @@ auto-merge was enabled, from the head repository's activity; it prints `-`
 until GitHub lists the current head's push, which takes seconds to minutes, and
 when a push shares the second auto-merge was enabled. A head there that differs
 from `head` means a push followed auto-merge: disable it, or land the new head.
+
+### Read through Kixel Quest
+
+Agents polling `quest status`, `quest wait`, and `quest unblocked --unclaimed`
+can spend a person's whole hourly GitHub quota. Where
+[Kixel Quest](https://kixel.quest) serves the repository, those reads, and the
+claim and draft reads of `quest start` and `quest waiting`, go to its index of
+GitHub's webhooks instead. It serves only people its allow-list gives a token,
+which `quest` takes from `$XDG_CONFIG_HOME/quest/records.json`, paired with
+`https://kixel.quest`:
+
+```json
+{ "https://kixel.quest": "<token>" }
+```
+
+Without a token, or for a repository Kixel Quest does not serve, reads go to
+GitHub as above; the output is the same either way. When Kixel Quest fails, the
+command fails too, naming `QUEST_FORGE=github`, which reads GitHub instead.
+`QUEST_KIXEL_URL` names another Kixel Quest, such as one running locally, whose
+token the same file pairs with its URL.
+
+Its read API lives under `/forge`, with the token as a bearer token:
+`GET /forge` answers `{"login", "repositories"}`, the person the token names
+and the lowercase `owner/repo` of each repository served to them, and
+`POST /forge/<read>` takes one of `status`, `pulls`, `held`, or `watch` and
+answers `{"value", "asOf"}`, the read's value and the time of the newest
+webhook behind it. A 400 with `{"error"}` refuses a bad argument, such as a
+malformed `--since`, which `quest` reports as a usage error. `quest/core` exports each read's types and their parsers;
+`quest/github`'s `GitHubForge` answers the same reads from GitHub.
 
 ## Own a pull request
 

@@ -1,56 +1,16 @@
 // Who holds a quest on GitHub: its claim branch upstream or in the head fork, unless that branch is a
 // merged PR's head, or the earliest open PR from a branch of that name in either.
-import { handedBack, landed } from "../core";
-import { type GitHub, type Repository, object, repositoryPath, string } from "./client";
-
-/** An open PR, from any head repository, as the claim checks read it. */
-export interface OpenPull {
-	number: number;
-	url: string;
-	branch: string;
-	/** The head repository as `owner/repo`, or `null` once a fork is deleted. */
-	head: string | null;
-	draft: boolean;
-	/** Epoch milliseconds. The earliest open PR on a branch holds the claim. */
-	created: number;
-	/** Epoch milliseconds of the last push, comment, or edit. */
-	updated: number;
-	/** Its body has a `## Waiting` section, so it waits on the maintainer. */
-	handedBack: boolean;
-	body: string;
-}
-
-/** A held quest branch, and the open PR from it if there is one. */
-export interface Claim {
-	branch: string;
-	/** The PR holding the claim: the earliest open one. */
-	url: string | null;
-	pull: OpenPull | null;
-}
-
-/** Which branches someone holds, and which landed branches a new claim replaces. */
-export interface Holdings {
-	/** Sorted by branch. */
-	claims: Claim[];
-	/**
-	 * Branches in the head fork, or upstream without one, whose tip is the head of a merged PR, by
-	 * that tip. Their work landed, so they hold nothing and a claim may replace them.
-	 */
-	landed: Map<string, string>;
-}
-
-/** A repository claim branches live in, and its `quest/*` branch tips when the caller already read them. */
-export interface Source {
-	repository: Repository;
-	tips?: Map<string, string>;
-}
-
-/** Where claims live: the upstream repository, and the fork a contributor pushes claims to, if any. */
-export interface Sources {
-	upstream: Source;
-	/** Absent when claims are pushed upstream. */
-	fork?: Source;
-}
+import {
+	type Claim,
+	type ClaimSource,
+	type ClaimSources,
+	type Holdings,
+	type OpenPull,
+	type Repository,
+	handedBack,
+	landed,
+} from "../core";
+import { type GitHub, object, repositoryPath, string } from "./client";
 
 /** Every open PR in `repository`, from any head repository. */
 export async function openPullRequests(github: GitHub, repository: Repository): Promise<OpenPull[]> {
@@ -97,9 +57,9 @@ export async function claimBranches(github: GitHub, repository: Repository): Pro
  * PR's branch still holds its quest, since that work may be wanted back. A fork's own branches and PRs
  * count, so a claim pushed there is seen before its PR opens. Tips a source leaves out are read here.
  */
-export async function held(github: GitHub, sources: Sources, branches: string[]): Promise<Holdings> {
+export async function held(github: GitHub, sources: ClaimSources, branches: string[]): Promise<Holdings> {
 	const { upstream, fork } = sources;
-	const read = async (source: Source) => ({
+	const read = async (source: ClaimSource) => ({
 		repository: source.repository,
 		tips: source.tips ?? (await claimBranches(github, source.repository)),
 	});

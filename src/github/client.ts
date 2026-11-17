@@ -1,20 +1,10 @@
 // The GitHub client: authenticated REST and GraphQL requests with paging, retries, rate limits, and a deadline.
 // No Node APIs, so it runs wherever `fetch` does; the caller supplies the token and clock.
+import type { Repository } from "../core";
 import { cancelled, currentContexts, latestContexts, type RollupContext, type WorkflowRun } from "./checks";
 
 const API = "https://api.github.com";
 const MAX_SLEEP = 2_147_483_647;
-
-/** A repository on github.com. */
-export interface Repository {
-	owner: string;
-	repo: string;
-}
-
-/** A pull request by its repository and number. */
-export interface PullRequest extends Repository {
-	number: number;
-}
 
 /**
  * What the client needs from its host: `fetch`, a clock, a way to pause, the token, where warnings

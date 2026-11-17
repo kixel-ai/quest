@@ -3,7 +3,7 @@
 // while nothing but the claim commit is on the branch.
 import { randomBytes } from "node:crypto";
 
-import { questBranch } from "../core";
+import { type OpenPull, questBranch } from "../core";
 import {
 	type ClaimDependencies,
 	type Target,
@@ -18,7 +18,7 @@ import { GitError, git } from "./git";
 import { requireRemote } from "./github";
 import { object, repositoryPath, string } from "../github/client";
 import { ago } from "../github/hold";
-import { type OpenPull, mergedPull, openPullRequests, pullsFrom } from "../github/claims";
+import { mergedPull, openPullRequests, pullsFrom } from "../github/claims";
 
 /** Someone else holds the quest, or the claim cannot be released; distinct from a failure. */
 export class Refusal extends Error {}

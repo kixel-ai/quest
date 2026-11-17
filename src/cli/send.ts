@@ -82,7 +82,7 @@ export function checkoutEndpoint(root: string): string | null {
 }
 
 /** `endpoint` when it is HTTPS, or HTTP to this host for a local store; anything else would send records in clear. */
-function checkedEndpoint(endpoint: string, where: string): string {
+export function checkedEndpoint(endpoint: string, where: string): string {
 	let url: URL;
 	try {
 		url = new URL(endpoint);
