@@ -16,6 +16,7 @@ import {
 	type OpenPull,
 	type Opening,
 	type Pick,
+	type PullFiles,
 	type PullRequest,
 	type PullView,
 	type Repository,
@@ -123,6 +124,21 @@ export function locate(value: string, root: string, env: NodeJS.ProcessEnv): Loc
 		return { pull: { owner: match[1]!, repo: match[2]!, number: Number(match[3]) }, hosted: true };
 	}
 	return { pull: pullRequest(value, root), hosted: false };
+}
+
+/** The repository the origin remote at `root` names, and whether Kixel Quest hosts it rather than GitHub. */
+export function locateRepository(root: string, env: NodeJS.ProcessEnv): { repository: Repository; hosted: boolean } {
+	const base = kixelUrl(env);
+	let origin = null;
+	try {
+		origin = readRemote(root, "origin");
+	} catch {
+		// Not a checkout: the error below says so.
+	}
+	if (origin === null) throw new InputError(`${root} is not a checkout with an origin remote`);
+	const host = remoteHost(origin, (url) => hostedRepository(base, url));
+	if (host === null) throw new InputError("origin names neither a github.com repository nor one on Kixel Quest");
+	return { repository: host.repository, hosted: host.forge === "kixel" };
 }
 
 /** The repository `value` on Kixel Quest at `base` names, as `<base>/<owner>/<repo>[.git]`, or null. */
@@ -281,6 +297,10 @@ export class KixelQuestForge implements Forge, ForgeWrites {
 
 	pulls(repository: Repository): Promise<Answer<OpenPull[]>> {
 		return this.kixel.call("pulls", { repository });
+	}
+
+	files(repository: Repository): Promise<Answer<PullFiles[]>> {
+		return this.kixel.call("files", { repository });
 	}
 
 	held(sources: ClaimSources, branches: string[]): Promise<Answer<Holdings>> {

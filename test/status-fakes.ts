@@ -185,7 +185,7 @@ export function setup(
 				return Response.json(page.rows, { headers: page.next ? { Link: `<${page.next}>; rel="next"` } : {} });
 			}
 			const request = JSON.parse(String(init?.body));
-			if (request.query.includes("query OpenQuests(")) {
+			if (request.query.includes("query OpenFiles(")) {
 				const nodes = options.open?.pulls ?? [];
 				return Response.json({
 					data: {

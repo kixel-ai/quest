@@ -54,6 +54,7 @@ import {
 	hostedForge,
 	hostedRepository,
 	locate as locatePull,
+	locateRepository,
 } from "./forge";
 import { PENDING_MS } from "./admission";
 import { gate } from "./gate";
@@ -115,7 +116,7 @@ import { KIXEL_QUEST_URL, kixelUrl, tokensPath } from "./tokens";
 import { CONTEXT, GUIDE, GUIDE_SECTIONS, SKILLS, guideSections, sectionHeading, skill } from "./skills";
 import { type Terminal, Theme } from "./theme";
 import { type Snapshot, checkout, collect, load, snapshot, under } from "./tree";
-import { statusLines, viewLines } from "./status";
+import { pullFileLines, statusLines, viewLines } from "./status";
 import { TOKEN_MAX_MISSING, daysBefore, runTokenMax, usage, usageDependencies, usageLines } from "./usage";
 import { waitForActivity, WaitTimeout } from "./wait";
 import { version } from "./version";
@@ -972,6 +973,25 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 			settle(forge.view(pull), ({ value: view }) => {
 				if (options.json) print(JSON.stringify(view));
 				else for (const line of viewLines(view)) print(line);
+			});
+		});
+	pr.command("list")
+		.description(
+			"List the repository's open PRs with the paths each changes, for the repository origin names, on " +
+				"GitHub or Kixel Quest: what gh pr list --json number,url,files gives, without its cap of 100 files " +
+				"a PR. Plain output prints a file <url> <path> line per changed path, by PR number, so a grep for a " +
+				"path names the PRs changing it. --json prints a deterministic array of {number, url, files}, " +
+				"listing a PR without files too.",
+		)
+		.option("--json", "Print a deterministic JSON array")
+		.action((options: { json?: boolean }) => {
+			const { repository, hosted } = locateRepository(root(), process.env);
+			const forge = hosted
+				? hostedForge(repository, forgeDependencies())
+				: new GitHubForge(gitHubDependencies(warn));
+			settle(forge.files(repository), ({ value: pulls }) => {
+				if (options.json) print(JSON.stringify(pulls));
+				else for (const line of pullFileLines(pulls)) print(line);
 			});
 		});
 	const bodyOptions = (command: Command) =>

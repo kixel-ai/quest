@@ -152,6 +152,7 @@ export {
 	FORGE_WRITES,
 	type OpenPull,
 	type PostedReview,
+	type PullFiles,
 	type PullRequest,
 	type PullView,
 	type Reaction,

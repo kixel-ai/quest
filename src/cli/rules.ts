@@ -27,7 +27,7 @@ export const RULES = {
 	rewrite:
 		"Never rebase or force-push, even a branch only you hold; merge the base instead, when the branch conflicts with it or a landing step refuses the head.",
 	tmp: "Put scratch files, such as PR bodies, logs, patches, helper scripts, and temporary clones, in the checkout's `.tmp/`, never `/tmp`, so they disappear with the worktree.",
-	kixel: "On a repository Kixel Quest hosts, `gh` cannot reach its PRs: use `quest pr view`, `create`, `edit`, `comment`, and `resolve`, and `quest status`, `ready`, and `merge`.",
+	kixel: "On a repository Kixel Quest hosts, `gh` cannot reach its PRs: use `quest pr view`, `list`, `create`, `edit`, `comment`, and `resolve`, and `quest status`, `ready`, and `merge`.",
 } as const;
 
 /**
@@ -544,6 +544,7 @@ function questCommand(args: string[]): string[] {
 /** The `quest` command doing what a `gh pr` subcommand does, on a repository Kixel Quest hosts. */
 const QUEST_PR: Record<string, string> = {
 	view: "quest pr view",
+	list: "quest pr list",
 	create: "quest pr create",
 	edit: "quest pr edit",
 	comment: "quest pr comment",

@@ -107,7 +107,7 @@ End every quest skill with a final summary in sections, such as the PRs and thei
 ## Creation
 
 Quests are created in PRs and reviewed.
-Before making a new quest, search the tree, git history, and the quest files each open PR adds or changes, which `gh pr list --limit 1000 --json number,url,files` lists, up to 100 files a PR (`gh api --paginate 'repos/{owner}/{repo}/pulls/<number>/files'` lists the rest); a search of PR titles and bodies misses a PR that never names the subject.
+Before making a new quest, search the tree, git history, and the quest files each open PR adds or changes, which `quest pr list` lists, a `file <url> <path>` line each, on GitHub and Kixel Quest alike; a search of PR titles and bodies misses a PR that never names the subject.
 
 Split independently completable work into separate quests.
 Group related quests in an epic; its README holds the work no child owns.
