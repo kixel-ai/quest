@@ -230,7 +230,7 @@ test("the sender posts each queued session with its sub-agents, from its transcr
 	expect(pending(env)).toEqual([]);
 });
 
-test("a repository Kixel Quest does not serve stays queued, unsent and without token-max, and is said once", async () => {
+test("a repository Kixel Quest does not serve is dropped, unsent and without token-max, and is said once", async () => {
 	const env = home();
 	const root = checkout();
 	queue(stopped(root), env);
@@ -239,18 +239,15 @@ test("a repository Kixel Quest does not serve stays queued, unsent and without t
 	expect(refusing.asked).toEqual(["Bearer secret"]);
 	expect(refusing.uploads).toEqual([]);
 	expect(refusing.windows).toEqual([]);
-	expect(pending(env)).toHaveLength(1);
-	expect(queue(stopped(root), env).notices).toEqual([
-		expect.stringContaining(`${URL_} does not serve acme/proj, so its sessions' records stay queued`),
-	]);
-	// Said once, and it stays queued while Kixel Quest does not serve it; once it does, the session is sent.
-	await sendPass(refusing.deps);
-	expect(queue(stopped(root), env).notices).toEqual([]);
-	const serving = sender(env, 200, [session("s1", "quest/m0/a")]);
-	expect(await sendPass(serving.deps)).toEqual([
-		{ endpoint: ENDPOINT, repository: "acme/proj", records: 1, breakages: 0, refused: false },
-	]);
 	expect(pending(env)).toEqual([]);
+	expect(queue(stopped(root), env).notices).toEqual([
+		expect.stringContaining(`${URL_} does not serve acme/proj, so its sessions' records are dropped`),
+	]);
+	// Said once, and a later stop is dropped without a notice.
+	queue(stopped(root), env);
+	await sendPass(refusing.deps);
+	expect(pending(env)).toEqual([]);
+	expect(queue(stopped(root), env).notices).toEqual([]);
 });
 
 test("a repository Kixel Quest serves is matched by the base its PRs open on, not a fork's origin", async () => {

@@ -1280,7 +1280,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				`then again every ${SEND_INTERVAL / 1000} seconds until stopped, at low priority. A record is built as quest usage ` +
 				"builds it, from token-max's sessions on this host since the earliest queued session's first instant and " +
 				"the PRs updated since then, and replaces its earlier copy, so a resend never doubles. A repository Kixel " +
-				"Quest does not serve, as it says on GET /forge, stays queued, unsent. A sent session whose " +
+				"Quest does not serve, as it says on GET /forge, has its sessions dropped, said once. A sent session whose " +
 				"latest branch, or a sub-agent's, heads no PR yet is sent again, with its sub-agents, once a pass for its " +
 				"repository reads a PR opened on that branch, until its transcript is gone. A Kixel Quest that " +
 				"refuses the token (401 or 403) is sent nothing more until the token changes; any other failure keeps the " +

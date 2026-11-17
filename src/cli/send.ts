@@ -266,9 +266,10 @@ export async function runSender(deps: SendDependencies, log: (line: string) => v
 
 /**
  * Send every queued session's record once, with those of its sub-agents on this host, one upload per repository, to
- * the Kixel Quest the user's token is paired with. A repository Kixel Quest does not serve stays queued, unsent. An
- * upload refused for access drops its sessions and says so once; any other failure keeps them queued for the next
- * pass, records it for the stop hook, and throws. A session queued again while an upload ran stays queued.
+ * the Kixel Quest the user's token is paired with. A repository Kixel Quest does not serve has its sessions dropped,
+ * said once, so it costs no later request. An upload refused for access drops its sessions and says so once; any other
+ * failure keeps them queued for the next pass, records it for the stop hook, and throws. A session queued again while
+ * an upload ran stays queued.
  */
 export async function sendPass(deps: SendDependencies): Promise<Sent[]> {
 	const dir = stateDirectory(deps.env);
@@ -317,7 +318,7 @@ async function sendOnce(deps: SendDependencies, dir: string): Promise<Sent[]> {
 		);
 	};
 	// Records name the repository PRs open on, which a fork's is not. Kixel Quest refuses a whole upload naming one it
-	// does not index, so a group it does not serve stays queued and sits the pass out, without running token-max.
+	// does not index, so a group it does not serve is dropped without running token-max.
 	const kixel = new KixelQuest(url, token, {
 		env: deps.env,
 		fetch: deps.fetch,
@@ -345,10 +346,14 @@ async function sendOnce(deps: SendDependencies, dir: string): Promise<Sent[]> {
 				bases.set(id, repository);
 				continue;
 			}
+			// Dropped, not kept: an unserved repository's stops would otherwise pile up in `pending/` and cost a GitHub
+			// request every pass to resolve again.
+			for (const q of group) settle(q);
+			clearBackoff(deps.env, id);
 			const unserved = once(
 				deps.env,
 				`unserved:${key(repository)}`,
-				`${url} does not serve ${key(repository)}, so its sessions' records stay queued on this host.`,
+				`${url} does not serve ${key(repository)}, so its sessions' records are dropped on this host.`,
 			);
 			if (unserved !== null) notes.push(unserved);
 		} catch (error) {

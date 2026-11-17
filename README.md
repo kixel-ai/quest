@@ -1869,8 +1869,8 @@ it sends nothing, and the hook says so once as a system message.
 
 Kixel Quest refuses a whole upload naming a repository it does not index or
 the sender cannot read, so the sender asks `GET /forge` which repositories it
-serves and sends only those. The rest stay queued on this host, unsent, and the
-next stop says so once.
+serves and sends only those. The rest are dropped from this host's queue, so an
+unserved repository costs no GitHub requests, and the next stop says so once.
 
 The `Stop` hook [`quest setup`](#configure-your-agent) installs for Claude Code
 and Codex only queues the session under `$XDG_STATE_HOME/quest/records`. One
