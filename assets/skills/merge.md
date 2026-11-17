@@ -40,3 +40,8 @@ Ask instead when it refuses a head `/quest-iterate` left unchanged, and never pa
 Report once it is queued, and do not wait for it to merge.
 A PR that left the queue unmerged shows why under `landing-stopped` in `quest status <pr>`; it needs the user's pick again, except where `/quest-run` says an earlier pick still holds.
 Never close a PR to unstick it, and never work around a refused merge; ask instead.
+
+Ask the user for the pick with your recommended action, one of `/quest-merge`, `/quest-iterate`, skip, or `/quest-delete`, plus `/quest-merge` when you recommend another, "Explain it first", and "Rethink it".
+"Explain it first" walks them through the change and its open choices; ask again without it.
+"Rethink it" starts a fresh background sub-agent, given the PR, its reviews and threads, and its quest's Goal, Plan, and evidence (read the deleted file on the base), not your recommendation, to start from scratch: brainstorm other approaches to the problem, decide whether this PR is the best path forward, and recommend merging it, iterating toward a named alternative, or dropping it.
+Ask again without it, its recommendation beside yours, and where they differ.
