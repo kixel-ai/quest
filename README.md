@@ -464,7 +464,8 @@ connection a few times, and fails loudly on invalid responses.
 There is no deadline unless `--timeout <seconds>` is supplied. Activity exits 0,
 timeout exits 3, invalid arguments exit 2, and other failures exit 1; interrupt
 with Ctrl-C to stop waiting. A timeout prints a resume point as its only line:
-a cursor, or the given `--since` (else the head SHA) if setup had not finished.
+a cursor, or the given `--since` (else the head SHA, or through Kixel Quest the
+time the wait started) if setup had not finished.
 Retry with it, not the original command, so activity that landed during the
 first wait is still reported.
 

@@ -356,6 +356,43 @@ describe("wait", () => {
 			"timed out waiting for pull request activity; Kixel Quest's last answer was current to 2026-10-07T12:09:00Z",
 		);
 	});
+	test("a first poll that times out resumes from when the wait started, so a retry reports a push made meanwhile", async () => {
+		const first = wait.setup([]);
+		const server = kixelQuest(() => first.deps);
+		// Kixel Quest never answers the first poll: the timeout passes while it is asked.
+		const fetch = async (input: string | URL | Request, init?: RequestInit) => {
+			if (new URL(String(input)).pathname !== "/forge/watch") return server.fetch(input, init);
+			await first.deps.sleep(61_000);
+			throw new Error("The operation timed out.");
+		};
+		const forge = await forgeFor(repository, { ...dependencies(fetch, () => first.deps), now: first.deps.now });
+		const timeout = await waitForActivity(
+			wait.pr,
+			{ timeout: 60 },
+			{ choose: async () => forge },
+			first.deps,
+		).catch((e: unknown) => e);
+		expect(timeout).toBeInstanceOf(WaitTimeout);
+		expect((timeout as WaitTimeout).cursor).toBe("2026-10-07T12:10:00.000Z");
+		// The head moved to B during the timed-out wait; the retry reports that push.
+		const second = wait.setup(
+			[
+				wait.pull(undefined, wait.B),
+				wait.response([wait.pushed(wait.B, "2026-10-07T12:10:30Z"), wait.pushed()]),
+				wait.response([wait.committed(wait.A), wait.committed(wait.B)]),
+			],
+			[wait.A, wait.B],
+		);
+		const retry = await throughKixelQuest(() => second.deps);
+		const lines = await waitForActivity(
+			wait.pr,
+			{ since: (timeout as WaitTimeout).cursor },
+			{ choose: async () => retry.forge },
+			second.deps,
+		);
+		expect(lines).toHaveLength(1);
+		expect(lines[0]).toMatch(/^2026-10-07T12:10:30Z pushed author /);
+	});
 });
 
 describe("wait deadlines and arguments", () => {
@@ -487,6 +524,16 @@ describe("choosing the forge", () => {
 		const forge = await forgeFor(repository, dependencies(malformed.fetch, unreachable));
 		await expect(forge.pulls(repository)).rejects.toThrow(
 			`Kixel Quest (${URL_}) failed POST /forge/pulls: malformed forge answer.extra: expected no such field; ${override}`,
+		);
+	});
+
+	test("a Kixel Quest 400 on a read without a free-form argument names the setting that reads GitHub", async () => {
+		const server = kixelQuest(unreachable, { fail: 400 });
+		const kixel = new KixelQuest(URL_, TOKEN, dependencies(server.fetch, unreachable));
+		const error = await new KixelQuestForge(kixel).pulls(repository).catch((e: unknown) => e);
+		expect(error).not.toBeInstanceOf(InputError);
+		expect((error as Error).message).toBe(
+			`Kixel Quest (${URL_}) failed POST /forge/pulls: HTTP 400, index unavailable; set QUEST_FORGE=github to read GitHub`,
 		);
 	});
 

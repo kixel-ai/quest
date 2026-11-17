@@ -94,6 +94,11 @@ export class KixelQuest {
 		);
 	}
 
+	/** The time now, epoch milliseconds. */
+	now(): number {
+		return this.deps.now();
+	}
+
 	/** Ask for `call`, giving up at `deadline` (epoch milliseconds). */
 	async call<C extends ForgeCall>(
 		call: C,
@@ -147,8 +152,9 @@ export class KixelQuest {
 		}
 		if (response.status === 401 || response.status === 403)
 			throw failed(`it refused the token ${tokensPath(this.deps.env)} pairs with it (HTTP ${response.status})`);
-		// A bad argument, such as a malformed wait point, is the caller's to fix on any forge.
-		if (response.status === 400)
+		// A malformed wait point is the caller's to fix on any forge; the other reads take no free-form argument, so
+		// their 400 means the CLI and Kixel Quest disagree on the wire, which reading GitHub sidesteps.
+		if (response.status === 400 && path === "/forge/watch")
 			throw new InputError(`Kixel Quest refused ${method} ${path}${reason(text) || ", a bad request"}`);
 		if (!response.ok) throw failed(`HTTP ${response.status}${reason(text)}`);
 		try {
@@ -194,9 +200,12 @@ export class KixelQuestForge implements Forge {
 	watch(pull: PullRequest, { since, deadline }: WatchOptions): Watch {
 		const kixel = this.kixel;
 		let cursor: string | undefined;
+		// Until Kixel Quest first answers, a timeout resumes from when the wait started, so a retry still reports a
+		// push made meanwhile; GitHub's backend resumes from the head, which needs a read that could time out too.
+		const started = since ?? new Date(kixel.now()).toISOString();
 		return {
 			get resume() {
-				return cursor ?? since;
+				return cursor ?? started;
 			},
 			async poll() {
 				const answer = await kixel.call("watch", { pull, from: cursor ?? since ?? null }, deadline);

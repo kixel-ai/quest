@@ -581,7 +581,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"auto-merge:moved prints once per head, with the account that enabled it as the actor and a URL naming the head it " +
 				"was enabled on, which it reads as quest status does. " +
 				"Pass the final field of the last line to --since to resume without replaying events. " +
-				"On timeout, the only line is a resume point for --since (a cursor, or the given --since or head SHA if setup did not finish), so a retry with it still reports activity from the first wait.\n\n" +
+				"On timeout, the only line is a resume point for --since (a cursor, or the given --since, else the head SHA, or through Kixel Quest the time the wait started, if setup did not finish), so a retry with it still reports activity from the first wait.\n\n" +
 				"Uses GH_TOKEN, GITHUB_TOKEN, or gh auth token. Label changes, replies, and reactions by that account are ignored. " +
 				FORGE_READS.replace("these reads", "its polls") +
 				"Through Kixel Quest, that account is the person its token names, and a timeout says how current its " +
