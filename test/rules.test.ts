@@ -312,6 +312,13 @@ test("gh calls reaching for a repository Kixel Quest hosts are denied, naming th
 	// A call naming another repository, or one gh could not tell, reaches GitHub as asked.
 	expect(run("gh pr view 3 -R localhost:8787/example/project")).toEqual([instead("quest pr view")]);
 	expect(run("gh pr view 3 -R moq-dev/quest")).toEqual([]);
+	// `-R` is persistent on `gh pr`, so it may come before the subcommand.
+	expect(run("gh pr -R moq-dev/quest view 3")).toEqual([]);
+	expect(run("gh pr --repo=moq-dev/quest view 3")).toEqual([]);
+	expect(run("gh pr -R example/project view 3")).toEqual([instead("quest pr view")]);
+	// The first denied call's pointer survives a later one with none.
+	expect(run("gh pr view 3 --json body && gh pr diff 3")).toEqual([instead("quest pr view")]);
+	expect(run("gh pr diff 3 && gh pr view 3")).toEqual([instead("quest pr view")]);
 	// The same name on another forge is another repository.
 	expect(run("gh pr view https://github.com/example/project/pull/3")).toEqual([]);
 	expect(run("gh pr view 3 -R github.com/example/project")).toEqual([]);
@@ -338,6 +345,7 @@ test("gh calls reaching for a repository Kixel Quest hosts are denied, naming th
 	).toEqual([]);
 	// The post checks still run beside it.
 	expect(run('gh pr comment 3 --body "Done."')).toEqual([RULES.footer, instead("quest pr comment")]);
+	expect(run('gh pr -R moq-dev/quest comment 3 --body "Done."')).toEqual([RULES.footer]);
 });
 
 test("gh calls in a checkout whose origin is on GitHub, or that has none, pass", () => {

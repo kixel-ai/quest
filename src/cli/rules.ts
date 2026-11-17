@@ -351,8 +351,9 @@ function shell(
 		} else if (name === "mktemp") mktemp(args, env, check);
 		else if (name === "git") git(args, asked, input, check);
 		else if (name === "gh") {
-			gh(args, input, literal, check);
-			if (!elsewhere && !moved) kixel(args, env, check);
+			const command = ghCommand(args);
+			gh(command, input, literal, check);
+			if (!elsewhere && !moved) kixel(command, env, check);
 		}
 		// `quest pr` posts as `gh pr` does, to GitHub or Kixel Quest, with the same flags, after any `--root`.
 		else if (name === "quest") {
@@ -507,6 +508,20 @@ function values(args: string[], names: string[], { attached = [] as string[] } =
 	return found;
 }
 
+/**
+ * `gh`'s arguments with any `-R`/`--repo` before `gh pr`'s or `gh issue`'s subcommand moved after it, where the
+ * checks look: the flag is persistent there, so `gh pr -R OWNER/REPO view 3` is `gh pr view -R OWNER/REPO 3`.
+ */
+function ghCommand(args: string[]): string[] {
+	const [group, ...rest] = args;
+	if (group !== "pr" && group !== "issue") return args;
+	let i = 0;
+	while (rest[i] === "-R" || rest[i] === "--repo" || /^(-R.|--repo=)/.test(rest[i] ?? ""))
+		i += rest[i] === "-R" || rest[i] === "--repo" ? 2 : 1;
+	if (i === 0 || i >= rest.length) return args;
+	return [group, rest[i]!, ...rest.slice(0, i), ...rest.slice(i + 1)];
+}
+
 /** `quest`'s arguments past its global options: `--root <path>` or `--root=<path>`. */
 function questCommand(args: string[]): string[] {
 	let i = 0;
@@ -636,7 +651,8 @@ function kixel(args: string[], env: ReadonlySet<string>, check: Check) {
 	if (hosted === null) return;
 	if (named !== null && !namesHosted(named, hosted, kixelUrl(check.env))) return;
 	check.found.add("kixel");
-	if (group === "pr") check.instead = QUEST_PR[command ?? ""];
+	// The first denied call's pointer stands, so a later one without a pointer does not erase it.
+	if (group === "pr") check.instead ??= QUEST_PR[command ?? ""];
 }
 
 /**
