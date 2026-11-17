@@ -9,6 +9,7 @@ import { Argument, Command, CommanderError, InvalidArgumentError, Option } from 
 
 import { description } from "../../package.json";
 import {
+	AUDITS,
 	type Doc,
 	type RankedQuest,
 	blockers,
@@ -51,6 +52,7 @@ import { type GitHubDependencies, mergedHolds } from "../github/client";
 import { setTimeout as sleep } from "node:timers/promises";
 import { type Hold, finish, land, release, take } from "./hold";
 import { LAND_CHECK } from "../github/land";
+import { audit } from "./audits";
 import { apply, pushCommand } from "./land-apply";
 import { EFFORT_VARIABLE, EFFORTS, fix, FixerAgentError } from "./land-fix";
 import { watch, type WatchOptions } from "./land-watch";
@@ -1223,7 +1225,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"its cost counting equally toward each. Its role is classifying when a PR's ## Review record names it as the risk classifier, reviewing when it names it " +
 				"as a reviewer or Codex marks it a review, else the one the first quest skill it ran gives (planning, implementing, iterating, " +
 				"reviewing, merging, or coordinating), else its parent's unless that is coordinating, else coordinating for a session on its sub-agents' " +
-				"PRs only, planning on a quest-plan, quest-audit, quest-recurring, or quest-import branch, implementing when its " +
+				"PRs only, planning on a quest-plan, quest-recurring, or quest-import branch, implementing when its " +
 				"first request since --since came before the PR opened, and iterating otherwise. Each PR sums its sessions' " +
 				"waits by kind: queued in and running a quest gate, waiting in quest wait for PR activity or the merge queue, " +
 				"each as the tool logged it for its session, and on a person's answer to a blocking question, as its " +
@@ -1284,7 +1286,9 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				`${tokensPath()} pairs with that endpoint as a bearer token, one upload per endpoint and repository, ` +
 				`then again every ${SEND_INTERVAL / 1000} seconds until stopped, at low priority. A record is built as quest usage ` +
 				"builds it, from token-max's sessions on this host since the earliest queued session's first instant and " +
-				"the PRs updated since then, and replaces its earlier copy, so a resend never doubles. An endpoint that " +
+				"the PRs updated since then, and replaces its earlier copy, so a resend never doubles. A sent session whose " +
+				"latest branch, or a sub-agent's, heads no PR yet is sent again, with its sub-agents, once a pass for its " +
+				"repository reads a PR opened on that branch, until its transcript is gone. An endpoint that " +
 				"refuses the token (401 or 403) is sent nothing more until the token changes; any other failure keeps the " +
 				"sessions queued, retried after a minute and then twice as long each time up to six hours, and the next " +
 				"stop hook says so once. Before a record is built, a cheap model, " +
@@ -1880,6 +1884,28 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 			const found = skill(name);
 			if (!found) throw new Error(`no skill named ${name} (have: ${SKILLS.map((s) => s.name).join(", ")})`);
 			out.stdout(found.instructions);
+		});
+
+	program
+		.command("audit")
+		.summary("Print a shipped audit's definition, or list the audits with no name")
+		.description(
+			"Print a shipped audit's definition, or list the audits with no name.\n\n" +
+				"A quest whose ## Audit section names an audit runs it, and the pinned binary decides what the audit checks. " +
+				"It prints what to look for and what each finding becomes, then how the run plans the next one. " +
+				"`quest init` plants a stub for each audit no quest names, unless the root quest/README.md lists it under " +
+				"## Skipped audits.",
+		)
+		.argument("[name]", "Audit to print")
+		.action((name: string | undefined) => {
+			if (name === undefined) {
+				for (const a of AUDITS) print(`${a.name} - ${a.title.replace(/^\[\w+\] /, "")}`);
+				return;
+			}
+			const text = audit(name);
+			if (text === undefined)
+				throw new Error(`no audit named ${name} (have: ${AUDITS.map((a) => a.name).join(", ")})`);
+			out.stdout(text);
 		});
 
 	const listed = (hooks: readonly HookEntry[]) =>

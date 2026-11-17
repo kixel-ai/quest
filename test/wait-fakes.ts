@@ -1,5 +1,5 @@
 // A fake GitHub for `quest wait`: scripted REST pages and GraphQL answers, and a clock that advances as it sleeps.
-import { type GitHubDependencies } from "../src/github/client";
+import { type CachedResponse, type GitHubDependencies } from "../src/github/client";
 import { GitHubForge } from "../src/github/forge";
 import { waitForActivity, type WaitOptions } from "../src/cli/wait";
 
@@ -185,9 +185,11 @@ export function setup(
 	const ruleCalls: { path: string; headers: Headers }[] = [];
 	const sleeps: number[] = [];
 	const warnings: string[] = [];
+	const stored = new Map<string, CachedResponse>();
 	const deps: GitHubDependencies = {
 		token: "test-token",
 		quota: "wait",
+		cache: { get: async (key) => stored.get(key), set: async (key, entry) => void stored.set(key, entry) },
 		now: () => now,
 		sleep: async (ms) => {
 			sleeps.push(ms);

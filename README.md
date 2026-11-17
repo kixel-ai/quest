@@ -180,6 +180,66 @@ refuses it. On an epic or milestone README, the date holds back every quest
 under it. A past date no longer blocks. `quest check` rejects anything but one
 real `YYYY-MM-DD` date.
 
+## Run recurring audits
+
+Quest ships a pack of audits every repository runs once per milestone:
+
+```console
+$ quest audit
+tree - Audit the quest tree
+deps - Audit dependencies
+code - Audit the code
+cost - Audit build and CI cost
+docs - Audit the docs
+tests - Audit test coverage
+```
+
+`tree` finds quests that disagree, conflict, sit in the wrong milestone, or
+plan stale work; `deps` reviews new releases, upstream health, held-back
+majors, and dependencies worth dropping; `code` deletes dead code, simplifies
+overbuilt code, and prunes stale lint suppressions; `cost` weighs each CI job,
+gate step, test, build second, and artifact byte against what it earns; `docs`
+checks claims, examples, links, and exports against the code; and `tests`
+finds untested behavior and tests CI never runs. `quest audit <name>` prints
+what one checks, what each finding becomes, and how its run plans the next
+one.
+
+A quest runs an audit by naming it in an `## Audit` section, and holds only
+what the repository learned, such as its baseline and the scope it excludes:
+
+```markdown
+# [M] Audit dependencies
+
+## Goal
+
+Run the `deps` audit: `quest audit deps` prints what it checks, what each finding becomes, and how to plan its next run.
+
+## Audit
+
+- deps
+
+## Required
+
+- [m0](/quest/m0/README.md) - the audit runs after it
+```
+
+`quest init` plants this stub for each audit no quest names, in the milestone
+after the lowest one with work left, requiring it, and creates that milestone
+when missing; with no work left, the stubs are ready at once. It never edits a
+stub afterwards. The run's PR deletes the stub and creates the next one a
+milestone later, scheduled a week out, so improving a definition reaches every
+repository on its next run. To opt out, list the audit in the root
+`quest/README.md`:
+
+```markdown
+## Skipped audits
+
+- deps - this repository vendors nothing and has no package manager
+```
+
+`quest check` rejects an audit name Quest does not ship in either section, a
+second name in one `## Audit`, and `## Skipped audits` outside the root.
+
 ## Find what waits on you
 
 A quest waiting outside the tree says so in a `## Waiting` section, one item
@@ -384,6 +444,9 @@ quest wait 101 --since abcdef0123456789abcdef0123456789abcdef01
 A number uses the repository's `origin`, so it needs a checkout or `--root`
 naming one; a URL works from any directory.
 Authentication comes from `GH_TOKEN`, then `GITHUB_TOKEN`, then `gh auth token`.
+Every REST read quest makes revalidates its last answer by ETag, kept per token
+under `$XDG_CACHE_HOME/quest/github` (`~/.cache`, about 64 MiB), so an
+unchanged read costs none of the token's GitHub quota.
 Without `--since`, the point is the current head's push time, so an existing
 review on that head is included. GitHub lists a push seconds to minutes after
 it lands, so for the current head the wait rereads the listing every 15 seconds
@@ -1754,17 +1817,21 @@ latest upload, since one sender sends a session's uploads in order. The type is
 
 - `pulls` are the PRs it worked on, attributed as `quest usage` attributes
   them; a session with none yet, such as planning before its PR opens, keeps
-  its `branch`, and the next record names the PR.
+  its `branch`, and the next record names the PR. The sender remembers a sent
+  session while its latest branch, or a sub-agent's, heads no PR, and resends
+  it, with its sub-agents, once one opens: with the next session it sends from
+  that repository, since only then does it read the repository's PRs. It
+  forgets the session once the harness prunes its transcript.
 - `role` is classifying when a PR's `## Review` record names it as the
   [risk classifier](#risk-tiers), reviewing when it names it as a reviewer or
   Codex marks it a review, else the one the first quest skill it ran gives: planning
-  (`/quest-plan`, `/quest-audit`, `/quest-recurring`, `/quest-import`,
+  (`/quest-plan`, `/quest-recurring`, `/quest-import`,
   `/quest-grill`, `/quest-delete`, `/quest-export`), implementing
   (`/quest-start`), iterating (`/quest-iterate`), reviewing (`/quest-review`),
   merging (`/quest-merge`, `/quest-complete`), or coordinating (`/quest-run`,
   `/quest-spawn`). Without one, a sub-agent takes its parent's role unless that
   is coordinating; a session on its sub-agents' PRs only is coordinating; one
-  on a `quest-plan/`, `quest-audit/`, `quest-recurring/`, or `quest-import/`
+  on a `quest-plan/`, `quest-recurring/`, or `quest-import/`
   branch is planning; and the rest are implementing when their first request
   came before the PR opened, else iterating.
 - `waits` holds each wait a tool timed: `gate-queue` and `gate-run` for an
@@ -2193,7 +2260,6 @@ arrives with the guide sections and other skills it builds on, in one call:
 | `quest-recurring` | Plan a quest whose finishing PR creates its next occurrence, and what gates it. |
 | `quest-import` | Bring open GitHub issues into the planning conversation. |
 | `quest-export` | Turn active quests into GitHub issues before leaving Quest. |
-| `quest-audit` | Find conflicting, stale, or misprioritized quests, then resolve them. |
 | `quest-start` | Claim a ready quest, complete it, and open a PR. |
 | `quest-spawn` | Run only `quest-run`'s quest starts: triage ready quests and send agents out in parallel, asking nothing. |
 | `quest-iterate` | Iterate on an open PR to settle its open decisions, fix CI and review findings, and push. |

@@ -1,6 +1,6 @@
 // `quest init` and `quest uninstall`: install skill stubs and reverse it.
 //
-// Init applies the core's file plan (`planInit`) to the checkout, then
+// Init applies the core's file plans (`planInit`, then `planAudits`) to the checkout, then
 // registers the clone's merge driver. Uninstall never deletes the quest tree.
 
 import {
@@ -28,6 +28,7 @@ import {
 	lines,
 	newline,
 	InitRefused,
+	planAudits,
 	planInit,
 } from "../core";
 import { git } from "./git";
@@ -41,7 +42,8 @@ export { ATTRIBUTES_LINE, REFERENCE_LINE } from "../core";
  * A conflict throws before anything is written, so a refused init leaves the repository as it was.
  */
 export function init(root: string): string[] {
-	const changes = planInit(checkout(root), SKILLS);
+	const repo = checkout(root);
+	const changes = [...planInit(repo, SKILLS), ...planAudits(repo)];
 	for (const { path, content } of changes) {
 		if (content === null) {
 			rmSync(join(root, path));

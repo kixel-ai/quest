@@ -884,3 +884,35 @@ describe("Required links to a later milestone", () => {
 			.accepts();
 	});
 });
+
+describe("audits", () => {
+	const audit = (...names: string[]) => `\n## Audit\n\n${names.map((name) => `- ${name}\n`).join("")}`;
+	const skipped = (...items: string[]) => `\n## Skipped audits\n\n${items.map((item) => `- ${item}\n`).join("")}`;
+
+	test("a quest names one shipped audit, and the root skips others", () => {
+		tree()
+			.append("quest/m0/epic/one.md", audit("deps"))
+			.append("quest/README.md", skipped("tree - nothing to audit yet"))
+			.accepts();
+	});
+
+	test("an audit quest does not ship is rejected in either section", () => {
+		tree()
+			.append("quest/m0/epic/one.md", audit("dep"))
+			.rejects(
+				"one.md:9: '## Audit' item must be the name of an audit quest ships (tree, deps, code, cost, docs, tests)",
+			);
+		tree()
+			.append("quest/README.md", skipped("perf - not shipped"))
+			.rejects("quest/README.md:9: '## Skipped audits' item must open with the name of an audit quest ships");
+	});
+
+	test("an Audit section names one audit", () => {
+		tree().append("quest/m0/epic/one.md", audit("deps", "tree")).rejects("'## Audit' names one audit");
+		tree().append("quest/m0/epic/one.md", "\n## Audit\n").rejects("'## Audit' is empty");
+	});
+
+	test("only the root README skips audits", () => {
+		tree().append("quest/m0/README.md", skipped("deps")).rejects("'## Skipped audits' belongs in quest/README.md");
+	});
+});

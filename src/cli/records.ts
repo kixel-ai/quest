@@ -7,7 +7,6 @@ import type { LoggedWait } from "./waits";
 /** The role the first quest skill a session ran gives it; a skill not listed gives none. */
 const SKILL_ROLES: Record<string, Role> = {
 	"quest-plan": "planning",
-	"quest-audit": "planning",
 	"quest-recurring": "planning",
 	"quest-import": "planning",
 	"quest-grill": "planning",
@@ -23,7 +22,7 @@ const SKILL_ROLES: Record<string, Role> = {
 };
 
 /** Branch prefixes of the skills whose PRs plan quests. */
-const PLANNING = ["quest-plan/", "quest-audit/", "quest-recurring/", "quest-import/"];
+const PLANNING = ["quest-plan/", "quest-recurring/", "quest-import/"];
 
 /** What the records are built from. */
 export interface RecordInput {

@@ -4,6 +4,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 import type { GitHubDependencies } from "../github/client";
 import { InputError, type PullRequest, type Repository } from "../core";
 import { git } from "./git";
+import { diskResponseCache, responseCacheDirectory } from "./response-cache";
 
 /** Accept a GitHub PR URL, or a number in the origin repository. */
 export function pullRequest(value: string, root: string): PullRequest {
@@ -120,7 +121,7 @@ export function githubRepository(url: string): Repository | null {
 
 /**
  * The CLI's client dependencies: global `fetch`, a token from `GH_TOKEN`, `GITHUB_TOKEN`, or `gh auth token`,
- * `warn`, and `quota`, which only a command whose job is to wait sets to `wait`.
+ * `warn`, `quota`, which only a command whose job is to wait sets to `wait`, and the on-disk response cache.
  */
 export function gitHubDependencies(
 	warn: (message: string) => void,
@@ -138,5 +139,5 @@ export function gitHubDependencies(
 		}
 	}
 	if (!token) throw new Error("GitHub authentication returned an empty token");
-	return { fetch, now: Date.now, sleep, token, warn, quota };
+	return { fetch, now: Date.now, sleep, token, warn, quota, cache: diskResponseCache(responseCacheDirectory()) };
 }
