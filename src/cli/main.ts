@@ -148,6 +148,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		env: process.env,
 		fetch: globalThis.fetch,
 		now: Date.now,
+		sleep,
 		github: () => gitHubDependencies(warn, quota),
 	});
 	const claimDependencies = (): ClaimDependencies => ({

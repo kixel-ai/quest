@@ -34,7 +34,15 @@ import {
 import { type GitHubDependencies, reading } from "../github/client";
 import { GitHubForge } from "../github/forge";
 import { pullRequest, readRemote, remoteHost } from "./github";
-import { type Installation, REUSE_MARGIN, installationDirectory, keep, kept } from "./installation";
+import {
+	type Installation,
+	LockDeadline,
+	REUSE_MARGIN,
+	exclusive,
+	installationDirectory,
+	keep,
+	kept,
+} from "./installation";
 import { kixelUrl, tokenFor, tokensPath } from "./tokens";
 
 /** The variable that, set to `github`, reads GitHub even where Kixel Quest serves the repository. */
@@ -45,6 +53,7 @@ export interface ForgeDependencies {
 	env: NodeJS.ProcessEnv;
 	fetch: typeof fetch;
 	now(): number;
+	sleep(milliseconds: number): Promise<unknown>;
 	/** Called only once a read goes to GitHub, so Kixel Quest's reads need no GitHub token. */
 	github(): GitHubDependencies;
 	/** What a Kixel Quest failure tells the person to do; by default, to read GitHub instead. */
@@ -217,24 +226,40 @@ export class KixelQuest {
 		}
 		const path = "/installation-token";
 		const name = `${repository.owner}/${repository.repo}`;
-		const { response, text } = await this.#fetch("POST", path, { repository: name }, deadline);
-		if (response.status === 404) return null;
-		if (response.status === 429) {
-			const wait = Number(response.headers.get("retry-after"));
-			throw this.#failed(
-				"POST",
-				path,
-				`you have minted as many installation tokens this hour as one person may${Number.isFinite(wait) && wait > 0 ? `; try again in ${Math.ceil(wait)} seconds` : ""}`,
-			);
-		}
-		if (!response.ok) throw this.#failed("POST", path, `HTTP ${response.status}${reason(text)}`);
-		const installation = this.#minted(text, name);
+		const mint = async (): Promise<Installation | null> => {
+			// Another agent may have minted while this one waited for the lock.
+			try {
+				const have = kept(directory, this.url, this.token, repository, this.deps.now());
+				if (have !== null) return have;
+			} catch (error) {
+				throw keeping("read", error);
+			}
+			const { response, text } = await this.#fetch("POST", path, { repository: name }, deadline);
+			if (response.status === 404) return null;
+			if (response.status === 429) {
+				const wait = Number(response.headers.get("retry-after"));
+				throw this.#failed(
+					"POST",
+					path,
+					`you have minted as many installation tokens this hour as one person may${Number.isFinite(wait) && wait > 0 ? `; try again in ${Math.ceil(wait)} seconds` : ""}`,
+				);
+			}
+			if (!response.ok) throw this.#failed("POST", path, `HTTP ${response.status}${reason(text)}`);
+			const installation = this.#minted(text, name);
+			try {
+				keep(directory, this.url, this.token, repository, installation);
+			} catch (error) {
+				throw keeping("keep", error);
+			}
+			return installation;
+		};
 		try {
-			keep(directory, this.url, this.token, repository, installation);
+			return await exclusive(directory, this.url, this.token, repository, this.deps, deadline, mint);
 		} catch (error) {
-			throw keeping("keep", error);
+			if (error instanceof LockDeadline) throw this.#failed("POST", path, error.message);
+			if ((error as NodeJS.ErrnoException).code !== undefined) throw keeping("lock", error);
+			throw error;
 		}
-		return installation;
 	}
 
 	/** The token in a mint's answer, `{token, expiresAt, repository, login}`, for `name`. */

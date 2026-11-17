@@ -107,6 +107,7 @@ function dependencies(
 		env: { XDG_CONFIG_HOME: config, XDG_CACHE_HOME: join(config, "cache"), ...env },
 		fetch,
 		now: () => 0,
+		sleep: async () => {},
 		// The fake's token is the person's own here.
 		github: () => {
 			const { readToken, ...rest } = github();

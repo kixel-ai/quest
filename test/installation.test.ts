@@ -1,5 +1,6 @@
 // Reads on the installation token Kixel Quest mints, and writes on the person's own, against a fake Kixel Quest and a
 // fake GitHub that record the token each request carries.
+import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -64,7 +65,13 @@ function world(options: { mint?: (n: number, repository: string) => Response; gi
 		quota: "fail",
 		warn: () => {},
 	});
-	const deps: ForgeDependencies = { env, fetch: fetch as typeof globalThis.fetch, now: () => clock, github: person };
+	const deps: ForgeDependencies = {
+		env,
+		fetch: fetch as typeof globalThis.fetch,
+		now: () => clock,
+		sleep: async (ms) => void (clock += ms),
+		github: person,
+	};
 	return { deps, mints, github, person, env };
 }
 
@@ -121,6 +128,35 @@ describe("reads on a minted installation token", () => {
 			expect(statSync(join(directory, name)).mode & 0o777).toBe(0o600);
 		}
 		expect(statSync(directory).mode & 0o777).toBe(0o700);
+	});
+
+	test("agents starting on a cold cache mint once between them", async () => {
+		const w = world();
+		// Each waiter lets the others run while it sleeps, as parallel processes do.
+		const slow: ForgeDependencies = { ...w.deps, sleep: async (ms) => void (await Promise.resolve((clock += ms))) };
+		const forges = await Promise.all(Array.from({ length: 8 }, () => liveFor(repository, slow)));
+		await Promise.all(forges.map((forge) => forge.pulls(repository)));
+		expect(w.mints).toHaveLength(1);
+		expect(new Set(w.github.map((request) => request.token))).toEqual(new Set(["minted-1"]));
+		expect(files(w.env).filter((name) => name.endsWith(".lock"))).toEqual([]);
+	});
+
+	test("a lock a crashed agent left is taken over once stale, and a held one is waited for until the deadline", async () => {
+		const w = world();
+		const lock = join(
+			installationDirectory(w.env),
+			`${createHash("sha256").update(`${KIXEL}\n${KIXEL_TOKEN}\nexample/project`).digest("hex")}.lock`,
+		);
+		mkdirSync(installationDirectory(w.env), { recursive: true });
+		writeFileSync(lock, String(clock));
+		await expect(liveFor(repository, w.deps, clock + 1000)).rejects.toThrow(
+			"its deadline passed while another quest minted the token",
+		);
+		expect(w.mints).toEqual([]);
+		clock += 60_000;
+		await liveFor(repository, w.deps);
+		expect(w.mints).toHaveLength(1);
+		expect(files(w.env).filter((name) => name.endsWith(".lock"))).toEqual([]);
 	});
 
 	test("a person with another Kixel Quest token mints their own", async () => {
