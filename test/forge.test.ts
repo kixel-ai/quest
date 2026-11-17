@@ -359,26 +359,28 @@ describe("wait", () => {
 	test("a first poll that times out resumes from when the wait started, so a retry reports a push made meanwhile", async () => {
 		const first = wait.setup([]);
 		const server = kixelQuest(() => first.deps);
-		// Kixel Quest never answers the first poll: the timeout passes while it is asked.
+		// Asking which forge to read takes 10 seconds, then Kixel Quest never answers the first poll.
 		const fetch = async (input: string | URL | Request, init?: RequestInit) => {
-			if (new URL(String(input)).pathname !== "/forge/watch") return server.fetch(input, init);
-			await first.deps.sleep(61_000);
+			await first.deps.sleep(new URL(String(input)).pathname === "/forge" ? 10_000 : 61_000);
+			if (new URL(String(input)).pathname === "/forge") return server.fetch(input, init);
 			throw new Error("The operation timed out.");
 		};
-		const forge = await forgeFor(repository, { ...dependencies(fetch, () => first.deps), now: first.deps.now });
+		const deps = { ...dependencies(fetch, () => first.deps), now: first.deps.now };
+		// The wait starts half a second into 12:10:00, which GitHub times activity in as 12:10:00.
+		await first.deps.sleep(500);
 		const timeout = await waitForActivity(
 			wait.pr,
 			{ timeout: 60 },
-			{ choose: async () => forge },
+			{ choose: (pull, deadline) => forgeFor(pull, deps, deadline) },
 			first.deps,
 		).catch((e: unknown) => e);
 		expect(timeout).toBeInstanceOf(WaitTimeout);
 		expect((timeout as WaitTimeout).cursor).toBe("2026-10-07T12:10:00.000Z");
-		// The head moved to B during the timed-out wait; the retry reports that push.
+		// The head moved to B in the wait's first second; the retry reports that push.
 		const second = wait.setup(
 			[
 				wait.pull(undefined, wait.B),
-				wait.response([wait.pushed(wait.B, "2026-10-07T12:10:30Z"), wait.pushed()]),
+				wait.response([wait.pushed(wait.B, "2026-10-07T12:10:00Z"), wait.pushed()]),
 				wait.response([wait.committed(wait.A), wait.committed(wait.B)]),
 			],
 			[wait.A, wait.B],
@@ -391,7 +393,7 @@ describe("wait", () => {
 			second.deps,
 		);
 		expect(lines).toHaveLength(1);
-		expect(lines[0]).toMatch(/^2026-10-07T12:10:30Z pushed author /);
+		expect(lines[0]).toMatch(/^2026-10-07T12:10:00Z pushed author /);
 	});
 });
 

@@ -223,6 +223,8 @@ export interface WatchOptions {
 	/** An ISO timestamp, a pushed SHA, or a cursor; the head's push time when absent. */
 	since?: string;
 	deadline: number;
+	/** When the wait began, epoch milliseconds; where a backend resumes before it knows the head. Now when absent. */
+	started?: number;
 }
 
 /** The reads quest makes of a forge. */

@@ -67,7 +67,7 @@ export async function waitForActivity(
 	};
 	try {
 		forge = await choice.choose(pr, deadline);
-		watch = forge.watch(pr, { since: options.since, deadline });
+		watch = forge.watch(pr, { since: options.since, deadline, started });
 		for (;;) {
 			const answer = await watch.poll();
 			asOf = answer.asOf;

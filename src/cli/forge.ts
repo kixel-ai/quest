@@ -197,12 +197,13 @@ export class KixelQuestForge implements Forge {
 		return this.kixel.call("held", { sources, branches });
 	}
 
-	watch(pull: PullRequest, { since, deadline }: WatchOptions): Watch {
+	watch(pull: PullRequest, { since, deadline, started: began }: WatchOptions): Watch {
 		const kixel = this.kixel;
 		let cursor: string | undefined;
-		// Until Kixel Quest first answers, a timeout resumes from when the wait started, so a retry still reports a
-		// push made meanwhile; GitHub's backend resumes from the head, which needs a read that could time out too.
-		const started = since ?? new Date(kixel.now()).toISOString();
+		// Until Kixel Quest first answers, a timeout resumes from when the wait began, so a retry still reports a push
+		// made meanwhile; GitHub's backend resumes from the head, which needs a read that could time out too. GitHub
+		// times activity to the second, so the point rounds down to keep activity in the wait's first second.
+		const started = since ?? new Date(Math.floor((began ?? kixel.now()) / 1000) * 1000).toISOString();
 		return {
 			get resume() {
 				return cursor ?? started;
