@@ -1454,13 +1454,13 @@ whole branch at the PR's size.
 committed branch before it is pushed for review, at an effort set by the PR's
 size. Each size ranks its reviewers, the same for every repository:
 
-| PR size | Reviewer | When Sol changed it last |
-|---|---|---|
-| XS | Codex `gpt-6.1-sol` medium | Claude Code `claude-opus-5-5` low |
-| S | Codex `gpt-6.1-sol` medium | Claude Code `claude-opus-5-5` low |
-| M, or none | Codex `gpt-6.1-sol` high | Claude Code `claude-opus-5-5` medium |
-| L | Codex `gpt-6.1-sol` xhigh | Claude Code `claude-opus-5-5` high |
-| XL | Codex `gpt-6.1-sol` xhigh | Claude Code `claude-opus-5-5` xhigh |
+| PR size | Reviewer | When Sol changed it last | Last |
+|---|---|---|---|
+| XS | Codex `gpt-6.1-sol` medium | Claude Code `claude-opus-5-5` low | Claude Code `claude-sonnet-5-5` medium |
+| S | Codex `gpt-6.1-sol` medium | Claude Code `claude-opus-5-5` low | Claude Code `claude-sonnet-5-5` medium |
+| M, or none | Codex `gpt-6.1-sol` high | Claude Code `claude-opus-5-5` medium | Claude Code `claude-sonnet-5-5` medium |
+| L | Codex `gpt-6.1-sol` xhigh | Claude Code `claude-opus-5-5` high | Claude Code `claude-sonnet-5-5` high |
+| XL | Codex `gpt-6.1-sol` xhigh | Claude Code `claude-opus-5-5` xhigh | Claude Code `claude-sonnet-5-5` high |
 
 Beside it, the shadow, the pick's model one effort lower (Sol low for an XS
 PR), reviews the same head in its own session, so the routing can be retuned
@@ -1474,6 +1474,25 @@ a shadow at its own effort while the old shadow still has findings, so none
 is left unanswered. The reviewers run at once;
 the first to fail, such as on a usage limit, stops the others, and the round
 saves none.
+
+A reviewer that cannot run passes the round to the next whose model is not
+the latest writer's, so Sonnet reviews what Opus changed last while Sol is
+out. That is a failure the CLI or provider reports before any finding is
+saved, never text in the diff or a reply: a CLI that is not installed, logged
+out, or has its login rejected passes over every model of that CLI, and a
+model at its usage limit passes over only itself. The run prints a `skipped`
+line for each reviewer it passed over, and the record names it in its
+header:
+
+```markdown
+- Skipped: Codex, gpt-6.1-sol, high effort: usage limit, resets 2026-11-18T03:00:00Z
+```
+
+The new reviewer settles the open findings of the one it replaces, and the
+shadow follows it. Only when every eligible reviewer is out does the run fail,
+exiting 3 with each one's error. A reviewer `--harness`, `--model`, or
+`--effort` names never passes the round on, so a controlled run, such as
+`quest eval run`'s, measures the reviewer it names.
 
 A quest branch takes its quest's size, read from the base branch's tip so a
 change cannot lower its own review; any other PR, such as a skill's own, takes
@@ -1493,10 +1512,8 @@ reviewers' sessions for the pick's next run, and refuses while one has
 findings to settle, so a head never passes one reviewer alone while the other's
 findings are open. When the latest writer changes the size's pick to one with
 no session on the branch, its first session settles the open findings of the
-reviewer it replaces, and the new pick's shadow settles the old shadow's. An unknown harness, a size whose
-every reviewer is avoided, or a missing or logged-out CLI, is an error
-rather than a same-model review, as is a login the API rejects mid-round, such
-as an expired or revoked token. The reviewer reaches its model as the user's own CLI does:
+reviewer it replaces, and the new pick's shadow settles the old shadow's. An unknown harness or a size whose
+every reviewer is avoided is an error rather than a same-model review. The reviewer reaches its model as the user's own CLI does:
 Claude Code keeps `ANTHROPIC_BASE_URL`, `ANTHROPIC_CUSTOM_HEADERS`, and its
 cloud providers' `CLAUDE_CODE_USE_*` switches and settings, so a gateway such
 as CLIProxyAPI, Bedrock, Vertex, or Foundry works, and Codex keeps
@@ -1630,11 +1647,14 @@ and prints `record skipped: <why>`. It edits as the user the GitHub token names
 record only on a PR whose author has write access, so review your
 own PRs with your own token. A record GitHub refuses fails the command after the
 round's report, with exit status 1. It exits 0 once the round
-finishes, whatever it found, 2 for invalid arguments or a checkout or CLI that
-cannot be reviewed, including a login the API rejects, 3 when a reviewer's
-account hit its usage limit, and 1 for other failures. A usage limit prints one
-line, `error: <harness> hit its usage limit; resets <time>`, where `<time>` is
-the reset as an ISO 8601 UTC timestamp, or `unknown` when the CLI named none.
+finishes, whatever it found, 2 for invalid arguments or a checkout that
+cannot be reviewed, 3 when no eligible reviewer could run, each not installed,
+logged out, its login rejected, or at its usage limit, and 1 for other
+failures. The only eligible reviewer's usage limit prints one line,
+`error: <harness> hit its usage limit; resets <time>`, where `<time>` is the
+reset as an ISO 8601 UTC timestamp, or `unknown` when the CLI named none; with
+several, it prints `error: no eligible <size> reviewer could run: <model>
+<effort> (<error>), ...`.
 Through a gateway that pools accounts, such as CLIProxyAPI, the limit is the
 pool's: Claude Code shows its "All credentials for model ... are cooling down",
 and Codex, sent to `OPENAI_BASE_URL`, gives up on the gateway's 429 after its

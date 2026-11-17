@@ -83,7 +83,8 @@ import {
 } from "./models";
 import {
 	ReviewInputError,
-	ReviewLimitError,
+	ReviewOutageError,
+	ReviewerUnavailableError,
 	processDependencies as reviewDependencies,
 	ask,
 	review,
@@ -1568,11 +1569,12 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		(size) => `${size} ${REVIEWERS[size].map((e) => `${e.harness} ${e.model} ${e.effort}`).join(", then ")}`,
 	).join("; ");
 	const classifiers = CLASSIFIERS.map((e) => `${e.harness} ${e.model} ${e.effort}`).join(", then ");
-	/** quest review's exit code for `error`: 2 for a usage error, 3 at a usage limit, else 1. */
+	/** quest review's exit code for `error`: 2 for a usage error, 3 when no reviewer could run, else 1. */
 	const reviewFailure = (error: unknown): number => {
-		if (error instanceof ReviewInputError || error instanceof ReviewLimitError) {
+		const outage = error instanceof ReviewerUnavailableError || error instanceof ReviewOutageError;
+		if (error instanceof ReviewInputError || outage) {
 			out.stderr(`error: ${error.message}\n`);
-			return error instanceof ReviewInputError ? 2 : 3;
+			return outage ? 3 : 2;
 		}
 		warn(error instanceof Error ? error.message : String(error));
 		return 1;
@@ -1583,7 +1585,12 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		.description(
 			"Review the checkout's committed branch against its base with a reviewer its size picks, never the " +
 				`model that changed it last. Each size ranks its reviewers (harness, model, effort): ${reviewers}. The ` +
-				"first whose model is not avoided reviews, and beside it, on the same head in its own session, the shadow: " +
+				"first whose model is not avoided reviews. One that cannot run, as its CLI or provider reports before any " +
+				"finding is saved, passes the round to the next whose model is not avoided: a CLI that is not installed, " +
+				"logged out, or has its login rejected passes over every model of that CLI, and a model at its usage limit " +
+				"only itself; the run's report and record name each it passed over and why. A reviewer --harness, --model, " +
+				"or --effort names never passes the round on. Beside the reviewer, on the same head in its own session, runs the shadow, " +
+				"which follows the round to the reviewer it passes to: " +
 				"the pick's model one effort lower (low, medium, high, xhigh), skipped when the pick runs at low or an " +
 				"effort off that ladder, so each effort step can be compared with the one below it. The shadow runs on a " +
 				"branch's first run of the pick, then only while it has findings to settle or once the pick changed so it is " +
@@ -1653,7 +1660,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"and can only raise it: the head's tier is the riskiest, with the reason of the first to judge it so.\n\n" +
 				"Prints the size and where it came from, base, and head, its risk tier and reason, the classifier's tier, " +
 				"how it was set (model, paths, or default), and reason, and for a model a classifier line (harness, model, " +
-				"effort, session) and its usage line, then for each reviewer its harness, model, and " +
+				"effort, session) and its usage line, a skipped line (harness, model, effort, reason) for each reviewer passed over, then for each reviewer its harness, model, and " +
 				"effort, followed by shadow for the shadow, session, round, an " +
 				"unchanged line for a repeated round, a usage line per turn (input tokens, the " +
 				"part read from the prompt cache, and output), a score from 0 to 10 for how ready the head is to land with " +
@@ -1663,20 +1670,22 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"`next checkpoint` when a reviewer's every third round reports other findings, to compare the current approach " +
 				"with the best long-term approach worked out from first principles before fixing them, `next respond` to fix or refute the findings, or `next done`. A reply without a valid score " +
 				"fails as any malformed reply does. --json prints " +
-				"one object: `rounds`, one per reviewer, `tallies`, every reviewer's findings across the branch's rounds, `risk`, the head's tier with its classification, `record`, and `next`.\n\n" +
+				"one object: `rounds`, one per reviewer, `tallies`, every reviewer's findings across the branch's rounds, `risk`, the head's tier with its classification, `skipped`, each reviewer passed over with its reason, `record`, and `next`.\n\n" +
 				"After each round, it rewrites the `## Review` section of the branch's open PR into the base, as the " +
 				"user the GitHub token names, keeping the rest of the body, and prints `record <url>`: the reviewed " +
 				"head, named in full only once no reviewer reports a finding, the base, the head's risk tier and reason, " +
-				"the classifier's tier and who set it, and each reviewer, its Reviewer line ending in `, shadow` for the shadow, its " +
+				"the classifier's tier and who set it, a `- Skipped:` line for each reviewer passed over, and each reviewer, its Reviewer line ending in `, shadow` for the shadow, its " +
 				"session and round, score, the tier it raised the risk to and why, its tally of findings across the branch's rounds, and each finding with its disposition. With no " +
 				"such PR, or a remote off GitHub, it prints `record skipped: <why>` and changes nothing.\n\n" +
 				"Exits 0 once the round finishes, whatever it found, 2 for invalid arguments " +
-				"or a checkout or CLI that cannot be reviewed, including a login the API rejects, 3 when a reviewer's " +
-				"account hit its usage limit, and 1 for other failures, including a PR GitHub will not show or a record it " +
+				"or a checkout that cannot be reviewed, 3 when no eligible reviewer could run, each not installed, logged " +
+				"out, its login rejected, or at its usage limit, and 1 for other failures, including a PR GitHub will not show or a record it " +
 				"refuses. A malformed `## Models` field the round reads, such as a Size line naming no size or an " +
-				"Implementer line naming no model it can read, is a usage error, unless --size or --exclude-model replaces it. A usage limit prints one line, " +
+				"Implementer line naming no model it can read, is a usage error, unless --size or --exclude-model replaces it. A usage limit of the only " +
+				"eligible reviewer prints one line, " +
 				"`error: <harness> hit its usage limit; resets <time>`, where <time> is the reset as an ISO 8601 UTC " +
-				"timestamp, or `unknown` when the CLI named none.",
+				"timestamp, or `unknown` when the CLI named none; with several, it prints `error: no eligible <size> " +
+				"reviewer could run: <model> <effort> (<error>), ...`, each error as the only reviewer's would read.",
 		)
 		.option("--base <remote/branch>", "Base branch to review against (default: origin's default branch)")
 		.addOption(
@@ -1735,7 +1744,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 					},
 				);
 				pending = run.then(async (reviewed) => {
-					const { rounds, tallies, risk } = reviewed;
+					const { rounds, tallies, risk, skipped } = reviewed;
 					// The rounds are saved in their sessions either way, so their report prints before a failed record.
 					let record: Recorded | undefined;
 					let failure: unknown;
@@ -1750,6 +1759,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 								rounds,
 								tallies,
 								risk,
+								skipped,
 								record: record ?? null,
 								next: nextStep(rounds),
 							}),
@@ -1787,14 +1797,15 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"this build, with the review rules of this checkout, its committed REVIEW.md at HEAD, so a change to the " +
 				"reviewer table, the prompts, or REVIEW.md is scored before it lands. The reviewers are the size's pick, " +
 				"avoiding the case's writer, and its shadow, as quest review runs them, or --harness's alone, at its " +
-				"entry's model and effort unless --model and --effort override them. Cases run one at a time, their reviewers " +
+				"entry's model and effort unless --model and --effort override them. A reviewer that cannot run fails the run " +
+				"rather than passing the case to the next, so the score measures the reviewers it names. Cases run one at a time, their reviewers " +
 				"at once, and the first failure stops the run and fails it.\n\n" +
 				"Prints the set's counts and rules, a line per seat (pick, shadow, and, without --harness, either: what " +
 				"the case's seats found together, as a run of the pick and its shadow finds it) with defects found and clean findings by severity, the same by size and tier, " +
 				"each case's rounds with score, defects found, findings, tokens the CLI reported, and session, and the " +
 				"run's cost at API list price as token-max prices its sessions, or unpriced without token-max. --json prints " +
-				"one object. Exits as quest review does: 2 for invalid arguments or a set that cannot be read, 3 at a " +
-				"usage limit, 1 for other failures.",
+				"one object. Exits as quest review does: 2 for invalid arguments or a set that cannot be read, 3 for a " +
+				"reviewer that is not installed, logged out, or at its usage limit, 1 for other failures.",
 		)
 		.option("--set <file>", `The eval set (default: ${EVAL_FILE} at the checkout's root)`)
 		.addOption(
