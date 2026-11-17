@@ -312,9 +312,9 @@ function shell(
 	const { found, scratch } = check;
 	const commands = parse(line);
 	alone &&= commands.length === 1 && !commands[0]!.runs;
-	// After a `cd`, gh may run in another checkout than the one the hook reads.
-	elsewhere ||= commands.some((simple) => ["cd", "pushd", "popd"].includes(simple.argv[0] ?? ""));
 	for (const simple of commands) {
+		// From a `cd` on, gh may run in another checkout than the one the hook reads.
+		elsewhere ||= ["cd", "pushd", "popd"].includes(simple.argv[0] ?? "");
 		const env = new Set(inherited);
 		const words = [...simple.argv];
 		const argv = unwrap(simple.argv, env);
@@ -353,7 +353,7 @@ function shell(
 		else if (name === "gh") {
 			const command = ghCommand(args);
 			gh(command, input, literal, check);
-			if (!elsewhere && !moved) kixel(command, env, check);
+			if (!elsewhere && !moved) kixel({ args: command, env, literal }, check);
 		}
 		// `quest pr` posts as `gh pr` does, to GitHub or Kixel Quest, with the same flags, after any `--root`.
 		else if (name === "quest") {
@@ -615,37 +615,54 @@ const API_VALUE_OPTIONS = new Set([
 	"--preview",
 ]);
 
+/** A `gh` call: its arguments, the line's assignments, and `literal`, which gives a word's text or `undefined` when the shell expands it. */
+interface GhCall {
+	args: string[];
+	env: ReadonlySet<string>;
+	literal: (word: string) => string | undefined;
+}
+
+/** A gh placeholder for the checkout's repository, which gh fills in an endpoint or a `-F` field. */
+const PLACEHOLDER = /\{(owner|repo)\}|:(owner|repo)\b/;
+
 /**
  * Deny a `gh pr` or `gh api` call aimed at the repository the checkout's origin names on Kixel Quest, which gh
  * cannot reach: one that names no repository, so gh takes the checkout's, or names that one. A call naming another
- * repository, or none gh could tell, such as `gh api graphql`, passes. `env` holds the line's assignments; the
- * process's own `GH_REPO` counts too.
+ * repository, or none the line settles, such as `gh api graphql` or `gh pr view "$URL"`, passes. The line's
+ * `GH_REPO` assignment wins over the process's own.
  */
-function kixel(args: string[], env: ReadonlySet<string>, check: Check) {
+function kixel({ args, env, literal }: GhCall, check: Check) {
 	const [group, command, ...rest] = args;
 	if ((group !== "pr" && group !== "api") || args.some((arg) => arg === "--help" || arg === "-h")) return;
 	const assigned = [...env].filter((each) => each.startsWith("GH_REPO=")).at(-1);
+	if (assigned !== undefined && literal(assigned) === undefined) return;
 	const ghRepo =
 		assigned === undefined ? check.env.GH_REPO || undefined : assigned.slice("GH_REPO=".length) || undefined;
+	// Whether the shell expands any of `words`, so only it knows which repository they name.
+	const opaque = (...words: (string | undefined)[]) =>
+		words.some((word) => word !== undefined && literal(word) === undefined);
 	// The repository the call names, or null for the checkout's.
-	let named: string | null | undefined;
+	let named: string | null;
 	if (group === "pr") {
 		const flag = values(rest, ["-R", "--repo"], { attached: ["-R"] }).at(-1);
-		const url = positionals(rest, PR_VALUE_OPTIONS).find((arg) => /^https?:\/\//.test(arg));
+		const selectors = positionals(rest, PR_VALUE_OPTIONS);
+		if (opaque(flag, ...selectors)) return;
+		const url = selectors.find((arg) => /^https?:\/\//.test(arg));
 		// A PR URL names its repository before `--repo` or `GH_REPO` do.
 		named = url ?? flag ?? ghRepo ?? null;
 	} else {
 		const words = [command ?? "", ...rest];
 		const endpoint = positionals(words, API_VALUE_OPTIONS)[0];
-		// gh fills these placeholders from the checkout's repository, or `GH_REPO`.
-		if (words.some((word) => /\{(owner|repo)\}|:(owner|repo)\b/.test(word))) named = ghRepo ?? null;
-		else {
-			// A full URL names its host, which is GitHub's API or another forge, never Kixel Quest's.
-			if (endpoint === undefined || /^https?:\/\//.test(endpoint)) return;
-			const match = /^\/?repos\/([^/?#]+\/[^/?#]+)/.exec(endpoint);
-			if (match === null) return;
-			named = match[1]!;
-		}
+		const host = values(words, ["--hostname"]).at(-1);
+		const fields = values(words, ["-F", "--field"], { attached: ["-F"] });
+		if (endpoint === undefined || opaque(endpoint, host)) return;
+		const match = /^\/?repos\/([^/?#]+\/[^/?#]+)/.exec(endpoint);
+		// gh fills placeholders from `GH_REPO`, or the checkout's repository: on Kixel Quest, it fails there.
+		if ([match?.[1] ?? endpoint, ...fields].some((word) => PLACEHOLDER.test(word))) named = ghRepo ?? null;
+		// A full URL names its host, which is GitHub's API or another forge, never Kixel Quest's.
+		else if (match === null || /^https?:\/\//.test(endpoint)) return;
+		// `--hostname` picks the host the endpoint's repository is on.
+		else named = host === undefined ? match[1]! : `${host}/${match[1]!}`;
 	}
 	const hosted = check.hosted();
 	if (hosted === null) return;

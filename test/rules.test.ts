@@ -338,8 +338,21 @@ test("gh calls reaching for a repository Kixel Quest hosts are denied, naming th
 	expect(run("gh api user")).toEqual([]);
 	expect(run("gh pr view --help")).toEqual([]);
 	expect(run("gh issue list")).toEqual([]);
-	// After a cd, gh may run in another checkout.
+	// After a cd, gh may run in another checkout; before it, gh runs in this one.
 	expect(run("cd ../other && gh pr view 3")).toEqual([]);
+	expect(run("gh pr view 3; cd ..")).toEqual([instead("quest pr view")]);
+	// An expanded selector, repository, or host could name any repository.
+	expect(run('gh pr view "$PR_URL"')).toEqual([]);
+	expect(run('gh pr view 3 -R "$REPO"')).toEqual([]);
+	expect(run('GH_REPO="$REPO" gh pr view 3')).toEqual([]);
+	expect(run('gh api "repos/$REPO/pulls"')).toEqual([]);
+	expect(run('gh pr comment 3 --body "$(cat notes.md)"')).toEqual([instead("quest pr comment")]);
+	// `--hostname` names the host the endpoint's repository is on.
+	expect(run("gh api --hostname github.com repos/example/project/pulls")).toEqual([]);
+	expect(run("gh api --hostname localhost:8787 repos/example/project/pulls")).toEqual([RULES.kixel]);
+	// gh fills placeholders in the endpoint and `-F` fields, never in `-f` ones.
+	expect(run("gh api repos/moq-dev/quest/pulls -f title='{owner}'")).toEqual([]);
+	expect(run("gh api graphql -F owner='{owner}' -f query=q")).toEqual([RULES.kixel]);
 	expect(
 		broken({ tool: "Bash", input: { command: "gh pr view 3" }, cwd }, { ...env, GH_REPO: "moq-dev/quest" }),
 	).toEqual([]);
