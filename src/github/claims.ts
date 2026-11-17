@@ -10,10 +10,10 @@ import {
 	handedBack,
 	landed,
 } from "../core";
-import { type GitHub, object, repositoryPath, string } from "./client";
+import { type GitHubReader, object, repositoryPath, string } from "./client";
 
 /** Every open PR in `repository`, from any head repository. */
-export async function openPullRequests(github: GitHub, repository: Repository): Promise<OpenPull[]> {
+export async function openPullRequests(github: GitHubReader, repository: Repository): Promise<OpenPull[]> {
 	const rows = await github.all(`${repositoryPath(repository)}/pulls?state=open&per_page=100`);
 	return rows.map((row) => {
 		const head = object(row.head);
@@ -47,7 +47,7 @@ export function questBranches(refs: Map<string, string>): Map<string, string> {
 }
 
 /** The `quest/*` branches of `repository`, with their tips. */
-export async function claimBranches(github: GitHub, repository: Repository): Promise<Map<string, string>> {
+export async function claimBranches(github: GitHubReader, repository: Repository): Promise<Map<string, string>> {
 	const rows = await github.all(`${repositoryPath(repository)}/git/matching-refs/heads/quest/`);
 	return questBranches(new Map(rows.map((row) => [string(row.ref), string(object(row.object).sha)])));
 }
@@ -58,7 +58,7 @@ export async function claimBranches(github: GitHub, repository: Repository): Pro
  * PR's branch still holds its quest, since that work may be wanted back. A fork's own branches and PRs
  * count, so a claim pushed there is seen before its PR opens. Tips a source leaves out are read here.
  */
-export async function held(github: GitHub, sources: ClaimSources, branches: string[]): Promise<Holdings> {
+export async function held(github: GitHubReader, sources: ClaimSources, branches: string[]): Promise<Holdings> {
 	const { upstream, fork } = sources;
 	const read = async (source: ClaimSource) => ({
 		repository: source.repository,
@@ -92,7 +92,7 @@ export async function held(github: GitHub, sources: ClaimSources, branches: stri
 
 /** The URL of the PR from `head`'s `branch` that merged into `repository` with `tip` as its head, or `null`. */
 export async function mergedPull(
-	github: GitHub,
+	github: GitHubReader,
 	repository: Repository,
 	head: Repository,
 	branch: string,

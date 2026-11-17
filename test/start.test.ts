@@ -10,7 +10,7 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 
 import { claims, openDrafts, target } from "../src/cli/claims";
 import { githubRepository, readRemote, remoteRepository } from "../src/cli/github";
-import { type GitHubDependencies, type ObjectValue } from "../src/github/client";
+import { type GitHubDependencies, type ObjectValue, reading } from "../src/github/client";
 import { GitHubForge } from "../src/github/forge";
 import { type Output, main } from "../src/cli/main";
 import { Refusal } from "../src/core";
@@ -202,7 +202,8 @@ class FakeGitHub {
 function deps(github: FakeGitHub, warnings: string[] = []) {
 	return {
 		github: () => github.deps(),
-		forge: async () => new GitHubForge(github.deps()),
+		forge: async () => new GitHubForge(reading(github.deps())),
+		live: async () => new GitHubForge(reading(github.deps())),
 		warn: (message: string) => warnings.push(message),
 	};
 }
@@ -849,7 +850,8 @@ test("openDrafts skips drafts with a warning when GitHub cannot be read", async 
 		github: () => {
 			throw new Error("set GH_TOKEN or GITHUB_TOKEN, or sign in with gh auth login");
 		},
-		forge: async () => new GitHubForge(offline.github()),
+		forge: async () => new GitHubForge(reading(offline.github())),
+		live: async () => new GitHubForge(reading(offline.github())),
 		warn: (message: string) => warnings.push(message),
 	};
 	expect(await openDrafts(work, "origin", offline)).toEqual([]);

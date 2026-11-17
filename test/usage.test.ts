@@ -823,6 +823,7 @@ describe("usage", () => {
 				warn: () => {},
 			}),
 			forge: () => Promise.reject(new Error("usage reads no forge")),
+			live: () => Promise.reject(new Error("usage reads no forge")),
 			warn: () => {},
 			sessions: (since: Date, ssh: string[]) => {
 				calls.push([since, ssh]);

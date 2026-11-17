@@ -193,7 +193,7 @@ async function openDraft(
 	}
 
 	// Two claimers on different repositories, such as forks, both push; the earliest PR wins.
-	const open = pullsFrom((await hosting.live().pulls(repository)).value, branch);
+	const open = pullsFrom((await (await hosting.live()).pulls(repository)).value, branch);
 	const first = pullsFrom([...open.filter((pull) => pull.number !== created.number), created], branch)[0];
 	if (first.number !== created.number) {
 		deleteBranch(root, remote, branch, sha);
@@ -241,7 +241,7 @@ export async function releaseQuest(
 	const hosting = up.hosting;
 	if (hosting) {
 		const head = `${hosting.head.owner}/${hosting.head.repo}`.toLowerCase();
-		const open = (await hosting.live().pulls(hosting.repository)).value;
+		const open = (await (await hosting.live()).pulls(hosting.repository)).value;
 		pulls.push(...pullsFrom(open, branch).filter((pull) => pull.head?.toLowerCase() === head));
 	}
 	// Deleting first means the lease decides: a push since the check keeps both the branch and its PR.

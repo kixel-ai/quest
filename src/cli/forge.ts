@@ -1,7 +1,9 @@
 // Which forge answers a repository's reads and takes its writes. A repository Kixel Quest hosts, named by a remote or
 // PR URL on Kixel Quest, is read and written there alone. For one on GitHub, reads go to Kixel Quest's index for a
 // person holding its token when it serves the repository, else GitHub, and writes go to GitHub. A Kixel Quest failure
-// fails the command, naming the setting that reads GitHub instead where that would help.
+// fails the command, naming the setting that reads GitHub instead where that would help. A read that goes to GitHub
+// anyway, to verify what an index said or because Kixel Quest does not serve the repository, runs on a read-only
+// installation token Kixel Quest mints, so it draws on the installation's rate limit rather than the person's.
 import {
 	type Answer,
 	type ClaimSources,
@@ -29,9 +31,10 @@ import {
 	parseForgeInfo,
 	Refusal,
 } from "../core";
-import type { GitHubDependencies } from "../github/client";
+import { type GitHubDependencies, reading } from "../github/client";
 import { GitHubForge } from "../github/forge";
 import { pullRequest, readRemote, remoteHost } from "./github";
+import { type Installation, REUSE_MARGIN, installationDirectory, keep, kept } from "./installation";
 import { kixelUrl, tokenFor, tokensPath } from "./tokens";
 
 /** The variable that, set to `github`, reads GitHub even where Kixel Quest serves the repository. */
@@ -84,7 +87,25 @@ export async function forgeFor(
 	const kixel = kixelQuest(deps);
 	return kixel !== null && (await kixel.serves(repository, deadline))
 		? new KixelQuestForge(kixel)
-		: new GitHubForge(deps.github());
+		: new GitHubForge(reading(deps.github()));
+}
+
+/**
+ * The forge that answers `repository`'s reads from GitHub itself, never an index that may lag. For a person holding a
+ * Kixel Quest token it reads on the installation token Kixel Quest mints for the repository, and on the person's own
+ * where Kixel Quest does not serve it or the reads are forced onto GitHub. Minting gives up at `deadline`.
+ */
+export async function liveFor(
+	repository: Repository,
+	deps: ForgeDependencies,
+	deadline = Infinity,
+): Promise<GitHubForge> {
+	const kixel = kixelQuest(deps);
+	const installation = kixel === null ? null : await kixel.installation(repository, deadline);
+	const person = reading(deps.github());
+	return installation === null
+		? new GitHubForge(person)
+		: new GitHubForge({ ...person, readToken: installation.token }, installation.login);
 }
 
 /** Kixel Quest refused the person's token, as a sender must tell from a failure that may pass. */
@@ -177,6 +198,66 @@ export class KixelQuest {
 		);
 	}
 
+	/**
+	 * A read-only token for `repository`, or null when Kixel Quest does not serve it to this person. Minted at most
+	 * once an hour per repository: a kept token with time left is reused, so a command mints none.
+	 */
+	async installation(repository: Repository, deadline = Infinity): Promise<Installation | null> {
+		const directory = installationDirectory(this.deps.env);
+		const instead = `set ${FORGE}=github to read GitHub with your own token`;
+		const keeping = (what: string, error: unknown) =>
+			new Error(
+				`cannot ${what} installation tokens in ${directory}: ${error instanceof Error ? error.message : String(error)}; ${instead}`,
+			);
+		try {
+			const have = kept(directory, this.url, this.token, repository, this.deps.now());
+			if (have !== null) return have;
+		} catch (error) {
+			throw keeping("read", error);
+		}
+		const path = "/installation-token";
+		const name = `${repository.owner}/${repository.repo}`;
+		const { response, text } = await this.#fetch("POST", path, { repository: name }, deadline);
+		if (response.status === 404) return null;
+		if (response.status === 429) {
+			const wait = Number(response.headers.get("retry-after"));
+			throw this.#failed(
+				"POST",
+				path,
+				`you have minted as many installation tokens this hour as one person may${Number.isFinite(wait) && wait > 0 ? `; try again in ${Math.ceil(wait)} seconds` : ""}`,
+			);
+		}
+		if (!response.ok) throw this.#failed("POST", path, `HTTP ${response.status}${reason(text)}`);
+		const installation = this.#minted(text, name);
+		try {
+			keep(directory, this.url, this.token, repository, installation);
+		} catch (error) {
+			throw keeping("keep", error);
+		}
+		return installation;
+	}
+
+	/** The token in a mint's answer, `{token, expiresAt, repository, login}`, for `name`. */
+	#minted(text: string, name: string): Installation {
+		const path = "/installation-token";
+		let json: unknown;
+		try {
+			json = JSON.parse(text);
+		} catch {
+			throw this.#failed("POST", path, "its answer is not JSON");
+		}
+		const { token, expiresAt, repository, login } = (json ?? {}) as Record<string, unknown>;
+		const at = typeof expiresAt === "string" ? Date.parse(expiresAt) : NaN;
+		if (typeof token !== "string" || token === "" || typeof login !== "string" || login === "" || Number.isNaN(at))
+			throw this.#failed("POST", path, "its answer lacks a token, an expiry, or a login");
+		if (typeof repository !== "string" || repository.toLowerCase() !== name.toLowerCase())
+			throw this.#failed("POST", path, `it minted a token for ${String(repository)}, not ${name}`);
+		// A token that is already inside its reuse margin would be minted again by every command.
+		if (at - this.deps.now() <= REUSE_MARGIN)
+			throw this.#failed("POST", path, `its token expires at ${expiresAt}, too soon to reuse`);
+		return { token, expiresAt: at, login };
+	}
+
 	/** The time now, epoch milliseconds. */
 	now(): number {
 		return this.deps.now();
@@ -203,8 +284,13 @@ export class KixelQuest {
 		return new Error(`Kixel Quest (${this.url}) failed ${method} ${path}: ${why}${instead}`);
 	}
 
-	/** The JSON answer to a request, or an error naming the setting that reads GitHub instead. */
-	async #send(method: "GET" | "POST", path: string, body: unknown, deadline: number): Promise<unknown> {
+	/** The answer to a request, as text; Kixel Quest's refusal of the person's token and any network failure throw. */
+	async #fetch(
+		method: "GET" | "POST",
+		path: string,
+		body: unknown,
+		deadline: number,
+	): Promise<{ response: Response; text: string }> {
 		const failed = (why: string) => this.#failed(method, path, why);
 		const remaining = deadline - this.deps.now();
 		if (remaining <= 0) throw failed("its deadline passed");
@@ -238,6 +324,13 @@ export class KixelQuest {
 					.message,
 				response.status,
 			);
+		return { response, text };
+	}
+
+	/** The JSON answer to a request, or an error naming the setting that reads GitHub instead. */
+	async #send(method: "GET" | "POST", path: string, body: unknown, deadline: number): Promise<unknown> {
+		const failed = (why: string) => this.#failed(method, path, why);
+		const { response, text } = await this.#fetch(method, path, body, deadline);
 		// A malformed wait point, token, thread, or body is the caller's to fix on any forge; the other reads take no
 		// free-form argument, so their 400 means the CLI and Kixel Quest disagree on the wire, which reading GitHub
 		// sidesteps.

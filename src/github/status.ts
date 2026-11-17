@@ -3,9 +3,9 @@ import {
 	actor,
 	array,
 	currentChecks,
-	GitHub,
+	GitHubReader,
 	GitHubDeadline,
-	type GitHubDependencies,
+	type GitHubReadDependencies,
 	link,
 	object,
 	type ObjectValue,
@@ -91,13 +91,17 @@ export interface BaseNeeds extends Repository {
  * what it read of their base once, instead of each read fetching it again; it throws when the PR's repository or base
  * is another.
  */
-export async function pullRequestStatus(pr: PullRequest, deps: GitHubDependencies, base?: BaseNeeds): Promise<Status> {
+export async function pullRequestStatus(
+	pr: PullRequest,
+	deps: GitHubReadDependencies,
+	base?: BaseNeeds,
+): Promise<Status> {
 	// GitHub's owner and repository names are case-insensitive.
 	if (base !== undefined && `${base.owner}/${base.repo}`.toLowerCase() !== `${pr.owner}/${pr.repo}`.toLowerCase())
 		throw new Error(
 			`the requirements passed for ${pr.owner}/${pr.repo}#${pr.number} were read for ${base.owner}/${base.repo}`,
 		);
-	const github = new GitHub(deps);
+	const github = new GitHubReader(deps);
 	const cursors: Record<"checks" | "reviews" | "threads", string | null | undefined> = {
 		checks: null,
 		reviews: null,
@@ -182,7 +186,7 @@ function risk(body: string, head: string, record: ReviewRecord | null): Status["
 }
 
 async function reviewRecord(
-	github: GitHub,
+	github: GitHubReader,
 	pr: PullRequest,
 	pull: ObjectValue,
 	warn: (message: string) => void,
@@ -236,7 +240,7 @@ export const BRANCH_UPDATES = ["push", "force_push", "branch_creation", "pr_merg
  * `headRefName`, `headRepository { nameWithOwner }`, and `autoMergeRequest { enabledAt commitBody }`.
  */
 export async function enabledHead(
-	github: GitHub,
+	github: GitHubReader,
 	pull: ObjectValue,
 	warn: (message: string) => void,
 ): Promise<string | null> {
@@ -255,7 +259,7 @@ export async function enabledHead(
  * `headRepository { nameWithOwner }`.
  */
 export async function headBefore(
-	github: GitHub,
+	github: GitHubReader,
 	pull: ObjectValue,
 	time: number,
 	what: string,
@@ -298,7 +302,7 @@ export interface Needs {
 }
 
 /** What `branch` requires of a PR head. The gate's own check is never on one, so it is left out. */
-export async function requiredOf(github: GitHub, repository: Repository, branch: string): Promise<Needs> {
+export async function requiredOf(github: GitHubReader, repository: Repository, branch: string): Promise<Needs> {
 	const found = await requirements(github, repository, branch);
 	return { checks: found.checks.filter((check) => check.name !== LAND_CHECK), workflows: found.workflows };
 }

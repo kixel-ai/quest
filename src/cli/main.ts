@@ -45,12 +45,12 @@ import {
 } from "./agent";
 import type { ForgeWrites, Hold, Repository } from "../core";
 import { GitHubWrites } from "./writes";
-import { GitHubForge } from "../github/forge";
 import { type ClaimDependencies, held, openDrafts, reach, target, upstream, upstreamRefs } from "./claims";
 import {
 	type ForgeDependencies,
 	type Located,
 	forgeFor,
+	liveFor,
 	hostedForge,
 	hostedRepository,
 	locate as locatePull,
@@ -153,6 +153,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 	const claimDependencies = (): ClaimDependencies => ({
 		github: () => gitHubDependencies(warn),
 		forge: (repository) => forgeFor(repository, forgeDependencies()),
+		live: (repository) => liveFor(repository, forgeDependencies()),
 		kixel: {
 			hosted: (url) => hostedRepository(kixelUrl(process.env), url),
 			forge: (repository) => hostedForge(repository, forgeDependencies()),
@@ -968,11 +969,16 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		.option("--json", "Print a deterministic JSON object")
 		.action((value: string, options: { json?: boolean }) => {
 			const { pull, hosted } = locatePull(value, root(), process.env);
-			const forge = hosted ? hostedForge(pull, forgeDependencies()) : new GitHubForge(gitHubDependencies(warn));
-			settle(forge.view(pull), ({ value: view }) => {
-				if (options.json) print(JSON.stringify(view));
-				else for (const line of viewLines(view)) print(line);
-			});
+			settle(
+				(async () =>
+					(hosted ? hostedForge(pull, forgeDependencies()) : await liveFor(pull, forgeDependencies())).view(
+						pull,
+					))(),
+				({ value: view }) => {
+					if (options.json) print(JSON.stringify(view));
+					else for (const line of viewLines(view)) print(line);
+				},
+			);
 		});
 	pr.command("list")
 		.description(
@@ -990,7 +996,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 					if (up.hosting === null)
 						throw new InputError("origin names neither a github.com repository nor one on Kixel Quest");
 					// Verifies a search, so it reads GitHub itself, never an index that may lag.
-					return up.hosting.live().files(up.hosting.repository);
+					return (await up.hosting.live()).files(up.hosting.repository);
 				})(),
 				({ value: pulls }) => {
 					if (options.json) print(JSON.stringify(pulls));

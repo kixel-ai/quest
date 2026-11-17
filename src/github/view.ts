@@ -1,11 +1,11 @@
 // A PR's title, body, and discussion as GitHub gives them: what `gh pr view --comments` shows, with its review
 // threads' comments too.
 import type { Comment, PullRequest, PullView } from "../core";
-import { type GitHub, type ObjectValue, actor, array, object, string } from "./client";
+import { type GitHubReader, type ObjectValue, actor, array, object, string } from "./client";
 import { readActivity } from "./online-review";
 
 /** `pull`'s title, body, comments, submitted reviews, and review threads. */
-export async function pullView(github: GitHub, pull: PullRequest): Promise<PullView> {
+export async function pullView(github: GitHubReader, pull: PullRequest): Promise<PullView> {
 	const data = await github.graphql(
 		"query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) { " +
 			"pullRequest(number: $number) { url title body state isDraft author { login } } } }",

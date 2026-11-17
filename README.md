@@ -636,6 +636,20 @@ command fails too, naming `QUEST_FORGE=github`, which reads GitHub instead.
 `QUEST_KIXEL_URL` names another Kixel Quest, such as one running locally, whose
 token the same file pairs with its URL.
 
+A read that must come from GitHub itself, such as `quest pr view` or the
+open-PR checks of `quest start`, uses a read-only App installation token Kixel
+Quest mints for that repository, so it draws on the installation's rate limit,
+not the person's. `POST /installation-token` takes `{"repository":
+"owner/repo"}` and answers `{token, expiresAt, repository, login}`; a 404 means
+Kixel Quest does not serve the repository, and `quest` reads it with the
+person's own token. `quest` keeps each token in
+`$XDG_CACHE_HOME/quest/installation` (else `~/.cache/quest/installation`) until
+five minutes before it expires, since a person may mint only so many an hour,
+and a 429 or any other failure fails the command, naming `QUEST_FORGE=github`.
+Writes, such as comments, pushes, and merges, always use the person's own token,
+so they are made in their name; `quest wait` takes the person from the mint's
+`login`, because on an installation token GitHub names the App as the viewer.
+
 Its read API lives under `/forge`, with the token as a bearer token:
 `GET /forge` answers `{"login", "repositories"}`, the person the token names
 and the lowercase `owner/repo` of each repository served to them, and

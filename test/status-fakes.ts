@@ -1,7 +1,7 @@
 // A fake GitHub for `quest status`: recorded GraphQL answers and the REST reads around them.
 import { expect } from "vitest";
 
-import { type GitHubDependencies } from "../src/github/client";
+import { type GitHubReadDependencies } from "../src/github/client";
 
 export const A = "a".repeat(40);
 export const B = "b".repeat(40);
@@ -137,8 +137,8 @@ export function setup(
 	const eventPages = [...(options.eventPages ?? [])];
 	const activityPages = [...(options.activity ?? [])];
 	const activityRequests: string[] = [];
-	const deps: GitHubDependencies = {
-		token: "test-token",
+	const deps: GitHubReadDependencies = {
+		readToken: "test-token",
 		quota: "wait",
 		now: () => options.now ?? 0,
 		sleep: async () => {},

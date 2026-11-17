@@ -117,6 +117,8 @@ describe("quest pr list in a fork on GitHub", () => {
 		vi.stubGlobal("fetch", async (input: URL | string, init?: { body?: string }) => {
 			const url = new URL(input);
 			asked.push(url.pathname);
+			// Kixel Quest does not serve this repository, so the person's own token reads it.
+			if (url.pathname === "/installation-token") return new Response("{}", { status: 404 });
 			if (url.pathname === "/repos/me/project")
 				return json(info("me/project", { fork: true, parent: info("example/project") }));
 			if (url.pathname === "/repos/example/project") return json(info("example/project"));

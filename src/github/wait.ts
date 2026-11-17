@@ -4,8 +4,8 @@ import {
 	actor,
 	array,
 	currentChecks,
-	type GitHub,
-	type GitHubDependencies,
+	type GitHubReader,
+	type GitHubReadDependencies,
 	link,
 	object,
 	type ObjectValue,
@@ -120,8 +120,8 @@ interface Viewer {
  * the person whose own label changes, replies, reactions, and edits never wake them.
  */
 export function watchPull(
-	github: GitHub,
-	deps: GitHubDependencies,
+	github: GitHubReader,
+	deps: GitHubReadDependencies,
 	pr: PullRequest,
 	since: string | undefined,
 	identity: Viewer,
@@ -147,8 +147,8 @@ export function watchPull(
 
 /** Read the starting point, returning one poll from it. */
 async function start(
-	github: GitHub,
-	deps: GitHubDependencies,
+	github: GitHubReader,
+	deps: GitHubReadDependencies,
 	pr: PullRequest,
 	from: string | undefined,
 	identity: Viewer,
