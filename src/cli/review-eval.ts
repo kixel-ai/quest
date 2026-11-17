@@ -7,9 +7,9 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { SIZES, type Size, TIERS, type Tier } from "../core";
+import { type Repository, type Size, SIZES, type Tier, TIERS } from "../core";
 import { parser } from "../core/parse";
-import { type GitHub, type Repository, object, repositoryPath } from "../github/client";
+import { type GitHub, object, repositoryPath } from "../github/client";
 import type { HarnessName } from "./agent";
 import { git } from "./git";
 import { type ClaimDependencies, upstream } from "./claims";

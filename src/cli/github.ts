@@ -1,11 +1,10 @@
 // The CLI's side of the GitHub client: PR arguments, git remotes, and the token, which need a checkout or Node.
 import { execFileSync } from "node:child_process";
 import { setTimeout as sleep } from "node:timers/promises";
-import type { GitHubDependencies, PullRequest, Repository } from "../github/client";
+import type { GitHubDependencies } from "../github/client";
+import { InputError, type PullRequest, type Repository } from "../core";
 import { git } from "./git";
-
-/** A bad PR argument or option, reported as a usage error. */
-export class GitHubInputError extends Error {}
+import { diskResponseCache, responseCacheDirectory } from "./response-cache";
 
 /** Accept a GitHub PR URL, or a number in the origin repository. */
 export function pullRequest(value: string, root: string): PullRequest {
@@ -17,13 +16,13 @@ export function pullRequest(value: string, root: string): PullRequest {
 		} catch {
 			origin = null;
 		}
-		if (!origin) throw new GitHubInputError(`${root} is not a checkout with an origin remote: ${outside}`);
+		if (!origin) throw new InputError(`${root} is not a checkout with an origin remote: ${outside}`);
 		const { repository } = remoteRepository(origin);
-		if (!repository) throw new GitHubInputError(`origin does not name a github.com repository: ${outside}`);
+		if (!repository) throw new InputError(`origin does not name a github.com repository: ${outside}`);
 		return { ...repository, number: Number(value) };
 	}
 	const match = /^https:\/\/github\.com\/([\w.-]+)\/([\w.-]+)\/pull\/([1-9]\d*)\/?(?:[?#].*)?$/.exec(value);
-	if (!match) throw new GitHubInputError("expected a GitHub pull request URL or a PR number in origin");
+	if (!match) throw new InputError("expected a GitHub pull request URL or a PR number in origin");
 	return { owner: match[1], repo: match[2], number: Number(match[3]) };
 }
 
@@ -122,7 +121,7 @@ export function githubRepository(url: string): Repository | null {
 
 /**
  * The CLI's client dependencies: global `fetch`, a token from `GH_TOKEN`, `GITHUB_TOKEN`, or `gh auth token`,
- * `warn`, and `quota`, which only a command whose job is to wait sets to `wait`.
+ * `warn`, `quota`, which only a command whose job is to wait sets to `wait`, and the on-disk response cache.
  */
 export function gitHubDependencies(
 	warn: (message: string) => void,
@@ -140,5 +139,5 @@ export function gitHubDependencies(
 		}
 	}
 	if (!token) throw new Error("GitHub authentication returned an empty token");
-	return { fetch, now: Date.now, sleep, token, warn, quota };
+	return { fetch, now: Date.now, sleep, token, warn, quota, cache: diskResponseCache(responseCacheDirectory()) };
 }

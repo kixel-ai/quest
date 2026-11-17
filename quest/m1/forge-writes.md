@@ -15,8 +15,9 @@ our private repositories move onto Cloudflare Artifacts with Kixel Quest as
 their whole forge, kixel-ai/kixel.ai first as the pilot; public repositories
 stay on GitHub.
 
-- Extend the [forge interface](/quest/m0/github-quota/forge-reads.md) with
-  the writes, typed in `quest/core` as its reads are. This quest owns their
+- Extend the forge interface (`Forge` in `src/core/forge.ts`, with its
+  Kixel Quest backend in `src/cli/forge.ts`) with the writes, typed and
+  parsed in `quest/core` as its reads are. This quest owns their
   shape: kixel-ai/kixel.quest serves it (`quest/m1/forge/pulls.md` there),
   so build against a fake Kixel Quest and land first.
 - A pick names the head the person saw, as `Quest-Land-Head` does on GitHub;
@@ -27,7 +28,3 @@ stay on GitHub.
 
 Tests: against a fake Kixel Quest, quest opens a PR, edits its body, readies
 it, resolves a thread, claims and holds it, and queues a pick of its head.
-
-## Required
-
-- [Forge reads](/quest/m0/github-quota/forge-reads.md) - the interface these writes extend

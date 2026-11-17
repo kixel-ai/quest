@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 
-import type { GitHub, Repository } from "../src/github/client";
+import type { GitHub } from "../src/github/client";
+import type { Repository } from "../src/core";
 import { type Activity, bodyFindings, classify, onlineReviews, readActivity } from "../src/github/online-review";
 import { readSignals } from "../src/github/signals";
 

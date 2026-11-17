@@ -32,6 +32,7 @@ import {
 	REQUEUE_LIMIT,
 	history,
 	historyPath,
+	outputTail,
 	redactTokens,
 	saveRound,
 	type Round,
@@ -1412,6 +1413,21 @@ printf '[{"number":1,"action":"handback","diagnosis":"saw %s","recommendation":"
 		expect(bodies).toContain("[redacted token]");
 		expect(bodies).not.toContain(token);
 		expect(redactTokens(`a ${token} github_pat_${"x".repeat(30)} b`)).toBe("a [redacted token] [redacted token] b");
+	});
+	test("redacts a fixer's output before cutting its tail, so a cut never splits a token from its prefix", () => {
+		const token = `ghp_${"A1b2".repeat(9)}`;
+		const job = join(tempDir(), "job");
+		// The 2,000-character cut lands two characters into the token, splitting its `ghp_` prefix.
+		writeFileSync(`${job}.log`, `${"x".repeat(10)} ${token}${"y".repeat(2_000 - token.length + 2)}\n`);
+		const tail = outputTail(job);
+		expect(tail).not.toContain(token.slice(4));
+		expect(tail).toContain("[redacted token]");
+		// A tail window that starts mid-file drops its partial first line, which may hold a token's rest.
+		writeFileSync(`${job}.log`, `${token}${"z".repeat(16_384 - token.length + 10)}\nlast\n`);
+		expect(outputTail(job)).toBe("last");
+		// Without a line break, the whole window is a partial line.
+		writeFileSync(`${job}.log`, `${token}${" ".repeat(16_384 - token.length + 4)}`);
+		expect(outputTail(job)).toBe("");
 	});
 	test("bounds a fixer's import by what it added, not the history fetched at launch or its submodules", () => {
 		const root = tempDir();

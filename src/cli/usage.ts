@@ -2,7 +2,27 @@
 // the work went by the PR's own record. token-max reads and prices the sessions, on this host and any SSH host
 // named; quest ties each to a PR by the branches and repositories token-max exports for it.
 import { spawnSync } from "node:child_process";
-import { type RecordedRisk, type Size, SIZES, TIERS, type Tier, handedBack, questBranch, recordedRisk } from "../core";
+import {
+	breakageKey,
+	type BreakageRecord,
+	handedBack,
+	questBranch,
+	type RecordedRisk,
+	recordedRisk,
+	type Repository,
+	type Role,
+	ROLES,
+	type Seat,
+	type SessionRecord,
+	type Size,
+	SIZES,
+	SPLIT_CATEGORIES,
+	type SplitUsage,
+	type Tier,
+	TIERS,
+	type TimeSplit,
+	WAIT_KINDS,
+} from "../core";
 import type { Arm } from "./models";
 import { recorded } from "./models-record";
 import { type ClaimDependencies, upstream } from "./claims";
@@ -12,7 +32,7 @@ import { culpritOf, culprits } from "./breakage";
 import { fixes } from "./land-fixer";
 import { MERGER } from "./land-watch-fix";
 import { githubRepository, requireRemote } from "./github";
-import { type GitHub, type ObjectValue, type Repository, link, object } from "../github/client";
+import { type GitHub, type ObjectValue, link, object } from "../github/client";
 import { type OnlineReview, readOnlineReviews } from "../github/online-review";
 import {
 	type Counts,
@@ -24,18 +44,6 @@ import {
 	severityText,
 } from "./review-record";
 import { SEVERITIES } from "./review";
-import {
-	type BreakageRecord,
-	ROLES,
-	breakageKey,
-	type Role,
-	SPLIT_CATEGORIES,
-	type Seat,
-	type SessionRecord,
-	type SplitUsage,
-	type TimeSplit,
-	WAIT_KINDS,
-} from "../core";
 import { type RecordInput, buildRecords } from "./records";
 import { stateDirectory } from "./send";
 import { keptSplit } from "./split";
@@ -579,36 +587,62 @@ function owners(sessions: Session[]): (session: Session) => string[] | null {
 	};
 }
 
+/** `pulls` by head branch, oldest first, as {@link headed} takes them. */
+function byBranch(pulls: Pull[]): Map<string, Pull[]> {
+	const branches = new Map<string, Pull[]>();
+	for (const each of [...pulls].sort((a, b) => a.created - b.created))
+		branches.set(each.branch, [...(branches.get(each.branch) ?? []), each]);
+	return branches;
+}
+
+/** A branch a session reached at `first`, epoch ms, in one of `repositories`, as matching it to a PR needs. */
+export interface Reached {
+	name: string;
+	first: number;
+	repositories: string[];
+}
+
 /**
- * The PR each session's own branch heads: the one whose head branch it last named, among those still open when the
- * session reached the branch and headed from a repository its host resolved for it. `evidence` holds every exported
- * copy, folded ones included, since a dropped copy may be the only one naming its directory's repository.
+ * The PR `reached` heads: the oldest still open when the session reached the branch and headed from one of its
+ * repositories, or null when none is, or when such PRs come from several repositories, since a checkout with remotes
+ * for both a fork and its upstream cannot tell which one's branch it was on.
+ */
+function headed(branches: Map<string, Pull[]>, reached: Reached): Pull | null {
+	const open = (branches.get(reached.name) ?? []).filter(
+		(each) =>
+			(each.closed === null || each.closed >= reached.first) &&
+			each.repository !== null &&
+			reached.repositories.includes(each.repository),
+	);
+	if (new Set(open.map((each) => each.repository)).size > 1) return null;
+	return open[0] ?? null;
+}
+
+/** Whether some PR among `pulls` heads a branch, by the rule that attributes a session's own PR. */
+export function heading(pulls: Pull[]): (reached: Reached) => boolean {
+	const branches = byBranch(pulls);
+	return (reached) => headed(branches, reached) !== null;
+}
+
+/**
+ * The PR each session's own branch heads: the one {@link headed} finds for the branch it last named that heads one.
+ * Another repository may use the same branch name, so a session counts only where its repository is known. `evidence`
+ * holds every exported copy, folded ones included, since a dropped copy may be the only one naming its directory's
+ * repository.
  */
 function attribute(
 	sessions: Session[],
 	evidence: Session[],
 	pulls: Pull[],
 ): { own: Map<Session, Pull>; known: (session: Session) => string[] | null } {
-	const byBranch = new Map<string, Pull[]>();
-	for (const each of [...pulls].sort((a, b) => a.created - b.created))
-		byBranch.set(each.branch, [...(byBranch.get(each.branch) ?? []), each]);
+	const branches = byBranch(pulls);
 	const own = new Map<Session, Pull>();
 	const owned = owners(evidence);
 	for (const session of sessions) {
-		// Another repository may use the same branch name, so a session counts only where its repository is known.
 		const known = owned(session);
 		if (known === null) continue;
 		for (const seen of [...session.branches].sort((a, b) => b.last - a.last)) {
-			// A branch can head a new PR after an earlier one closed: take the one open when the session reached it.
-			const open = (byBranch.get(seen.name) ?? []).filter(
-				(each) =>
-					(each.closed === null || each.closed >= seen.first) &&
-					each.repository !== null &&
-					known.includes(each.repository),
-			);
-			// A checkout with remotes for both a fork and its upstream cannot tell which one's branch it was on.
-			if (new Set(open.map((each) => each.repository)).size > 1) continue;
-			const found = open[0];
+			const found = headed(branches, { name: seen.name, first: seen.first, repositories: known });
 			if (found) {
 				own.set(session, found);
 				break;
@@ -616,6 +650,25 @@ function attribute(
 		}
 	}
 	return { own, known: owned };
+}
+
+/**
+ * Each of `sessions` whose latest branch heads no PR among `pulls`, by the rule {@link attribute} uses, with that
+ * branch, so a PR that opens on it later can be noticed. A session whose repository is unknown, or that named no
+ * branch, has none to wait for.
+ */
+export function unheaded(sessions: Session[], evidence: Session[], pulls: Pull[]): Map<Session, Reached> {
+	const branches = byBranch(pulls);
+	const owned = owners(evidence);
+	const waiting = new Map<Session, Reached>();
+	for (const session of sessions) {
+		const repositories = owned(session);
+		const latest = [...session.branches].sort((a, b) => b.last - a.last)[0];
+		if (repositories === null || latest === undefined) continue;
+		const reached = { name: latest.name, first: latest.first, repositories };
+		if (headed(branches, reached) === null) waiting.set(session, reached);
+	}
+	return waiting;
 }
 
 /** What `sessionRecords` builds from. */

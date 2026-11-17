@@ -1,7 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { resolve } from "node:path";
 
-import { isQuest, remove } from "../core";
+import { isQuest, remove, type Repository } from "../core";
 import { LAND_CHECK, type Reason, pin, pinned } from "../github/land";
 import { programEnvironment } from "./program";
 import {
@@ -10,7 +10,6 @@ import {
 	type GitHubDependencies,
 	object,
 	type ObjectValue,
-	type Repository,
 	type RequiredCheck,
 	array,
 	currentChecks,

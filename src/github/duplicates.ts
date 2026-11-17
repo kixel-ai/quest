@@ -1,17 +1,7 @@
 // Quests a PR adds that another open PR also adds, so a follow-up some other PR already owns is
 // caught before a pick round asks about it.
-import { isQuest, parse } from "../core";
-import { type GitHub, type PullRequest, array, object, repositoryPath, string } from "./client";
-
-/** A quest the PR adds that another open PR also adds, at the same path or under the same title. */
-export interface Duplicate {
-	/** The quest file the PR adds. */
-	path: string;
-	/** The other open PR. */
-	url: string;
-	/** The quest file the other PR adds: `path` itself, or another path with the same title. */
-	other: string;
-}
+import { type Duplicate, type PullRequest, isQuest, parse } from "../core";
+import { type GitHub, array, object, repositoryPath, string } from "./client";
 
 /** An open PR's added quest files, each with its title, or null when it has none. */
 export interface Added {

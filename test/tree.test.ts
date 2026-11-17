@@ -899,9 +899,11 @@ describe("audits", () => {
 	test("an audit quest does not ship is rejected in either section", () => {
 		tree()
 			.append("quest/m0/epic/one.md", audit("dep"))
-			.rejects("one.md:9: '## Audit' item must be the name of an audit quest ships (tree, deps)");
+			.rejects(
+				"one.md:9: '## Audit' item must be the name of an audit quest ships (tree, deps, code, cost, docs, tests)",
+			);
 		tree()
-			.append("quest/README.md", skipped("code - not yet shipped"))
+			.append("quest/README.md", skipped("perf - not shipped"))
 			.rejects("quest/README.md:9: '## Skipped audits' item must open with the name of an audit quest ships");
 	});
 

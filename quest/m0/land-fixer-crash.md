@@ -1,4 +1,4 @@
-# [M] The land fixer stops crashing on kixel-ai/rind
+# [XS] The land fixer stops crashing on kixel-ai/rind
 
 ## Goal
 
@@ -9,7 +9,15 @@ On kixel-ai/rind, a PR the merge queue drops for `failed_checks` gets a land fix
 Planned 2026-11-15 with the maintainer in rind's `/quest-run` of 2026-11-14 and 2026-11-15:
 
 - Every fixer handback that run saw on rind said `Codex land fixer: fixer crashed (exit 1); run /quest-iterate.` (`src/cli/land-fixer.ts`), on kixel-ai/rind#742, #748 (twice), #758 (twice), #786 and #789. The maintainer's session ran `/quest-iterate` by hand each time.
-- On kixel-ai/rind#789 the rind watcher logged `fixing 789` and `handback 789` 66 seconds apart, and the maintainer's host journal shows no fixer container starting in that minute, while containers for other runs started and finished cleanly. So the run exits 1 before Codex starts: in Quest's launch of the fixer, or in the host's restricted launcher it calls.
-- Here: make the handback comment carry the failed launch's stderr tail and exit reason instead of `crashed (exit 1)` alone, reproduce the failure, and fix it with a regression test where the cause is in Quest's code.
-- Where the cause is in the host's fixer service (its socket, container, or credentials), that fix is kixel-ai/dotfiles' work, per this repository's `AGENTS.md`: add it there as a follow-up, record it under this quest's `## Waiting` as `kixel-ai/dotfiles:` with the PR or quest that fixes it, since `## Required` links only quests in this tree, and finish this quest once rind's next dropped PR gets a real fixer run.
 - ✅ m0: the fixer is how [the queue watcher](/quest/m0/queue-watcher/README.md) absorbs the quest-file conflicts GitHub cannot resolve, so a crashing fixer leaves those for a human (rejected: m1).
+
+Found 2026-11-17 in this quest's first PR, which also makes a failed fixer's handback quote the tail of its own output after the gate's failure:
+
+- Each of those runs' job logs on the maintainer's host holds one line, `quest land check: upload exceeds 256 MiB`: the host's fixer client tars Quest's prepared checkout, `.git` and working tree, and refuses past its 256 MiB upload cap. Quest's checkout for kixel-ai/rind#789 tars to 382 MB, 97 MB of `.git` and 274 MB of working tree (235 MB of it `thirdparty/` test vectors and proofs). Quest's checkout is as small as the round allows (only the base, the PR, and the configured tags and branches), so the cause is in the host's fixer service.
+- That fix is kixel-ai/dotfiles' work, per this repository's `AGENTS.md`. ✅ The host's fixer client uploads only `.git` and checks the base out inside the container, since the working tree is `HEAD`'s and the result already returns as `.git`; that puts rind at about 97 MB (rejected: raising the 256 MiB cap; compressing the upload, each of which only defers the next large repository). Settled by the maintainer on 2026-11-17 in moq-dev/quest#763.
+- ✅ A failed fixer's handback quotes its output in every repository, public ones included, with tokens redacted before the tail is cut (rejected: private repositories only; never quoting output). Settled by the maintainer on 2026-11-17 in moq-dev/quest#763.
+- Finish this quest once rind's next dropped PR gets a real fixer run.
+
+## Waiting
+
+- kixel-ai/dotfiles: its fixer client stops refusing rind's checkout (`quest land check: upload exceeds 256 MiB`), from a quest `/quest-plan` adds there from moq-dev/quest#763's follow-ups. Check that a rind fixer's job log on the maintainer's host (`watch-job-fix-*.json.log` in the rind watcher's state) shows a Codex run, or that rind's next fixer handback names a cause other than the upload.

@@ -9,18 +9,27 @@ import {
 	link,
 	object,
 	type ObjectValue,
-	type PullRequest,
-	type Repository,
 	requirements,
 	string,
 	workflowKey,
 } from "./client";
 import { appOf, checksState, contextOutcome } from "./checks";
 import { EJECTED, LAND_CHECK, pinned } from "./land";
-import { type Tier, recordedRisk, reviewSection } from "../core";
-import { readHoldStatus, type HoldFact, type HoldReport } from "./hold";
-import { readSignals, type Signal } from "./signals";
-import { type Duplicate, duplicateQuests } from "./duplicates";
+import {
+	type Check,
+	type PullRequest,
+	type Reaction,
+	type Repository,
+	type Review,
+	type ReviewRecord,
+	type Status,
+	type Thread,
+	recordedRisk,
+	reviewSection,
+} from "../core";
+import { readHoldStatus } from "./hold";
+import { readSignals } from "./signals";
+import { duplicateQuests } from "./duplicates";
 
 /**
  * One query covers the PR; each connection pages by its own cursor, and a
@@ -70,101 +79,6 @@ const STATUS = `query($owner: String!, $repo: String!, $number: Int!,
 	}
 }
 fragment reaction on Reaction { content createdAt user { login } }`;
-
-/** A check run or commit status on the head, as `quest status` prints it. */
-export interface Check {
-	name: string;
-	required: boolean;
-	/** The lowercased check-run conclusion or status, or commit-status state. */
-	result: string;
-	url: string | null;
-}
-
-/** A reviewer's latest submitted review. */
-export interface Review {
-	reviewer: string;
-	/** approved, changes_requested, commented, or dismissed. */
-	state: string;
-	/** Whether the review was submitted against the current head. */
-	current: boolean;
-	commit: string | null;
-	submittedAt: string;
-	url: string;
-}
-
-/** A reaction on the PR or one of its reviews. */
-export interface Reaction {
-	content: string;
-	actor: string;
-	createdAt: string;
-	/** The PR or review reacted to. */
-	url: string;
-}
-
-/** An unresolved review thread. */
-export interface Thread {
-	id: string;
-	path: string;
-	/** The line on the current diff, or the original line once outdated. */
-	line: number | null;
-	outdated: boolean;
-	lastAuthor: string;
-	/** The thread's latest comment. */
-	url: string;
-}
-
-/**
- * The head the PR body's `## Review` section names last, the latest reviewed one: a round's record, or a line after
- * it for low-severity fixes or a skip. `current` is the PR's head; `diff-identical` an earlier head whose diff from
- * the base (`git diff <base>...<sha>`) matches the head's; `unknown` one GitHub cannot compare, such as a diff too
- * large to render.
- */
-export interface ReviewRecord {
-	state: "current" | "diff-identical" | "stale" | "unknown";
-	head: string;
-}
-
-/** Everything `quest status` reports about a PR. */
-export interface Status {
-	url: string;
-	state: "open" | "closed" | "merged";
-	draft: boolean;
-	head: string;
-	mergeable: string;
-	mergeState: string;
-	reviewDecision: string | null;
-	/** `head` is the head it was enabled on, or null when that cannot be told; see {@link enabledHead}. */
-	autoMerge: { method: string; enabledBy: string; enabledAt: string; head: string | null } | null;
-	mergeQueue: { state: string; position: number; enqueuedAt: string } | null;
-	/**
-	 * The latest exit from the merge queue, auto-merge, or `quest land`'s queue, and the reason for it;
-	 * null once the PR is queued again.
-	 */
-	landingStopped: { reason: string; actor: string; at: string } | null;
-	checks: { state: string | null; passed: number; failing: Check[]; pending: Check[] };
-	/** Each reviewer's latest submitted review, oldest first. */
-	reviews: Review[];
-	/** The design checkpoints online reviewers put on the head, as {@link checkpoints} finds them. */
-	checkpoints: { reviewer: string; round: number; url: string }[];
-	/** Null when the `## Review` section names no full SHA. */
-	reviewRecord: ReviewRecord | null;
-	/**
-	 * The head's risk tier as the `## Review` record names it, and the classifier's own tier, lower when a reviewer
-	 * raised it; null when the record names none. `state` is the review record's, which a line after it carries to a
-	 * later head, else `current` when the record names the head and `stale` when not.
-	 */
-	risk: { tier: Tier; reason: string; classified: Tier; state: ReviewRecord["state"] } | null;
-	reactions: Reaction[];
-	/** Unresolved review threads, oldest first. */
-	threads: Thread[];
-	/** What holds the head from landing: online reviewers' unanswered findings on it and newer maintainer decisions. */
-	signals: Signal[];
-	/** Ownership facts read by the same client as the state commands. */
-	holds: HoldFact[];
-	starterHold: HoldReport["starter"];
-	/** Quests an open PR adds that another open PR also adds; none for a PR no longer open. */
-	duplicates: Duplicate[];
-}
 
 /** What a repository's base branch requires, as {@link requiredOf} read it for that repository and branch. */
 export interface BaseNeeds extends Repository {

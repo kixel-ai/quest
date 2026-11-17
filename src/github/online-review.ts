@@ -2,7 +2,8 @@
 // thread, and any review whose
 // body opens with `Automated review by <name>`, as a reviewer posting under a person's account does. A finding is a
 // review thread one opens, or a `[P<n>]` line in its review body; whoever answers it says whether it was taken.
-import { type GitHub, type ObjectValue, type Repository, array, object } from "./client";
+import { type GitHub, type ObjectValue, array, object } from "./client";
+import type { Repository } from "../core";
 
 /** One online reviewer's record on one PR. */
 export interface OnlineReview {
