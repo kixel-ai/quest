@@ -99,6 +99,16 @@ export interface StarterHold {
 	url: string;
 }
 
+/** A quest the PR adds that another open PR also adds, at the same path or under the same title. */
+export interface Duplicate {
+	/** The quest file the PR adds. */
+	path: string;
+	/** The other open PR. */
+	url: string;
+	/** The quest file the other PR adds: `path` itself, or another path with the same title. */
+	other: string;
+}
+
 /** Everything `quest status` reports about a PR. */
 export interface Status {
 	url: string;
@@ -136,6 +146,8 @@ export interface Status {
 	signals: Signal[];
 	holds: HoldFact[];
 	starterHold: StarterHold | null;
+	/** Quests an open PR adds that another open PR also adds; none for a PR no longer open. */
+	duplicates: Duplicate[];
 }
 
 /** An open PR, from any head repository, as the claim checks read it. */
@@ -422,6 +434,7 @@ const status = shape<Status>({
 		}),
 	),
 	starterHold: nullable(shape<StarterHold>({ lastActive: time, age: string, url: string })),
+	duplicates: list(shape<Duplicate>({ path: string, url: string, other: string })),
 });
 
 const openPull = shape<OpenPull>({

@@ -45,7 +45,7 @@ A reviewer out of quota or logged out is an outage, not a skip: stop reviewing, 
 Its `## Waiting` item names the reviewer, its error, and the check, such as `Codex: out of quota until 2026-11-03 15:00 UTC; check that quest review runs`, with the reset time `quest review` prints when it exits 3 on a usage limit; a logged-out reviewer waits on `Maintainer:`, with the login command `quest review` prints.
 Once the reset passes or the login is restored, the item has cleared: whoever finds it runs `/quest-review` on the PR.
 
-Push, then mark the PR ready for review: with `quest ready <pr> <token>`, which also drops its `## Waiting` section, or with `gh pr ready <pr>` for a draft you reviewed without a hold.
+Push, resolve each `duplicate` line `quest status <pr>` then prints as the guide's Creation describes, then mark the PR ready for review: with `quest ready <pr> <token>`, which also drops its `## Waiting` section, or with `gh pr ready <pr>` for a draft you reviewed without a hold.
 
 Summarize the review, with its last round's score and rationale, and CI from `quest status <pr>`.
 Name any decisions the review raised without answering them, then ask the user with your recommended action:
