@@ -1425,6 +1425,9 @@ printf '[{"number":1,"action":"handback","diagnosis":"saw %s","recommendation":"
 		// A tail window that starts mid-file drops its partial first line, which may hold a token's rest.
 		writeFileSync(`${job}.log`, `${token}${"z".repeat(16_384 - token.length + 10)}\nlast\n`);
 		expect(outputTail(job)).toBe("last");
+		// Without a line break, the whole window is a partial line.
+		writeFileSync(`${job}.log`, `${token}${" ".repeat(16_384 - token.length + 4)}`);
+		expect(outputTail(job)).toBe("");
 	});
 	test("bounds a fixer's import by what it added, not the history fetched at launch or its submodules", () => {
 		const root = tempDir();

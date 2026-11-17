@@ -61,7 +61,7 @@ export function handbackLog(log: string, lines?: [number, number]): string {
 
 /**
  * Read a bounded window of a log, or "" when it is missing or not a regular file. A tail window that
- * starts mid-file drops its partial first line, so a cut never splits a token from the prefix that
+ * starts mid-file drops its partial first line, or all of it without a line break, so a cut never splits a token from the prefix that
  * `redactTokens` matches.
  */
 function readLog(path: string, window: "head" | "tail"): string {
@@ -74,7 +74,9 @@ function readLog(path: string, window: "head" | "tail"): string {
 		const start = window === "head" ? 0 : stat.size - buffer.length;
 		const length = readSync(fd, buffer, 0, buffer.length, start);
 		const text = buffer.subarray(0, length).toString("utf8");
-		return start > 0 ? text.slice(text.indexOf("\n") + 1) : text;
+		if (start === 0) return text;
+		const newline = text.indexOf("\n");
+		return newline < 0 ? "" : text.slice(newline + 1);
 	} finally {
 		closeSync(fd);
 	}
