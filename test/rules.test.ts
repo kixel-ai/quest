@@ -39,12 +39,12 @@ test("parse splits commands and attaches redirections and here-documents", () =>
 		{ argv: ["gh", "x"], redirects: [] },
 	]);
 	expect(parse("echo $(git push) # git rebase")).toEqual([
-		{ argv: ["echo", "$(git push)"], redirects: [], expanded: ["$(git push)"], runs: true },
+		{ argv: ["echo", "$(git push)"], redirects: [], expanded: [1], runs: true },
 	]);
 	expect(parse("cat 3<<EOF 4<<<x\n`date`\nEOF")).toEqual([{ argv: ["cat"], redirects: [], runs: true }]);
 	expect(parse("cat 3< in")).toEqual([{ argv: ["cat"], redirects: [{ op: "<", target: "in", fd: 3 }] }]);
 	expect(parse("cat <<EOF\n$x\nEOF")).toEqual([{ argv: ["cat"], redirects: [], stdin: "$x\n", stdinExpanded: true }]);
-	expect(parse("echo '$x' \"a $y\"")).toEqual([{ argv: ["echo", "$x", "a $y"], redirects: [], expanded: ["a $y"] }]);
+	expect(parse("echo '$x' \"a $y\"")).toEqual([{ argv: ["echo", "$x", "a $y"], redirects: [], expanded: [2] }]);
 	expect(parse("cat <<-END\n\tbody\n\tEND")).toEqual([{ argv: ["cat"], redirects: [], stdin: "body\n" }]);
 });
 
@@ -333,6 +333,11 @@ test("gh calls reaching for a repository Kixel Quest hosts are denied, naming th
 	).toEqual([]);
 	expect(run("gh pr view https://github.com/moq-dev/quest/pull/3")).toEqual([]);
 	expect(run("GH_REPO=moq-dev/quest gh api 'repos/{owner}/{repo}/pulls'")).toEqual([]);
+	// gh fills each placeholder from `GH_REPO`, so the endpoint can still name another repository.
+	expect(run("GH_REPO=example/project gh api 'repos/{owner}/other/pulls'")).toEqual([]);
+	expect(run("GH_REPO=example/other gh api 'repos/{owner}/project/pulls'")).toEqual([RULES.kixel]);
+	expect(run("GH_REPO=example/project gh api 'repos/:owner/:repo/pulls'")).toEqual([RULES.kixel]);
+	expect(run("GH_REPO=example/project gh api graphql -F owner='{owner}' -f query=q")).toEqual([RULES.kixel]);
 	expect(run("gh api repos/moq-dev/quest/pulls/3")).toEqual([]);
 	expect(run("gh api graphql -f query='{ viewer { login } }'")).toEqual([]);
 	expect(run("gh api user")).toEqual([]);
@@ -346,7 +351,13 @@ test("gh calls reaching for a repository Kixel Quest hosts are denied, naming th
 	expect(run('gh pr view 3 -R "$REPO"')).toEqual([]);
 	expect(run('GH_REPO="$REPO" gh pr view 3')).toEqual([]);
 	expect(run('gh api "repos/$REPO/pulls"')).toEqual([]);
+	expect(run('gh pr view 3 --repo="$REPO"')).toEqual([]);
+	expect(run('sh -c "gh pr view \\"\\$PR_URL\\""')).toEqual([]);
+	// Only the expanded word is unknown, even when its text ends with a literal one's.
 	expect(run('gh pr comment 3 --body "$(cat notes.md)"')).toEqual([instead("quest pr comment")]);
+	expect(run('gh pr comment 3 --body "see $X 3"')).toEqual([instead("quest pr comment")]);
+	expect(run('gh pr view 3 -R example/project --json "$F,example/project"')).toEqual([instead("quest pr view")]);
+	expect(run('sh -c "echo $X; gh pr view 3"')).toEqual([instead("quest pr view")]);
 	// `--hostname` names the host the endpoint's repository is on.
 	expect(run("gh api --hostname github.com repos/example/project/pulls")).toEqual([]);
 	expect(run("gh api --hostname localhost:8787 repos/example/project/pulls")).toEqual([RULES.kixel]);
