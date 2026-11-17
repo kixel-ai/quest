@@ -1,6 +1,7 @@
-// What quest reads from a forge, as one interface with a backend per forge: pull request, check, review, hold, and
-// queue state, claims, and activity to wait on. Its types are the wire format Kixel Quest serves them in, so both
-// sides parse the same shapes and neither guesses.
+// What quest reads from and writes to a forge, as interfaces with a backend per forge: pull request, check, review,
+// hold, and queue state, claims, and activity to wait on; and opening, editing, readying, commenting on, holding,
+// and picking PRs. Its types are the wire format Kixel Quest serves them in, so both sides parse the same shapes and
+// neither guesses.
 import { TIERS, type Tier } from "./risk";
 
 /** A repository on its forge, by owner and name. */
@@ -16,6 +17,9 @@ export interface PullRequest extends Repository {
 
 /** A bad argument, such as a malformed PR or wait point, reported as a usage error. */
 export class InputError extends Error {}
+
+/** The forge or a claim refused the request, such as someone else holding the PR; distinct from a failure. */
+export class Refusal extends Error {}
 
 /** A check run or commit status on the head, as `quest status` prints it. */
 export interface Check {
@@ -155,6 +159,8 @@ export interface OpenPull {
 	number: number;
 	url: string;
 	branch: string;
+	/** The branch it merges into. */
+	base: string;
 	/** The head repository as `owner/repo`, or `null` once a fork is deleted. */
 	head: string | null;
 	draft: boolean;
@@ -255,20 +261,107 @@ export interface Forge {
 	watch(pull: PullRequest, options: WatchOptions): Watch;
 }
 
-/** Each read Kixel Quest serves at `POST /forge/<call>`: the request it takes and the value it answers. */
+/** A PR to open: `branch` in `head` (the repository itself, or a fork of it) onto `base` in `repository`. */
+export interface Opening {
+	repository: Repository;
+	head: Repository;
+	branch: string;
+	base: string;
+	title: string;
+	body: string;
+	draft: boolean;
+}
+
+/** A session's hold on a PR: what it is called, such as its label, and the opaque token naming it. */
+export interface Hold {
+	label: string;
+	token: string;
+}
+
+/** How a merge method is named; a forge whose queue fast-forwards its base takes none. */
+export type Method = "merge" | "squash" | "rebase";
+
+/** What `quest merge` picks: the head the person saw, and how to land it where the forge offers a choice. */
+export interface Pick {
+	/** The full head SHA, which must still be the PR's head. */
+	head: string;
+	/** Null for the forge's default. */
+	method: Method | null;
+	/** Merge at once, past an ungated base's disabled auto-merge. */
+	direct: boolean;
+}
+
+/**
+ * The writes quest makes to a forge. A refusal the caller should report rather than retry, such as another session
+ * holding the PR, is a `Refusal`.
+ */
+export interface ForgeWrites {
+	/** Open a PR, returned as `pulls` lists it. A forge that keeps claims refuses a second open PR on a quest branch. */
+	open(opening: Opening): Promise<OpenPull>;
+	/** Close a PR without merging it. */
+	close(pull: PullRequest): Promise<void>;
+	/** Replace a PR's title, body, or both; null keeps one. */
+	edit(pull: PullRequest, change: { title: string | null; body: string | null }): Promise<void>;
+	/** Comment on a PR, or reply in the review thread `thread` names; returns the comment's URL. */
+	comment(pull: PullRequest, comment: { body: string; thread: string | null }): Promise<string>;
+	/** Resolve the review thread `thread` names, as `quest status` lists its ID. */
+	resolve(pull: PullRequest, thread: string): Promise<void>;
+	/**
+	 * Take a PR for this session, or with `token` keep the hold it names. Refuses while the PR is merged or closed,
+	 * another session holds it, or it is a draft its starter still holds.
+	 */
+	hold(pull: PullRequest, token: string | null): Promise<Hold>;
+	/**
+	 * Mark a draft ready for review. With `token`, as the session holding it: also drop its body's `## Waiting`
+	 * section, keeping the hold it returns. Without one, it refuses while any session holds the PR.
+	 */
+	ready(pull: PullRequest, token: string | null): Promise<Hold | null>;
+	/** Give up the hold `token` names; one already gone counts as given up. Works on a merged or closed PR too. */
+	release(pull: PullRequest, token: string): Promise<Hold>;
+	/** Queue the PR's head to land, refusing once it moved or while a session holds the PR. */
+	pick(pull: PullRequest, pick: Pick): Promise<void>;
+}
+
+/** Each call Kixel Quest serves at `POST /forge/<call>`: the request it takes and the value it answers. */
 export interface ForgeCalls {
 	status: { request: { pull: PullRequest }; value: Status };
 	pulls: { request: { repository: Repository }; value: OpenPull[] };
 	held: { request: { sources: ClaimSources; branches: string[] }; value: Holdings };
 	/** `from` is a `--since` point or a cursor; null starts at the head's push time. */
 	watch: { request: { pull: PullRequest; from: string | null }; value: WatchPoll };
+	open: { request: { opening: Opening }; value: OpenPull };
+	close: { request: { pull: PullRequest }; value: null };
+	edit: { request: { pull: PullRequest; title: string | null; body: string | null }; value: null };
+	comment: { request: { pull: PullRequest; body: string; thread: string | null }; value: { url: string } };
+	resolve: { request: { pull: PullRequest; thread: string }; value: null };
+	hold: { request: { pull: PullRequest; token: string | null }; value: Hold };
+	ready: { request: { pull: PullRequest; token: string | null }; value: Hold | null };
+	release: { request: { pull: PullRequest; token: string }; value: Hold };
+	/** Kixel Quest's queue fast-forwards the base, so a pick names only the head. */
+	pick: { request: { pull: PullRequest; head: string }; value: null };
 }
 
-/** A read Kixel Quest serves. */
+/** A call Kixel Quest serves. */
 export type ForgeCall = keyof ForgeCalls;
 
-/** The calls, as their paths name them. */
-export const FORGE_CALLS: readonly ForgeCall[] = ["status", "pulls", "held", "watch"];
+/** The reads, as their paths name them. */
+export const FORGE_READS = ["status", "pulls", "held", "watch"] as const satisfies readonly ForgeCall[];
+
+/** The writes, as their paths name them; Kixel Quest serves them only for a repository it hosts. */
+export const FORGE_WRITES = [
+	"open",
+	"close",
+	"edit",
+	"comment",
+	"resolve",
+	"hold",
+	"ready",
+	"release",
+	"pick",
+] as const satisfies readonly ForgeCall[];
+
+/** Every call, reads first. */
+export const FORGE_CALLS: readonly ForgeCall[] = [...FORGE_READS, ...FORGE_WRITES];
 
 /** `GET /forge`: the person a token names and the repositories, as lowercase `owner/repo`, read through Kixel Quest. */
 export interface ForgeInfo {
@@ -441,6 +534,7 @@ const openPull = shape<OpenPull>({
 	number: count,
 	url: string,
 	branch: name,
+	base: name,
 	head: nullable(name),
 	draft: boolean,
 	created: count,
@@ -471,6 +565,9 @@ const info = shape<ForgeInfo>({
 	),
 });
 
+const hold = shape<Hold>({ label: name, token: name });
+const none: Parse<null> = (value, at) => (value === null ? null : fail(at, "null"));
+
 const REQUESTS: { [C in ForgeCall]: Parse<ForgeCalls[C]["request"]> } = {
 	status: shape({ pull: pullRequest }),
 	pulls: shape({ repository }),
@@ -479,6 +576,25 @@ const REQUESTS: { [C in ForgeCall]: Parse<ForgeCalls[C]["request"]> } = {
 		branches: list(branch),
 	}),
 	watch: shape({ pull: pullRequest, from: nullable(name) }),
+	open: shape({
+		opening: shape<Opening>({
+			repository,
+			head: repository,
+			branch: name,
+			base: name,
+			title: name,
+			body: string,
+			draft: boolean,
+		}),
+	}),
+	close: shape({ pull: pullRequest }),
+	edit: shape({ pull: pullRequest, title: nullable(name), body: nullable(string) }),
+	comment: shape({ pull: pullRequest, body: name, thread: nullable(name) }),
+	resolve: shape({ pull: pullRequest, thread: name }),
+	hold: shape({ pull: pullRequest, token: nullable(name) }),
+	ready: shape({ pull: pullRequest, token: nullable(name) }),
+	release: shape({ pull: pullRequest, token: name }),
+	pick: shape({ pull: pullRequest, head: sha }),
 };
 
 const VALUES: { [C in ForgeCall]: Parse<ForgeCalls[C]["value"]> } = {
@@ -486,6 +602,15 @@ const VALUES: { [C in ForgeCall]: Parse<ForgeCalls[C]["value"]> } = {
 	pulls: list(openPull),
 	held: holdings,
 	watch: watchPoll,
+	open: openPull,
+	close: none,
+	edit: none,
+	comment: shape({ url: name }),
+	resolve: none,
+	hold,
+	ready: nullable(hold),
+	release: hold,
+	pick: none,
 };
 
 const answer = <T>(value: Parse<T>): Parse<Answer<T>> => shape<Answer<T>>({ value, asOf: nullable(time) });

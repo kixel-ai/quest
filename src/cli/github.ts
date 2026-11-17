@@ -107,6 +107,24 @@ export function remoteRepository(remote: Remote, push = false): { url: string; r
 	return { url, repository: githubRepository(url) };
 }
 
+/** The forge a remote names: Kixel Quest's repository, or GitHub's with the URL that names it. */
+export type RemoteHost =
+	{ forge: "kixel"; repository: Repository } | { forge: "github"; url: string; repository: Repository };
+
+/**
+ * The forge `remote`'s fetch URL names, asking `kixel` and then GitHub of its configured URL before the one
+ * `insteadOf` rewrites make, so a rewrite to the other forge's mirror never moves its writes there; null for neither.
+ */
+export function remoteHost(remote: Remote, kixel: ((url: string) => Repository | null) | null): RemoteHost | null {
+	const at = (url: string): RemoteHost | null => {
+		const hosted = kixel?.(url) ?? null;
+		if (hosted !== null) return { forge: "kixel", repository: hosted };
+		const repository = githubRepository(url);
+		return repository === null ? null : { forge: "github", url, repository };
+	};
+	return at(remote.configured.fetch) ?? at(remote.used().fetch);
+}
+
 /**
  * The github.com repository a remote URL names, or `null` for any other host:
  * HTTPS with or without credentials, `ssh://`, or the scp-like `user@github.com:` form.

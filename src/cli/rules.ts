@@ -314,6 +314,11 @@ function shell(line: string, check: Check, inherited: ReadonlySet<string> = new 
 		} else if (name === "mktemp") mktemp(args, env, check);
 		else if (name === "git") git(args, asked, input, check);
 		else if (name === "gh") gh(args, input, literal, check);
+		// `quest pr` posts as `gh pr` does, to GitHub or Kixel Quest, with the same flags, after any `--root`.
+		else if (name === "quest") {
+			const command = questCommand(args);
+			if (command[0] === "pr") gh(command, input, literal, check);
+		}
 	}
 }
 
@@ -462,7 +467,14 @@ function values(args: string[], names: string[], { attached = [] as string[] } =
 	return found;
 }
 
-/** `gh` subcommands that post text, by group and command, and whether each authors a new post. */
+/** `quest`'s arguments past its global options: `--root <path>` or `--root=<path>`. */
+function questCommand(args: string[]): string[] {
+	let i = 0;
+	while (args[i] === "--root" || args[i]?.startsWith("--root=")) i += args[i] === "--root" ? 2 : 1;
+	return args.slice(i);
+}
+
+/** `gh` and `quest pr` subcommands that post text, by group and command, and whether each authors a new post. */
 const POSTS: Record<string, Record<string, boolean>> = {
 	pr: { create: true, comment: true, review: true, edit: false },
 	issue: { create: true, comment: true, edit: false },

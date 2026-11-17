@@ -197,6 +197,14 @@ test("a new GitHub post needs the footer and no em dashes; edits and bodies off 
 	expect(bash("gh api -XPATCH repos/o/r/pulls/5 -fbody=Done")).toEqual([]);
 	expect(bash("gh pr comment 5 --edit-last --create-if-none --body Done")).toEqual([]);
 	expect(bash("gh pr review 5 --approve")).toEqual([]);
+	// quest pr posts the same way, on GitHub or Kixel Quest.
+	expect(bash('quest pr comment 5 --body "Done."')).toEqual([RULES.footer]);
+	expect(bash('quest --root .worktrees/a pr comment 5 --body "Done."')).toEqual([RULES.footer]);
+	expect(bash('quest --root=. pr comment 5 --body "Done."')).toEqual([RULES.footer]);
+	expect(bash(`quest pr comment 5 --thread T -b "Done ${DASH} mostly.\n\n${FOOTER}"`)).toEqual([RULES.emDash]);
+	expect(bash(`quest pr create -t "a ${DASH} b" -b "Body\n\n${FOOTER}"`)).toEqual([RULES.emDash]);
+	expect(bash("quest pr edit 5 --body Done")).toEqual([]);
+	expect(bash("quest pr resolve 5 T")).toEqual([]);
 	expect(bash("cat .tmp/body.md | gh pr comment 5 --body-file -")).toEqual([]);
 	expect(bash('gh pr comment 5 --body "$body"')).toEqual([]);
 	expect(bash("gh pr comment 5 --body-file - <<EOF\n$(cat .tmp/body.md)\nEOF")).toEqual([]);

@@ -321,13 +321,12 @@ async function sendOnce(deps: SendDependencies, dir: string): Promise<Sent[]> {
 	};
 	// Records name the repository PRs open on, which a fork's is not. Kixel Quest refuses a whole upload naming one it
 	// does not index, so a group it does not serve is dropped without running token-max.
-	const kixel = new KixelQuest(url, token, {
-		env: deps.env,
-		fetch: deps.fetch,
-		now: deps.now,
-		github: deps.github,
-		remedy: "its records stay queued",
-	});
+	const kixel = new KixelQuest(
+		url,
+		token,
+		{ env: deps.env, fetch: deps.fetch, now: deps.now, github: deps.github, remedy: "its records stay queued" },
+		false,
+	);
 	/** Kixel Quest refused the token, which every group shares: nothing more is sent, and what is queued is dropped. */
 	const refuseAll = (status: number, repository: string, records: number, breakages: number) => {
 		refuse(deps.env, url, token);
