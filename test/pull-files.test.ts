@@ -154,6 +154,20 @@ describe("GitHub's files", () => {
 		expect(requests).toEqual(["graphql null", "/repos/acme/proj/pulls/2/files?per_page=100", "graphql next"]);
 	});
 
+	test("a PR GitHub's REST cap may have cut fails", async () => {
+		const github = {
+			graphql: async () => ({
+				repository: {
+					pullRequests: { pageInfo: { hasNextPage: false }, nodes: [node(4, [["a", "ADDED"]], true)] },
+				},
+			}),
+			all: async () => Array.from({ length: 3000 }, (_, i) => ({ filename: `f${i}`, status: "added" })),
+		} as unknown as GitHub;
+		await expect(openPullFiles(github, { owner: "acme", repo: "proj" })).rejects.toThrow(
+			"PR #4 changes at least 3000 files, more than GitHub lists",
+		);
+	});
+
 	test("a repository the token cannot read fails", async () => {
 		const github = { graphql: async () => ({ repository: null }) } as unknown as GitHub;
 		await expect(openPullFiles(github, { owner: "acme", repo: "proj" })).rejects.toThrow(
