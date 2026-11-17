@@ -128,6 +128,7 @@ export {
 	type Claim,
 	type ClaimSource,
 	type ClaimSources,
+	type Duplicate,
 	FORGE_CALLS,
 	type Forge,
 	type ForgeCall,

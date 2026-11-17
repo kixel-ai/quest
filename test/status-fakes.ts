@@ -125,6 +125,8 @@ export function setup(
 		noBase?: boolean;
 		/** The head's workflow runs, as `GET /actions/runs` lists them. */
 		runs?: Node[];
+		/** The open PRs as the duplicate read lists them, and each `<head>:<path>` blob's text. */
+		open?: { pulls: Node[]; blobs?: Record<string, string>; files?: Record<number, Node[]> };
 	} = {},
 ) {
 	const queries: Record<string, unknown>[] = [];
@@ -160,6 +162,8 @@ export function setup(
 					: Response.json({ protection: { enabled: false } });
 			if (path.pathname === "/repos/example/project/rules/branches/main")
 				return Response.json(options.rules ?? []);
+			const changed = /^\/repos\/example\/project\/pulls\/(\d+)\/files$/.exec(path.pathname);
+			if (changed) return Response.json(options.open?.files?.[Number(changed[1])] ?? []);
 			if (path.pathname === "/repos/example/project/actions/runs") {
 				if (!options.runs) throw new Error("unexpected workflow run request");
 				return Response.json({ total_count: options.runs.length, workflow_runs: options.runs });
@@ -181,6 +185,23 @@ export function setup(
 				return Response.json(page.rows, { headers: page.next ? { Link: `<${page.next}>; rel="next"` } : {} });
 			}
 			const request = JSON.parse(String(init?.body));
+			if (request.query.includes("query OpenQuests(")) {
+				const nodes = options.open?.pulls ?? [];
+				return Response.json({
+					data: {
+						repository: { pullRequests: { pageInfo: { hasNextPage: false, endCursor: null }, nodes } },
+					},
+				});
+			}
+			if (request.query.includes("object(expression:")) {
+				const repository: Node = {};
+				for (const [key, value] of Object.entries(request.variables as Record<string, string>))
+					if (key.startsWith("e")) {
+						const text = options.open?.blobs?.[value];
+						repository[`f${key.slice(1)}`] = text === undefined ? null : { text };
+					}
+				return Response.json({ data: { repository } });
+			}
 			if (request.query.includes("p1: pullRequest(number: 1)")) {
 				if (!last) throw new Error("signals read before PR state");
 				const head = last.data.repository.pullRequest.headRefOid;
