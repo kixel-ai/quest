@@ -8,7 +8,7 @@ import { type PullFiles, forgeJson, parseForgeAnswer, parseForgeRequest } from "
 import { type Output, main } from "../src/cli/main";
 import type { GitHub } from "../src/github/client";
 import { openPullFiles } from "../src/github/files";
-import { tempDir } from "./fixture";
+import { Tree, tempDir, template } from "./fixture";
 import { FakeKixelQuest, KIXEL, REPOSITORY, kixelEnv } from "./kixel-fakes";
 
 let kixel: FakeKixelQuest;
@@ -33,18 +33,24 @@ async function cli(...args: string[]): Promise<{ code: number; stdout: string; s
 	return { code, stdout, stderr };
 }
 
-/** A checkout whose origin is `url`. */
-function checkout(url: string): string {
+/** A bare repository with a default branch, which a checkout reads from the Kixel Quest URL it routes there. */
+const hostedBare = template((dir) => {
+	execFileSync("git", ["clone", "-q", "--bare", Tree.committed().path, "."], { cwd: dir, stdio: "ignore" });
+});
+
+/** A checkout whose origin is `url`, fetched from `bare` when given, as Kixel Quest's repository is. */
+function checkout(url: string, bare?: string): string {
 	const work = tempDir();
 	const run = (...args: string[]) => execFileSync("git", args, { cwd: work, stdio: "ignore" });
 	run("init", "-q");
 	run("remote", "add", "origin", url);
+	if (bare) run("config", `url.${bare}.insteadOf`, url);
 	return work;
 }
 
 describe("quest pr list on a repository Kixel Quest hosts", () => {
 	test("prints a file line per path of each open PR, and --json every PR", async () => {
-		const work = checkout(`${KIXEL}/example/project.git`);
+		const work = checkout(`${KIXEL}/example/project.git`, hostedBare());
 		const one = kixel.add({ branch: "quest/m0/one", files: ["quest/m0/one.md", "src/a file.ts"] });
 		kixel.add({ branch: "closed", state: "closed", files: ["src/closed.ts"] });
 		const empty = kixel.add({ branch: "empty" });
@@ -72,7 +78,7 @@ describe("quest pr list on a repository Kixel Quest hosts", () => {
 	});
 
 	test("a failure fails the command, and nothing reaches GitHub", async () => {
-		const work = checkout(`${KIXEL}/example/project.git`);
+		const work = checkout(`${KIXEL}/example/project.git`, hostedBare());
 		kixel.fail = { status: 503, error: "down", call: "files" };
 		expect(await cli("--root", work, "pr", "list")).toEqual({
 			code: 1,
@@ -82,9 +88,69 @@ describe("quest pr list on a repository Kixel Quest hosts", () => {
 	});
 
 	test("outside a checkout, or with an origin on neither forge, fails", async () => {
-		expect((await cli("--root", tempDir(), "pr", "list")).stderr).toContain("not a checkout with an origin remote");
+		expect((await cli("--root", tempDir(), "pr", "list")).code).toBe(1);
 		const elsewhere = checkout("https://example.com/example/project.git");
 		expect((await cli("--root", elsewhere, "pr", "list")).stderr).toContain("neither a github.com repository");
+	});
+});
+
+describe("quest pr list in a fork on GitHub", () => {
+	const json = (body: unknown) =>
+		new Response(JSON.stringify(body), { headers: { "content-type": "application/json" } });
+	const info = (full: string, extra: object = {}) => {
+		const [owner, repo] = full.split("/");
+		return {
+			owner: { login: owner },
+			name: repo,
+			default_branch: "main",
+			clone_url: `https://github.com/${full}.git`,
+			ssh_url: `git@github.com:${full}.git`,
+			fork: false,
+			...extra,
+		};
+	};
+
+	test("lists the parent's PRs, not the fork's, while the parent keeps quests", async () => {
+		vi.stubEnv("GH_TOKEN", "token");
+		vi.stubEnv("XDG_CACHE_HOME", tempDir());
+		const asked: string[] = [];
+		vi.stubGlobal("fetch", async (input: URL | string, init?: { body?: string }) => {
+			const url = new URL(input);
+			asked.push(url.pathname);
+			if (url.pathname === "/repos/me/project")
+				return json(info("me/project", { fork: true, parent: info("example/project") }));
+			if (url.pathname === "/repos/example/project") return json(info("example/project"));
+			if (url.pathname === "/repos/example/project/contents/quest/README.md") return json({});
+			if (url.pathname === "/graphql") {
+				const { variables } = JSON.parse(init!.body!) as { variables: { owner: string; repo: string } };
+				asked.push(`graphql ${variables.owner}/${variables.repo}`);
+				const nodes =
+					variables.owner === "example"
+						? [
+								{
+									number: 7,
+									url: "https://github.com/example/project/pull/7",
+									headRefOid: "h".repeat(40),
+									files: {
+										pageInfo: { hasNextPage: false },
+										nodes: [{ path: "quest/m0/a.md", changeType: "ADDED" }],
+									},
+								},
+							]
+						: [];
+				return json({ data: { repository: { pullRequests: { pageInfo: { hasNextPage: false }, nodes } } } });
+			}
+			throw new Error(`unexpected request ${url.pathname}`);
+		});
+		const work = checkout("https://github.com/me/project.git");
+
+		expect(await cli("--root", work, "pr", "list")).toEqual({
+			code: 0,
+			stdout: "file https://github.com/example/project/pull/7 quest/m0/a.md\n",
+			stderr: "",
+		});
+		expect(asked).toContain("graphql example/project");
+		expect(asked).not.toContain("graphql me/project");
 	});
 });
 

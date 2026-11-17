@@ -676,8 +676,10 @@ quest pr resolve 12 <thread-id>
 
 `quest pr list` prints a `file <url> <path>` line for each path each open PR
 changes, so a search for a path names the PRs changing it, and `--json` prints
-`[{"number", "url", "files"}]`; it reads origin's repository, with no cap on
-files a PR, where `gh pr list --json files` stops at 100.
+`[{"number", "url", "files"}]`; it reads the upstream that holds origin's claims
+(a fork's parent), with no 100-file cap, where `gh pr list --json files` stops
+at 100. It fails on a PR of 3,000 files or more, GitHub's REST limit, rather
+than print a possibly incomplete list.
 
 Its reads are `POST /forge/view` and `POST /forge/files`, answering the same `{"value", "asOf"}`. The
 writes are `POST /forge/<write>`, beside the reads: `open`, `close`,

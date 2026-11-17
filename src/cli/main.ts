@@ -54,7 +54,6 @@ import {
 	hostedForge,
 	hostedRepository,
 	locate as locatePull,
-	locateRepository,
 } from "./forge";
 import { PENDING_MS } from "./admission";
 import { gate } from "./gate";
@@ -977,22 +976,27 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		});
 	pr.command("list")
 		.description(
-			"List the repository's open PRs with the paths each changes, for the repository origin names, on " +
+			"List the open PRs with the paths each changes, of the upstream that holds origin's claims, on " +
 				"GitHub or Kixel Quest: what gh pr list --json number,url,files gives, without its cap of 100 files " +
-				"a PR. Plain output prints a file <url> <path> line per changed path, by PR number, so a grep for a " +
-				"path names the PRs changing it. --json prints a deterministic array of {number, url, files}, " +
-				"listing a PR without files too.",
+				"a PR; it fails on a PR with 3,000 files or more, which GitHub cuts. Plain output prints a file <url> <path> line per " +
+				"changed path, by PR number, so a grep for a path names the PRs changing it. --json prints a deterministic " +
+				"array of {number, url, files}, listing a PR without files too.",
 		)
 		.option("--json", "Print a deterministic JSON array")
 		.action((options: { json?: boolean }) => {
-			const { repository, hosted } = locateRepository(root(), process.env);
-			const forge = hosted
-				? hostedForge(repository, forgeDependencies())
-				: new GitHubForge(gitHubDependencies(warn));
-			settle(forge.files(repository), ({ value: pulls }) => {
-				if (options.json) print(JSON.stringify(pulls));
-				else for (const line of pullFileLines(pulls)) print(line);
-			});
+			settle(
+				(async () => {
+					const up = await upstream(root(), requireRemote(root(), "origin"), claimDependencies());
+					if (up.hosting === null)
+						throw new InputError("origin names neither a github.com repository nor one on Kixel Quest");
+					// Verifies a search, so it reads GitHub itself, never an index that may lag.
+					return up.hosting.live().files(up.hosting.repository);
+				})(),
+				({ value: pulls }) => {
+					if (options.json) print(JSON.stringify(pulls));
+					else for (const line of pullFileLines(pulls)) print(line);
+				},
+			);
 		});
 	const bodyOptions = (command: Command) =>
 		command

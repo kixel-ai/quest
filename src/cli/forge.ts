@@ -126,21 +126,6 @@ export function locate(value: string, root: string, env: NodeJS.ProcessEnv): Loc
 	return { pull: pullRequest(value, root), hosted: false };
 }
 
-/** The repository the origin remote at `root` names, and whether Kixel Quest hosts it rather than GitHub. */
-export function locateRepository(root: string, env: NodeJS.ProcessEnv): { repository: Repository; hosted: boolean } {
-	const base = kixelUrl(env);
-	let origin = null;
-	try {
-		origin = readRemote(root, "origin");
-	} catch {
-		// Not a checkout: the error below says so.
-	}
-	if (origin === null) throw new InputError(`${root} is not a checkout with an origin remote`);
-	const host = remoteHost(origin, (url) => hostedRepository(base, url));
-	if (host === null) throw new InputError("origin names neither a github.com repository nor one on Kixel Quest");
-	return { repository: host.repository, hosted: host.forge === "kixel" };
-}
-
 /** The repository `value` on Kixel Quest at `base` names, as `<base>/<owner>/<repo>[.git]`, or null. */
 export function hostedRepository(base: string, value: string): Repository | null {
 	const at = new URL(base);
