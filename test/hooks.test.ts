@@ -221,9 +221,12 @@ test("SessionStart adds nothing where the repository does not use Quest", () => 
 	expect(hook({ hook_event_name: "SessionStart", cwd: tempDir() })).toBe("");
 });
 
-/** Hook dependencies writing to a fresh state directory, sampling a fixed counter. */
+/** Hook dependencies writing to a fresh state directory, sampling a fixed counter, with `cat` and `ls` on PATH. */
 function sampled(usage = 5_000) {
-	const env = { XDG_STATE_HOME: tempDir(), XDG_CONFIG_HOME: tempDir(), PATH: "/bin:/usr/bin" };
+	// Stub programs, since a host such as NixOS keeps neither in /bin or /usr/bin.
+	const bin = tempDir();
+	for (const program of ["cat", "ls"]) writeFileSync(join(bin, program), "#!/bin/sh\n", { mode: 0o755 });
+	const env = { XDG_STATE_HOME: tempDir(), XDG_CONFIG_HOME: tempDir(), PATH: bin };
 	const sample = () => ({ at: "2026-11-15T10:00:00.000Z", cgroup: "/app.slice/agent.scope", usage });
 	return { env, sample, lines: () => readCalls(Date.parse("2026-11-15T00:00:00Z"), env) };
 }
