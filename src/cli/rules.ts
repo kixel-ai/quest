@@ -527,7 +527,11 @@ const QUEST_PR: Record<string, string> = {
 	merge: "quest merge",
 };
 
-/** `gh pr` options that take the next word, so a URL in one, such as a body, is not taken for the PR. */
+/**
+ * `gh pr` options that take the next word, so a URL in one, such as a body, is not taken for the PR. Short forms that
+ * are a boolean in another subcommand, such as `review -a` and `merge -r`, `-m`, and `-s`, are left out: their values
+ * there, an assignee, reviewer, milestone, or state, are never a URL.
+ */
 const PR_VALUE_OPTIONS = new Set([
 	"-R",
 	"--repo",
@@ -544,24 +548,20 @@ const PR_VALUE_OPTIONS = new Set([
 	"--base",
 	"-H",
 	"--head",
-	"-a",
 	"--assignee",
 	"-A",
 	"--author",
 	"-l",
 	"--label",
-	"-m",
 	"--milestone",
 	"-p",
 	"--project",
-	"-r",
 	"--reviewer",
 	"-q",
 	"--jq",
 	"--json",
 	"-S",
 	"--search",
-	"-s",
 	"--state",
 	"-L",
 	"--limit",

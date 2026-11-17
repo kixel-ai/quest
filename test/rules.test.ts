@@ -316,6 +316,10 @@ test("gh calls reaching for a repository Kixel Quest hosts are denied, naming th
 	expect(run("gh pr view https://github.com/example/project/pull/3")).toEqual([]);
 	expect(run("gh pr view 3 -R github.com/example/project")).toEqual([]);
 	expect(run("gh api https://api.github.com/repos/example/project/pulls")).toEqual([]);
+	// A boolean short flag does not take the URL after it for its value.
+	expect(run("gh pr review -a https://github.com/moq-dev/quest/pull/12")).toEqual([]);
+	expect(run("gh pr merge -s -r https://github.com/moq-dev/quest/pull/12")).toEqual([]);
+	expect(run("gh pr review -a http://localhost:8787/example/project/pull/1")).toEqual([instead("quest pr comment")]);
 	// A URL in an option's value, such as a body, is not the PR.
 	expect(
 		run(`gh pr comment 3 -R moq-dev/quest --body "See http://localhost:8787/example/project/pull/1.\n\n${FOOTER}"`),
