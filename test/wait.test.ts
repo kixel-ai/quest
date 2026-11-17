@@ -6,7 +6,7 @@ import { expect, test } from "vitest";
 
 import { main } from "../src/cli/main";
 import { GitHubInputError, pullRequest } from "../src/cli/github";
-import { type GitHubDependencies } from "../src/github/client";
+import { type CachedResponse, type GitHubDependencies } from "../src/github/client";
 import { waitForActivity, WaitTimeout } from "../src/cli/wait";
 
 const A = "a".repeat(40);
@@ -189,9 +189,11 @@ function setup(
 	const ruleCalls: { path: string; headers: Headers }[] = [];
 	const sleeps: number[] = [];
 	const warnings: string[] = [];
+	const stored = new Map<string, CachedResponse>();
 	const deps: GitHubDependencies = {
 		token: "test-token",
 		quota: "wait",
+		cache: { get: async (key) => stored.get(key), set: async (key, entry) => void stored.set(key, entry) },
 		now: () => now,
 		sleep: async (ms) => {
 			sleeps.push(ms);

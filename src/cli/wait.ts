@@ -304,30 +304,19 @@ async function watch(
 		return event.time > mark.time || (event.time === mark.time && !seen[source].has(event.id));
 	};
 	/**
-	 * Read every page once, then poll the last page conditionally, following it when it fills. A 304
-	 * has no Link header and the ETag covers only the body, so a full last page is reread whole to
-	 * learn of a next one.
+	 * Read every page once, then poll from the last page, following it when it fills. The client
+	 * revalidates each page by ETag, so an unchanged one costs no quota; rows reread are not fresh.
 	 */
 	const pager = (first: string) => {
 		let path = first;
-		let etag: string | undefined;
 		return async (): Promise<ObjectValue[]> => {
 			const rows: ObjectValue[] = [];
 			for (;;) {
-				const response = await github.request(path, { etag });
-				if (response.status === 304) {
-					if (!etag) throw new Error("unexpected GitHub 304 without a cached response");
-					return rows;
-				}
-				const page = array(await response.json());
-				rows.push(...page);
-				const next = link(response, "next");
-				if (!next) {
-					etag = page.length < PAGE ? (response.headers.get("etag") ?? undefined) : undefined;
-					return rows;
-				}
+				const page = await github.list(path);
+				rows.push(...page.rows);
+				const next = link(page.response, "next");
+				if (!next) return rows;
 				path = next;
-				etag = undefined;
 			}
 		};
 	};
@@ -423,17 +412,10 @@ async function watch(
 	);
 	// Issue comments are ordered by creation: an old comment can be edited on an
 	// earlier page, so reread this update-filtered list from its first page.
-	const edits = async () => {
-		const rows: ObjectValue[] = [];
-		let path: string | undefined =
-			`${base}/issues/${pr.number}/comments?per_page=${PAGE}&since=${new Date(cursor.marks.edits.time - 1000).toISOString()}`;
-		while (path) {
-			const page = await github.list(path);
-			rows.push(...page.rows);
-			path = link(page.response, "next");
-		}
-		return rows;
-	};
+	const edits = () =>
+		github.all(
+			`${base}/issues/${pr.number}/comments?per_page=${PAGE}&since=${new Date(cursor.marks.edits.time - 1000).toISOString()}`,
+		);
 	const found: Record<Source, Activity[]> = { timeline: historical, replies: [], reactions: [], edits: [] };
 	for (;;) {
 		github.pollInterval = 0;
