@@ -288,10 +288,21 @@ describe("PR records", () => {
 		{ ...tally("claude", 2, { high: 2, medium: 0, low: 0 }, 1, 0), session: CLAUDE },
 	];
 
+	const SKIP = {
+		harness: "claude" as const,
+		model: "claude-opus-5-5",
+		effort: "high",
+		reason: "usage limit, resets 2026-11-18T03:00:00Z",
+	};
+
 	test("reads back each reviewer's round and tally quest review records, after the land fixer's lines", () => {
-		const body = `Summary.\n\n## Review\n\nmechanical fix by codex, gpt-6.1-sol, medium effort: \`merged\` (head ${"d".repeat(40)})\n\n${reviewRecord({ rounds: [round, second], tallies, risk })}\n\n## Models\n\n- Size: L\n`;
+		const body = `Summary.\n\n## Review\n\nmechanical fix by codex, gpt-6.1-sol, medium effort: \`merged\` (head ${"d".repeat(40)})\n\n${reviewRecord({ rounds: [round, second], tallies, risk, skipped: [SKIP] })}\n\n## Models\n\n- Size: L\n`;
 		expect(body).toContain(
 			"\n- Rounds: 3; first round 2 (high 1, low 1); findings 4 (high 1, medium 1, low 2): fixed 2, refuted 1, open 1\n",
+		);
+		// A reviewer the run skipped is named in the header, outside the blocks parseReview reads.
+		expect(body).toContain(
+			"\n- Skipped: Claude Code, claude-opus-5-5, high effort: usage limit, resets 2026-11-18T03:00:00Z\n\n- Reviewer: Codex,",
 		);
 		expect(parseReview(body)).toEqual([
 			{
@@ -357,9 +368,11 @@ describe("PR records", () => {
 		expect(body).not.toContain("b".repeat(40));
 		// Claude's left-out tally still holds an open finding, which keeps it short too.
 		const clean = [{ ...round, findings: [] }, second];
-		expect(reviewRecord({ rounds: clean, tallies, risk })).not.toContain("b".repeat(40));
+		expect(reviewRecord({ rounds: clean, tallies, risk, skipped: [] })).not.toContain("b".repeat(40));
 		const settledAll = [tally("codex", 3, { high: 1, medium: 1, low: 2 }, 3, 1), tallies[1]!];
-		expect(reviewRecord({ rounds: clean, tallies: settledAll, risk })).toContain(`- Head: ${"b".repeat(40)}\n`);
+		expect(reviewRecord({ rounds: clean, tallies: settledAll, risk, skipped: [] })).toContain(
+			`- Head: ${"b".repeat(40)}\n`,
+		);
 		expect(fixes(body)).toEqual(["codex, gpt-6.1-sol, medium effort"]);
 		// The reviewer sessions read even from a record whose other lines this version cannot parse.
 		const newer = body.replace(/^- Rounds: 3;/m, "- Rounds: 3; first round 1 (medium 1);");
@@ -369,6 +382,7 @@ describe("PR records", () => {
 		const classified = reviewRecord({
 			rounds: [round],
 			tallies,
+			skipped: [],
 			risk: {
 				...risk,
 				classified: {
@@ -381,7 +395,7 @@ describe("PR records", () => {
 	});
 
 	test("a record written before tallies has none, and a Rounds line that does not add up fails", () => {
-		const record = reviewRecord({ rounds: [second], tallies: [tallies[1]!], risk });
+		const record = reviewRecord({ rounds: [second], tallies: [tallies[1]!], risk, skipped: [] });
 		const older = `## Review\n\n${record.replace(/^- Rounds: .*\n/m, "")}\n`;
 		expect(parseReview(older)[0]!.tally).toBeNull();
 		// The settled count `quest usage` prints reads back.

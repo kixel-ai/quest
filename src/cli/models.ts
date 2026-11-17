@@ -41,14 +41,16 @@ export const WRITERS: Record<Size, readonly Model[]> = {
 
 /**
  * Each PR size's reviewers, ranked: the first whose model is not the latest
- * writer's reviews it, so Claude reviews what Sol changed last.
+ * writer's reviews it, so Claude reviews what Sol changed last, and one that
+ * cannot run passes the review to the next. Sonnet comes last so Opus-written
+ * work still has a reviewer when Sol is out.
  */
 export const REVIEWERS: Record<Size, readonly Model[]> = {
-	XS: [sol("medium"), opus("low")],
-	S: [sol("medium"), opus("low")],
-	M: [sol("high"), opus("medium")],
-	L: [sol("xhigh"), opus("high")],
-	XL: [sol("xhigh"), opus("xhigh")],
+	XS: [sol("medium"), opus("low"), sonnet("low")],
+	S: [sol("medium"), opus("low"), sonnet("low")],
+	M: [sol("high"), opus("medium"), sonnet("low")],
+	L: [sol("xhigh"), opus("high"), sonnet("medium")],
+	XL: [sol("xhigh"), opus("xhigh"), sonnet("high")],
 };
 
 /** One side of the writer A/B: A runs the size's own first writer, B the alternative. */

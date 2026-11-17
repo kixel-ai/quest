@@ -84,10 +84,11 @@ function classifiedBy({ by }: Risk["classified"]): string {
 }
 
 /**
- * The `## Review` section's text for a run's `rounds` of the same head, without its heading: the head's risk, then
- * every tally on the branch, each round's reviewer's beside its round, and a reviewer the run left out on its own.
+ * The `## Review` section's text for a run's `rounds` of the same head, without its heading: the head's risk and each
+ * reviewer the run skipped since it could not run, then every tally on the branch, each round's reviewer's beside its
+ * round, and a reviewer the run left out on its own.
  */
-export function reviewRecord({ rounds, tallies, risk }: Reviewed): string {
+export function reviewRecord({ rounds, tallies, risk, skipped }: Reviewed): string {
 	const [shared] = rounds;
 	// A reviewer the run left out may still hold open findings, which keep the head from passing too.
 	const clean =
@@ -100,6 +101,10 @@ export function reviewRecord({ rounds, tallies, risk }: Reviewed): string {
 		`- Base: ${shared!.base.ref} at ${shared!.base.sha.slice(0, 12)}`,
 		`- Risk: ${risk.tier}, ${code(risk.reason)}`,
 		`- Classified: ${risk.classified.tier} by ${classifiedBy(risk.classified)}`,
+		// Outside the Reviewer blocks, which `parseReview` reads as reviewers that ran.
+		...skipped.map(
+			(skip) => `- Skipped: ${HARNESSES[skip.harness]}, ${skip.model}, ${skip.effort} effort: ${skip.reason}`,
+		),
 	];
 	for (const round of rounds) {
 		lines.push(
