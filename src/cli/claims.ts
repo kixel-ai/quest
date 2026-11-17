@@ -23,8 +23,6 @@ export interface ClaimDependencies {
 		/** Kixel Quest's backend for a repository it hosts, which both reads and writes there. */
 		forge(repository: Repository): Forge & ForgeWrites;
 	};
-	/** The writes to GitHub; `quest merge`'s landing check runs in the checkout at `root`. */
-	writes?(root: string): ForgeWrites;
 	warn(message: string): void;
 }
 
@@ -124,7 +122,7 @@ export async function upstream(root: string, remote: Remote, deps: ClaimDependen
 		prefix,
 		forge: () => (forge ??= deps.forge(up.repository)),
 		live: () => new GitHubForge(deps.github()),
-		writes: () => (writes ??= deps.writes?.(root) ?? new GitHubWrites(deps.github(), landingCheck(root))),
+		writes: () => (writes ??= new GitHubWrites(deps.github(), landingCheck(root))),
 		link: (path: string) =>
 			`https://github.com/${owner}/${repo}/blob/${up.defaultBranch}/${encodeURI(prefix + path)}`,
 	};

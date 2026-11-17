@@ -796,7 +796,9 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 			if (!/^[\da-f]{40}$/i.test(options.land)) throw new UsageError("--land needs a full 40-character SHA");
 			const { pull, writes } = located(value);
 			const method = options.squash ? "squash" : options.rebase ? "rebase" : null;
-			settle(writes.pick(pull, { head: options.land, method, direct: options.direct ?? false }), () => undefined);
+			// Kixel Quest's wire takes a lowercase SHA; GitHub compares either case.
+			const head = options.land.toLowerCase();
+			settle(writes.pick(pull, { head, method, direct: options.direct ?? false }), () => undefined);
 		});
 
 	const landCommand = program.command("land").summary("Land queued PRs through a host daemon");

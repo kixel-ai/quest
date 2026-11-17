@@ -101,6 +101,10 @@ describe("a PR on a repository Kixel Quest hosts", () => {
 		expect(moved.code).toBe(3);
 		expect(moved.stderr).toContain(`head moved to ${"b".repeat(40)}`);
 		expect(pull.picked).toBeNull();
+		// An uppercase SHA, which `--land` accepts, picks the same head.
+		const same = kixel.add({ branch: "other" });
+		expect(await cli("merge", kixel.url(same.number), "--land", HEAD.toUpperCase())).toMatchObject({ code: 0 });
+		expect(same.picked).toBe(HEAD);
 	});
 
 	test.each([["--squash"], ["--rebase"], ["--direct"]])("a pick takes no %s", async (flag) => {
