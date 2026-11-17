@@ -30,12 +30,8 @@ import {
 import type { GitHubDependencies } from "../github/client";
 import { GitHubForge } from "../github/forge";
 import { pullRequest, readRemote, remoteHost } from "./github";
-import { checkedEndpoint, tokenFor, tokensPath } from "./send";
+import { kixelUrl, tokenFor, tokensPath } from "./tokens";
 
-/** Kixel Quest's own URL. */
-export const KIXEL_QUEST = "https://kixel.quest";
-/** The variable naming another Kixel Quest, such as one running locally. */
-export const KIXEL_QUEST_URL = "QUEST_KIXEL_URL";
 /** The variable that, set to `github`, reads GitHub even where Kixel Quest serves the repository. */
 export const FORGE = "QUEST_FORGE";
 
@@ -46,11 +42,8 @@ export interface ForgeDependencies {
 	now(): number;
 	/** Called only once a read goes to GitHub, so Kixel Quest's reads need no GitHub token. */
 	github(): GitHubDependencies;
-}
-
-/** The Kixel Quest `env` names, without a trailing slash. */
-export function kixelUrl(env: NodeJS.ProcessEnv): string {
-	return checkedEndpoint(env[KIXEL_QUEST_URL] || KIXEL_QUEST, KIXEL_QUEST_URL).replace(/\/+$/, "");
+	/** What a Kixel Quest failure tells the person to do; by default, to read GitHub instead. */
+	remedy?: string;
 }
 
 /** The Kixel Quest `env` names, with the person's token for it; null without a token, or when reads are on GitHub. */
@@ -90,6 +83,16 @@ export async function forgeFor(
 	return kixel !== null && (await kixel.serves(repository, deadline))
 		? new KixelQuestForge(kixel)
 		: new GitHubForge(deps.github());
+}
+
+/** Kixel Quest refused the person's token, as a sender must tell from a failure that may pass. */
+export class Refused extends Error {
+	constructor(
+		message: string,
+		readonly status: number,
+	) {
+		super(message);
+	}
 }
 
 /** A PR named on the command line, and whether Kixel Quest hosts its repository rather than GitHub. */
@@ -194,7 +197,7 @@ export class KixelQuest {
 
 	/** A failed request, naming the setting that reads GitHub instead where Kixel Quest does not host the repository. */
 	#failed(method: string, path: string, why: string): Error {
-		const instead = this.hosted ? "" : `; set ${FORGE}=github to read GitHub`;
+		const instead = this.hosted ? "" : `; ${this.deps.remedy ?? `set ${FORGE}=github to read GitHub`}`;
 		return new Error(`Kixel Quest (${this.url}) failed ${method} ${path}: ${why}${instead}`);
 	}
 
@@ -228,7 +231,11 @@ export class KixelQuest {
 			throw failed(error instanceof Error ? error.message : String(error));
 		}
 		if (response.status === 401 || response.status === 403)
-			throw failed(`it refused the token ${tokensPath(this.deps.env)} pairs with it (HTTP ${response.status})`);
+			throw new Refused(
+				failed(`it refused the token ${tokensPath(this.deps.env)} pairs with it (HTTP ${response.status})`)
+					.message,
+				response.status,
+			);
 		// A malformed wait point, token, thread, or body is the caller's to fix on any forge; the other reads take no
 		// free-form argument, so their 400 means the CLI and Kixel Quest disagree on the wire, which reading GitHub
 		// sidesteps.

@@ -1964,23 +1964,20 @@ are read from the transcript on this host, and only their names and times
 leave it. The split's notes are lines a model wrote, told to name no one and
 quote no message.
 
-A checkout names its endpoint in a committed `.quest.json`:
+Records go to [Kixel Quest](https://kixel.quest), the same one the
+[forge reads](#read-through-kixel-quest) use, at its `/records`, with the token
+`$XDG_CONFIG_HOME/quest/records.json` (`~/.config`) pairs with its URL. No
+repository commits a config file: a record names its repository by `owner/repo`
+from its checkout's `origin` (the repository its PRs open on, for a fork), and
+the token is sent only to the URL the user's own file pairs it with. The URL is
+`https://kixel.quest`, or HTTPS (HTTP to `localhost`) `QUEST_KIXEL_URL` for
+another Kixel Quest, such as one running locally. A user holding no token for
+it sends nothing, and the hook says so once as a system message.
 
-```json
-{ "records": "https://kixel.example/records" }
-```
-
-and each user pairs a token with it in `$XDG_CONFIG_HOME/quest/records.json`
-(`~/.config`), so a checkout naming another endpoint, as a hostile branch
-might, is never sent the token or a record:
-
-```json
-{ "https://kixel.example/records": "token" }
-```
-
-The endpoint must be HTTPS, or HTTP to `localhost`. A checkout naming none, or
-an endpoint the user holds no token for, sends nothing, and the hook says so
-once as a system message.
+Kixel Quest refuses a whole upload naming a repository it does not index or
+the sender cannot read, so the sender asks `GET /forge` which repositories it
+serves and sends only those. The rest are dropped from this host's queue, so an
+unserved repository costs no GitHub requests, and the next stop says so once.
 
 The `Stop` hook [`quest setup`](#configure-your-agent) installs for Claude Code
 and Codex only queues the session under `$XDG_STATE_HOME/quest/records`. One
@@ -2002,23 +1999,23 @@ once per outage.
 
 Each pass runs token-max on this host from the earliest queued session's first
 instant, reads the PRs updated since then, or since its last upload for that
-endpoint and repository read them, if earlier, so a fix merged after its
+repository read them, if earlier, so a fix merged after its
 sessions were sent still goes with the next one, labels each session's new
 steps for its [time split](#time-splits), and posts
 `{"records": [...], "breakages": [...]}`, the breakages being those the merged
 PRs among them name under `## Caused by`, as `quest usage` reports them, with
-`Authorization: Bearer <token>`, one upload per endpoint and repository, each
+`Authorization: Bearer <token>`, one upload per repository, each
 queued session with its sub-agents, which stop without the hook naming them.
 Each upload is checked with `parseUpload` before it is posted. A 2xx drops the
 sessions from the queue, unless the hook queued one again meanwhile. A 401 or
-403 drops them and sends that endpoint nothing more until the token changes.
+403 drops them and sends Kixel Quest nothing more until the token changes.
 Any other failure keeps them queued, and the next stop says so once. A failing
-endpoint and repository back off, waiting a minute and doubling up to six
-hours, and sit out the passes meanwhile, so they never widen the others'
+repository backs off, waiting a minute and doubling up to six
+hours, and sits out the passes meanwhile, so it never widens the others'
 window. token-max missing is retried each pass.
 
 A deploy or alert reports what it found with `quest records incident`, which
-posts one breakage at once to the checkout's endpoint and fails loud on any
+posts one breakage at once to Kixel Quest and fails loud on any
 answer but a 2xx, since nothing retries it:
 
 ```console
