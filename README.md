@@ -188,12 +188,21 @@ Quest ships a pack of audits every repository runs once per milestone:
 $ quest audit
 tree - Audit the quest tree
 deps - Audit dependencies
+code - Audit the code
+cost - Audit build and CI cost
+docs - Audit the docs
+tests - Audit test coverage
 ```
 
 `tree` finds quests that disagree, conflict, sit in the wrong milestone, or
 plan stale work; `deps` reviews new releases, upstream health, held-back
-majors, and dependencies worth dropping. `quest audit <name>` prints what one
-checks, what each finding becomes, and how its run plans the next one.
+majors, and dependencies worth dropping; `code` deletes dead code, simplifies
+overbuilt code, and prunes stale lint suppressions; `cost` weighs each CI job,
+gate step, test, build second, and artifact byte against what it earns; `docs`
+checks claims, examples, links, and exports against the code; and `tests`
+finds untested behavior and tests CI never runs. `quest audit <name>` prints
+what one checks, what each finding becomes, and how its run plans the next
+one.
 
 A quest runs an audit by naming it in an `## Audit` section, and holds only
 what the repository learned, such as its baseline and the scope it excludes:
@@ -435,6 +444,9 @@ quest wait 101 --since abcdef0123456789abcdef0123456789abcdef01
 A number uses the repository's `origin`, so it needs a checkout or `--root`
 naming one; a URL works from any directory.
 Authentication comes from `GH_TOKEN`, then `GITHUB_TOKEN`, then `gh auth token`.
+Every REST read quest makes revalidates its last answer by ETag, kept per token
+under `$XDG_CACHE_HOME/quest/github` (`~/.cache`, about 64 MiB), so an
+unchanged read costs none of the token's GitHub quota.
 Without `--since`, the point is the current head's push time, so an existing
 review on that head is included. GitHub lists a push seconds to minutes after
 it lands, so for the current head the wait rereads the listing every 15 seconds
@@ -515,7 +527,8 @@ connection a few times, and fails loudly on invalid responses.
 There is no deadline unless `--timeout <seconds>` is supplied. Activity exits 0,
 timeout exits 3, invalid arguments exit 2, and other failures exit 1; interrupt
 with Ctrl-C to stop waiting. A timeout prints a resume point as its only line:
-a cursor, or the given `--since` (else the head SHA) if setup had not finished.
+a cursor, or the given `--since` (else the head SHA, or through Kixel Quest the
+time the wait started) if setup had not finished.
 Retry with it, not the original command, so activity that landed during the
 first wait is still reported.
 
@@ -568,6 +581,7 @@ comes last, and a missing value prints as `-`:
 | `signal` | `finding` or `decision`, its URL, who posted it, and its text, for each [signal](#signals-that-hold-a-head) holding the head. |
 | `hold` | Label, acquisition token, acquisition time, verified GitHub event API URL, and age; `hold -` when no label holds it. Unknown acquisition facts print as `-` and `unknown age`. |
 | `starter-hold` | A draft its starter owns: last activity time, PR URL, and `last active` age. Last activity is not when ownership began. |
+| `duplicate` | For an open PR, each quest it adds that another open PR also adds, at the same path or under the same title compared without its size, case, or spacing: the quest's path, the other PR's URL, and the other quest's path. A follow-up another PR already owns is dropped, or moved into that PR's quest, before a pick asks about it. |
 
 The node ID is what GraphQL's `addPullRequestReviewThreadReply` and
 `resolveReviewThread` take. Neutral and skipped checks pass. Only each check's
@@ -589,7 +603,7 @@ requirement names one, its app, as GitHub and `quest land` do, and leaves out
 same facts as one object with the fields `url`, `state`, `draft`, `head`,
 `mergeable`, `mergeState`, `reviewDecision`, `autoMerge`, `mergeQueue`,
 `landingStopped`, `checks` (`state`, `passed`, `failing`, `pending`), `reviews`, `checkpoints` (`reviewer`, `round`, `url`), `reactions`,
-`threads`, `signals` (`kind`, `url`, `author`, `text`), `holds` (`label`, `token`, `takenAt`, `age`, `eventUrl`), and `starterHold` (`lastActive`, `age`, `url`, or null). Ownership uses the state commands' shared reader without changing labels, and event links match the opaque acquisition token against GitHub's event listing. Long lists are paged; reactions are the newest 100 per PR or review,
+`threads`, `signals` (`kind`, `url`, `author`, `text`), `holds` (`label`, `token`, `takenAt`, `age`, `eventUrl`), `starterHold` (`lastActive`, `age`, `url`, or null), and `duplicates` (`path`, `url`, `other`). Ownership uses the state commands' shared reader without changing labels, and event links match the opaque acquisition token against GitHub's event listing. Long lists are paged; reactions are the newest 100 per PR or review,
 as in `quest wait`. Any PR state exits 0, invalid arguments exit 2, and other
 failures exit 1.
 
@@ -601,6 +615,35 @@ auto-merge was enabled, from the head repository's activity; it prints `-`
 until GitHub lists the current head's push, which takes seconds to minutes, and
 when a push shares the second auto-merge was enabled. A head there that differs
 from `head` means a push followed auto-merge: disable it, or land the new head.
+
+### Read through Kixel Quest
+
+Agents polling `quest status`, `quest wait`, and `quest unblocked --unclaimed`
+can spend a person's whole hourly GitHub quota. Where
+[Kixel Quest](https://kixel.quest) serves the repository, those reads, and the
+claim and draft reads of `quest start` and `quest waiting`, go to its index of
+GitHub's webhooks instead. It serves only people its allow-list gives a token,
+which `quest` takes from `$XDG_CONFIG_HOME/quest/records.json`, paired with
+`https://kixel.quest`:
+
+```json
+{ "https://kixel.quest": "<token>" }
+```
+
+Without a token, or for a repository Kixel Quest does not serve, reads go to
+GitHub as above; the output is the same either way. When Kixel Quest fails, the
+command fails too, naming `QUEST_FORGE=github`, which reads GitHub instead.
+`QUEST_KIXEL_URL` names another Kixel Quest, such as one running locally, whose
+token the same file pairs with its URL.
+
+Its read API lives under `/forge`, with the token as a bearer token:
+`GET /forge` answers `{"login", "repositories"}`, the person the token names
+and the lowercase `owner/repo` of each repository served to them, and
+`POST /forge/<read>` takes one of `status`, `pulls`, `held`, or `watch` and
+answers `{"value", "asOf"}`, the read's value and the time of the newest
+webhook behind it. A 400 with `{"error"}` refuses a bad argument, such as a
+malformed `--since`, which `quest` reports as a usage error. `quest/core` exports each read's types and their parsers;
+`quest/github`'s `GitHubForge` answers the same reads from GitHub.
 
 ## Own a pull request
 
@@ -1775,7 +1818,11 @@ latest upload, since one sender sends a session's uploads in order. The type is
 
 - `pulls` are the PRs it worked on, attributed as `quest usage` attributes
   them; a session with none yet, such as planning before its PR opens, keeps
-  its `branch`, and the next record names the PR.
+  its `branch`, and the next record names the PR. The sender remembers a sent
+  session while its latest branch, or a sub-agent's, heads no PR, and resends
+  it, with its sub-agents, once one opens: with the next session it sends from
+  that repository, since only then does it read the repository's PRs. It
+  forgets the session once the harness prunes its transcript.
 - `role` is classifying when a PR's `## Review` record names it as the
   [risk classifier](#risk-tiers), reviewing when it names it as a reviewer or
   Codex marks it a review, else the one the first quest skill it ran gives: planning

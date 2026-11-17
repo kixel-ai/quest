@@ -29,6 +29,7 @@ import {
 	unblocked,
 	onMaintainer,
 	waiting,
+	InputError,
 } from "../core";
 import {
 	AgentInputError,
@@ -41,11 +42,14 @@ import {
 	stopAgent,
 	stopAll,
 } from "./agent";
-import { held, openDrafts, reach, target, upstream, upstreamRefs } from "./claims";
+import type { Repository } from "../core";
+import { type ClaimDependencies, held, openDrafts, reach, target, upstream, upstreamRefs } from "./claims";
+import { type ForgeDependencies, forgeFor } from "./forge";
 import { PENDING_MS } from "./admission";
 import { gate } from "./gate";
-import { gitHubDependencies, GitHubInputError, pullRequest, readRemote, remoteRepository } from "./github";
-import { mergedHolds } from "../github/client";
+import { gitHubDependencies, pullRequest, readRemote, remoteRepository } from "./github";
+import { type GitHubDependencies, mergedHolds } from "../github/client";
+import { setTimeout as sleep } from "node:timers/promises";
 import { type Hold, finish, land, release, take } from "./hold";
 import { LAND_CHECK } from "../github/land";
 import { audit } from "./audits";
@@ -109,7 +113,6 @@ import { CONTEXT, GUIDE, GUIDE_SECTIONS, SKILLS, guideSections, sectionHeading, 
 import { type Terminal, Theme } from "./theme";
 import { type Snapshot, checkout, collect, load, snapshot, under } from "./tree";
 import { statusLines } from "./status";
-import { pullRequestStatus } from "../github/status";
 import { TOKEN_MAX_MISSING, daysBefore, runTokenMax, usage, usageDependencies, usageLines } from "./usage";
 import { waitForActivity, WaitTimeout } from "./wait";
 import { version } from "./version";
@@ -138,7 +141,22 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 	const warn = (line: string): void => {
 		out.stderr(`quest: ${line}\n`);
 	};
+	const forgeDependencies = (quota?: GitHubDependencies["quota"]): ForgeDependencies => ({
+		env: process.env,
+		fetch: globalThis.fetch,
+		now: Date.now,
+		github: () => gitHubDependencies(warn, quota),
+	});
+	const claimDependencies = (): ClaimDependencies => ({
+		github: () => gitHubDependencies(warn),
+		forge: (repository) => forgeFor(repository, forgeDependencies()),
+		warn,
+	});
 	const theme = out.terminal ? new Theme(out.terminal) : null;
+	const FORGE_READS =
+		"Where Kixel Quest serves the repository and $XDG_CONFIG_HOME/quest/records.json pairs a token with it, " +
+		"these reads go to Kixel Quest's index instead, sparing the GitHub quota, and its failure fails the command; " +
+		"QUEST_FORGE=github reads GitHub, and QUEST_KIXEL_URL names another Kixel Quest. ";
 
 	const program = new Command("quest")
 		.description(description)
@@ -349,6 +367,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"through parents whose default branch has quest/README.md, so a fork with its own quests is its own " +
 				"upstream. The branches and PRs of the fork the remote pushes to count too. Each skipped quest is listed on stderr with its PR and how long ago that PR was last " +
 				"active, so a stale claim can be offered for takeover. Off GitHub, only branches are checked. " +
+				FORGE_READS +
 				"Outside conditions are never checked.\n\n" +
 				"Given a path, piped output lists its blockers, one per line with nesting indented, with an " +
 				"explanation on stderr; no output means it is ready. On a terminal it prints a quest log instead: a " +
@@ -399,7 +418,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				}
 				// Readiness comes from the upstream default branch, so a stale checkout cannot offer
 				// a deleted quest or one whose prerequisite has since finished.
-				const deps = { github: () => gitHubDependencies(warn), warn };
+				const deps = claimDependencies();
 				settle(
 					(async () => {
 						const up = await reach(root(), options.remote, deps);
@@ -448,8 +467,10 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"Invalid trees fail before printing. Outside conditions are never checked, nor whether another " +
 				"session holds a draft.\n\n" +
 				"Drafts are read from the open PRs of the remote's upstream, found as for quest unblocked " +
-				"--unclaimed, using GH_TOKEN, GITHUB_TOKEN, or gh auth token. Without the remote, off GitHub, or " +
-				"when GitHub cannot be read, it lists the quest tree's items alone and warns that drafts were skipped.",
+				"--unclaimed, using GH_TOKEN, GITHUB_TOKEN, or gh auth token. " +
+				FORGE_READS +
+				"Without the remote, off GitHub, or when the drafts cannot be read, it lists the quest tree's items alone " +
+				"and warns that drafts were skipped.",
 		)
 		.option("--json", "Print a deterministic JSON array")
 		.option("--maintainer", "Only items waiting on the maintainer")
@@ -458,7 +479,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		.action((options: { json?: boolean; maintainer?: boolean; limit?: number; remote: string }) => {
 			const tree = checkout(root(), warn);
 			if (!valid(tree)) return;
-			settle(openDrafts(root(), options.remote, { github: () => gitHubDependencies(warn), warn }), (drafts) => {
+			settle(openDrafts(root(), options.remote, claimDependencies()), (drafts) => {
 				const found = waiting(tree.docs, today(), drafts)
 					.map((quest) =>
 						options.maintainer ? { ...quest, waits: quest.waits.filter(onMaintainer) } : quest,
@@ -507,7 +528,9 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"with a warning.\n\n" +
 				"--release deletes the quest's branch on the remote, with a lease on its tip, and closes its PR, only " +
 				"while that tip is still an empty commit.\n\n" +
-				"Uses GH_TOKEN, GITHUB_TOKEN, or gh auth token on GitHub. Exits 0 when done, 3 when refused " +
+				"Uses GH_TOKEN, GITHUB_TOKEN, or gh auth token on GitHub. " +
+				FORGE_READS.replace("these reads", "the check for an existing claim") +
+				"Exits 0 when done, 3 when refused " +
 				"(blocked, held, a branch in the way, or work on the branch), 2 for invalid arguments, and 1 for other " +
 				"failures.",
 		)
@@ -515,7 +538,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		.option("--release", "Release the claim instead: delete the empty claim branch and close its PR")
 		.option("--remote <name>", "Remote to push the claim to", "origin")
 		.action((path: string, options: { release?: boolean; remote: string }) => {
-			const deps = { github: () => gitHubDependencies(warn), warn };
+			const deps = claimDependencies();
 			if (options.release) {
 				settle(releaseQuest(root(), find(load(root()), path).path, options.remote, deps), (released) => {
 					print(`deleted ${released.branch}`);
@@ -561,8 +584,11 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"auto-merge:moved prints once per head, with the account that enabled it as the actor and a URL naming the head it " +
 				"was enabled on, which it reads as quest status does. " +
 				"Pass the final field of the last line to --since to resume without replaying events. " +
-				"On timeout, the only line is a resume point for --since (a cursor, or the given --since or head SHA if setup did not finish), so a retry with it still reports activity from the first wait.\n\n" +
+				"On timeout, the only line is a resume point for --since (a cursor, or the given --since, else the head SHA, or through Kixel Quest the time the wait started, if setup did not finish), so a retry with it still reports activity from the first wait.\n\n" +
 				"Uses GH_TOKEN, GITHUB_TOKEN, or gh auth token. Label changes, replies, and reactions by that account are ignored. " +
+				FORGE_READS.replace("these reads", "its polls") +
+				"Through Kixel Quest, that account is the person its token names, and a timeout says how current its " +
+				"index's last answer was. " +
 				"Exits 0 for activity, 3 on timeout, 2 for invalid arguments, and 1 for other failures. " +
 				"Issue-comment edits print as edited, including updates to older bot status comments. The account's own edits are ignored.\n\n" +
 				"In an agent session, where CLAUDE_CODE_SESSION_ID or CODEX_THREAD_ID is set, the wait is logged under " +
@@ -585,7 +611,11 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 					return false;
 				}
 			};
-			pending = waitForActivity(pr, options, gitHubDependencies(warn, "wait")).then(
+			const choice = {
+				choose: (repository: Repository, deadline: number) =>
+					forgeFor(repository, forgeDependencies("wait"), deadline),
+			};
+			pending = waitForActivity(pr, options, choice, { now: Date.now, sleep }).then(
 				(lines) => {
 					for (const line of lines) print(line);
 					return logged(lines[0]?.split(" ")[1] ?? null) ? 0 : 1;
@@ -594,7 +624,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 					if (error instanceof WaitTimeout && error.cursor) print(error.cursor);
 					warn(error instanceof Error ? error.message : String(error));
 					if (error instanceof WaitTimeout) return logged(null) ? 3 : 1;
-					return error instanceof GitHubInputError ? 2 : 1;
+					return error instanceof InputError ? 2 : 1;
 				},
 			);
 		});
@@ -625,27 +655,33 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"reviewer that approves or requests changes, its round, and its review, when that review is of the " +
 				"head, while its latest verdict on the head is neither an approval nor a dismissal, and ends its third, sixth, ... round (one commit it reviewed), as " +
 				"/quest-review's design checkpoint; a reacted:<content> line per " +
-				"reaction on the PR or a review; a thread line per unresolved review thread, led by its node ID; and a " +
-				"signal line per finding or decision that holds the head from landing (see the README). " +
+				"reaction on the PR or a review; a thread line per unresolved review thread, led by its node ID; a " +
+				"signal line per finding or decision that holds the head from landing (see the README); and last, " +
+				"for an open PR, a duplicate line per quest it adds that another open PR also adds, at the same path or under the same title " +
+				"compared without its size, case, or spacing, giving the quest's path, the other PR's URL, and the other quest's path last. " +
 				"A missing value prints as -. --json prints the same facts as one deterministic object.\n\n" +
-				"Uses GH_TOKEN, GITHUB_TOKEN, or gh auth token. Exits 0 for any PR state, 2 for invalid arguments, " +
+				"Uses GH_TOKEN, GITHUB_TOKEN, or gh auth token. " +
+				FORGE_READS.replace("these reads", "the read") +
+				"Exits 0 for any PR state, 2 for invalid arguments, " +
 				"and 1 for other failures.",
 		)
 		.argument("<pr>", "GitHub PR URL, or a PR number in origin")
 		.option("--json", "Print a deterministic JSON object")
 		.action((value: string, options: { json?: boolean }) => {
 			const pr = pullRequest(value, root());
-			pending = pullRequestStatus(pr, gitHubDependencies(warn)).then(
-				(status) => {
-					if (options.json) print(JSON.stringify(status));
-					else for (const line of statusLines(status)) print(line);
-					return 0;
-				},
-				(error: unknown) => {
-					warn(error instanceof Error ? error.message : String(error));
-					return 1;
-				},
-			);
+			pending = forgeFor(pr, forgeDependencies())
+				.then((forge) => forge.status(pr))
+				.then(
+					({ value: status }) => {
+						if (options.json) print(JSON.stringify(status));
+						else for (const line of statusLines(status)) print(line);
+						return 0;
+					},
+					(error: unknown) => {
+						warn(error instanceof Error ? error.message : String(error));
+						return 1;
+					},
+				);
 		});
 
 	const OWNERSHIP =
@@ -969,7 +1005,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 	const merged = async (repository: string, commit: string) => {
 		const origin = readRemote(repository, "origin");
 		if (origin === null) return false; // No forge to ask.
-		const up = await upstream(repository, origin, { github: () => gitHubDependencies(warn), warn });
+		const up = await upstream(repository, origin, claimDependencies());
 		return up.github !== null && mergedHolds(up.github.client, up.github.repository, commit);
 	};
 	worktree
@@ -1225,7 +1261,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		)
 		.option("--json", "Print one JSON object")
 		.action((options: { since?: string; quest?: string; pr?: number; ssh?: string[]; json?: boolean }) => {
-			const github = { github: () => gitHubDependencies(warn), warn };
+			const github = claimDependencies();
 			const since = options.since ?? daysBefore(new Date(), 7);
 			settle(
 				usage(
@@ -1253,7 +1289,9 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				`${tokensPath()} pairs with that endpoint as a bearer token, one upload per endpoint and repository, ` +
 				`then again every ${SEND_INTERVAL / 1000} seconds until stopped, at low priority. A record is built as quest usage ` +
 				"builds it, from token-max's sessions on this host since the earliest queued session's first instant and " +
-				"the PRs updated since then, and replaces its earlier copy, so a resend never doubles. An endpoint that " +
+				"the PRs updated since then, and replaces its earlier copy, so a resend never doubles. A sent session whose " +
+				"latest branch, or a sub-agent's, heads no PR yet is sent again, with its sub-agents, once a pass for its " +
+				"repository reads a PR opened on that branch, until its transcript is gone. An endpoint that " +
 				"refuses the token (401 or 403) is sent nothing more until the token changes; any other failure keeps the " +
 				"sessions queued, retried after a minute and then twice as long each time up to six hours, and the next " +
 				"stop hook says so once. Before a record is built, a cheap model, " +
@@ -1552,7 +1590,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 					options.responses === undefined
 						? undefined
 						: readFileSync(options.responses === "-" ? 0 : options.responses, "utf8");
-				const github = { github: () => gitHubDependencies(warn), warn };
+				const github = claimDependencies();
 				const run = review(
 					{ ...options, root: root(), exclude: options.excludeModel, responses, fresh: options.new },
 					{
@@ -1704,7 +1742,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 							given === 3 ? { at: options.defect!, fix: options.fix!, what: options.what! } : undefined,
 						env: process.env,
 					},
-					{ github: () => gitHubDependencies(warn), warn },
+					claimDependencies(),
 				);
 				pending = run.then((entry) => {
 					print(JSON.stringify(entry));
@@ -1739,13 +1777,10 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		.argument("<from>", "Quest file or epic directory, as /quest/..., quest/..., or a filesystem path")
 		.argument("<to>", "Its new path, which must not exist")
 		.action((from: string, to: string) => {
-			pending = moveQuest(root(), from, to, { github: () => gitHubDependencies(warn), warn }).then(
-				report,
-				(error: unknown) => {
-					warn(error instanceof Error ? error.message : String(error));
-					return 1;
-				},
-			);
+			pending = moveQuest(root(), from, to, claimDependencies()).then(report, (error: unknown) => {
+				warn(error instanceof Error ? error.message : String(error));
+				return 1;
+			});
 		});
 
 	program
@@ -1976,7 +2011,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 			// Help and version exit 0; any other parse failure is a usage error.
 			return error.exitCode === 0 ? 0 : 2;
 		}
-		if (error instanceof UsageError || error instanceof GitHubInputError) {
+		if (error instanceof UsageError || error instanceof InputError) {
 			out.stderr(`error: ${error.message}\n`);
 			return 2;
 		}

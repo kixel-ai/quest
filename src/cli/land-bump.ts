@@ -10,11 +10,11 @@ import {
 	type GitHubDependencies,
 	object,
 	type ObjectValue,
-	type Repository,
 	requirements,
 	string,
 	workflowRuns,
 } from "../github/client";
+import type { Repository } from "../core";
 import { land } from "./hold";
 import { commandEnvironment, contexts, git, type RemoteRead } from "./land";
 import { push, remoteHead } from "./land-head";

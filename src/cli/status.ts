@@ -1,5 +1,5 @@
 // `quest status`: a pull request's state as stable plain lines.
-import type { Check, Status } from "../github/status";
+import type { Check, Status } from "../core";
 
 /** Stable plain lines: a record type, then space-separated fields, with any free text last. */
 export function statusLines(status: Status): string[] {
@@ -53,5 +53,6 @@ export function statusLines(status: Status): string[] {
 					`starter-hold ${status.starterHold.lastActive} ${status.starterHold.url} last active ${status.starterHold.age}`,
 				]
 			: []),
+		...status.duplicates.map((d) => `duplicate ${d.path} ${d.url} ${d.other}`),
 	];
 }

@@ -20,8 +20,10 @@ so their `pullfrog.yml` gains steps before the agent
 under `Waiting`): install Nix, put the `/nix/store` entries of `main`'s
 `nix print-dev-env` `PATH` on `GITHUB_PATH` (Pullfrog's restricted shell
 keeps `PATH` but drops other dev-shell variables, so `nix develop --command`
-stays the way to anything needing them), and delete the job token the
-installer writes into `/etc/nix/nix.conf`, failing if it remains. The
+stays the way to anything needing them), and keep the job's token and Nix
+daemon trust from the agent: the installer gets no token and leaves the
+runner user untrusted, the PATH step alone fetches with the token, and the
+job fails if the token reached Nix's config. The
 `pullfrog` environment admits only `main`, so these steps always build the
 default branch's shell; `checkout_pr` moves to a PR's head only afterwards,
 and `quest context`, now on the agent's PATH, carries the rule against

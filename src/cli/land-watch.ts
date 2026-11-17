@@ -11,9 +11,9 @@ import {
 	link,
 	object,
 	type ObjectValue,
-	type Repository,
 	string,
 } from "../github/client";
+import type { Repository } from "../core";
 import { lacksApproval } from "../github/merge";
 import type { Entry, LandMethod, Plan } from "./land";
 import type { Reason } from "../github/land";

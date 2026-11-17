@@ -1,20 +1,10 @@
 // The GitHub client: authenticated REST and GraphQL requests with paging, retries, rate limits, and a deadline.
 // No Node APIs, so it runs wherever `fetch` does; the caller supplies the token and clock.
+import type { Repository } from "../core";
 import { cancelled, currentContexts, latestContexts, type RollupContext, type WorkflowRun } from "./checks";
 
 const API = "https://api.github.com";
 const MAX_SLEEP = 2_147_483_647;
-
-/** A repository on github.com. */
-export interface Repository {
-	owner: string;
-	repo: string;
-}
-
-/** A pull request by its repository and number. */
-export interface PullRequest extends Repository {
-	number: number;
-}
 
 /**
  * What the client needs from its host: `fetch`, a clock, a way to pause, the token, where warnings
@@ -31,6 +21,21 @@ export interface GitHubDependencies {
 	 * outlast it; `fail` fails at once, naming the reset, so a one-shot command never stalls on it.
 	 */
 	quota: "wait" | "fail";
+	/** Where GET answers are kept to revalidate by ETag, so an unchanged read costs no quota; none when absent. */
+	cache?: ResponseCache;
+}
+
+/** A 200 answer to a GET, kept to serve when GitHub answers its ETag with a 304. */
+export interface CachedResponse {
+	etag: string;
+	headers: [string, string][];
+	body: string;
+}
+
+/** Stored GET answers by an opaque key, a hex SHA-256 that covers the token, so no token is stored. */
+export interface ResponseCache {
+	get(key: string): Promise<CachedResponse | undefined>;
+	set(key: string, entry: CachedResponse): Promise<void>;
 }
 
 /** A request or pause reached the client's deadline; the caller decides what that means. */
@@ -59,7 +64,7 @@ const backoff = (failures: number) => 1000 * 2 ** failures;
 /** How far GitHub's clock may run behind ours, as when looking for what a lost request created. */
 export const CLOCK_SKEW = 60_000;
 /** Statuses whose response has no body. */
-const NULL_BODY = [204, 205, 304];
+const NULL_BODY = [204, 205];
 
 /**
  * Whether a request may repeat after a 5xx or a dropped connection, after which GitHub may have
@@ -70,7 +75,6 @@ export type Repeat = boolean | ((started: number) => Promise<Response | undefine
 
 /** How {@link GitHub.request} sends a request and which refusals it returns rather than throws. */
 export interface RequestOptions {
-	etag?: string;
 	body?: unknown;
 	method?: "POST" | "PUT" | "PATCH" | "DELETE";
 	allow?: number[];
@@ -95,11 +99,30 @@ function limited(response: Response, body: string): boolean {
 export class GitHub {
 	/** The longest X-Poll-Interval GitHub asked for since the caller last set this, in milliseconds. */
 	pollInterval = 0;
+	/** The response cache, dropped after its first failure. */
+	private cache: ResponseCache | undefined;
 
 	constructor(
 		private readonly deps: GitHubDependencies,
 		private readonly deadline = Infinity,
-	) {}
+	) {
+		this.cache = deps.cache;
+	}
+
+	/**
+	 * A cache operation's result, or undefined once it fails: the cache only saves quota, so a full
+	 * or unwritable disk warns once and leaves the client reading GitHub uncached.
+	 */
+	private async cached<T>(operation: () => Promise<T>): Promise<T | undefined> {
+		if (!this.cache) return undefined;
+		try {
+			return await operation();
+		} catch (error) {
+			this.cache = undefined;
+			this.deps.warn(`GitHub response cache failed, reading uncached: ${message(error)}`);
+			return undefined;
+		}
+	}
 
 	/** Sleep, cut short by the deadline. */
 	async pause(milliseconds: number): Promise<void> {
@@ -110,8 +133,9 @@ export class GitHub {
 	}
 
 	/**
-	 * A 2xx or 304 response, its body already read; anything else fails, with GitHub's reason when
-	 * it gives one, unless `allow` lists its status. Rate limits are waited out. A 5xx or a
+	 * A 2xx response, its body already read; anything else fails, with GitHub's reason when it gives
+	 * one, unless `allow` lists its status. A GET revalidates the cached answer by its ETag and serves
+	 * it on a 304, under the 304's own headers. Rate limits are waited out. A 5xx or a
 	 * connection dropped before the body is in, after which GitHub may or may not have acted, is
 	 * retried with bounded backoff as `repeat` allows, then fails with the last error. `body` makes
 	 * it a POST unless `method` says otherwise.
@@ -122,6 +146,11 @@ export class GitHub {
 		if (url.origin !== API || url.username || url.password) throw new Error("invalid GitHub pagination URL");
 		const started = this.deps.now();
 		const repeat = options.repeat ?? (await this.repeatable(url, options, started));
+		const accept = options.accept ?? "application/vnd.github+json";
+		const get = options.body === undefined && options.method === undefined;
+		const cache = get ? this.cache : undefined;
+		const key = cache && (await cacheKey(this.deps.token, accept, url.href));
+		const cached = key === undefined ? undefined : await this.cached(() => cache!.get(key));
 		let limits = 0;
 		let failures = 0;
 		for (;;) {
@@ -135,11 +164,11 @@ export class GitHub {
 						? options.method && { method: options.method }
 						: { method: options.method ?? "POST", body: JSON.stringify(options.body) }),
 					headers: {
-						Accept: options.accept ?? "application/vnd.github+json",
+						Accept: accept,
 						Authorization: `Bearer ${this.deps.token}`,
 						"X-GitHub-Api-Version": "2022-11-28",
 						"User-Agent": "quest",
-						...(options.etag ? { "If-None-Match": options.etag } : {}),
+						...(cached ? { "If-None-Match": cached.etag } : {}),
 					},
 					...(Number.isFinite(remaining) ? { signal: AbortSignal.timeout(Math.ceil(remaining)) } : {}),
 				});
@@ -155,13 +184,27 @@ export class GitHub {
 					(text) => ({ text }),
 					(error: unknown) => ({ error }),
 				);
+				if (response.status === 304) {
+					if (!cached) throw new Error(`unexpected GitHub 304 for ${url.pathname} without a cached response`);
+					const headers = new Headers(cached.headers);
+					response.headers.forEach((value, name) => headers.set(name, value));
+					return new Response(cached.body, { status: 200, statusText: "OK", headers });
+				}
 				// A rate limit is waited out even when the caller allows its status, such as a 403 refusal.
 				if (
 					response.ok ||
-					response.status === 304 ||
 					(options.allow?.includes(response.status) && !limited(response, "text" in read ? read.text : ""))
 				) {
 					const { status, statusText, headers } = response;
+					const etag = headers.get("etag");
+					if (
+						"text" in read &&
+						key !== undefined &&
+						status === 200 &&
+						etag &&
+						settled(response, url, read.text)
+					)
+						await this.cached(() => cache!.set(key, { etag, headers: [...headers], body: read.text }));
 					if ("text" in read)
 						return new Response(NULL_BODY.includes(status) ? null : read.text, {
 							status,
@@ -301,7 +344,6 @@ export class GitHub {
 	/** One page of a REST listing, and its response for the next link. */
 	async list(path: string): Promise<{ rows: ObjectValue[]; response: Response }> {
 		const response = await this.request(path);
-		if (response.status !== 200) throw new Error("unexpected GitHub 304 without a cached response");
 		return { rows: array(await response.json()), response };
 	}
 
@@ -381,6 +423,28 @@ const PULL_MUTATIONS: Record<string, { fields: string; landed(pull: ObjectValue)
 	},
 	markPullRequestReadyForReview: { fields: "isDraft", landed: (pull) => pull.isDraft === false },
 };
+
+/** The cache key of a GET: a hex SHA-256 of the token, media type, and URL, so tokens never share answers. */
+async function cacheKey(token: string, accept: string, url: string): Promise<string> {
+	const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`${token}\n${accept}\n${url}`));
+	return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+/**
+ * Whether a 304 can show that an answer is still whole. A 304 carries no Link header and its ETag
+ * covers only the body, so a full last page of a listing, whose next page may since have appeared
+ * without changing it, is reread whole instead; a page not full changes when anything joins it.
+ */
+function settled(response: Response, url: URL, body: string): boolean {
+	if (link(response, "next")) return true;
+	let rows: unknown;
+	try {
+		rows = JSON.parse(body);
+	} catch {
+		return true;
+	}
+	return !Array.isArray(rows) || rows.length < Number(url.searchParams.get("per_page") ?? 30);
+}
 
 /** The REST path of a repository. */
 export function repositoryPath(repository: Repository): string {

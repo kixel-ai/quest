@@ -21,10 +21,6 @@ Plan: check m1's public-release quests first, since they predate the
 
 - Dependabot: the dev shell's `quest-pinned` knows all six audit names, so
   `quest check` accepts the stubs. Check that `quest audit` in the dev shell
-  lists them; advance it with `nix flake update quest-pinned` once
-  [the definitions](/quest/m0/audit-pack/definitions.md) are released.
-
-## Required
-
-- [Definitions](/quest/m0/audit-pack/definitions.md) - ships `code`, `cost`,
-  `docs`, and `tests`, so one run plants all six
+  lists them; advance it with `nix flake update quest-pinned` once a release
+  includes [moq-dev/quest#755](https://github.com/moq-dev/quest/pull/755),
+  which ships `code`, `cost`, `docs`, and `tests`.

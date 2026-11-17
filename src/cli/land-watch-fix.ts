@@ -36,6 +36,7 @@ import {
 	identity,
 	importFix,
 	launch,
+	outputSection,
 	type Outcome,
 	post,
 	prepare,
@@ -756,7 +757,10 @@ async function collect(
 		attribution,
 		handbackLog(job.log, !handback && result?.action === "handback" ? result.log : undefined),
 		job.signaled ? "unanswered_signal" : job.reason,
-		job.resolution ? (room) => resolutionSection(number, job.resolution!, room) : undefined,
+		(room) => {
+			const output = job.output ? outputSection(job.output, room) : "";
+			return output + (job.resolution ? resolutionSection(number, job.resolution, room - output.length) : "");
+		},
 	);
 	finish(path, job);
 	return [...said, `handback ${number}`];

@@ -808,6 +808,7 @@ describe("usage", () => {
 				quota: "wait" as const,
 				warn: () => {},
 			}),
+			forge: () => Promise.reject(new Error("usage reads no forge")),
 			warn: () => {},
 			sessions: (since: Date, ssh: string[]) => {
 				calls.push([since, ssh]);
