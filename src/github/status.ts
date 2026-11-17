@@ -29,6 +29,7 @@ import {
 } from "../core";
 import { readHoldStatus } from "./hold";
 import { readSignals } from "./signals";
+import { duplicateQuests } from "./duplicates";
 
 /**
  * One query covers the PR; each connection pages by its own cursor, and a
@@ -168,7 +169,8 @@ export async function pullRequestStatus(pr: PullRequest, deps: GitHubDependencie
 	if (signaled.head !== first!.headRefOid)
 		throw new Error("the PR head changed while reading its signals; rerun quest status");
 	status.signals = signaled.signals;
-	return { ...status, holds: ownership.holds, starterHold: ownership.starter };
+	const duplicates = first!.state === "OPEN" ? await duplicateQuests(github, pr) : [];
+	return { ...status, holds: ownership.holds, starterHold: ownership.starter, duplicates };
 }
 
 /** The risk the PR body records, judged against the head as {@link Status.risk} describes. */
@@ -467,6 +469,7 @@ function summarize(
 		signals: [],
 		holds: [],
 		starterHold: null,
+		duplicates: [],
 	};
 }
 

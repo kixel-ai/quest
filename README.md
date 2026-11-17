@@ -581,6 +581,7 @@ comes last, and a missing value prints as `-`:
 | `signal` | `finding` or `decision`, its URL, who posted it, and its text, for each [signal](#signals-that-hold-a-head) holding the head. |
 | `hold` | Label, acquisition token, acquisition time, verified GitHub event API URL, and age; `hold -` when no label holds it. Unknown acquisition facts print as `-` and `unknown age`. |
 | `starter-hold` | A draft its starter owns: last activity time, PR URL, and `last active` age. Last activity is not when ownership began. |
+| `duplicate` | For an open PR, each quest it adds that another open PR also adds, at the same path or under the same title compared without its size, case, or spacing: the quest's path, the other PR's URL, and the other quest's path. A follow-up another PR already owns is dropped, or moved into that PR's quest, before a pick asks about it. |
 
 The node ID is what GraphQL's `addPullRequestReviewThreadReply` and
 `resolveReviewThread` take. Neutral and skipped checks pass. Only each check's
@@ -602,7 +603,7 @@ requirement names one, its app, as GitHub and `quest land` do, and leaves out
 same facts as one object with the fields `url`, `state`, `draft`, `head`,
 `mergeable`, `mergeState`, `reviewDecision`, `autoMerge`, `mergeQueue`,
 `landingStopped`, `checks` (`state`, `passed`, `failing`, `pending`), `reviews`, `checkpoints` (`reviewer`, `round`, `url`), `reactions`,
-`threads`, `signals` (`kind`, `url`, `author`, `text`), `holds` (`label`, `token`, `takenAt`, `age`, `eventUrl`), and `starterHold` (`lastActive`, `age`, `url`, or null). Ownership uses the state commands' shared reader without changing labels, and event links match the opaque acquisition token against GitHub's event listing. Long lists are paged; reactions are the newest 100 per PR or review,
+`threads`, `signals` (`kind`, `url`, `author`, `text`), `holds` (`label`, `token`, `takenAt`, `age`, `eventUrl`), `starterHold` (`lastActive`, `age`, `url`, or null), and `duplicates` (`path`, `url`, `other`). Ownership uses the state commands' shared reader without changing labels, and event links match the opaque acquisition token against GitHub's event listing. Long lists are paged; reactions are the newest 100 per PR or review,
 as in `quest wait`. Any PR state exits 0, invalid arguments exit 2, and other
 failures exit 1.
 
