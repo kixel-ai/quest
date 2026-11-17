@@ -226,7 +226,7 @@ export class KixelQuest {
 		}
 		const path = "/installation-token";
 		const name = `${repository.owner}/${repository.repo}`;
-		const mint = async (): Promise<Installation | null> => {
+		const mint = async (until: number): Promise<Installation | null> => {
 			// Another agent may have minted while this one waited for the lock.
 			try {
 				const have = kept(directory, this.url, this.token, repository, this.deps.now());
@@ -234,7 +234,7 @@ export class KixelQuest {
 			} catch (error) {
 				throw keeping("read", error);
 			}
-			const { response, text } = await this.#fetch("POST", path, { repository: name }, deadline);
+			const { response, text } = await this.#fetch("POST", path, { repository: name }, until);
 			if (response.status === 404) return null;
 			if (response.status === 429) {
 				const wait = Number(response.headers.get("retry-after"));

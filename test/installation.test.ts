@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { beforeEach, describe, expect, test } from "vitest";
 
 import { type ForgeDependencies, liveFor } from "../src/cli/forge";
-import { REUSE_MARGIN, installationDirectory } from "../src/cli/installation";
+import { HOLD, REUSE_MARGIN, exclusive, installationDirectory } from "../src/cli/installation";
 import { waitForActivity } from "../src/cli/wait";
 import { GitHubWrites } from "../src/cli/writes";
 import { GitHub, type GitHubDependencies, GitHubReader, reading } from "../src/github/client";
@@ -157,6 +157,22 @@ describe("reads on a minted installation token", () => {
 		await liveFor(repository, w.deps);
 		expect(w.mints).toHaveLength(1);
 		expect(files(w.env).filter((name) => name.endsWith(".lock"))).toEqual([]);
+	});
+
+	test("a holder gets less time than it takes to be taken over, and never releases another's lock", async () => {
+		const directory = installationDirectory({ XDG_CACHE_HOME: cache });
+		const clockwork = { now: () => clock, sleep: async (ms: number) => void (clock += ms) };
+		let until = 0;
+		await exclusive(directory, KIXEL, KIXEL_TOKEN, repository, clockwork, Infinity, async (limit) => {
+			until = limit;
+		});
+		expect(until).toBe(START + HOLD);
+		// A holder that overran, whose lock another took over, leaves the new holder's lock be.
+		await exclusive(directory, KIXEL, KIXEL_TOKEN, repository, clockwork, Infinity, async () => {
+			const [held] = readdirSync(directory);
+			writeFileSync(join(directory, held!), `${clock} another`);
+		});
+		expect(readdirSync(directory).filter((name) => name.endsWith(".lock"))).toHaveLength(1);
 	});
 
 	test("a person with another Kixel Quest token mints their own", async () => {

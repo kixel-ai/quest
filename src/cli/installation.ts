@@ -76,6 +76,8 @@ export function keep(
 /** How long a lock may stand before it is taken for a crashed holder's, and how often a waiter looks again. */
 const STALE = 30_000;
 const POLL = 100;
+/** The longest a holder works under its lock, well inside `STALE`, so a live holder is never taken over. */
+export const HOLD = 20_000;
 
 /** The clock a lock waits on. */
 export interface Clock {
@@ -92,9 +94,11 @@ export class LockDeadline extends Error {
 
 /**
  * Run `run` while holding the one lock for `repository`'s token, so parallel agents on a cold or expiring cache mint
- * once between them: each waits, then finds the winner's token. The lock is a file created exclusively, holding its
- * time, so a holder that crashed is taken over after `STALE` milliseconds; two waiters that take over at once may
- * mint twice, which only spends one more of the cap. Waits until `deadline`, epoch milliseconds.
+ * once between them: each waits, then finds the winner's token. `run` gets the time, epoch milliseconds, it must
+ * finish by: the caller's `deadline`, or `HOLD` after it took the lock if sooner, so a live holder is never taken
+ * over. The lock is a file created exclusively, holding its time and its owner, so a holder that crashed is taken over
+ * after `STALE` milliseconds, and a holder releases only a lock still its own. Waits until `deadline`, epoch
+ * milliseconds; two waiters that take over a crashed holder's lock at once may mint twice.
  */
 export async function exclusive<T>(
 	directory: string,
@@ -103,13 +107,14 @@ export async function exclusive<T>(
 	repository: Repository,
 	clock: Clock,
 	deadline: number,
-	run: () => Promise<T>,
+	run: (until: number) => Promise<T>,
 ): Promise<T> {
 	mkdirSync(directory, { recursive: true, mode: 0o700 });
 	const lock = `${file(directory, url, kixelToken, repository)}.lock`;
+	const owner = crypto.randomUUID();
 	for (;;) {
 		try {
-			writeFileSync(lock, String(clock.now()), { flag: "wx", mode: 0o600 });
+			writeFileSync(lock, `${clock.now()} ${owner}`, { flag: "wx", mode: 0o600 });
 			break;
 		} catch (error) {
 			if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
@@ -118,7 +123,7 @@ export async function exclusive<T>(
 		try {
 			const text = readFileSync(lock, "utf8");
 			// Created but not yet written: its holder has only just taken it.
-			since = text === "" ? clock.now() : Number(text);
+			since = text === "" ? clock.now() : Number(text.split(" ")[0]);
 		} catch (error) {
 			// Released between the two reads: try to take it again.
 			if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
@@ -132,8 +137,13 @@ export async function exclusive<T>(
 		await clock.sleep(Math.min(POLL, deadline - clock.now()));
 	}
 	try {
-		return await run();
+		return await run(Math.min(deadline, clock.now() + HOLD));
 	} finally {
-		rmSync(lock, { force: true });
+		try {
+			if (readFileSync(lock, "utf8").endsWith(` ${owner}`)) rmSync(lock, { force: true });
+		} catch (error) {
+			// Taken over and released by another, which owns the file's fate now.
+			if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+		}
 	}
 }
