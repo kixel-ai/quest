@@ -2413,8 +2413,10 @@ hook on shell commands and file edits denies, with the rule as the reason:
 - in a checkout whose origin is on [Kixel Quest](#work-on-a-repository-kixel-quest-hosts),
   a `gh pr` or `gh api` call aimed at that repository, which `gh` cannot reach:
   one naming no repository, through `--repo`, `GH_REPO`, a PR URL, or an
-  endpoint's `repos/<owner>/<repo>`, or naming that one; the reason names the
-  `quest` command to run, such as `quest pr view`.
+  endpoint's `repos/<owner>/<repo>`, or naming that one by its owner and name
+  or on Kixel Quest; a URL or host elsewhere, such as github.com, names
+  another repository. The reason names the `quest` command to run, such as
+  `quest pr view`.
 
 For Claude Code, `Stop` and `SubagentStop` hooks refuse to end an agent's turn
 while a `quest gate` command it started still runs in the background, naming

@@ -527,6 +527,58 @@ const QUEST_PR: Record<string, string> = {
 	merge: "quest merge",
 };
 
+/** `gh pr` options that take the next word, so a URL in one, such as a body, is not taken for the PR. */
+const PR_VALUE_OPTIONS = new Set([
+	"-R",
+	"--repo",
+	"-b",
+	"--body",
+	"-F",
+	"--body-file",
+	"-t",
+	"--title",
+	"--subject",
+	"-T",
+	"--template",
+	"-B",
+	"--base",
+	"-H",
+	"--head",
+	"-a",
+	"--assignee",
+	"-A",
+	"--author",
+	"-l",
+	"--label",
+	"-m",
+	"--milestone",
+	"-p",
+	"--project",
+	"-r",
+	"--reviewer",
+	"-q",
+	"--jq",
+	"--json",
+	"-S",
+	"--search",
+	"-s",
+	"--state",
+	"-L",
+	"--limit",
+	"--app",
+	"--add-assignee",
+	"--remove-assignee",
+	"--add-label",
+	"--remove-label",
+	"--add-reviewer",
+	"--remove-reviewer",
+	"--add-project",
+	"--remove-project",
+	"--match-head-commit",
+	"--author-email",
+	"--color",
+]);
+
 /** `gh api` options that take the next word. */
 const API_VALUE_OPTIONS = new Set([
 	"-X",
@@ -564,7 +616,7 @@ function kixel(args: string[], env: ReadonlySet<string>, check: Check) {
 	let named: string | null | undefined;
 	if (group === "pr") {
 		const flag = values(rest, ["-R", "--repo"], { attached: ["-R"] }).at(-1);
-		const url = rest.find((arg) => /^https?:\/\//.test(arg));
+		const url = positionals(rest, PR_VALUE_OPTIONS).find((arg) => /^https?:\/\//.test(arg));
 		// A PR URL names its repository before `--repo` or `GH_REPO` do.
 		named = url ?? flag ?? ghRepo ?? null;
 	} else {
@@ -573,37 +625,44 @@ function kixel(args: string[], env: ReadonlySet<string>, check: Check) {
 		// gh fills these placeholders from the checkout's repository, or `GH_REPO`.
 		if (words.some((word) => /\{(owner|repo)\}|:(owner|repo)\b/.test(word))) named = ghRepo ?? null;
 		else {
-			const path = endpoint?.replace(/^https:\/\/api\.github\.com/, "").replace(/^\//, "");
-			const match = path === undefined ? null : /^repos\/([^/?#]+\/[^/?#]+)/.exec(path);
+			// A full URL names its host, which is GitHub's API or another forge, never Kixel Quest's.
+			if (endpoint === undefined || /^https?:\/\//.test(endpoint)) return;
+			const match = /^\/?repos\/([^/?#]+\/[^/?#]+)/.exec(endpoint);
 			if (match === null) return;
 			named = match[1]!;
 		}
 	}
 	const hosted = check.hosted();
 	if (hosted === null) return;
-	if (named !== null && repositoryOf(named) !== `${hosted.owner}/${hosted.repo}`.toLowerCase()) return;
+	if (named !== null && !namesHosted(named, hosted, kixelUrl(check.env))) return;
 	check.found.add("kixel");
 	if (group === "pr") check.instead = QUEST_PR[command ?? ""];
 }
 
-/** The lowercase `owner/repo` that `[HOST/]OWNER/REPO`, or a URL whose path starts with them, names; null for neither. */
-function repositoryOf(value: string): string | null {
-	let path = value;
+/**
+ * Whether `value`, as `--repo`, `GH_REPO`, a PR URL, or an endpoint's `OWNER/REPO` gives it, names `hosted` on the
+ * Kixel Quest at `base`: a URL there, `HOST/OWNER/REPO` with its host, or `OWNER/REPO` without one, which an agent in
+ * that checkout means for its own. A URL or host elsewhere, such as github.com, names another forge's repository.
+ */
+function namesHosted(value: string, hosted: Repository, base: string): boolean {
+	let parts: string[];
 	if (/^https?:\/\//.test(value)) {
-		try {
-			path = new URL(value).pathname;
-		} catch {
-			return null;
-		}
+		if (!value.toLowerCase().startsWith(`${base.toLowerCase()}/`)) return false;
+		parts = value
+			.slice(base.length + 1)
+			.split(/[/?#]/)
+			.slice(0, 2);
+	} else {
+		parts = value.split("/").filter(Boolean);
+		if (parts.length === 3 && parts.shift()!.toLowerCase() !== new URL(base).host.toLowerCase()) return false;
 	}
-	const parts = path.split("/").filter(Boolean);
-	const pair = path === value ? parts.slice(-2) : parts.slice(0, 2);
-	return pair.length === 2
-		? pair
-				.join("/")
-				.replace(/\.git$/, "")
-				.toLowerCase()
-		: null;
+	return (
+		parts.length === 2 &&
+		parts
+			.join("/")
+			.replace(/\.git$/, "")
+			.toLowerCase() === `${hosted.owner}/${hosted.repo}`.toLowerCase()
+	);
 }
 
 /** `gh` and `quest pr` subcommands that post text, by group and command, and whether each authors a new post. */

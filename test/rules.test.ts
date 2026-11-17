@@ -310,7 +310,16 @@ test("gh calls reaching for a repository Kixel Quest hosts are denied, naming th
 	expect(run("gh api --paginate /repos/example/project/pulls/3/files")).toEqual([RULES.kixel]);
 	expect(run("bash -c 'gh pr list'")).toEqual([RULES.kixel]);
 	// A call naming another repository, or one gh could not tell, reaches GitHub as asked.
+	expect(run("gh pr view 3 -R localhost:8787/example/project")).toEqual([instead("quest pr view")]);
 	expect(run("gh pr view 3 -R moq-dev/quest")).toEqual([]);
+	// The same name on another forge is another repository.
+	expect(run("gh pr view https://github.com/example/project/pull/3")).toEqual([]);
+	expect(run("gh pr view 3 -R github.com/example/project")).toEqual([]);
+	expect(run("gh api https://api.github.com/repos/example/project/pulls")).toEqual([]);
+	// A URL in an option's value, such as a body, is not the PR.
+	expect(
+		run(`gh pr comment 3 -R moq-dev/quest --body "See http://localhost:8787/example/project/pull/1.\n\n${FOOTER}"`),
+	).toEqual([]);
 	expect(run("gh pr view https://github.com/moq-dev/quest/pull/3")).toEqual([]);
 	expect(run("GH_REPO=moq-dev/quest gh api 'repos/{owner}/{repo}/pulls'")).toEqual([]);
 	expect(run("gh api repos/moq-dev/quest/pulls/3")).toEqual([]);
