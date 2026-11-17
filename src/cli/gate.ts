@@ -925,8 +925,9 @@ export async function gate(command: string[], options: GateOptions = {}): Promis
 			// The status the CLI exits with for a gate's own failure.
 			status = 1;
 		}
+		const iso = (ms: number) => new Date(ms).toISOString();
+		const ended = iso(Date.now());
 		if (waits) {
-			const iso = (ms: number) => new Date(ms).toISOString();
 			try {
 				logWait(
 					{
@@ -934,7 +935,7 @@ export async function gate(command: string[], options: GateOptions = {}): Promis
 						command: argvName(command, runs(process.env, directory)),
 						start: iso(started),
 						admitted: observed.admitted === undefined ? null : iso(observed.admitted),
-						end: iso(Date.now()),
+						end: ended,
 						cpu: observed.cpu ?? null,
 					},
 					{ cwd: directory },
@@ -952,13 +953,14 @@ export async function gate(command: string[], options: GateOptions = {}): Promis
 			if (failure !== undefined) throw failure;
 			return status;
 		}
-		const iso = (ms: number) => new Date(ms).toISOString();
 		const line = Buffer.from(
 			`${JSON.stringify({
 				command,
 				directory,
 				started: iso(started),
 				admitted: observed.admitted === undefined ? null : iso(observed.admitted),
+				ended,
+				cpu: observed.cpu ?? null,
 				unit: observed.unit ?? null,
 				exit: status,
 				cancelled: cancel.signal.aborted,

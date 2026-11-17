@@ -203,8 +203,9 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"kill-on-close Job Object. Exits with the command's status, or 128 plus the signal's number once " +
 				"cancelled.\n\n" +
 				"With QUEST_GATE_RECORD naming an absolute path, an outermost gate on Linux or macOS appends one JSON " +
-				"line per run to that file, however the run ends: its command, directory, when it started and was " +
-				"admitted, its systemd scope, whose journal holds its CPU time and peak memory, and its exit status. " +
+				"line per run to that file, however the run ends: its command, directory, when it started, was " +
+				"admitted, and ended, its CPU milliseconds (null without a systemd scope), its systemd scope, whose " +
+				"journal holds its peak memory, and its exit status. " +
 				"A file it cannot write fails the gate.\n\n" +
 				"In an agent session, where CLAUDE_CODE_SESSION_ID or CODEX_THREAD_ID is set, an outermost gate also logs " +
 				"its time queued and running under $XDG_STATE_HOME/quest/waits for the session's record; a log it cannot " +
