@@ -20,6 +20,7 @@ import { EJECTED, LAND_CHECK, pinned } from "./land";
 import { type Tier, recordedRisk, reviewSection } from "../core";
 import { readHoldStatus, type HoldFact, type HoldReport } from "./hold";
 import { readSignals, type Signal } from "./signals";
+import { type Duplicate, duplicateQuests } from "./duplicates";
 
 /**
  * One query covers the PR; each connection pages by its own cursor, and a
@@ -161,6 +162,8 @@ export interface Status {
 	/** Ownership facts read by the same client as the state commands. */
 	holds: HoldFact[];
 	starterHold: HoldReport["starter"];
+	/** Quests an open PR adds that another open PR also adds; none for a PR no longer open. */
+	duplicates: Duplicate[];
 }
 
 /** What a repository's base branch requires, as {@link requiredOf} read it for that repository and branch. */
@@ -252,7 +255,8 @@ export async function pullRequestStatus(pr: PullRequest, deps: GitHubDependencie
 	if (signaled.head !== first!.headRefOid)
 		throw new Error("the PR head changed while reading its signals; rerun quest status");
 	status.signals = signaled.signals;
-	return { ...status, holds: ownership.holds, starterHold: ownership.starter };
+	const duplicates = first!.state === "OPEN" ? await duplicateQuests(github, pr) : [];
+	return { ...status, holds: ownership.holds, starterHold: ownership.starter, duplicates };
 }
 
 /** The risk the PR body records, judged against the head as {@link Status.risk} describes. */
@@ -551,6 +555,7 @@ function summarize(
 		signals: [],
 		holds: [],
 		starterHold: null,
+		duplicates: [],
 	};
 }
 

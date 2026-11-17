@@ -624,8 +624,10 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"reviewer that approves or requests changes, its round, and its review, when that review is of the " +
 				"head, while its latest verdict on the head is neither an approval nor a dismissal, and ends its third, sixth, ... round (one commit it reviewed), as " +
 				"/quest-review's design checkpoint; a reacted:<content> line per " +
-				"reaction on the PR or a review; a thread line per unresolved review thread, led by its node ID; and a " +
-				"signal line per finding or decision that holds the head from landing (see the README). " +
+				"reaction on the PR or a review; a thread line per unresolved review thread, led by its node ID; a " +
+				"signal line per finding or decision that holds the head from landing (see the README); and last, " +
+				"for an open PR, a duplicate line per quest it adds that another open PR also adds, at the same path or under the same title " +
+				"compared without its size, case, or spacing, giving the quest's path, the other PR's URL, and the other quest's path last. " +
 				"A missing value prints as -. --json prints the same facts as one deterministic object.\n\n" +
 				"Uses GH_TOKEN, GITHUB_TOKEN, or gh auth token. Exits 0 for any PR state, 2 for invalid arguments, " +
 				"and 1 for other failures.",

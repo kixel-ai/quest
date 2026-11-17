@@ -127,6 +127,8 @@ function setup(
 		noBase?: boolean;
 		/** The head's workflow runs, as `GET /actions/runs` lists them. */
 		runs?: Node[];
+		/** The open PRs as the duplicate read lists them, and each `<head>:<path>` blob's text. */
+		open?: { pulls: Node[]; blobs?: Record<string, string>; files?: Record<number, Node[]> };
 	} = {},
 ) {
 	const queries: Record<string, unknown>[] = [];
@@ -162,6 +164,8 @@ function setup(
 					: Response.json({ protection: { enabled: false } });
 			if (path.pathname === "/repos/example/project/rules/branches/main")
 				return Response.json(options.rules ?? []);
+			const changed = /^\/repos\/example\/project\/pulls\/(\d+)\/files$/.exec(path.pathname);
+			if (changed) return Response.json(options.open?.files?.[Number(changed[1])] ?? []);
 			if (path.pathname === "/repos/example/project/actions/runs") {
 				if (!options.runs) throw new Error("unexpected workflow run request");
 				return Response.json({ total_count: options.runs.length, workflow_runs: options.runs });
@@ -183,6 +187,23 @@ function setup(
 				return Response.json(page.rows, { headers: page.next ? { Link: `<${page.next}>; rel="next"` } : {} });
 			}
 			const request = JSON.parse(String(init?.body));
+			if (request.query.includes("query OpenQuests(")) {
+				const nodes = options.open?.pulls ?? [];
+				return Response.json({
+					data: {
+						repository: { pullRequests: { pageInfo: { hasNextPage: false, endCursor: null }, nodes } },
+					},
+				});
+			}
+			if (request.query.includes("object(expression:")) {
+				const repository: Node = {};
+				for (const [key, value] of Object.entries(request.variables as Record<string, string>))
+					if (key.startsWith("e")) {
+						const text = options.open?.blobs?.[value];
+						repository[`f${key.slice(1)}`] = text === undefined ? null : { text };
+					}
+				return Response.json({ data: { repository } });
+			}
 			if (request.query.includes("p1: pullRequest(number: 1)")) {
 				if (!last) throw new Error("signals read before PR state");
 				const head = last.data.repository.pullRequest.headRefOid;
@@ -1171,5 +1192,91 @@ describe("checkpoint", () => {
 			author: { __typename: "User", login: "alice" },
 		}));
 		expect(await line(person)).toEqual([]);
+	});
+});
+
+describe("duplicate quests", () => {
+	const other = "https://github.com/example/project/pull/2";
+	const third = "https://github.com/example/project/pull/3";
+	const files = (paths: [string, string][], more = false) => ({
+		pageInfo: { hasNextPage: more },
+		nodes: paths.map(([path, changeType]) => ({ path, changeType })),
+	});
+
+	test("reports each quest the PR adds that another open PR adds at its path or under its title", async () => {
+		const body = pull({ checks: null, reviews: page([]), threads: page([]) });
+		const status = await pullRequestStatus(
+			pr,
+			setup([body], {
+				open: {
+					pulls: [
+						{
+							number: 1,
+							url: URL_,
+							headRefOid: A,
+							files: files([
+								["quest/m0/hang.md", "ADDED"],
+								["quest/m1/fips.md", "ADDED"],
+								["quest/m0/edited.md", "MODIFIED"],
+								["quest/AGENTS.md", "ADDED"],
+								["src/a.ts", "ADDED"],
+							]),
+						},
+						{
+							number: 2,
+							url: other,
+							headRefOid: B,
+							files: files([
+								["quest/m0/hang.md", "ADDED"],
+								["quest/m0/edited.md", "ADDED"],
+							]),
+						},
+						{
+							number: 3,
+							url: third,
+							headRefOid: "c".repeat(40),
+							// Over 100 files, so REST lists them.
+							files: files([["quest/m0/edited.md", "MODIFIED"]], true),
+						},
+					],
+					files: {
+						3: [
+							{ filename: "quest/m0/fips-hang.md", status: "added" },
+							{ filename: "quest/m0/edited.md", status: "modified" },
+						],
+					},
+					blobs: {
+						[`${A}:quest/m0/hang.md`]: "# [S] Dart iOS hang\n\n## Goal\n\nx\n",
+						[`${A}:quest/m1/fips.md`]: "# [M] Fix the  FIPS fork-test hang\n\n## Goal\n\nx\n",
+						[`${B}:quest/m0/hang.md`]: "# [S] Something else\n\n## Goal\n\nx\n",
+						[`${B}:quest/m0/edited.md`]: "# [S] Edited\n\n## Goal\n\nx\n",
+						[`${"c".repeat(40)}:quest/m0/fips-hang.md`]:
+							"# [S] fix the fips fork-test hang\n\n## Goal\n\nx\n",
+					},
+				},
+			}).deps,
+		);
+		expect(status.duplicates).toEqual([
+			{ path: "quest/m0/hang.md", url: other, other: "quest/m0/hang.md" },
+			{ path: "quest/m1/fips.md", url: third, other: "quest/m0/fips-hang.md" },
+		]);
+		expect(statusLines(status).filter((line) => line.startsWith("duplicate "))).toEqual([
+			`duplicate quest/m0/hang.md ${other} quest/m0/hang.md`,
+			`duplicate quest/m1/fips.md ${third} quest/m0/fips-hang.md`,
+		]);
+	});
+
+	test("a PR that adds no quest reads no titles, and a closed one reads no open PRs", async () => {
+		const open = {
+			pulls: [
+				{ number: 1, url: URL_, headRefOid: A, files: files([["quest/m0/a.md", "MODIFIED"]]) },
+				{ number: 2, url: other, headRefOid: B, files: files([["quest/m0/a.md", "ADDED"]]) },
+			],
+		};
+		const body = pull({ checks: null, reviews: page([]), threads: page([]) });
+		expect((await pullRequestStatus(pr, setup([body], { open }).deps)).duplicates).toEqual([]);
+		const closed = pull({ checks: null, reviews: page([]), threads: page([]), state: "CLOSED" });
+		const opened = { pulls: [{ ...open.pulls[0]!, files: files([["quest/m0/a.md", "ADDED"]]) }, open.pulls[1]!] };
+		expect((await pullRequestStatus(pr, setup([closed], { open: opened }).deps)).duplicates).toEqual([]);
 	});
 });

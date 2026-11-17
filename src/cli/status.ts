@@ -53,5 +53,6 @@ export function statusLines(status: Status): string[] {
 					`starter-hold ${status.starterHold.lastActive} ${status.starterHold.url} last active ${status.starterHold.age}`,
 				]
 			: []),
+		...status.duplicates.map((d) => `duplicate ${d.path} ${d.url} ${d.other}`),
 	];
 }

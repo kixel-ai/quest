@@ -568,6 +568,7 @@ comes last, and a missing value prints as `-`:
 | `signal` | `finding` or `decision`, its URL, who posted it, and its text, for each [signal](#signals-that-hold-a-head) holding the head. |
 | `hold` | Label, acquisition token, acquisition time, verified GitHub event API URL, and age; `hold -` when no label holds it. Unknown acquisition facts print as `-` and `unknown age`. |
 | `starter-hold` | A draft its starter owns: last activity time, PR URL, and `last active` age. Last activity is not when ownership began. |
+| `duplicate` | For an open PR, each quest it adds that another open PR also adds, at the same path or under the same title compared without its size, case, or spacing: the quest's path, the other PR's URL, and the other quest's path. A follow-up another PR already owns is dropped, or moved into that PR's quest, before a pick asks about it. |
 
 The node ID is what GraphQL's `addPullRequestReviewThreadReply` and
 `resolveReviewThread` take. Neutral and skipped checks pass. Only each check's
