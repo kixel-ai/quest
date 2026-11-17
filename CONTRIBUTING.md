@@ -51,13 +51,15 @@ The package stays `private`; GitHub releases will ship the `quest` binary.
 
 ## Releases
 
-The Release workflow cuts every release; no person or agent tags one. Each
-push to `main`, a daily schedule, and a manual run on `main` compare `main`
-with the latest published release, and cut the next one when that range
-changes what ships, as `scripts/release-plan.sh` decides: everything the
-binaries and the flake package build from, every file Release publishes, and
-the workflows that build and check them. Its pull request runs use the same
-predicate to decide whether to build. The next version is greater than every
+The Release workflow cuts every release; no person or agent tags one. A daily
+schedule (06:17 UTC) and a manual run on `main` compare `main` with the latest
+published release, and cut the next one when that range changes what ships, so
+a day's merges become one release and a day with none cuts nothing. A push to
+`main` cuts no release; an urgent fix ships early once it merges, with
+`gh workflow run release.yml --ref main`. `scripts/release-plan.sh` judges the
+range: everything the binaries and the flake package build from, every file
+Release publishes, and the workflows that build and check them. Its pull
+request runs use the same predicate to decide whether to build. The next version is greater than every
 `vX.Y.Z` tag: a minor bump (a major one from 1.0) when a commit subject in the
 range has `!` before its colon, a patch bump otherwise.
 
