@@ -22,6 +22,7 @@ export async function openPullRequests(github: GitHub, repository: Repository): 
 			number: Number(row.number),
 			url: string(row.html_url),
 			branch: string(head.ref),
+			base: string(object(row.base).ref),
 			head: repo === null ? null : string(repo.full_name),
 			draft: row.draft === true,
 			created: Date.parse(string(row.created_at)),

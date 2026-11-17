@@ -701,7 +701,7 @@ fakes("codex reviews read-only with the base's instructions, then reports in the
 			"2. high src/lib.ts:2 Off by one",
 			"  average([3]) is 0.",
 			// The fixture's origin is a local path, which can have no PR.
-			"record skipped: origin is not on GitHub",
+			"record skipped: origin is not on GitHub or Kixel Quest",
 			"next respond: fix each finding or refute it with evidence the reviewer cannot rebut, commit, rerun the checks, then run the next round with --responses, one response per finding by its number",
 			"",
 		].join("\n"),
@@ -999,13 +999,21 @@ function onGitHub(repo: string, pulls: FakePull[], fork = false): { body: string
 			return url.pathname.endsWith("/contents/quest/README.md") ? json({}) : json({}, 404);
 		if (url.pathname === `/repos/${owner}/widget/pulls`) {
 			expect(url.searchParams.get("state")).toBe("open");
-			expect(url.searchParams.get("base")).toBe("main");
-			const head = url.searchParams.get("head");
-			return json(
-				head === "acme:feature"
-					? pulls.map((p) => ({ ...p, html_url: `https://github.com/${owner}/widget/pull/${p.number}` }))
-					: [],
-			);
+			const row = (p: FakePull, ref: string, base: string) => ({
+				...p,
+				html_url: `https://github.com/${owner}/widget/pull/${p.number}`,
+				head: { ref, repo: { full_name: "acme/widget" } },
+				base: { ref: base },
+				draft: false,
+				created_at: "2026-10-01T00:00:00Z",
+				updated_at: "2026-10-01T00:00:00Z",
+			});
+			// The record's PR among others: one from another branch, and one from the same branch into another base.
+			return json([
+				...pulls.map((p) => row(p, "feature", "main")),
+				row({ number: 90, body: "other" }, "other", "main"),
+				row({ number: 91, body: "other" }, "feature", "release"),
+			]);
 		}
 		const patched = new RegExp(`^/repos/${owner}/widget/pulls/(\\d+)$`).exec(url.pathname);
 		if (patched && init?.method === "PATCH") {

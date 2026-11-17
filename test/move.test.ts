@@ -273,7 +273,9 @@ describe("quest mv", () => {
 		const out = await quest(tree, "mv", "quest/m0/epic", "quest/m0/feature");
 		expect(out.code).toBe(1);
 		expect(out.stdout).toBe("");
-		expect(out.stderr).toContain("quest: origin is not on GitHub, so only its branches were checked for claims\n");
+		expect(out.stderr).toContain(
+			"quest: origin is not on GitHub or Kixel Quest, so only its branches were checked for claims\n",
+		);
 		expect(out.stderr).toContain("quest: refusing to move claimed quests: quest/m0/epic/two;");
 		expect(existsSync(join(tree.path, "quest/m0/epic/two.md"))).toBe(true);
 		expect(staged(tree)).toEqual([]);
@@ -542,6 +544,7 @@ test("open pull requests come from every page, by head branch", async () => {
 			const pull = (ref: string, n: number, body: string | null) => ({
 				number: n,
 				head: { ref, repo: n === 1 ? { full_name: "someone/project" } : null },
+				base: { ref: "main" },
 				draft: n === 1,
 				body,
 				created_at: "2026-10-21T12:00:00Z",
@@ -563,6 +566,7 @@ test("open pull requests come from every page, by head branch", async () => {
 			number: 1,
 			url: "https://github.com/example/project/pull/1",
 			branch: "quest/m0/a",
+			base: "main",
 			head: "someone/project",
 			draft: true,
 			...times,
@@ -573,6 +577,7 @@ test("open pull requests come from every page, by head branch", async () => {
 			number: 2,
 			url: "https://github.com/example/project/pull/2",
 			branch: "feature",
+			base: "main",
 			head: null,
 			draft: false,
 			...times,

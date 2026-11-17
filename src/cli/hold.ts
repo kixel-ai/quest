@@ -8,7 +8,10 @@ import {
 	handedBack,
 	heldToken,
 	latestHold,
+	type Hold,
+	type Method,
 	type PullRequest,
+	Refusal,
 	withoutHandBack,
 } from "../core";
 import { cleanAutoMergeRefusal, immediateMerge, queueHead } from "../github/merge";
@@ -28,30 +31,37 @@ import { LAND_CHECK } from "../github/land";
 import { QUEUE_CHECK } from "./land-queue";
 import type { LandingCheck } from "./landed";
 import { classifyCheck } from "../github/status";
-import { Refusal } from "./start";
 import { type Snapshot, ago, readSnapshot, starterHeld } from "../github/hold";
 import { describe, readSignals } from "../github/signals";
 
-export type Method = "merge" | "squash" | "rebase";
-
-/** A session's hold: its label and the token naming the event that added it. */
-export interface Hold {
-	label: string;
-	token: string;
-}
-
 /** Take `pr`, or keep the hold `token` names. Prints nothing; returns the hold. */
-export async function take(pr: PullRequest, token: string | undefined, deps: GitHubDependencies): Promise<Hold> {
-	const { hold } = await acquire(new Labels(pr, deps), token);
+export async function take(pr: PullRequest, token: string | null, deps: GitHubDependencies): Promise<Hold> {
+	const { hold } = await acquire(new Labels(pr, deps), token ?? undefined);
 	return hold;
 }
 
 /**
  * While `token` holds `pr`, hand it to reviewers: drop its `## Waiting` section
- * and mark a draft ready for review. The hold stays.
+ * and mark a draft ready for review. The hold stays. Without a token, mark a draft
+ * ready only while no session holds it.
  */
-export async function finish(pr: PullRequest, token: string, deps: GitHubDependencies): Promise<Hold> {
+export async function finish(pr: PullRequest, token: string | null, deps: GitHubDependencies): Promise<Hold | null> {
 	const labels = new Labels(pr, deps);
+	const markReady = (snapshot: Snapshot) =>
+		snapshot.draft
+			? labels.github.graphql(
+					`mutation($id: ID!) { markPullRequestReadyForReview(input: { pullRequestId: $id }) { clientMutationId } }`,
+					{ id: snapshot.id },
+				)
+			: undefined;
+	if (token === null) {
+		const snapshot = await labels.read();
+		open(snapshot);
+		const label = snapshot.labels[0];
+		if (label !== undefined) throw new Refusal(holder(snapshot, label, deps.now()));
+		await markReady(snapshot);
+		return null;
+	}
 	const { hold, snapshot } = await acquire(labels, token);
 	return holding(hold, async () => {
 		if (handedBack(snapshot.body)) {
@@ -60,12 +70,7 @@ export async function finish(pr: PullRequest, token: string, deps: GitHubDepende
 				body: { body: withoutHandBack(snapshot.body) },
 			});
 		}
-		if (snapshot.draft) {
-			await labels.github.graphql(
-				`mutation($id: ID!) { markPullRequestReadyForReview(input: { pullRequestId: $id }) { clientMutationId } }`,
-				{ id: snapshot.id },
-			);
-		}
+		await markReady(snapshot);
 	});
 }
 
@@ -347,18 +352,18 @@ async function holding(hold: Hold, work: () => Promise<void>): Promise<Hold> {
 }
 
 /** Remove the label `token` holds. A label already gone is released; one added again since is not ours. */
-export async function release(pr: PullRequest, token: string, deps: GitHubDependencies): Promise<string> {
+export async function release(pr: PullRequest, token: string, deps: GitHubDependencies): Promise<Hold> {
 	const labels = new Labels(pr, deps);
 	const snapshot = await labels.read();
 	const event = snapshot.events.find((candidate) => candidate.id === token && candidate.label !== null);
 	if (!event?.label) throw new Refusal(unknown(snapshot, token));
 	if (!snapshot.labels.includes(event.label)) {
 		deps.warn(`${event.label} is already off ${snapshot.url}`);
-		return event.label;
+		return { label: event.label, token };
 	}
 	held(snapshot, token);
 	await labels.remove(event.label);
-	return event.label;
+	return { label: event.label, token };
 }
 
 /**
