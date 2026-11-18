@@ -12,8 +12,8 @@ line in its root instructions.
 ## Install and pin
 
 Pin the latest [release](https://github.com/moq-dev/quest/releases) tag.
-Every merge that changes what Quest ships becomes a release, so a release tag
-is never far behind `main`; prefer it to pinning a commit.
+A day's merges that change what Quest ships become one release, cut daily, so a
+release tag is at most about a day behind `main`; prefer it to pinning a commit.
 Releases ship binaries for macOS, Linux, and native Windows on arm64 and x64.
 Never pin v0.1.0: it has no Windows archives and no `quest worktree hook`
 command, which `quest init`'s Claude Code hooks call. Every later release has
