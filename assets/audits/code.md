@@ -13,6 +13,6 @@ Look for:
 
 Split the reading by area across parallel sub-agents, then verify each claim before acting: a duplicate can be a test seam or a deliberate split, and an unused flag can be a tuning knob or an old spelling kept to fail with migration guidance.
 
-Delete dead private code and land simplifications in the run's PR, and add a check to the gate that would have caught a finding when it passes clean and runs fast.
+Delete dead private code and land simplifications in the run's PR.
 Removing or reshaping a public API or a user-visible flag, route, or field, and narrowing a feature, are the maintainer's decisions: each is a follow-up with a recommendation and how users migrate.
 Record what was checked and kept on purpose, with why, as scope the next stub excludes.

@@ -6,6 +6,7 @@ The stub's Plan holds only what this repository learned, and wins where it narro
 ## Findings
 
 Fix in the run's PR what is mechanical or already decided.
+For each kind of finding, also fix what let it in, so the next run finds none: a fast gate check, a test, a simpler design, or an `AGENTS.md` rule proposed under `## Waiting` as `quest guide prompting` describes.
 Work that needs its own PR is a follow-up, as the guide's Creation section describes.
 A run cannot prompt, so each decision goes under the PR's `## Waiting` as a `Maintainer:` item with its options and a recommendation.
 
