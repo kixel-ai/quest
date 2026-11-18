@@ -660,7 +660,9 @@ function encodeCursor(cursor: Cursor): string {
 function decodeCursor(value: string, pr: string): Cursor {
 	try {
 		const binary = atob(value.slice(3).replace(/-/g, "+").replace(/_/g, "/"));
-		const text = new TextDecoder("utf-8", { fatal: true }).decode(Uint8Array.from(binary, (c) => c.charCodeAt(0)));
+		const text = new TextDecoder("utf-8", { fatal: true, ignoreBOM: false }).decode(
+			Uint8Array.from(binary, (c) => c.charCodeAt(0)),
+		);
 		const parsed = object(JSON.parse(text));
 		const marks = object(parsed.marks);
 		const checks = object(parsed.checks);
