@@ -31,16 +31,13 @@ package now that the `@kixel` npm scope exists (rejected: cargo-dist's npm
 installer for `npx @kixel/token-max`, which adds a release channel and a
 GitHub-hosted publish job that `run.ps1` makes unnecessary).
 
-## Waiting
-
-- kixel-ai/token-max: release 0.1.0 and serve both run-once lines; check
-  that `curl -fsS -A quest https://crates.io/api/v1/crates/token-max/0.1.0 | jq .version.repository`
-  prints `"https://github.com/kixel-ai/token-max"`, that
-  `gh release view v0.1.0 -R kixel-ai/token-max --json assets` lists
-  binaries for Linux, macOS and Windows and their checksums, and that
-  `curl -fsSL` of `https://max.kixel.ai/run.sh` and of
-  `https://max.kixel.ai/run.ps1` each returns a script, not an HTML page,
-  that downloads from that release and compares the download against its
-  checksums file before running `token-max doctor`; read the scripts, never
-  run them, to
-  clear this
+Cleared 2026-11-18: token-max shipped 0.0.1 rather than 0.1.0 (its own m0
+decision, 2026-11-14). `curl -fsS -A quest https://crates.io/api/v1/crates/token-max/0.0.1`
+names `https://github.com/kixel-ai/token-max` as its repository, the
+[v0.0.1 release](https://github.com/kixel-ai/token-max/releases/tag/v0.0.1)
+lists Linux, macOS and Windows archives with checksums, and
+`https://max.kixel.ai/run.sh` and `run.ps1` are scripts that download the
+latest release and check it against its checksums before running
+`token-max doctor`. The `cargo install --git` hints in `src/cli/send.ts` and
+`src/cli/usage.ts` can now name the published crate:
+`cargo install --locked token-max`.
