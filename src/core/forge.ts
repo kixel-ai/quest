@@ -210,6 +210,8 @@ export interface OpenPull {
 	base: string;
 	/** The head repository as `owner/repo`, or `null` once a fork is deleted. */
 	head: string | null;
+	/** The head commit, where the forge reports it. */
+	sha?: string;
 	draft: boolean;
 	/** Epoch milliseconds. The earliest open PR on a branch holds the claim. */
 	created: number;
@@ -604,6 +606,7 @@ const openPull = shape<OpenPull>({
 	branch: name,
 	base: name,
 	head: nullable(name),
+	sha: maybe(sha),
 	draft: boolean,
 	created: count,
 	updated: count,

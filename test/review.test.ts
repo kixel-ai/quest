@@ -1093,7 +1093,8 @@ fakes("a change to the applicable instructions starts a new session that weighs 
  * `upstream/widget`, whose root holds the quest tree, and the PRs are upstream's. Returns the PR bodies
  * each PATCH wrote.
  */
-type FakePull = { number: number; body: string | null };
+/** An open PR from `feature` into `main`, from `acme/widget` unless `head` names another repository. */
+type FakePull = { number: number; body: string | null; head?: string; sha?: string };
 function onGitHub(repo: string, pulls: FakePull[], fork = false): { body: string }[] {
 	const local = git(repo, "remote", "get-url", "origin");
 	git(repo, "remote", "set-url", "origin", "https://github.com/acme/widget.git");
@@ -1119,10 +1120,10 @@ function onGitHub(repo: string, pulls: FakePull[], fork = false): { body: string
 			return url.pathname.endsWith("/contents/quest/README.md") ? json({}) : json({}, 404);
 		if (url.pathname === `/repos/${owner}/widget/pulls`) {
 			expect(url.searchParams.get("state")).toBe("open");
-			const row = (p: FakePull, ref: string, base: string) => ({
+			const row = ({ head, sha, ...p }: FakePull, ref: string, base: string) => ({
 				...p,
 				html_url: `https://github.com/${owner}/widget/pull/${p.number}`,
-				head: { ref, repo: { full_name: "acme/widget" } },
+				head: { ref, repo: { full_name: head ?? "acme/widget" }, ...(sha === undefined ? {} : { sha }) },
 				base: { ref: base },
 				draft: false,
 				created_at: "2026-10-01T00:00:00Z",
@@ -1548,7 +1549,7 @@ fakes("a branch with no open PR, or a body without a Review section, is reported
 	try {
 		const none = await quest("--root", s.repo, "review");
 		expect(none.code).toBe(0);
-		expect(none.stdout).toContain("record skipped: no open PR from acme:feature into main\n");
+		expect(none.stdout).toContain("record skipped: no open PR from feature into main\n");
 
 		pulls.push({ number: 8, body: null });
 		vi.stubEnv("FAKE_REPLY", JSON.stringify({ score: 10, rationale: "Lands as is.", findings: [] }));
@@ -1560,6 +1561,58 @@ fakes("a branch with no open PR, or a body without a Review section, is reported
 		);
 		// A round with no findings names its head in full, which the land gate counts.
 		expect(pulls[0]!.body!.match(/\b[0-9a-f]{40}\b/g)).toEqual([git(s.repo, "rev-parse", "HEAD")]);
+	} finally {
+		vi.unstubAllGlobals();
+	}
+});
+
+fakes("a maintainer's checkout records on a contributor's fork PR and reads its size", async () => {
+	const s = setup();
+	const pushed = git(s.repo, "rev-parse", "HEAD~1");
+	const pull = { number: 12, body: "Body.\n\n## Models\n\n- Size: S\n", head: "contributor/widget", sha: pushed };
+	// A stranger's PR from a branch of the same name, whose head this checkout lacks.
+	const stranger = {
+		number: 13,
+		body: "Stranger.\n\n## Models\n\n- Size: XS\n",
+		head: "stranger/widget",
+		sha: "f".repeat(40),
+	};
+	const pulls: FakePull[] = [stranger];
+	onGitHub(s.repo, pulls);
+	vi.stubEnv("FAKE_REPLY", JSON.stringify({ score: 10, rationale: "Lands as is.", findings: [] }));
+	try {
+		const alone = await quest("--root", s.repo, "review");
+		expect(alone.code, alone.stderr).toBe(0);
+		expect(alone.stdout).toContain(
+			"record skipped: no open PR from feature into main from acme or with a head this checkout holds: https://github.com/acme/widget/pull/13\n",
+		);
+		// Its size went unread: no size picks the default.
+		expect(alone.stdout).not.toContain(" low shadow\n");
+		expect(stranger.body).toBe("Stranger.\n\n## Models\n\n- Size: XS\n");
+
+		pulls.push(pull);
+		const result = await quest("--root", s.repo, "review");
+		expect(result.code, result.stderr).toBe(0);
+		expect(result.stdout).toContain("record https://github.com/acme/widget/pull/12\n");
+		// Size S picks the shadow one effort below medium.
+		expect(result.stdout).toContain(" low shadow\n");
+		expect(pull.body).toMatch(/^Body\.\n\n## Models\n\n- Size: S\n\n## Review\n\nRewritten by `quest review`/);
+		expect(stranger.body).toBe("Stranger.\n\n## Models\n\n- Size: XS\n");
+
+		// A second contributor's PR whose head this checkout also holds leaves no way to tell them apart.
+		pulls.push({ number: 15, body: "Other.", head: "someone/widget", sha: pushed });
+		const ambiguous = await quest("--root", s.repo, "review", "--size", "S");
+		expect(ambiguous.code, ambiguous.stderr).toBe(0);
+		expect(ambiguous.stdout).toContain(
+			"record skipped: several open PRs from feature into main with heads this checkout holds, none from acme: https://github.com/acme/widget/pull/12, https://github.com/acme/widget/pull/15\n",
+		);
+		expect(pulls[2]!.body).toBe("Other.");
+
+		// The push repository's own PR wins over any fork's.
+		pulls.push({ number: 14, body: "Own." });
+		const own = await quest("--root", s.repo, "review", "--size", "S");
+		expect(own.stdout).toContain("record https://github.com/acme/widget/pull/14\n");
+		expect(pulls[2]!.body).toBe("Other.");
 	} finally {
 		vi.unstubAllGlobals();
 	}

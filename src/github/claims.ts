@@ -24,6 +24,7 @@ export async function openPullRequests(github: GitHubReader, repository: Reposit
 			branch: string(head.ref),
 			base: string(object(row.base).ref),
 			head: repo === null ? null : string(repo.full_name),
+			...(typeof head.sha === "string" ? { sha: head.sha } : {}),
 			draft: row.draft === true,
 			created: Date.parse(string(row.created_at)),
 			updated: Date.parse(string(row.updated_at)),

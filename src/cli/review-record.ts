@@ -5,6 +5,7 @@ import { recorded } from "./models-record";
 import { type ClaimDependencies, upstream } from "./claims";
 import { pullsFrom } from "../github/claims";
 import { git } from "./git";
+import { contains } from "./land";
 import { requireRemote } from "./github";
 import {
 	type PullModels,
@@ -296,9 +297,9 @@ export function withReview(body: string, record: string): string {
 export type Recorded = { url: string } | { skipped: string };
 
 /**
- * The open PR from `branch` into the base `<remote>/<branch>` names, found among the upstream's PRs from the
- * repository the base's remote pushes to, as claims find a branch's PR; or why there is none. It reads the forge
- * itself, never an index that may lag, since its body is rewritten.
+ * The open PR from `branch` into the base `<remote>/<branch>` names, or why there is none: the one from the repository
+ * the base's remote pushes to, else the only one from any repository whose head `HEAD` contains, as a maintainer's
+ * checkout of a contributor's fork PR finds it. It reads the forge itself, never an index that may lag, since its body is rewritten.
  */
 async function openPull(
 	root: string,
@@ -314,10 +315,23 @@ async function openPull(
 	if (hosting === null) return { skipped: `${remote} is not on GitHub or Kixel Quest` };
 	const { repository, head } = hosting;
 	const name = `${head.owner}/${head.repo}`.toLowerCase();
-	const pull = pullsFrom((await (await hosting.live()).pulls(repository)).value, branch).find(
-		(each) => each.base === base && each.head?.toLowerCase() === name,
+	const candidates = pullsFrom((await (await hosting.live()).pulls(repository)).value, branch).filter(
+		(each) => each.base === base,
 	);
-	if (pull === undefined) return { skipped: `no open PR from ${head.owner}:${branch} into ${base}` };
+	const own = candidates.find((each) => each.head?.toLowerCase() === name);
+	// Another repository's PR counts only when this checkout holds its pushed head, so a stranger's PR from a
+	// branch of the same name neither sets the round's size nor receives its record.
+	const held = candidates.filter((each) => each.sha !== undefined && contains(top, each.sha, "HEAD"));
+	const pull = own ?? (held.length === 1 ? held[0] : undefined);
+	if (pull === undefined)
+		return {
+			skipped:
+				candidates.length === 0
+					? `no open PR from ${branch} into ${base}`
+					: held.length === 0
+						? `no open PR from ${branch} into ${base} from ${head.owner} or with a head this checkout holds: ${candidates.map((each) => each.url).join(", ")}`
+						: `several open PRs from ${branch} into ${base} with heads this checkout holds, none from ${head.owner}: ${held.map((each) => each.url).join(", ")}`,
+		};
 	return {
 		url: pull.url,
 		body: pull.body,
