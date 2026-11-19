@@ -301,8 +301,8 @@ export interface Needs {
 	workflows: string[];
 	/**
 	 * The lowercase `owner/repo` whose base this is. A required workflow keyed `repository <id>`, from a repository
-	 * the token cannot see, such as an installation token scoped to this one, is met by a workflow at its path from any
-	 * repository but this; without it, such a workflow is never met.
+	 * the token cannot see, such as an installation token scoped to this one, is met by a workflow at its path from
+	 * another repository, as {@link unmetWorkflows} matches it; without it, such a workflow is never met.
 	 */
 	repository?: string;
 }
@@ -349,19 +349,37 @@ export function unreported(found: Reported[], needs: Needs): string[] {
 					!found.some((entry) => entry.name === need.name && (need.app === null || entry.app === need.app)),
 			)
 			.map((need) => (need.app === null ? need.name : `${need.name} (from app ${need.app})`)),
-		...needs.workflows.filter((key) => !found.some((entry) => entry.workflow && meets(entry.workflow, key, needs))),
+		...unmetWorkflows(found, needs),
 	];
 }
 
-/** Whether a reported workflow `actual` meets the required `key`, both from {@link workflowKey}. */
-function meets(actual: string, key: string, needs: Needs): boolean {
-	if (actual === key) return true;
-	const split = (value: string) => [value.slice(0, value.indexOf(":")), value.slice(value.indexOf(":") + 1)];
-	const [owner, path] = split(key);
-	const [from, file] = split(actual);
-	return (
-		owner.startsWith("repository ") && needs.repository !== undefined && file === path && from !== needs.repository
-	);
+/** A workflow key's repository and path. */
+function split(key: string): [string, string] {
+	return [key.slice(0, key.indexOf(":")), key.slice(key.indexOf(":") + 1)];
+}
+
+/**
+ * The required workflows nothing reports. One named by its repository is met by that repository's workflow at its
+ * path. One keyed `repository <id>`, whose repository the token cannot see, is met by a workflow at its path from a
+ * repository other than the base's and every named one, each such repository meeting one requirement at most, so two
+ * unseen repositories' workflows at one path need two reports.
+ */
+function unmetWorkflows(found: Reported[], needs: Needs): string[] {
+	const reported = new Set(found.flatMap((entry) => (entry.workflow ? [entry.workflow] : [])));
+	const named = new Set(needs.workflows.filter((key) => !key.startsWith("repository ")).map((key) => split(key)[0]));
+	const spent = new Set<string>();
+	return needs.workflows.filter((key) => {
+		if (reported.has(key)) return false;
+		const [owner, path] = split(key);
+		if (!owner.startsWith("repository ") || needs.repository === undefined) return true;
+		const other = [...reported].find((actual) => {
+			const [from, file] = split(actual);
+			return file === path && from !== needs.repository && !named.has(from) && !spent.has(actual);
+		});
+		if (other === undefined) return true;
+		spent.add(other);
+		return false;
+	});
 }
 
 /**

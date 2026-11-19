@@ -527,6 +527,16 @@ test("a required workflow from a repository the token cannot see is met by its p
 		rules,
 	});
 	expect((await pullRequestStatus(pr, policy.deps)).checks.state).toBe("success");
+	// Two unseen repositories' workflows at one path need two reports; one meets only one of them.
+	const both = [
+		{ type: "workflows", parameters: { workflows: [3, 4].map((id) => ({ path: CI, repository_id: id })) } },
+	];
+	const once = setup([pull({ checks: page([job("example/policies")]), reviews: page([]), threads: page([]) })], {
+		rules: both,
+	});
+	expect((await pullRequestStatus(pr, once.deps)).checks.pending.map((check) => check.name)).toEqual([
+		`repository 4:${CI}`,
+	]);
 });
 
 test("a required workflow counts as reported when another workflow's same-named job is the newer one", async () => {
