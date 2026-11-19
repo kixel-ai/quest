@@ -1577,7 +1577,8 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"its state ($T3CODE_HOME, or ~/.t3), which records whether a person or an agent sent each message. " +
 				"Other Claude Code sessions, from $CLAUDE_CONFIG_DIR (or ~/.config/claude and ~/.claude), count a turn " +
 				"Claude Code marks as a human's; other Codex sessions, from $CODEX_HOME (or ~/.codex), count the " +
-				"content Codex marks as the user's, outside headless and sub-agent sessions. The repository is the " +
+				"content Codex marks as the user's (before 0.162, which marks none, the parts but its environment and " +
+				"AGENTS.md instructions), outside headless and sub-agent sessions. The repository is the " +
 				"checkout's GitHub origin, else the directory. Output goes to stdout only, except a note on stderr " +
 				"naming each Claude Code session whose malformed lines, such as a partial record a crashed write left, " +
 				"were skipped and how many; nothing is stored or posted. Each answer a person gave an agent's blocking question (Claude Code's AskUserQuestion, " +

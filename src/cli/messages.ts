@@ -333,6 +333,7 @@ export function readCodexMessages(path: string, since: number, repository: (dir:
 	const entries: Entry[] = [];
 	let session: string | undefined;
 	let typed = false;
+	let unmarked = false;
 	let where = "";
 	let skill: string | null = null;
 	const asked = new Map<string, CodexQuestion[] | null>();
@@ -346,6 +347,7 @@ export function readCodexMessages(path: string, since: number, repository: (dir:
 				throw new Error(`${path} does not start with a Codex session_meta record`);
 			if (typeof payload.source !== "string" || payload.source === "exec") return false;
 			typed = payload.originator !== T3_CODEX;
+			unmarked = writesNoProvenance(payload.cli_version);
 			session = payload.id;
 			const url = (payload.git as Record<string, unknown> | undefined)?.repository_url;
 			const repo = typeof url === "string" ? githubRepository(url) : null;
@@ -448,6 +450,9 @@ export function readCodexMessages(path: string, since: number, repository: (dir:
 		let sources: unknown[];
 		if (Array.isArray(provenance)) {
 			sources = provenance.map((each) => (each as { provenance?: { type?: unknown } } | null)?.provenance?.type);
+		} else if (unmarked && meta?.content_item_kinds === undefined) {
+			// Codex before 0.162 marks no part, so the parts it adds are told apart by how they open, and the rest is typed.
+			sources = content.map((part) => (CODEX_WRAPPER.test(part?.text as string) ? "harness" : "user"));
 		} else {
 			// Codex 0.162's TUI marks each part with a kind instead. A compaction replays earlier turns, already read
 			// where they were typed, with every kind unknown; a part whose kind says nothing otherwise cannot be told
@@ -487,10 +492,19 @@ export function codexSkill(text: string): string | null {
 	return /<name>\s*([^<]+?)\s*<\/name>/.exec(text)?.[1] ?? null;
 }
 
+/** Whether a Codex version predates 0.162, the first seen to mark who wrote each part of a user turn. */
+function writesNoProvenance(version: unknown): boolean {
+	const [major, minor] = /^(\d+)\.(\d+)\./.exec(String(version))?.slice(1).map(Number) ?? [];
+	return major === 0 && minor !== undefined && minor < 162;
+}
+
+/** How the parts Codex before 0.162 adds to a user turn open: the environment and the AGENTS.md instructions. */
+const CODEX_WRAPPER = /^\s*(?:<environment_context>|# AGENTS\.md instructions\b)/;
+
 /** Who Codex says wrote a part of a user turn: the person, or the instructions, harness, or skill it added. */
 const CODEX_SOURCES = new Set(["user", "agents_md", "harness", "skills"]);
 
-/** The content kinds Codex 0.162 gives the parts it adds to a user turn, never typed by the person. */
+/** The content kinds Codex 0.162 gives the parts of a user turn that are not text the person typed to the agent. */
 const CODEX_INJECTED = new Set([
 	"agents_md.instructions",
 	"environments.environment_context",
@@ -503,6 +517,8 @@ const CODEX_INJECTED = new Set([
 	"tools.deferred_namespaces",
 	"plugins.recommendations",
 	"model.base_instructions",
+	// A command the person ran with `!`, which Codex shows its agent with the output: a command, not a message.
+	"shell.user_command",
 ]);
 
 /** T3 Code's agent names, as the harness names `quest usage` reports. */
