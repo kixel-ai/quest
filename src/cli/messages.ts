@@ -494,7 +494,9 @@ export function codexSkill(text: string): string | null {
 
 /** Whether a Codex version predates 0.162, the first seen to mark who wrote each part of a user turn. */
 function writesNoProvenance(version: unknown): boolean {
-	const [major, minor] = /^(\d+)\.(\d+)\./.exec(String(version))?.slice(1).map(Number) ?? [];
+	const [major, minor] =
+		/^(\d+)\.(\d+)\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.exec(String(version))?.slice(1, 3).map(Number) ??
+		[];
 	return major === 0 && minor !== undefined && minor < 162;
 }
 

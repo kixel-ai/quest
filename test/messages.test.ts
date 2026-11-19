@@ -253,8 +253,26 @@ describe("readCodexMessages from Codex 0.146's TUI", () => {
 		expect(readCodexMessages(path, SINCE, plain).map((m) => m.kind === "message" && m.text)).toEqual(["fix it"]);
 	});
 
+	test("reads a prerelease or build version before 0.162", () => {
+		for (const head of [meta("0.146.0-alpha.1"), meta("0.146.0+build.5")]) {
+			const path = join(tempDir(), "rollout.jsonl");
+			writeFileSync(path, lines(head, bareTurn("2026-11-06T10:01:00Z", ["fix it"])));
+			expect(readCodexMessages(path, SINCE, plain).map((m) => m.kind === "message" && m.text)).toEqual([
+				"fix it",
+			]);
+		}
+	});
+
 	test("fails on a turn without provenance from a version that writes it, or one with no version", () => {
-		for (const head of [meta("0.162.1"), meta("0.167.0-alpha.6"), meta("1.0.0"), meta("unknown"), codexMeta({})]) {
+		for (const head of [
+			meta("0.162.1"),
+			meta("0.167.0-alpha.6"),
+			meta("1.0.0"),
+			meta("unknown"),
+			meta("0.146.not-a-version"),
+			meta("0.146.0 "),
+			codexMeta({}),
+		]) {
 			const path = join(tempDir(), "rollout.jsonl");
 			writeFileSync(path, lines(head, bareTurn("2026-11-06T10:01:00Z", ["fix it"])));
 			expect(() => readCodexMessages(path, SINCE, plain)).toThrow(/provenance/);
