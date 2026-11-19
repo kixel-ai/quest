@@ -114,6 +114,8 @@ export interface PullRow {
 	review: ReviewSummary[];
 	/** The risk tier the record names for its head, null when it names none. */
 	risk: RecordedRisk | null;
+	/** Why part of its `## Review` record could not be read: its reviewers, its tier, or both, which it then lacks. */
+	unreadReview: string | null;
 	/** Who made each mechanical fix the land fixer recorded, or `quest land watch` for a base merge it made alone. */
 	landFixes: string[];
 	/** Later PRs that list it under `## Caused by`. */
@@ -532,30 +534,49 @@ function pullRows(pulls: Pull[], repository: Repository): PullRow[] {
 	for (const each of pulls.filter((pull) => pull.state === "merged"))
 		for (const cause of causes(each.body, repository))
 			if (cause !== each.number) fixedBy.set(cause, [...(fixedBy.get(cause) ?? []), each.number]);
-	return pulls.map((each) => {
-		const own = recorded(each.body);
-		return {
-			number: each.number,
-			url: each.url,
-			title: each.title,
-			branch: each.branch,
-			repository: each.repository,
-			state: each.state,
-			draft: each.draft,
-			handedBack: each.draft && handedBack(each.body),
-			size: own.sizes.map(sized).find((s) => s !== null) ?? null,
-			implementers: own.implementers.flatMap(({ fields }) =>
-				fields ? [{ ...fields, size: sized(fields.size) }] : [],
-			),
-			unread: own.implementers.filter(({ fields }) => fields === null).map(({ item }) => item),
-			review: settledOnMerge(parseReview(each.body), each.state === "merged"),
-			risk: recordedRisk(each.body),
-			landFixes: fixes(each.body),
-			fixedBy: (fixedBy.get(each.number) ?? []).sort((a, b) => a - b),
-			online: [],
-			sessions: [],
-		};
-	});
+	return pulls.map((each) => pullRow(each, fixedBy));
+}
+
+/** `each`'s record, given the merged PRs that name each culprit as `fixedBy`. */
+function pullRow(each: Pull, fixedBy: Map<number, number[]>): PullRow {
+	const own = recorded(each.body);
+	// The `## Review` record is its writer's text, at times edited by hand, so one this version cannot read is
+	// reported on its PR instead of stopping every other PR's. Its reviewers and its tier are read apart, so a
+	// garbled line in one keeps the other.
+	const unread: string[] = [];
+	const read = <T>(parse: () => T, fallback: T): T => {
+		try {
+			return parse();
+		} catch (error) {
+			unread.push(error instanceof Error ? error.message : String(error));
+			return fallback;
+		}
+	};
+	const review = read(() => settledOnMerge(parseReview(each.body), each.state === "merged"), []);
+	const risk = read(() => recordedRisk(each.body), null);
+	const unreadReview = unread.length ? unread.join("; ") : null;
+	return {
+		number: each.number,
+		url: each.url,
+		title: each.title,
+		branch: each.branch,
+		repository: each.repository,
+		state: each.state,
+		draft: each.draft,
+		handedBack: each.draft && handedBack(each.body),
+		size: own.sizes.map(sized).find((s) => s !== null) ?? null,
+		implementers: own.implementers.flatMap(({ fields }) =>
+			fields ? [{ ...fields, size: sized(fields.size) }] : [],
+		),
+		unread: own.implementers.filter(({ fields }) => fields === null).map(({ item }) => item),
+		review,
+		risk,
+		unreadReview,
+		landFixes: fixes(each.body),
+		fixedBy: (fixedBy.get(each.number) ?? []).sort((a, b) => a - b),
+		online: [],
+		sessions: [],
+	};
 }
 
 const add = (to: Tokens, from: Tokens) => {
@@ -1389,6 +1410,7 @@ export function usageLines(report: Usage): string[] {
 			lines.push(`  implementer: ${i.harness}, ${i.model}, ${i.effort} effort${notes ? ` (${notes})` : ""}`);
 		}
 		for (const item of row.unread) lines.push(`  unread: ${item}`);
+		if (row.unreadReview) lines.push(`  unread review: ${row.unreadReview}`);
 		for (const r of row.review)
 			lines.push(
 				`  review: ${r.harness}, ${r.model}, ${r.effort} effort${r.shadow ? ", shadow" : ""}; ${r.round === null ? "not in the latest run" : `round ${r.round}, score ${r.score ?? "-"}/10`}; ${r.tally === null ? "no tally" : `rounds ${r.tally.rounds}, ${findingsText(r.tally)}`}`,

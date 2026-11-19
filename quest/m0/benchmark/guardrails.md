@@ -49,6 +49,16 @@ merge on their own, so the starting list holds that class too.
   review an author without write access needs (rejected: a local
   `quest review`; no review).
 
+Evidence from the 2026-11-18 [mistake audit](/quest/m0/mistake-audit.md)
+run: of 234 merge-pick answers from 2026-11-11 to 11-19, across the
+three repositories and the maintainer's hosts, 220 (94%) picked the PR the
+agent recommended. Follow-up keep-or-drop answers picked it 79% of the
+time, and other questions 73%. That supports widening the list once the
+tiers are trusted, not merging every pick on its own. Decided 2026-11-19
+(maintainer, merge pick of
+[moq-dev/quest#786](https://github.com/moq-dev/quest/pull/786)): ✅ keep
+this evidence here (rejected: drop).
+
 This quest edits the shipped skills and rules, which the maintainer asked
 for by planning it.
 

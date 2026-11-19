@@ -427,6 +427,12 @@ describe("PR records", () => {
 
 	test("a skipped review or a fixer-only section has no round", () => {
 		expect(parseReview("## Review\n\nSkipped: too trivial to need one.\n")).toEqual([]);
+		// A skip written by hand under the mark a round rewrote, as `/quest-review` allows.
+		expect(
+			parseReview(
+				"## Review\n\nRewritten by `quest review` after each round.\n\n- Head: 6c2ce3d381 (skipped review)\n- Skip: one reworded sentence.\n",
+			),
+		).toEqual([]);
 		expect(parseReview("## Review\n\nmechanical fix by quest land watch: `merged main` (head x)\n")).toEqual([]);
 		expect(fixes("## Review\n\nmechanical fix by quest land watch: `merged main` (head x)\n")).toEqual([
 			"quest land watch",
@@ -1094,6 +1100,40 @@ describe("usage", () => {
 		const report = await usage(root, { since: "2026-11-05" }, deps(sessions));
 		expect(report.pulls.flatMap((p) => p.sessions).some((s) => s.session?.startsWith("5555"))).toBe(false);
 		expect(report.unattributed!.sessions).toBe(6);
+	});
+
+	test("reports the part of a review record it cannot read on its PR and reads the rest", async () => {
+		const record = (...lines: string[]) =>
+			["## Review", "", "Rewritten by `quest review` after each round.", "", ...lines, ""].join("\n");
+		const head = `- Head: ${"a".repeat(40)}`;
+		const reviewer = "- Reviewer: Codex, gpt-6.1-sol, high effort";
+		// #30's tier survives its garbled Rounds line, and #31's reviewer its garbled Risk line.
+		const garbledRounds = record(head, RISK, reviewer, "- Rounds: garbled");
+		const garbledRisk = record(
+			head,
+			"- Risk: garbled",
+			reviewer,
+			"- Rounds: 2; findings 1 (medium 1): fixed 1, refuted 0, open 0",
+		);
+		const { root, deps, sessions } = setup({
+			pulls: [
+				pr(30, "quest/m0/bad", garbledRounds, "2026-11-06T00:00:00Z", { updated_at: "2026-11-07T00:00:00Z" }),
+				pr(31, "quest/m0/worse", garbledRisk, "2026-11-06T00:00:00Z", { updated_at: "2026-11-07T00:00:00Z" }),
+			],
+		});
+		const report = await usage(root, { since: "2026-11-05" }, deps(sessions));
+		const rounds = report.pulls.find((p) => p.number === 30)!;
+		expect(rounds.review).toEqual([]);
+		expect(rounds.risk?.tier).toBe("high");
+		expect(rounds.unreadReview).toBe("the ## Review record's Rounds line is malformed: garbled");
+		const risk = report.pulls.find((p) => p.number === 31)!;
+		expect(risk.review.map((r) => r.model)).toEqual(["gpt-6.1-sol"]);
+		expect(risk.risk).toBeNull();
+		expect(risk.unreadReview).toBe("the ## Review record's risk is malformed: garbled");
+		expect(report.pulls.find((p) => p.number === 10)!.unreadReview).toBeNull();
+		expect(usageLines(report).join("\n")).toContain(
+			"  unread review: the ## Review record's Rounds line is malformed: garbled",
+		);
 	});
 
 	test("rolls up the writer A/B by size and arm, leaving out a PR a writer ran off its arm", async () => {
