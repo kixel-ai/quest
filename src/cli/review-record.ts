@@ -315,7 +315,7 @@ async function openPull(
 	if (hosting === null) return { skipped: `${remote} is not on GitHub or Kixel Quest` };
 	const { repository, head } = hosting;
 	const name = `${head.owner}/${head.repo}`.toLowerCase();
-	const candidates = pullsFrom((await hosting.live().pulls(repository)).value, branch).filter(
+	const candidates = pullsFrom((await (await hosting.live()).pulls(repository)).value, branch).filter(
 		(each) => each.base === base,
 	);
 	const own = candidates.find((each) => each.head?.toLowerCase() === name);

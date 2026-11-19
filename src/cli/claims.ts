@@ -6,7 +6,6 @@ import { type Remote, readRemote, remoteHost, remoteRepository, requireRemote } 
 import { type GitHubDependencies, GitHub, object, repositoryPath, string } from "../github/client";
 import type { Claim, Forge, ForgeWrites, Holdings, OpenPull, Repository } from "../core";
 import { questBranches } from "../github/claims";
-import { GitHubForge } from "../github/forge";
 import { landingCheck } from "./landed";
 import { GitHubWrites } from "./writes";
 import { type Snapshot, snapshot } from "./tree";
@@ -16,6 +15,8 @@ export interface ClaimDependencies {
 	github(): GitHubDependencies;
 	/** The forge answering reads of a repository on GitHub, such as its claims and open PRs. */
 	forge(repository: Repository): Promise<Forge>;
+	/** The forge answering a read of a repository on GitHub from GitHub itself, never an index that may lag. */
+	live(repository: Repository): Promise<Forge>;
 	/** Kixel Quest, for remotes on it; without it, no remote is. */
 	kixel?: {
 		/** The repository `url` on Kixel Quest names, or null for none. */
@@ -38,7 +39,7 @@ export interface Hosting {
 	/** The forge answering reads of `repository`, chosen on first use. */
 	forge(): Promise<Forge>;
 	/** The forge's own answers, never an index that may lag, for a read that verifies or rewrites what it read. */
-	live(): Forge;
+	live(): Promise<Forge>;
 	/** The forge taking writes to `repository`, created on first use. */
 	writes(): ForgeWrites;
 	/** A link to `path` on the default branch, where the forge shows files. */
@@ -91,7 +92,7 @@ export async function upstream(root: string, remote: Remote, deps: ClaimDependen
 							defaultBranch: defaultBranch(root, remote.name),
 							prefix: git(root, ["rev-parse", "--show-prefix"]),
 							forge: async () => forge(),
-							live: forge,
+							live: async () => forge(),
 							writes: forge,
 							link: () => null,
 						},
@@ -121,7 +122,7 @@ export async function upstream(root: string, remote: Remote, deps: ClaimDependen
 		defaultBranch: up.defaultBranch,
 		prefix,
 		forge: () => (forge ??= deps.forge(up.repository)),
-		live: () => new GitHubForge(deps.github()),
+		live: () => deps.live(up.repository),
 		writes: () => (writes ??= new GitHubWrites(deps.github(), landingCheck(root))),
 		link: (path: string) =>
 			`https://github.com/${owner}/${repo}/blob/${up.defaultBranch}/${encodeURI(prefix + path)}`,

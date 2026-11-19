@@ -1,7 +1,7 @@
 // What holds a PR's head from landing besides its checks: an online reviewer's finding on the head that no writer has
 // answered, and a maintainer decision recorded in a comment after the head was committed that nothing has answered.
 import type { Repository, Signal } from "../core";
-import { type GitHub, type ObjectValue, array, object, string } from "./client";
+import { type GitHubReader, type ObjectValue, array, object, string } from "./client";
 import { type Activity, bodyFindings, isBot, login, readActivity, reviewerOf } from "./online-review";
 
 /** The picked heads whose signals a later commit carries unread, and when the pick was made. */
@@ -143,7 +143,7 @@ export function signals(pull: Activity, writers: ReadonlySet<string>, carried?: 
  * read, so their permission is read; any other association cannot.
  */
 async function writersOf(
-	client: GitHub,
+	client: GitHubReader,
 	repository: Repository,
 	actors: { actor: unknown; association: unknown }[],
 ): Promise<Set<string>> {
@@ -168,7 +168,7 @@ async function writersOf(
 
 /** The signals on each PR's current head, by number, with the head they were read for, and those `carried` carries. */
 export async function readSignals(
-	client: GitHub,
+	client: GitHubReader,
 	repository: Repository,
 	numbers: number[],
 	carried?: ReadonlyMap<number, Carried>,

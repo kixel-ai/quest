@@ -2,7 +2,7 @@
 // thread, and any review whose
 // body opens with `Automated review by <name>`, as a reviewer posting under a person's account does. A finding is a
 // review thread one opens, or a `[P<n>]` line in its review body; whoever answers it says whether it was taken.
-import { type GitHub, type ObjectValue, array, object } from "./client";
+import { type GitHubReader, type ObjectValue, array, object } from "./client";
 import type { Repository } from "../core";
 
 /** One online reviewer's record on one PR. */
@@ -87,7 +87,7 @@ export type Activity = Record<Exclude<Connection, "userContentEdits">, ObjectVal
 
 /** Each PR's reviews, review threads, and comments, and its head, read in batches and then in pages. */
 export async function readActivity(
-	client: GitHub,
+	client: GitHubReader,
 	repository: Repository,
 	numbers: number[],
 	extra: "userContentEdits"[] = [],
@@ -302,7 +302,7 @@ export function onlineReviews(pull: Activity): OnlineReview[] {
 
 /** Each PR's online reviews, and every body its edits left, by number. */
 export async function readOnlineReviews(
-	client: GitHub,
+	client: GitHubReader,
 	repository: Repository,
 	numbers: number[],
 ): Promise<Map<number, { online: OnlineReview[]; bodies: string[] }>> {

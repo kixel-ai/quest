@@ -10,7 +10,7 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 
 import { claims, openDrafts, target } from "../src/cli/claims";
 import { githubRepository, readRemote, remoteRepository } from "../src/cli/github";
-import { type GitHubDependencies, type ObjectValue } from "../src/github/client";
+import { type GitHubDependencies, type ObjectValue, reading } from "../src/github/client";
 import { GitHubForge } from "../src/github/forge";
 import { type Output, main } from "../src/cli/main";
 import { Refusal } from "../src/core";
@@ -202,7 +202,8 @@ class FakeGitHub {
 function deps(github: FakeGitHub, warnings: string[] = []) {
 	return {
 		github: () => github.deps(),
-		forge: async () => new GitHubForge(github.deps()),
+		forge: async () => new GitHubForge(reading(github.deps())),
+		live: async () => new GitHubForge(reading(github.deps())),
 		warn: (message: string) => warnings.push(message),
 	};
 }
@@ -258,6 +259,23 @@ describe("start on GitHub", () => {
 			{ base: "example/project", head: { ref: BRANCH, repo: { full_name: "example/project" } }, draft: true },
 		]);
 		expect(github.pulls[0].body).toBe(`Claims [${ONE}](https://github.com/example/project/blob/main/${ONE}).`);
+	});
+
+	test("a live read that fails before the PR opens, such as a refused mint, takes the branch back and opens none", async () => {
+		const bare = upstream();
+		const github = new FakeGitHub();
+		const work = clone(UPSTREAM, { [UPSTREAM]: bare });
+		const dependencies = {
+			...deps(github),
+			live: async (): Promise<GitHubForge> => {
+				throw new Error("Kixel Quest refused the mint");
+			},
+		};
+		await expect(
+			startQuest(work, await target(work, "origin", dependencies), ONE, "[S] One", dependencies),
+		).rejects.toThrow("Kixel Quest refused the mint");
+		expect(github.pulls).toEqual([]);
+		expect(tip(bare)).toBe("");
 	});
 
 	test("links the quest by its repository path when the tree is below the top level", async () => {
@@ -849,7 +867,8 @@ test("openDrafts skips drafts with a warning when GitHub cannot be read", async 
 		github: () => {
 			throw new Error("set GH_TOKEN or GITHUB_TOKEN, or sign in with gh auth login");
 		},
-		forge: async () => new GitHubForge(offline.github()),
+		forge: async () => new GitHubForge(reading(offline.github())),
+		live: async () => new GitHubForge(reading(offline.github())),
 		warn: (message: string) => warnings.push(message),
 	};
 	expect(await openDrafts(work, "origin", offline)).toEqual([]);

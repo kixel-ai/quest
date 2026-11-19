@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 
-import { GitHub } from "../src/github/client";
+import { GitHubReader } from "../src/github/client";
 import { main } from "../src/cli/main";
 import { statusLines } from "../src/cli/status";
 import { pullRequestStatus, requiredOf } from "../src/github/status";
@@ -410,7 +410,7 @@ test("a base's requirements read once give the status a read of its own would, a
 	expect(own.reads).not.toEqual([]);
 
 	const shared = counted();
-	const needs = await requiredOf(new GitHub(shared.deps), pr, "main");
+	const needs = await requiredOf(new GitHubReader(shared.deps), pr, "main");
 	const before = shared.reads.length;
 	expect(await pullRequestStatus(pr, shared.deps, { ...pr, branch: "main", needs })).toEqual(expected);
 	expect(shared.reads).toHaveLength(before);
