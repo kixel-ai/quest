@@ -57,13 +57,29 @@ export function reading(deps: GitHubDependencies): GitHubReadDependencies {
 	};
 }
 
+/** A comment, block string, string, or name, possibly a variable's, at the start of a GraphQL document's rest. */
+const TOKEN = /^(?:#[^\n\r]*|"""(?:\\"""|[^])*?"""|"(?:\\.|[^"\\\n\r])*"|\$?[_A-Za-z][_0-9A-Za-z]*)/;
+
 /**
- * Whether a GraphQL document may define a mutation: whether it holds the word anywhere, since GraphQL lets one
- * follow a comment, a comma, or a fragment. It errs toward a mutation, which is never repeated blindly and which a
- * read-only client refuses, since no read needs the word.
+ * Whether a GraphQL document may define a mutation: whether `mutation` is a name outside every brace and parenthesis,
+ * skipping comments and strings, since GraphQL lets an operation follow a comment, a comma, or a fragment. It errs
+ * toward a mutation, as for a fragment or operation named `mutation`, which is never repeated blindly and which a
+ * read-only client refuses.
  */
-function mutates(query: string): boolean {
-	return /\bmutation\b/.test(query);
+export function mutates(query: string): boolean {
+	let depth = 0;
+	for (let i = 0; i < query.length;) {
+		const token = TOKEN.exec(query.slice(i));
+		if (token) {
+			if (depth === 0 && token[0] === "mutation") return true;
+			i += token[0].length;
+			continue;
+		}
+		const char = query[i++];
+		if (char === "{" || char === "(") depth++;
+		else if ((char === "}" || char === ")") && depth > 0) depth--;
+	}
+	return false;
 }
 
 /** A 200 answer to a GET, kept to serve when GitHub answers its ETag with a 304. */

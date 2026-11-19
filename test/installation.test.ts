@@ -16,6 +16,7 @@ import {
 	type GitHubDependencies,
 	type GitHubReadDependencies,
 	GitHubReader,
+	mutates,
 	reading,
 } from "../src/github/client";
 import * as wait from "./wait-fakes";
@@ -111,6 +112,13 @@ describe("reads on a minted installation token", () => {
 		await expect(reader.graphql("mutation { x }", {})).rejects.toThrow("cannot run a mutation");
 		await expect(reader.graphql("# note\nmutation { x }", {})).rejects.toThrow("cannot run a mutation");
 		await expect(reader.graphql(",mutation { x }", {})).rejects.toThrow("cannot run a mutation");
+		// The word in a string, a block string, a comment, an alias, or a variable is no mutation.
+		for (const query of [
+			'query { search(query: "mutation } mutation") { x } }',
+			'query { search(query: """a \\""" } mutation""") { x } } # mutation',
+			"query($mutation: String) { mutation: search(query: $mutation) { x } }",
+		])
+			expect(mutates(query)).toBe(false);
 		await expect(reader.graphql("fragment f on X { y }\nmutation { x { ...f } }", {})).rejects.toThrow(
 			"cannot run a mutation",
 		);
