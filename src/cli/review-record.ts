@@ -296,9 +296,9 @@ export function withReview(body: string, record: string): string {
 export type Recorded = { url: string } | { skipped: string };
 
 /**
- * The open PR from `branch` into the base `<remote>/<branch>` names, found among the upstream's PRs from the
- * repository the base's remote pushes to, as claims find a branch's PR; or why there is none. It reads the forge
- * itself, never an index that may lag, since its body is rewritten.
+ * The open PR from `branch` into the base `<remote>/<branch>` names, or why there is none: the one from the repository
+ * the base's remote pushes to, else the only one from any repository, as a maintainer's checkout of a contributor's
+ * fork PR finds it. It reads the forge itself, never an index that may lag, since its body is rewritten.
  */
 async function openPull(
 	root: string,
@@ -314,10 +314,18 @@ async function openPull(
 	if (hosting === null) return { skipped: `${remote} is not on GitHub or Kixel Quest` };
 	const { repository, head } = hosting;
 	const name = `${head.owner}/${head.repo}`.toLowerCase();
-	const pull = pullsFrom((await hosting.live().pulls(repository)).value, branch).find(
-		(each) => each.base === base && each.head?.toLowerCase() === name,
+	const candidates = pullsFrom((await hosting.live().pulls(repository)).value, branch).filter(
+		(each) => each.base === base,
 	);
-	if (pull === undefined) return { skipped: `no open PR from ${head.owner}:${branch} into ${base}` };
+	const own = candidates.find((each) => each.head?.toLowerCase() === name);
+	const pull = own ?? (candidates.length === 1 ? candidates[0] : undefined);
+	if (pull === undefined)
+		return {
+			skipped:
+				candidates.length === 0
+					? `no open PR from ${branch} into ${base}`
+					: `several open PRs from ${branch} into ${base}, none from ${head.owner}: ${candidates.map((each) => each.url).join(", ")}`,
+		};
 	return {
 		url: pull.url,
 		body: pull.body,

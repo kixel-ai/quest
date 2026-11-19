@@ -1628,8 +1628,10 @@ branch's rounds, `risk`, the head's tier with its classification, `record`,
 and `next`.
 
 After each round, `quest review` rewrites the `## Review` section of the open PR
-from the branch into the base, found among the upstream's PRs from the
-repository the base's remote pushes to, and prints `record <url>`. The record
+from the branch into the base, found among the upstream's PRs: the one from
+the repository the base's remote pushes to, else the only one from any
+repository, as in a maintainer's checkout of a contributor's fork PR. It
+prints `record <url>`. The record
 names the reviewed head and the base's short SHA, the head's risk tier and who
 classified it, then for each reviewer its
 harness, model, and effort, its Reviewer line ending in `, shadow` for the
