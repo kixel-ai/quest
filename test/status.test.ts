@@ -506,6 +506,29 @@ test("a required workflow matches its repository as well as its path", async () 
 	expect(status.checks.pending.map((check) => check.name)).toEqual([`example/policies:${CI}`]);
 });
 
+test("a required workflow from a repository the token cannot see is met by its path from another repository", async () => {
+	const job = (repositoryName: string) => ({
+		...run("build", "COMPLETED", "SUCCESS", false),
+		databaseId: 1,
+		checkSuite: {
+			databaseId: 10,
+			app: { databaseId: 15368 },
+			workflowRun: { file: { path: CI, repositoryName } },
+		},
+	});
+	// Repository 3 answers 404, as an installation token scoped to example/project answers for example/policies.
+	const rules = [{ type: "workflows", parameters: { workflows: [{ path: CI, repository_id: 3 }] } }];
+	const local = setup([pull({ checks: page([job("example/project")]), reviews: page([]), threads: page([]) })], {
+		rules,
+	});
+	const unmet = await pullRequestStatus(pr, local.deps);
+	expect(unmet.checks.pending.map((check) => check.name)).toEqual([`repository 3:${CI}`]);
+	const policy = setup([pull({ checks: page([job("example/policies")]), reviews: page([]), threads: page([]) })], {
+		rules,
+	});
+	expect((await pullRequestStatus(pr, policy.deps)).checks.state).toBe("success");
+});
+
 test("a required workflow counts as reported when another workflow's same-named job is the newer one", async () => {
 	const build = (databaseId: number, path: string) => ({
 		...run("build", "COMPLETED", "SUCCESS", false),

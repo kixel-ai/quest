@@ -176,7 +176,10 @@ async function openDraft(
 	const body = link === null ? `Claims \`${path}\`.` : `Claims [${path}](${link}).`;
 	const writes = hosting.writes();
 	let created: OpenPull;
+	let live: Awaited<ReturnType<Hosting["live"]>>;
 	try {
+		// Before the PR exists, so a failed mint takes the branch back rather than leaving a PR behind.
+		live = await hosting.live();
 		created = await writes.open({
 			repository,
 			head,
@@ -193,7 +196,7 @@ async function openDraft(
 	}
 
 	// Two claimers on different repositories, such as forks, both push; the earliest PR wins.
-	const open = pullsFrom((await (await hosting.live()).pulls(repository)).value, branch);
+	const open = pullsFrom((await live.pulls(repository)).value, branch);
 	const first = pullsFrom([...open.filter((pull) => pull.number !== created.number), created], branch)[0];
 	if (first.number !== created.number) {
 		deleteBranch(root, remote, branch, sha);

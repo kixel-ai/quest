@@ -261,6 +261,23 @@ describe("start on GitHub", () => {
 		expect(github.pulls[0].body).toBe(`Claims [${ONE}](https://github.com/example/project/blob/main/${ONE}).`);
 	});
 
+	test("a live read that fails before the PR opens, such as a refused mint, takes the branch back and opens none", async () => {
+		const bare = upstream();
+		const github = new FakeGitHub();
+		const work = clone(UPSTREAM, { [UPSTREAM]: bare });
+		const dependencies = {
+			...deps(github),
+			live: async (): Promise<GitHubForge> => {
+				throw new Error("Kixel Quest refused the mint");
+			},
+		};
+		await expect(
+			startQuest(work, await target(work, "origin", dependencies), ONE, "[S] One", dependencies),
+		).rejects.toThrow("Kixel Quest refused the mint");
+		expect(github.pulls).toEqual([]);
+		expect(tip(bare)).toBe("");
+	});
+
 	test("links the quest by its repository path when the tree is below the top level", async () => {
 		const bare = initRepository(undefined, { bare: true });
 		const work = tempDir();

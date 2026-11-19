@@ -114,9 +114,12 @@ export async function exclusive<T>(
 	const owner = crypto.randomUUID();
 	// When this waiter first found the lock empty, so one whose holder died before writing it still goes stale.
 	let empty: number | undefined;
+	// When this holder took the lock, as written in it, so its time to work counts from what a waiter reads.
+	let taken = 0;
 	for (;;) {
+		taken = clock.now();
 		try {
-			writeFileSync(lock, `${clock.now()} ${owner}`, { flag: "wx", mode: 0o600 });
+			writeFileSync(lock, `${taken} ${owner}`, { flag: "wx", mode: 0o600 });
 			break;
 		} catch (error) {
 			if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
@@ -143,7 +146,7 @@ export async function exclusive<T>(
 		await clock.sleep(Math.min(POLL, deadline - clock.now()));
 	}
 	try {
-		return await run(Math.min(deadline, clock.now() + HOLD));
+		return await run(Math.min(deadline, taken + HOLD));
 	} finally {
 		try {
 			if (readFileSync(lock, "utf8").endsWith(` ${owner}`)) rmSync(lock, { force: true });

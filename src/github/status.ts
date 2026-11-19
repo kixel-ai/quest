@@ -299,12 +299,22 @@ export interface Needs {
 	checks: { name: string; app: number | null }[];
 	/** Workflow files that must pass as a whole, from {@link workflowKey}. */
 	workflows: string[];
+	/**
+	 * The lowercase `owner/repo` whose base this is. A required workflow keyed `repository <id>`, from a repository
+	 * the token cannot see, such as an installation token scoped to this one, is met by a workflow at its path from any
+	 * repository but this; without it, such a workflow is never met.
+	 */
+	repository?: string;
 }
 
 /** What `branch` requires of a PR head. The gate's own check is never on one, so it is left out. */
 export async function requiredOf(github: GitHubReader, repository: Repository, branch: string): Promise<Needs> {
 	const found = await requirements(github, repository, branch);
-	return { checks: found.checks.filter((check) => check.name !== LAND_CHECK), workflows: found.workflows };
+	return {
+		checks: found.checks.filter((check) => check.name !== LAND_CHECK),
+		workflows: found.workflows,
+		repository: `${repository.owner}/${repository.repo}`.toLowerCase(),
+	};
 }
 
 /** A check as a requirement matches it: its name, its app, and the workflow file a GitHub Actions job runs in. */
@@ -339,8 +349,19 @@ export function unreported(found: Reported[], needs: Needs): string[] {
 					!found.some((entry) => entry.name === need.name && (need.app === null || entry.app === need.app)),
 			)
 			.map((need) => (need.app === null ? need.name : `${need.name} (from app ${need.app})`)),
-		...needs.workflows.filter((key) => !found.some((entry) => entry.workflow === key)),
+		...needs.workflows.filter((key) => !found.some((entry) => entry.workflow && meets(entry.workflow, key, needs))),
 	];
+}
+
+/** Whether a reported workflow `actual` meets the required `key`, both from {@link workflowKey}. */
+function meets(actual: string, key: string, needs: Needs): boolean {
+	if (actual === key) return true;
+	const split = (value: string) => [value.slice(0, value.indexOf(":")), value.slice(value.indexOf(":") + 1)];
+	const [owner, path] = split(key);
+	const [from, file] = split(actual);
+	return (
+		owner.startsWith("repository ") && needs.repository !== undefined && file === path && from !== needs.repository
+	);
 }
 
 /**

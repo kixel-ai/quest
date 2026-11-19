@@ -34,10 +34,29 @@ export interface GitHubDependencies extends Omit<GitHubReadDependencies, "readTo
 	token: string;
 }
 
-/** `deps` as read dependencies, reading on the person's own token. */
+/**
+ * `deps` as read dependencies, reading on the person's own token. Each member is forwarded, called on `deps`, so a
+ * host whose members are a class's methods keeps them and their receiver.
+ */
 export function reading(deps: GitHubDependencies): GitHubReadDependencies {
-	const { token, ...rest } = deps;
-	return { ...rest, readToken: token };
+	return {
+		fetch: ((input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) =>
+			deps.fetch(input, init)) as typeof fetch,
+		now: () => deps.now(),
+		sleep: (milliseconds) => deps.sleep(milliseconds),
+		warn: (message) => deps.warn(message),
+		readToken: deps.token,
+		quota: deps.quota,
+		...(deps.cache === undefined ? {} : { cache: deps.cache }),
+	};
+}
+
+/**
+ * Whether a GraphQL document defines a mutation: one starting the document, or following a fragment's closing brace,
+ * once comments are gone. It errs toward refusing, since a read-only client never needs to send one.
+ */
+function mutates(query: string): boolean {
+	return /(^|\})\s*mutation\b/.test(query.replace(/#[^\n]*/g, ""));
 }
 
 /** A 200 answer to a GET, kept to serve when GitHub answers its ETag with a 304. */
@@ -390,7 +409,7 @@ export class GitHubReader {
 	 * 200 whose errors say `RATE_LIMITED`; that is waited out like a REST one.
 	 */
 	async graphql(query: string, variables: ObjectValue): Promise<ObjectValue> {
-		if (/^\s*mutation\b/.test(query)) throw new Error("a read-only GitHub client cannot run a mutation");
+		if (mutates(query)) throw new Error("a read-only GitHub client cannot run a mutation");
 		return this.operate(query, variables, true);
 	}
 
@@ -554,7 +573,7 @@ async function requiredWorkflows(github: GitHubReader, rules: ObjectValue[]): Pr
 		const id = Number(row.repository_id);
 		if (!names.has(id)) {
 			const response = await github.request(`/repositories/${id}`, { allow: [404] });
-			// A repository the token cannot see is still required; nothing on the head can match its name.
+			// A repository the token cannot see is still required, by its id; `unreported` matches it by path alone.
 			names.set(id, response.ok ? string(object(await response.json()).full_name) : `repository ${id}`);
 		}
 		keys.push(workflowKey(names.get(id)!, string(row.path)));

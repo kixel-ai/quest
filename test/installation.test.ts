@@ -103,7 +103,32 @@ describe("reads on a minted installation token", () => {
 		const forge = () => new GitHubWrites(reading(w.person()), null as never);
 		void forge;
 		await expect(reader.graphql("mutation { x }", {})).rejects.toThrow("cannot run a mutation");
+		await expect(reader.graphql("# note\nmutation { x }", {})).rejects.toThrow("cannot run a mutation");
+		await expect(reader.graphql("fragment f on X { y }\nmutation { x { ...f } }", {})).rejects.toThrow(
+			"cannot run a mutation",
+		);
 		expect(w.github).toEqual([]);
+	});
+
+	test("a host whose members are a class's methods keeps them as read dependencies", async () => {
+		const w = world();
+		const person = w.person();
+		class Host {
+			token = PERSON;
+			quota = "fail" as const;
+			fetch = person.fetch;
+			now() {
+				return person.now();
+			}
+			sleep(milliseconds: number) {
+				return person.sleep(milliseconds);
+			}
+			warn(message: string) {
+				person.warn(message);
+			}
+		}
+		await new GitHub(new Host()).request("/repos/example/project/pulls");
+		expect(w.github).toEqual([{ method: "GET", path: "/repos/example/project/pulls", token: PERSON }]);
 	});
 
 	test("the token is minted once and reused across runs until shortly before it expires", async () => {

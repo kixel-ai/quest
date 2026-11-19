@@ -153,9 +153,10 @@ export function setup(
 					return Response.json({ message: "Resource not accessible by integration" }, { status: 403 });
 				return Response.json(page.rows, { headers: page.next ? { Link: `<${page.next}>; rel="next"` } : {} });
 			}
-			// Ruleset workflows name their repository by ID: 1 is this one, 2 another.
+			// Ruleset workflows name their repository by ID: 1 is this one, 2 another, 3 one the token cannot see.
 			if (path.pathname === "/repositories/1") return Response.json({ full_name: "example/project" });
 			if (path.pathname === "/repositories/2") return Response.json({ full_name: "example/policies" });
+			if (path.pathname === "/repositories/3") return Response.json({ message: "Not Found" }, { status: 404 });
 			if (path.pathname === "/repos/example/project/branches/main")
 				return options.noBase
 					? Response.json({ message: "Branch not found" }, { status: 404 })
