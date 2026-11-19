@@ -1,4 +1,4 @@
-# Cut agent token waste
+# [S] Cut agent token waste
 
 ## Goal
 

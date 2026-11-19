@@ -381,7 +381,7 @@ async function sendOnce(deps: SendDependencies, dir: string): Promise<Sent[]> {
 	const exported = deps.sessions(new Date(since));
 	if (exported === null)
 		throw new Error(
-			"token-max is not installed, so no record can be priced; install it with `cargo install --locked --git https://github.com/kixel-ai/token-max`",
+			"token-max is not installed, so no record can be priced; install it with `cargo install --locked token-max`",
 		);
 	const { kept } = fold(exported);
 	const byId = new Map(kept.flatMap((s) => (s.id === null ? [] : [[`${s.harness}\0${s.id}`, s] as const])));

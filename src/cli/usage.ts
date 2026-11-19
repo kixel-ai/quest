@@ -285,7 +285,7 @@ export interface UsageDependencies extends ClaimDependencies {
 
 /** The install hint printed when token-max is missing. */
 export const TOKEN_MAX_MISSING =
-	"token-max is not installed, so no session tokens or cost are reported; install it with `cargo install --locked --git https://github.com/kixel-ai/token-max`";
+	"token-max is not installed, so no session tokens or cost are reported; install it with `cargo install --locked token-max`";
 
 /** The local date `days` before `now`, as `YYYY-MM-DD`. */
 export function daysBefore(now: Date, days: number): string {

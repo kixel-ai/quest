@@ -81,6 +81,21 @@ the `Quests: ` line), and run it with consent. Codex then asks the user to
 trust the hooks once through `/hooks`. It keeps the files' other settings and
 prints what it changed.
 
+## Check agent settings
+
+[token-max](https://github.com/kixel-ai/token-max) reads the user's Claude
+Code and Codex transcripts and recommends cheaper agent settings. Offer it, and
+with consent run it once without installing anything:
+`curl -LsSf https://max.kixel.ai/run.sh | sh`, or on native Windows
+`irm https://max.kixel.ai/run.ps1 | iex`. Each downloads the latest release,
+checks it against the release's checksums, and runs `token-max doctor`. Without
+a terminal, as an agent runs it, it only prints its report and exits 1 when it
+recommends a change; show the user the recommendations and apply none unasked.
+On a terminal, it walks the user through each change and writes settings only
+after a final yes.
+`quest usage` and the records sender also need `token-max` on the `PATH`;
+`cargo install --locked token-max` installs it, globally, so ask first.
+
 ## Opt into worktree hooks
 
 Quest can create and reclaim Claude Code's worktrees, sharing one disk budget
