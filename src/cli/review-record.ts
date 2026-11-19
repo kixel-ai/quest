@@ -314,7 +314,7 @@ async function openPull(
 	if (hosting === null) return { skipped: `${remote} is not on GitHub or Kixel Quest` };
 	const { repository, head } = hosting;
 	const name = `${head.owner}/${head.repo}`.toLowerCase();
-	const pull = pullsFrom((await hosting.live().pulls(repository)).value, branch).find(
+	const pull = pullsFrom((await (await hosting.live()).pulls(repository)).value, branch).find(
 		(each) => each.base === base && each.head?.toLowerCase() === name,
 	);
 	if (pull === undefined) return { skipped: `no open PR from ${head.owner}:${branch} into ${base}` };

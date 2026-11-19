@@ -1,7 +1,7 @@
 // Quests a PR adds that another open PR also adds, so a follow-up some other PR already owns is
 // caught before a pick round asks about it.
 import { type Duplicate, type PullRequest, isQuest, parse } from "../core";
-import { type GitHub, object } from "./client";
+import { type GitHubReader, object } from "./client";
 import { openFiles } from "./files";
 
 /** An open PR's added quest files, each with its title, or null when it has none. */
@@ -49,7 +49,7 @@ export function duplicates(self: number, pulls: Added[]): Duplicate[] {
 /**
  * The quests `pr` adds that another open PR in its repository also adds. Reads every open PR's files, then the titles of their quests at each PR's head, only when `pr` adds a quest.
  */
-export async function duplicateQuests(github: GitHub, pr: PullRequest): Promise<Duplicate[]> {
+export async function duplicateQuests(github: GitHubReader, pr: PullRequest): Promise<Duplicate[]> {
 	const pulls = (await openFiles(github, pr)).map(({ number, url, head, files }) => ({
 		number,
 		url,

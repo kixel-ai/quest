@@ -1,6 +1,6 @@
 // Every open PR's changed files, as GitHub lists them: what `gh pr list --json files` gives, without its cap.
 import type { PullFiles, Repository } from "../core";
-import { type GitHub, array, object, repositoryPath, string } from "./client";
+import { type GitHubReader, array, object, repositoryPath, string } from "./client";
 
 /** The most files GitHub's REST API lists for a PR. */
 const REST_LIMIT = 3000;
@@ -26,7 +26,7 @@ const OPEN = `query OpenFiles($owner: String!, $repo: String!, $after: String) {
 }`;
 
 /** Every open PR in `repository` with its changed files. */
-export async function openFiles(github: GitHub, repository: Repository): Promise<OpenFiles[]> {
+export async function openFiles(github: GitHubReader, repository: Repository): Promise<OpenFiles[]> {
 	const pulls: OpenFiles[] = [];
 	for (let after: string | null = null, more = true; more;) {
 		const data = await github.graphql(OPEN, { owner: repository.owner, repo: repository.repo, after });
@@ -60,7 +60,7 @@ export async function openFiles(github: GitHub, repository: Repository): Promise
 }
 
 /** `openFiles` as the paths each PR changes, by number. */
-export async function openPullFiles(github: GitHub, repository: Repository): Promise<PullFiles[]> {
+export async function openPullFiles(github: GitHubReader, repository: Repository): Promise<PullFiles[]> {
 	const pulls = await openFiles(github, repository);
 	// Fail loud: a cut list would let the duplicate search miss a PR touching a path.
 	const cut = pulls.find((pull) => pull.cut);

@@ -1,7 +1,15 @@
 // Reading who holds a PR: its `quest:*` labels, the events that added them, and a draft its starter still holds.
 // Taking and releasing holds stays in the CLI.
 import { type HoldFact, type PullRequest, type StarterHold, handedBack, isHoldLabel, latestHold } from "../core";
-import { GitHub, type GitHubDependencies, type ObjectValue, array, object, repositoryPath, string } from "./client";
+import {
+	GitHubReader,
+	type GitHubReadDependencies,
+	type ObjectValue,
+	array,
+	object,
+	repositoryPath,
+	string,
+} from "./client";
 import { lacksApproval } from "./merge";
 
 /** The PR, its `quest:*` labels, and the timeline events that add a label. */
@@ -62,7 +70,7 @@ export interface HoldReport {
 }
 
 /** Read `pr` and its hold labels. */
-export async function readSnapshot(github: GitHub, pr: PullRequest): Promise<Snapshot> {
+export async function readSnapshot(github: GitHubReader, pr: PullRequest): Promise<Snapshot> {
 	const data = await github.graphql(READ, {
 		owner: pr.owner,
 		repo: pr.repo,
@@ -98,8 +106,8 @@ export async function readSnapshot(github: GitHub, pr: PullRequest): Promise<Sna
 }
 
 /** Read `pr`'s holds without changing its labels. */
-export async function readHoldStatus(pr: PullRequest, deps: GitHubDependencies): Promise<HoldReport> {
-	const github = new GitHub(deps);
+export async function readHoldStatus(pr: PullRequest, deps: GitHubReadDependencies): Promise<HoldReport> {
+	const github = new GitHubReader(deps);
 	const snapshot = await readSnapshot(github, pr);
 	const holds =
 		snapshot.state !== "OPEN"

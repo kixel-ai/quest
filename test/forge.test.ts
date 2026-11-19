@@ -21,7 +21,7 @@ import {
 } from "../src/core";
 import { type ForgeDependencies, forgeFor, KixelQuest, KixelQuestForge } from "../src/cli/forge";
 import { waitForActivity, WaitTimeout } from "../src/cli/wait";
-import { type GitHubDependencies } from "../src/github/client";
+import { type GitHubReadDependencies } from "../src/github/client";
 import { GitHubForge } from "../src/github/forge";
 import * as status from "./status-fakes";
 import * as wait from "./wait-fakes";
@@ -32,7 +32,7 @@ const repository = { owner: "example", repo: "project" };
 
 /** A fake Kixel Quest serving `github`'s answers to the person `login`, at `asOf`. */
 function kixelQuest(
-	github: () => GitHubDependencies,
+	github: () => GitHubReadDependencies,
 	options: { login?: string; repositories?: string[]; asOf?: string | null; fail?: number; answer?: unknown } = {},
 ) {
 	const requests: { method: string; path: string; body: unknown }[] = [];
@@ -94,7 +94,7 @@ afterEach(() => {
 /** Forge dependencies whose token file pairs `TOKEN` with Kixel Quest, unless `token` is false. */
 function dependencies(
 	fetch: ForgeDependencies["fetch"],
-	github: () => GitHubDependencies,
+	github: () => GitHubReadDependencies,
 	env: NodeJS.ProcessEnv = {},
 	token = true,
 ): ForgeDependencies {
@@ -103,11 +103,21 @@ function dependencies(
 		mkdirSync(join(config, "quest"));
 		writeFileSync(join(config, "quest", "records.json"), JSON.stringify({ [URL_]: TOKEN }));
 	}
-	return { env: { XDG_CONFIG_HOME: config, ...env }, fetch, now: () => 0, github };
+	return {
+		env: { XDG_CONFIG_HOME: config, XDG_CACHE_HOME: join(config, "cache"), ...env },
+		fetch,
+		now: () => 0,
+		sleep: async () => {},
+		// The fake's token is the person's own here.
+		github: () => {
+			const { readToken, ...rest } = github();
+			return { ...rest, token: readToken };
+		},
+	};
 }
 
 /** Kixel Quest's backend over a fake serving `github`. */
-async function throughKixelQuest(github: () => GitHubDependencies, options?: Parameters<typeof kixelQuest>[1]) {
+async function throughKixelQuest(github: () => GitHubReadDependencies, options?: Parameters<typeof kixelQuest>[1]) {
 	const server = kixelQuest(github, options);
 	// Kixel Quest's reads keep the fake GitHub's clock, which a wait's deadline is set by.
 	const forge = await forgeFor(repository, { ...dependencies(server.fetch, github), now: () => github().now() });
@@ -236,7 +246,7 @@ describe("status", () => {
 });
 
 /** A fake GitHub holding open PRs and a merged one, as the claim reads list them. */
-function claimsGitHub(): GitHubDependencies {
+function claimsGitHub(): GitHubReadDependencies {
 	const pull = (number: number, ref: string, extra: Record<string, unknown> = {}) => ({
 		number,
 		html_url: `https://github.com/example/project/pull/${number}`,
@@ -251,7 +261,7 @@ function claimsGitHub(): GitHubDependencies {
 	const open = [pull(1, "quest/m0/one"), pull(2, "quest/m0/two"), pull(3, "feature", { draft: false, body: null })];
 	const merged = [pull(4, "quest/m0/done", { head: { ref: "quest/m0/done", sha: "d".repeat(40) }, merged_at: "x" })];
 	return {
-		token: "test-token",
+		readToken: "test-token",
 		quota: "fail",
 		now: () => 0,
 		sleep: async () => {},
@@ -431,7 +441,7 @@ describe("wait deadlines and arguments", () => {
 
 	test("a viewer or Kixel Quest read that failed is read again, not kept", async () => {
 		let viewers = 0;
-		const github: GitHubDependencies = {
+		const github: GitHubReadDependencies = {
 			...claimsGitHub(),
 			fetch: async () =>
 				++viewers === 1
@@ -474,12 +484,12 @@ describe("wait deadlines and arguments", () => {
 	});
 });
 
-const unreachableGitHub = (): GitHubDependencies => {
+const unreachableGitHub = (): GitHubReadDependencies => {
 	throw new Error("read GitHub");
 };
 
 describe("choosing the forge", () => {
-	const unreachable = (): GitHubDependencies => {
+	const unreachable = (): GitHubReadDependencies => {
 		throw new Error("read GitHub");
 	};
 

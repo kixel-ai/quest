@@ -324,7 +324,14 @@ async function sendOnce(deps: SendDependencies, dir: string): Promise<Sent[]> {
 	const kixel = new KixelQuest(
 		url,
 		token,
-		{ env: deps.env, fetch: deps.fetch, now: deps.now, github: deps.github, remedy: "its records stay queued" },
+		{
+			env: deps.env,
+			fetch: deps.fetch,
+			now: deps.now,
+			sleep: async () => {},
+			github: deps.github,
+			remedy: "its records stay queued",
+		},
 		false,
 	);
 	/** Kixel Quest refused the token, which every group shares: nothing more is sent, and what is queued is dropped. */
