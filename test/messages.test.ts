@@ -244,6 +244,9 @@ describe("readCodexMessages from Codex 0.146's TUI", () => {
 					"<environment_context>\n  <cwd>/work/proj</cwd>",
 				]),
 				bareTurn("2026-11-06T10:00:30Z", ["<environment_context>\n  <current_date>2026-11-06</current_date>"]),
+				bareTurn("2026-11-06T10:00:40Z", [
+					"<user_shell_command>\n<command>ls</command>\n</user_shell_command>",
+				]),
 				bareTurn("2026-11-06T10:01:00Z", ["fix it"]),
 			),
 		);

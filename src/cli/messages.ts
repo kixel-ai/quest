@@ -498,8 +498,8 @@ function writesNoProvenance(version: unknown): boolean {
 	return major === 0 && minor !== undefined && minor < 162;
 }
 
-/** How the parts Codex before 0.162 adds to a user turn open: the environment and the AGENTS.md instructions. */
-const CODEX_WRAPPER = /^\s*(?:<environment_context>|# AGENTS\.md instructions\b)/;
+/** How the parts Codex before 0.162 adds to a user turn open: the environment, the AGENTS.md instructions, and a `!` command. */
+const CODEX_WRAPPER = /^\s*(?:<environment_context>|# AGENTS\.md instructions\b|<user_shell_command>)/;
 
 /** Who Codex says wrote a part of a user turn: the person, or the instructions, harness, or skill it added. */
 const CODEX_SOURCES = new Set(["user", "agents_md", "harness", "skills"]);
