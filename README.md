@@ -1629,8 +1629,9 @@ and `next`.
 
 After each round, `quest review` rewrites the `## Review` section of the open PR
 from the branch into the base, found among the upstream's PRs: the one from
-the repository the base's remote pushes to, else the only one from any
-repository, as in a maintainer's checkout of a contributor's fork PR. It
+the repository the base's remote pushes to, else the only one from another
+repository whose pushed head the checked-out `HEAD` contains, as in a
+maintainer's checkout of a contributor's fork PR. It
 prints `record <url>`. The record
 names the reviewed head and the base's short SHA, the head's risk tier and who
 classified it, then for each reviewer its
