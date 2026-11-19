@@ -24,13 +24,19 @@ export interface GitHubReadDependencies {
 	quota: "wait" | "fail";
 	/** Where GET answers are kept to revalidate by ETag, so an unchanged read costs no quota; none when absent. */
 	cache?: ResponseCache;
+	/**
+	 * Where to read a repository's name by its id when the read token cannot see that repository, such as the person's
+	 * own dependencies behind an installation token scoped to one repository: a ruleset names a required workflow's
+	 * repository only by id. None when the read token is the person's.
+	 */
+	names?: GitHubReadDependencies;
 }
 
 /**
  * What a client that writes needs: the same, with the person's own token, so what it writes is in their
  * name. It has no `readToken`, so it never stands in for read dependencies built on another token.
  */
-export interface GitHubDependencies extends Omit<GitHubReadDependencies, "readToken"> {
+export interface GitHubDependencies extends Omit<GitHubReadDependencies, "readToken" | "names"> {
 	token: string;
 }
 
@@ -147,6 +153,18 @@ export class GitHubReader {
 		protected readonly deadline = Infinity,
 	) {
 		this.cache = deps.cache;
+	}
+
+	/**
+	 * The `owner/name` of the repository with `id`, read on {@link GitHubReadDependencies.names} when the read token
+	 * cannot see it; null when neither can.
+	 */
+	async repositoryName(id: number): Promise<string | null> {
+		for (const github of [this, ...(this.deps.names ? [new GitHubReader(this.deps.names, this.deadline)] : [])]) {
+			const response = await github.request(`/repositories/${id}`, { allow: [404] });
+			if (response.ok) return string(object(await response.json()).full_name);
+		}
+		return null;
 	}
 
 	/**
@@ -572,9 +590,8 @@ async function requiredWorkflows(github: GitHubReader, rules: ObjectValue[]): Pr
 		.flatMap((rule) => array(object(rule.parameters).workflows))) {
 		const id = Number(row.repository_id);
 		if (!names.has(id)) {
-			const response = await github.request(`/repositories/${id}`, { allow: [404] });
-			// A repository the token cannot see is still required, by its id; `unreported` matches it by path alone.
-			names.set(id, response.ok ? string(object(await response.json()).full_name) : `repository ${id}`);
+			// A repository no token can see is still required; nothing on the head can match its name.
+			names.set(id, (await github.repositoryName(id)) ?? `repository ${id}`);
 		}
 		keys.push(workflowKey(names.get(id)!, string(row.path)));
 	}

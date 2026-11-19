@@ -11,7 +11,13 @@ import { type ForgeDependencies, liveFor } from "../src/cli/forge";
 import { HOLD, REUSE_MARGIN, exclusive, installationDirectory } from "../src/cli/installation";
 import { waitForActivity } from "../src/cli/wait";
 import { GitHubWrites } from "../src/cli/writes";
-import { GitHub, type GitHubDependencies, GitHubReader, reading } from "../src/github/client";
+import {
+	GitHub,
+	type GitHubDependencies,
+	type GitHubReadDependencies,
+	GitHubReader,
+	reading,
+} from "../src/github/client";
 import * as wait from "./wait-fakes";
 
 const KIXEL = "https://kixel.test";
@@ -108,6 +114,29 @@ describe("reads on a minted installation token", () => {
 			"cannot run a mutation",
 		);
 		expect(w.github).toEqual([]);
+	});
+
+	test("a required workflow's repository the minted token cannot see is named on the person's token", async () => {
+		const w = world({
+			github: async (_input, init) => {
+				const token = new Headers(init?.headers).get("authorization");
+				return token === `Bearer ${PERSON}`
+					? Response.json({ full_name: "example/policies" })
+					: Response.json({ message: "Not Found" }, { status: 404 });
+			},
+		});
+		const forge = await liveFor(repository, w.deps);
+		// The forge's own dependencies, as its status read builds its reader from them.
+		const deps = (forge as unknown as { deps: GitHubReadDependencies }).deps;
+		expect(await new GitHubReader(deps).repositoryName(2)).toBe("example/policies");
+		expect(w.github).toEqual([
+			{ method: "GET", path: "/repositories/2", token: "minted-1" },
+			{ method: "GET", path: "/repositories/2", token: PERSON },
+		]);
+		// Without a token to fall back on, a repository the read token cannot see has no name.
+		w.github.length = 0;
+		expect(await new GitHubReader({ ...deps, names: undefined }).repositoryName(2)).toBeNull();
+		expect(w.github.map((request) => request.token)).toEqual(["minted-1"]);
 	});
 
 	test("a host whose members are a class's methods keeps them as read dependencies", async () => {

@@ -299,22 +299,12 @@ export interface Needs {
 	checks: { name: string; app: number | null }[];
 	/** Workflow files that must pass as a whole, from {@link workflowKey}. */
 	workflows: string[];
-	/**
-	 * The lowercase `owner/repo` whose base this is. A required workflow keyed `repository <id>`, from a repository
-	 * the token cannot see, such as an installation token scoped to this one, is met by a workflow at its path from
-	 * another repository, as {@link unmetWorkflows} matches it; without it, such a workflow is never met.
-	 */
-	repository?: string;
 }
 
 /** What `branch` requires of a PR head. The gate's own check is never on one, so it is left out. */
 export async function requiredOf(github: GitHubReader, repository: Repository, branch: string): Promise<Needs> {
 	const found = await requirements(github, repository, branch);
-	return {
-		checks: found.checks.filter((check) => check.name !== LAND_CHECK),
-		workflows: found.workflows,
-		repository: `${repository.owner}/${repository.repo}`.toLowerCase(),
-	};
+	return { checks: found.checks.filter((check) => check.name !== LAND_CHECK), workflows: found.workflows };
 }
 
 /** A check as a requirement matches it: its name, its app, and the workflow file a GitHub Actions job runs in. */
@@ -349,37 +339,8 @@ export function unreported(found: Reported[], needs: Needs): string[] {
 					!found.some((entry) => entry.name === need.name && (need.app === null || entry.app === need.app)),
 			)
 			.map((need) => (need.app === null ? need.name : `${need.name} (from app ${need.app})`)),
-		...unmetWorkflows(found, needs),
+		...needs.workflows.filter((key) => !found.some((entry) => entry.workflow === key)),
 	];
-}
-
-/** A workflow key's repository and path. */
-function split(key: string): [string, string] {
-	return [key.slice(0, key.indexOf(":")), key.slice(key.indexOf(":") + 1)];
-}
-
-/**
- * The required workflows nothing reports. One named by its repository is met by that repository's workflow at its
- * path. One keyed `repository <id>`, whose repository the token cannot see, is met by a workflow at its path from a
- * repository other than the base's and every named one, each such repository meeting one requirement at most, so two
- * unseen repositories' workflows at one path need two reports.
- */
-function unmetWorkflows(found: Reported[], needs: Needs): string[] {
-	const reported = new Set(found.flatMap((entry) => (entry.workflow ? [entry.workflow] : [])));
-	const named = new Set(needs.workflows.filter((key) => !key.startsWith("repository ")).map((key) => split(key)[0]));
-	const spent = new Set<string>();
-	return needs.workflows.filter((key) => {
-		if (reported.has(key)) return false;
-		const [owner, path] = split(key);
-		if (!owner.startsWith("repository ") || needs.repository === undefined) return true;
-		const other = [...reported].find((actual) => {
-			const [from, file] = split(actual);
-			return file === path && from !== needs.repository && !named.has(from) && !spent.has(actual);
-		});
-		if (other === undefined) return true;
-		spent.add(other);
-		return false;
-	});
 }
 
 /**

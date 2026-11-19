@@ -103,7 +103,9 @@ export async function forgeFor(
 /**
  * The forge that answers `repository`'s reads from GitHub itself, never an index that may lag. For a person holding a
  * Kixel Quest token it reads on the installation token Kixel Quest mints for the repository, and on the person's own
- * where Kixel Quest does not serve it or the reads are forced onto GitHub. Minting gives up at `deadline`.
+ * where Kixel Quest does not serve it or the reads are forced onto GitHub. A required workflow's repository the
+ * installation token cannot see is named on the person's own token, one request each, revalidated by ETag. Minting
+ * gives up at `deadline`.
  */
 export async function liveFor(
 	repository: Repository,
@@ -115,7 +117,7 @@ export async function liveFor(
 	const person = reading(deps.github());
 	return installation === null
 		? new GitHubForge(person)
-		: new GitHubForge({ ...person, readToken: installation.token }, installation.login);
+		: new GitHubForge({ ...person, readToken: installation.token, names: person }, installation.login);
 }
 
 /** Kixel Quest refused the person's token, as a sender must tell from a failure that may pass. */
