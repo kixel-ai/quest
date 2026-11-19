@@ -189,7 +189,7 @@ export function classifierSessions(body: string): string[] {
 
 /**
  * Each reviewer's latest round `body`'s `## Review` section records, or none when `quest review` wrote none
- * there, as when the section records a skipped review or only the land fixer's fixes.
+ * there, as when the section records a skipped review, even under the record's mark, or only the land fixer's fixes.
  */
 export function parseReview(body: string): ReviewSummary[] {
 	const section = reviewSection(body);
@@ -202,7 +202,6 @@ export function parseReview(body: string): ReviewSummary[] {
 		.slice(at)
 		.split(/^(?=- Reviewer: )/m)
 		.slice(1);
-	if (blocks.length === 0) throw new Error("the ## Review record names no reviewer");
 	return blocks.map((text) => {
 		const match = (pattern: RegExp) => {
 			const found = pattern.exec(text);

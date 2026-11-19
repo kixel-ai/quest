@@ -427,6 +427,12 @@ describe("PR records", () => {
 
 	test("a skipped review or a fixer-only section has no round", () => {
 		expect(parseReview("## Review\n\nSkipped: too trivial to need one.\n")).toEqual([]);
+		// A skip written by hand under the mark a round rewrote, as `/quest-review` allows.
+		expect(
+			parseReview(
+				"## Review\n\nRewritten by `quest review` after each round.\n\n- Head: 6c2ce3d381 (skipped review)\n- Skip: one reworded sentence.\n",
+			),
+		).toEqual([]);
 		expect(parseReview("## Review\n\nmechanical fix by quest land watch: `merged main` (head x)\n")).toEqual([]);
 		expect(fixes("## Review\n\nmechanical fix by quest land watch: `merged main` (head x)\n")).toEqual([
 			"quest land watch",
@@ -1093,6 +1099,22 @@ describe("usage", () => {
 		const report = await usage(root, { since: "2026-11-05" }, deps(sessions));
 		expect(report.pulls.flatMap((p) => p.sessions).some((s) => s.session?.startsWith("5555"))).toBe(false);
 		expect(report.unattributed!.sessions).toBe(6);
+	});
+
+	test("reports a review record it cannot read on its PR and reads the rest", async () => {
+		const body =
+			"## Review\n\nRewritten by `quest review` after each round.\n\n- Reviewer: Codex, gpt-6.1-sol, high effort\n- Rounds: garbled\n";
+		const { root, deps, sessions } = setup({
+			pulls: [pr(30, "quest/m0/bad", body, "2026-11-06T00:00:00Z", { updated_at: "2026-11-07T00:00:00Z" })],
+		});
+		const report = await usage(root, { since: "2026-11-05" }, deps(sessions));
+		const bad = report.pulls.find((p) => p.number === 30)!;
+		expect(bad.review).toEqual([]);
+		expect(bad.unreadReview).toBe("the ## Review record's Rounds line is malformed: garbled");
+		expect(report.pulls.find((p) => p.number === 10)!.unreadReview).toBeNull();
+		expect(usageLines(report).join("\n")).toContain(
+			"  unread review: the ## Review record's Rounds line is malformed: garbled",
+		);
 	});
 
 	test("rolls up the writer A/B by size and arm, leaving out a PR a writer ran off its arm", async () => {
