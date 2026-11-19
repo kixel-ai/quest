@@ -356,6 +356,33 @@
 			]
 		},
 		{
+			"pull": 553,
+			"base": "fcca33ed1754b8c29df0840f97a967a40c4ee35c",
+			"head": "44997f1a0c820fe5e3e7891a432fa0e918cd37c3",
+			"size": "M",
+			"tier": "medium",
+			"reason": "the base has no RISK.md to name what is always high or customer-facing, so every change is medium",
+			"writer": "claude-opus-5-5",
+			"defects": [
+				{
+					"fix": 771,
+					"what": "The gh post checks took `args[1]` as the subcommand, so `gh pr -R OWNER/REPO comment ...` skipped the footer and em dash checks.",
+					"at": [
+						{
+							"file": "src/cli/rules.ts",
+							"from": 368,
+							"to": 368
+						},
+						{
+							"file": "src/cli/rules.ts",
+							"from": 206,
+							"to": 206
+						}
+					]
+				}
+			]
+		},
+		{
 			"pull": 570,
 			"base": "738bbdecbd0e4482e038a4aac2a0107b815e8985",
 			"head": "ff36d184dbdd4093ed866bfd510592729710d29f",
@@ -436,6 +463,87 @@
 			]
 		},
 		{
+			"pull": 600,
+			"base": "eaa0831877a271c1bd4b7f90efd013ee8d24581a",
+			"head": "5fba1128468f5fd6c439aaf45f991562e093957c",
+			"size": "M",
+			"tier": "medium",
+			"reason": "the base has no RISK.md to name what is always high or customer-facing, so every change is medium",
+			"writer": "claude-opus-5-5",
+			"defects": [
+				{
+					"fix": 747,
+					"what": "The `quest` PATH sentence was spliced into the start of the footer-check paragraph, garbling it and duplicating the PATH note below.",
+					"at": [
+						{
+							"file": "README.md",
+							"from": 1781,
+							"to": 1781
+						}
+					]
+				}
+			]
+		},
+		{
+			"pull": 621,
+			"base": "855b46d46bbb82621045402d89720d867419806a",
+			"head": "9c37c2bca3c88eadeef9eff87599f749bb5f1a78",
+			"size": "M",
+			"tier": "medium",
+			"reason": "the base has no RISK.md to name what is always high or customer-facing, so every change is medium",
+			"writer": "claude-opus-5-5",
+			"defects": [
+				{
+					"fix": 722,
+					"what": "Running the reviewer seats concurrently and aborting the sibling on first failure lets a fake CLI die mid-append, while the tests still parse one shared append-only log line by line.",
+					"at": [
+						{
+							"file": "src/cli/review.ts",
+							"from": 1635,
+							"to": 1641
+						},
+						{
+							"file": "test/review.test.ts",
+							"from": 338,
+							"to": 343
+						}
+					]
+				}
+			]
+		},
+		{
+			"pull": 627,
+			"base": "f3301efd8c7831c7aa33ae2e6f13995170f3e205",
+			"head": "5b82f7b4aa0abefffaf1de9a62f34558ccf02387",
+			"size": "S",
+			"tier": "medium",
+			"reason": "the base has no RISK.md to name what is always high or customer-facing, so every change is medium",
+			"writer": "claude-opus-5-5",
+			"defects": [
+				{
+					"fix": 763,
+					"what": "Handbacks quoted only the gate's failure and dropped the fixer's own output, so a fixer that crashed before the agent started named no cause.",
+					"at": [
+						{
+							"file": "src/cli/land-fixer.ts",
+							"from": 72,
+							"to": 73
+						},
+						{
+							"file": "src/cli/land-fixer.ts",
+							"from": 1192,
+							"to": 1192
+						},
+						{
+							"file": "src/cli/land-watch-fix.ts",
+							"from": 690,
+							"to": 690
+						}
+					]
+				}
+			]
+		},
+		{
 			"pull": 655,
 			"base": "93c9c2ef65f074e82094bf5272076db44ac19030",
 			"head": "85b0b490516f494bd65d998ded89c96195306d73",
@@ -489,6 +597,50 @@
 							"file": "src/cli/usage.ts",
 							"from": 481,
 							"to": 486
+						}
+					]
+				}
+			]
+		},
+		{
+			"pull": 718,
+			"base": "85d0a78bd02b4dc7063abdfb8525f4ce9c8e1618",
+			"head": "4eddf305f23610adb1fe61805f9fd2efbd88eed6",
+			"size": "L",
+			"tier": "high",
+			"reason": "The change introduces a public record format, changes usage records consumers parse, and sends session data with bearer tokens to configured endpoints, so failures can break Kixel Code and scripts or expose data that a revert cannot recover.",
+			"writer": "claude-opus-5-5",
+			"defects": [
+				{
+					"fix": 748,
+					"what": "The sender settled each queued stop after one successful upload, so a session sent before its branch's PR opened was never rebuilt to name that PR.",
+					"at": [
+						{
+							"file": "src/cli/send.ts",
+							"from": 457,
+							"to": 458
+						}
+					]
+				}
+			]
+		},
+		{
+			"pull": 751,
+			"base": "f3bf9ca458a272cee7053e2130a9c77900c3d74b",
+			"head": "4f903210afdc40108ce76285d86a5fbfa93a6934",
+			"size": "S",
+			"tier": "high",
+			"reason": "it changes .github/workflows/pullfrog.yml, which is always high: workflows run with the repository's secrets and decide what merges and ships",
+			"writer": "claude-sonnet-5-5",
+			"defects": [
+				{
+					"fix": 756,
+					"what": "The Nix installer step left the action's default `trust-runner-user: true`, so the agent's shell could reach root through the Nix daemon.",
+					"at": [
+						{
+							"file": ".github/workflows/pullfrog.yml",
+							"from": 35,
+							"to": 37
 						}
 					]
 				}
