@@ -114,7 +114,7 @@ export interface PullRow {
 	review: ReviewSummary[];
 	/** The risk tier the record names for its head, null when it names none. */
 	risk: RecordedRisk | null;
-	/** Why its `## Review` record could not be read, which then names no reviewer or tier; null when it could. */
+	/** Why part of its `## Review` record could not be read: its reviewers, its tier, or both, which it then lacks. */
 	unreadReview: string | null;
 	/** Who made each mechanical fix the land fixer recorded, or `quest land watch` for a base merge it made alone. */
 	landFixes: string[];
@@ -541,17 +541,20 @@ function pullRows(pulls: Pull[], repository: Repository): PullRow[] {
 function pullRow(each: Pull, fixedBy: Map<number, number[]>): PullRow {
 	const own = recorded(each.body);
 	// The `## Review` record is its writer's text, at times edited by hand, so one this version cannot read is
-	// reported on its PR instead of stopping every other PR's.
-	let review: ReviewSummary[] = [];
-	let risk: RecordedRisk | null = null;
-	let unreadReview: string | null = null;
-	try {
-		review = settledOnMerge(parseReview(each.body), each.state === "merged");
-		risk = recordedRisk(each.body);
-	} catch (error) {
-		review = [];
-		unreadReview = error instanceof Error ? error.message : String(error);
-	}
+	// reported on its PR instead of stopping every other PR's. Its reviewers and its tier are read apart, so a
+	// garbled line in one keeps the other.
+	const unread: string[] = [];
+	const read = <T>(parse: () => T, fallback: T): T => {
+		try {
+			return parse();
+		} catch (error) {
+			unread.push(error instanceof Error ? error.message : String(error));
+			return fallback;
+		}
+	};
+	const review = read(() => settledOnMerge(parseReview(each.body), each.state === "merged"), []);
+	const risk = read(() => recordedRisk(each.body), null);
+	const unreadReview = unread.length ? unread.join("; ") : null;
 	return {
 		number: each.number,
 		url: each.url,

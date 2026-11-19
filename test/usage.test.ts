@@ -1101,16 +1101,34 @@ describe("usage", () => {
 		expect(report.unattributed!.sessions).toBe(6);
 	});
 
-	test("reports a review record it cannot read on its PR and reads the rest", async () => {
-		const body =
-			"## Review\n\nRewritten by `quest review` after each round.\n\n- Reviewer: Codex, gpt-6.1-sol, high effort\n- Rounds: garbled\n";
+	test("reports the part of a review record it cannot read on its PR and reads the rest", async () => {
+		const record = (...lines: string[]) =>
+			["## Review", "", "Rewritten by `quest review` after each round.", "", ...lines, ""].join("\n");
+		const head = `- Head: ${"a".repeat(40)}`;
+		const reviewer = "- Reviewer: Codex, gpt-6.1-sol, high effort";
+		// #30's tier survives its garbled Rounds line, and #31's reviewer its garbled Risk line.
+		const garbledRounds = record(head, RISK, reviewer, "- Rounds: garbled");
+		const garbledRisk = record(
+			head,
+			"- Risk: garbled",
+			reviewer,
+			"- Rounds: 2; findings 1 (medium 1): fixed 1, refuted 0, open 0",
+		);
 		const { root, deps, sessions } = setup({
-			pulls: [pr(30, "quest/m0/bad", body, "2026-11-06T00:00:00Z", { updated_at: "2026-11-07T00:00:00Z" })],
+			pulls: [
+				pr(30, "quest/m0/bad", garbledRounds, "2026-11-06T00:00:00Z", { updated_at: "2026-11-07T00:00:00Z" }),
+				pr(31, "quest/m0/worse", garbledRisk, "2026-11-06T00:00:00Z", { updated_at: "2026-11-07T00:00:00Z" }),
+			],
 		});
 		const report = await usage(root, { since: "2026-11-05" }, deps(sessions));
-		const bad = report.pulls.find((p) => p.number === 30)!;
-		expect(bad.review).toEqual([]);
-		expect(bad.unreadReview).toBe("the ## Review record's Rounds line is malformed: garbled");
+		const rounds = report.pulls.find((p) => p.number === 30)!;
+		expect(rounds.review).toEqual([]);
+		expect(rounds.risk?.tier).toBe("high");
+		expect(rounds.unreadReview).toBe("the ## Review record's Rounds line is malformed: garbled");
+		const risk = report.pulls.find((p) => p.number === 31)!;
+		expect(risk.review.map((r) => r.model)).toEqual(["gpt-6.1-sol"]);
+		expect(risk.risk).toBeNull();
+		expect(risk.unreadReview).toBe("the ## Review record's risk is malformed: garbled");
 		expect(report.pulls.find((p) => p.number === 10)!.unreadReview).toBeNull();
 		expect(usageLines(report).join("\n")).toContain(
 			"  unread review: the ## Review record's Rounds line is malformed: garbled",

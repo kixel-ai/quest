@@ -120,7 +120,6 @@ Agent's choices, for the implementer to revisit. Each run:
   check first, and a `## Scheduled` date one week after the run's date,
   checked with `date`.
 
-
 Check first next run:
 
 - Contract changes that left a dependent on the old contract, the largest
@@ -142,12 +141,13 @@ Check first next run:
   were not installed. Planned in kixel-ai/dotfiles, if kept.
 - Stalls after the stop hook of
   [moq-dev/quest#600](https://github.com/moq-dev/quest/pull/600): 5.0 per
-  100 typed messages on all hosts (4.3 on fedora), against 3.8 before.
+  100 typed messages on all hosts (4.3 on the audit's host), against 3.8
+  before.
   Without the 12 asks for new work after a `/quest-run` ended, 2.4.
 - Output handed back unchecked, after the verification rule of
   [moq-dev/quest#625](https://github.com/moq-dev/quest/pull/625): 5, 1.1
   per 100, all on the two hosts the earlier baseline did not read; 0 on
-  fedora.
+  the audit's host.
 - Heads that landed past a related finding or decision after
   [moq-dev/quest#652](https://github.com/moq-dev/quest/pull/652) landed
   (2026-11-13T22:12Z): 2 in moq-dev/moq, each a finding the agent answered
@@ -165,7 +165,8 @@ Check first next run:
 
 Baseline from the 2026-11-18 run (PRs updated 2026-11-11 to 11-19; culprit
 pairs whose fix opened since 2026-11-11; typed messages since 2026-11-11 on
-fedora, desktop, and nixos; each class from sub-agents' hand labels, so
+the maintainer's three hosts, of which "the audit's host" below is the
+one the 2026-11-11 baseline read alone; each class from sub-agents' hand labels, so
 approximate):
 
 - PRs: moq-dev/moq 700 (635 merged), moq-dev/moq.pro 492 (431), and
@@ -188,7 +189,7 @@ approximate):
 - Eval set: moq-dev/quest's grew from 26 to 32 cases with this run's
   escapes.
 - Typed messages: 577, 118 set aside as machine-written, 459 left (230 on
-  fedora). Per 100, all hosts then fedora: stalls until nudged 5.0 then
+  the audit's host). Per 100, all hosts then the audit's host: stalls until nudged 5.0 then
   4.3; waited on a blocked dependency instead of removing it 4.1 then 5.7
   (8 behind Pullfrog); routine choices asked 4.1 then 2.6 (7 asked to plan
   follow-ups a session had found); resumed after a rate limit or API
