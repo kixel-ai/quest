@@ -47,11 +47,13 @@ Agent's choices, for the implementer to revisit. Each run:
   of those culprits and their fixes; and the typed messages from
   `quest messages --since <date> --json` on every host the maintainer
   types on, since `quest messages` reads only its own host. Where a host
-  lacks `quest`, copy a `bun run compile` build of this checkout there
-  and remove it afterwards. Keep one host's counts apart when comparing
+  lacks `quest`, copy a `bun run compile` build of this checkout there,
+  built for that host's OS and CPU (`bun build --compile --target`
+  when they differ from this one's), and remove it afterwards. Keep one host's counts apart when comparing
   with a baseline that read only that host.
-- Count a culprit pair once its fix opened since the last run. 245 pairs
-  did on 2026-11-18, too many for one session: split them by repository
+- Count a culprit pair once its fix merged since the last run, so a fix
+  open across a run's start counts in exactly one run. 245 pairs whose fix
+  opened since 2026-11-11 were read on 2026-11-18, too many for one session: split them by repository
   into sub-agents of about 50 pairs, each writing one JSON line per pair
   under `.tmp/`, and classify messages in another.
 - Read each culprit pair's `## Caused by` line before counting it. On
@@ -122,6 +124,10 @@ Agent's choices, for the implementer to revisit. Each run:
 
 Check first next run:
 
+- The 15 culprit pairs (11 in moq-dev/moq, 4 in moq-dev/moq.pro) whose fix
+  opened before 2026-11-11 and merged after it: the 2026-11-18 run keyed
+  pairs by when the fix opened, so neither run read them. Read them with
+  this run's.
 - Contract changes that left a dependent on the old contract, the largest
   escape class: about 41 of 204 real escapes, 26 catchable or maybe, all
   past a local review. [Review dependents](/quest/m0/review-dependents.md)

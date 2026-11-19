@@ -11,6 +11,11 @@ class, at no more clean-PR noise.
 
 ## Plan
 
+Decided 2026-11-19 (maintainer, merge pick of
+[moq-dev/quest#786](https://github.com/moq-dev/quest/pull/786)):
+
+- Keep it? ✅ Keep, in m0 (rejected: m1, drop)
+
 From the 2026-11-18 [mistake audit](/quest/m0/mistake-audit.md) run: this
 was the largest class of real escapes, about 41 of 204 across moq-dev/moq,
 moq-dev/moq.pro, and moq-dev/quest. 26 of them were catchable or maybe from
@@ -41,7 +46,7 @@ Recommended:
 - Score base and head builds with `quest eval run` on both sets, and put
   both scores and their cost in the PR's `## Validation`, as this
   repository's `AGENTS.md` requires for a review-prompt change. Land it
-  only if defects found rise without clean findings rising more.
+  only if defects found rise and clean findings do not.
 
 ## Related
 
