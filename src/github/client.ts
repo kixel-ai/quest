@@ -58,11 +58,12 @@ export function reading(deps: GitHubDependencies): GitHubReadDependencies {
 }
 
 /**
- * Whether a GraphQL document defines a mutation: one starting the document, or following a fragment's closing brace,
- * once comments are gone. It errs toward refusing, since a read-only client never needs to send one.
+ * Whether a GraphQL document may define a mutation: whether it holds the word anywhere, since GraphQL lets one
+ * follow a comment, a comma, or a fragment. It errs toward a mutation, which is never repeated blindly and which a
+ * read-only client refuses, since no read needs the word.
  */
 function mutates(query: string): boolean {
-	return /(^|\})\s*mutation\b/.test(query.replace(/#[^\n]*/g, ""));
+	return /\bmutation\b/.test(query);
 }
 
 /** A 200 answer to a GET, kept to serve when GitHub answers its ETag with a 304. */
@@ -474,7 +475,7 @@ export class GitHub extends GitHubReader {
 	 * GitHub's refusal for the caller.
 	 */
 	private mutationRepeat(query: string, variables: ObjectValue): Repeat {
-		if (!/^\s*mutation\b/.test(query)) return true;
+		if (!mutates(query)) return true;
 		const call = /^\s*mutation\b[^{]*\{\s*(\w+)\s*\(\s*input:\s*\{\s*pullRequestId:\s*\$(\w+)\b/.exec(query);
 		const effect = call && Object.hasOwn(PULL_MUTATIONS, call[1]) ? PULL_MUTATIONS[call[1]] : undefined;
 		const id = call && variables[call[2]];

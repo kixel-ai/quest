@@ -110,6 +110,7 @@ describe("reads on a minted installation token", () => {
 		void forge;
 		await expect(reader.graphql("mutation { x }", {})).rejects.toThrow("cannot run a mutation");
 		await expect(reader.graphql("# note\nmutation { x }", {})).rejects.toThrow("cannot run a mutation");
+		await expect(reader.graphql(",mutation { x }", {})).rejects.toThrow("cannot run a mutation");
 		await expect(reader.graphql("fragment f on X { y }\nmutation { x { ...f } }", {})).rejects.toThrow(
 			"cannot run a mutation",
 		);
