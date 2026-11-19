@@ -97,7 +97,7 @@ export class LockDeadline extends Error {
  * once between them: each waits, then finds the winner's token. `run` gets the time, epoch milliseconds, it must
  * finish by: the caller's `deadline`, or `HOLD` after it took the lock if sooner, so a live holder is never taken
  * over. The lock is a file created exclusively, holding its time and its owner, so a holder that crashed is taken over
- * after `STALE` milliseconds, and a holder releases only a lock still its own. Waits until `deadline`, epoch
+ * after `STALE` milliseconds (one left empty, `STALE` after the waiter first found it empty), and a holder releases only a lock still its own. Waits until `deadline`, epoch
  * milliseconds; two waiters that take over a crashed holder's lock at once may mint twice.
  */
 export async function exclusive<T>(
@@ -112,6 +112,8 @@ export async function exclusive<T>(
 	mkdirSync(directory, { recursive: true, mode: 0o700 });
 	const lock = `${file(directory, url, kixelToken, repository)}.lock`;
 	const owner = crypto.randomUUID();
+	// When this waiter first found the lock empty, so one whose holder died before writing it still goes stale.
+	let empty: number | undefined;
 	for (;;) {
 		try {
 			writeFileSync(lock, `${clock.now()} ${owner}`, { flag: "wx", mode: 0o600 });
@@ -122,8 +124,12 @@ export async function exclusive<T>(
 		let since = Number.NaN;
 		try {
 			const text = readFileSync(lock, "utf8");
-			// Created but not yet written: its holder has only just taken it.
-			since = text === "" ? clock.now() : Number(text.split(" ")[0]);
+			// Created but not yet written: date it from when it was first seen empty.
+			if (text === "") since = empty ??= clock.now();
+			else {
+				empty = undefined;
+				since = Number(text.split(" ")[0]);
+			}
 		} catch (error) {
 			// Released between the two reads: try to take it again.
 			if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;

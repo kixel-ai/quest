@@ -1,9 +1,10 @@
 // Which forge answers a repository's reads and takes its writes. A repository Kixel Quest hosts, named by a remote or
 // PR URL on Kixel Quest, is read and written there alone. For one on GitHub, reads go to Kixel Quest's index for a
 // person holding its token when it serves the repository, else GitHub, and writes go to GitHub. A Kixel Quest failure
-// fails the command, naming the setting that reads GitHub instead where that would help. A read that goes to GitHub
-// anyway, to verify what an index said or because Kixel Quest does not serve the repository, runs on a read-only
-// installation token Kixel Quest mints, so it draws on the installation's rate limit rather than the person's.
+// fails the command, naming the setting that reads GitHub instead where that would help. A live read of a repository
+// Kixel Quest serves, which must come from GitHub itself rather than an index that may lag, runs on a read-only
+// installation token Kixel Quest mints, so it draws on the installation's rate limit rather than the person's; one of
+// a repository it does not serve runs on the person's own token.
 import {
 	type Answer,
 	type ClaimSources,

@@ -159,6 +159,23 @@ describe("reads on a minted installation token", () => {
 		expect(files(w.env).filter((name) => name.endsWith(".lock"))).toEqual([]);
 	});
 
+	test("a lock left empty by an agent that died before writing it is taken over once stale", async () => {
+		const w = world();
+		const lock = join(
+			installationDirectory(w.env),
+			`${createHash("sha256").update(`${KIXEL}\n${KIXEL_TOKEN}\nexample/project`).digest("hex")}.lock`,
+		);
+		mkdirSync(installationDirectory(w.env), { recursive: true });
+		writeFileSync(lock, "");
+		await expect(liveFor(repository, w.deps, clock + 1000)).rejects.toThrow(
+			"its deadline passed while another quest minted the token",
+		);
+		expect(w.mints).toEqual([]);
+		await liveFor(repository, w.deps);
+		expect(w.mints).toHaveLength(1);
+		expect(files(w.env).filter((name) => name.endsWith(".lock"))).toEqual([]);
+	});
+
 	test("a holder gets less time than it takes to be taken over, and never releases another's lock", async () => {
 		const directory = installationDirectory({ XDG_CACHE_HOME: cache });
 		const clockwork = { now: () => clock, sleep: async (ms: number) => void (clock += ms) };

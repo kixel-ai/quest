@@ -647,8 +647,9 @@ person's own token. `quest` keeps each token in
 five minutes before it expires, since a person may mint only so many an hour,
 and a 429 or any other failure fails the command, naming `QUEST_FORGE=github`.
 Writes, such as comments, pushes, and merges, always use the person's own token,
-so they are made in their name; `quest wait` takes the person from the mint's
-`login`, because on an installation token GitHub names the App as the viewer.
+so they are made in their name. A forge reading on a minted token takes the
+person from the mint's `login`, because on an installation token GitHub names
+the App as the viewer.
 
 Its read API lives under `/forge`, with the token as a bearer token:
 `GET /forge` answers `{"login", "repositories"}`, the person the token names
