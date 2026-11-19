@@ -204,6 +204,9 @@ describe("readCodexMessages from Codex 0.162's TUI", () => {
 				]),
 				kindTurn("2026-11-06T10:01:00Z", [["fix it", "user.text"]]),
 				kindTurn("2026-11-06T10:02:00Z", [["replayed", "unknown"]]),
+				kindTurn("2026-11-06T10:03:00Z", [
+					["<user_shell_command>ls</user_shell_command>", "shell.user_command"],
+				]),
 			),
 		);
 		expect(readCodexMessages(path, SINCE, plain).map((m) => m.kind === "message" && m.text)).toEqual(["fix it"]);
@@ -213,6 +216,67 @@ describe("readCodexMessages from Codex 0.162's TUI", () => {
 		const path = join(tempDir(), "rollout.jsonl");
 		writeFileSync(path, lines(codexMeta({}), kindTurn("2026-11-06T10:01:00Z", [["x", "plugins.mystery"]])));
 		expect(() => readCodexMessages(path, SINCE, plain)).toThrow(/unknown provenance: plugins.mystery/);
+	});
+});
+
+describe("readCodexMessages from Codex 0.146's TUI", () => {
+	/** A user turn that marks nothing but its turn, as codex-tui 0.146 writes. */
+	const bareTurn = (timestamp: string, parts: string[]) => ({
+		type: "response_item",
+		timestamp,
+		payload: {
+			type: "message",
+			role: "user",
+			content: parts.map((text) => ({ type: "input_text", text })),
+			internal_chat_message_metadata_passthrough: { turn_id: "t" },
+		},
+	});
+	const meta = (version: string) => codexMeta({ source: "cli", originator: "codex-tui", cli_version: version });
+
+	test("reads typed text and sets the parts Codex adds aside", () => {
+		const path = join(tempDir(), "rollout.jsonl");
+		writeFileSync(
+			path,
+			lines(
+				meta("0.146.0"),
+				bareTurn("2026-11-06T10:00:00Z", [
+					"# AGENTS.md instructions for /work/proj\n\n<INSTRUCTIONS>",
+					"<environment_context>\n  <cwd>/work/proj</cwd>",
+				]),
+				bareTurn("2026-11-06T10:00:30Z", ["<environment_context>\n  <current_date>2026-11-06</current_date>"]),
+				bareTurn("2026-11-06T10:00:40Z", [
+					"<user_shell_command>\n<command>ls</command>\n</user_shell_command>",
+				]),
+				bareTurn("2026-11-06T10:01:00Z", ["fix it"]),
+			),
+		);
+		expect(readCodexMessages(path, SINCE, plain).map((m) => m.kind === "message" && m.text)).toEqual(["fix it"]);
+	});
+
+	test("reads a prerelease or build version before 0.162", () => {
+		for (const head of [meta("0.146.0-alpha.1"), meta("0.146.0+build.5")]) {
+			const path = join(tempDir(), "rollout.jsonl");
+			writeFileSync(path, lines(head, bareTurn("2026-11-06T10:01:00Z", ["fix it"])));
+			expect(readCodexMessages(path, SINCE, plain).map((m) => m.kind === "message" && m.text)).toEqual([
+				"fix it",
+			]);
+		}
+	});
+
+	test("fails on a turn without provenance from a version that writes it, or one with no version", () => {
+		for (const head of [
+			meta("0.162.1"),
+			meta("0.167.0-alpha.6"),
+			meta("1.0.0"),
+			meta("unknown"),
+			meta("0.146.not-a-version"),
+			meta("0.146.0 "),
+			codexMeta({}),
+		]) {
+			const path = join(tempDir(), "rollout.jsonl");
+			writeFileSync(path, lines(head, bareTurn("2026-11-06T10:01:00Z", ["fix it"])));
+			expect(() => readCodexMessages(path, SINCE, plain)).toThrow(/provenance/);
+		}
 	});
 });
 

@@ -2120,8 +2120,9 @@ wording. T3 Code records whether a person or an agent created each message, so
 the sessions it drives are read from its state (`$T3CODE_HOME`, or `~/.t3`)
 and nowhere else. Other Claude Code sessions count the turns Claude Code marks
 as a human's, with its reminders dropped and a slash command spelled as typed;
-other Codex sessions count the content Codex marks as the user's, outside
-headless (`codex exec`) and sub-agent sessions. A log or record in a shape it
+other Codex sessions count the content Codex marks as the user's (before 0.162,
+which marks none, the parts but its environment, shell commands, and AGENTS.md instructions),
+outside headless (`codex exec`) and sub-agent sessions. A log or record in a shape it
 does not know fails the command rather than being skipped. Output goes to
 stdout only; nothing is stored or posted.
 
