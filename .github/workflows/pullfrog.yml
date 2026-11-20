@@ -32,15 +32,16 @@ jobs:
       # Edited: what the review needs to run the repository's checks and
       # tests. The environment admits only main, so the dev shell comes from
       # the default branch, not a pull request's head.
-      - uses: DeterminateSystems/nix-installer-action@1d87d45818068401a10cf16bdc5f00b24994a83f # main
+      - uses: cachix/install-nix-action@bb0495a1086c46893eee56f32fd192dfe4a15bb9 # v32.0.0
         with:
-          determinate: false
-          # The agent's shell can reach the daemon and read /etc/nix and
-          # /nix/receipt.json: keep the job's token out of both, and keep the
-          # runner user untrusted, since a trusted user's settings, such as a
-          # post-build-hook, run as root.
-          github-token: ""
-          trust-runner-user: false
+          # The agent's shell can reach the daemon and read /etc/nix: keep
+          # the runner user untrusted, since a trusted user's settings, such
+          # as a post-build-hook, run as root.
+          set_as_trusted_user: false
+      # The action writes the job's token into nix.conf and has no input to
+      # skip it, so drop it before the agent can read /etc/nix.
+      - name: Keep the job token out of Nix's config
+        run: sudo sed -i '/^access-tokens/d' /etc/nix/nix.conf
       - name: Put the dev shell's tools on PATH
         # bash, not the default shell, for pipefail: a failing print-dev-env
         # must fail the step, not write an empty PATH.
@@ -53,7 +54,7 @@ jobs:
           nix print-dev-env --json |
             jq -r '.variables.PATH.value' |
             tr ':' '\n' | grep '^/nix/store/' | paste -sd: >>"$GITHUB_PATH"
-          if sudo grep -rqF "$TOKEN" /etc/nix /nix/receipt.json; then
+          if sudo grep -rqF "$TOKEN" /etc/nix; then
             echo "the job token reached Nix's config" >&2
             exit 1
           fi
