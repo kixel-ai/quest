@@ -23,8 +23,18 @@ follow-up). Confirmed 2026-11-20 (maintainer, `/quest-plan` after a
 - Talk to Kixel Quest as `quest records` does, with its record token; a
   missing token fails `eval` with how to get one. No local-file fallback: this
   tree's Goal allows depending on Kixel Quest.
+- Key each set by the repository whose escape a case records, and tag each
+  case with what added it: the audit's name and run date, or `manual` for a
+  plain `quest eval add`. The mistake audit and review-dependents add each
+  case to its own repository's set, so "for every repository" means each
+  repository's set, not one shared pool. `quest eval run` runs the current
+  repository's set, every tag included; `--repo <owner/repo>` runs another
+  that the token can read, and `--source <tag>` narrows a run to one audit's
+  cases, so each audit reads and scores its own apart from another's.
 - Import this repository's `review-eval.json` before deleting it, and check
-  that `quest eval run` scores the same before and after.
+  that `quest eval run` scores the same before and after. It is the only
+  one: on 2026-11-21 no other repository Quest serves kept a
+  `review-eval.json`.
 - Move each audit's baseline (such as the mistake audit's "Baseline from the
   2026-11-18 run") into Kixel Quest's records the same way, and have each
   audit read its baseline from there.
