@@ -59,6 +59,14 @@ tiers are trusted, not merging every pick on its own. Decided 2026-11-19
 [moq-dev/quest#786](https://github.com/moq-dev/quest/pull/786)): ✅ keep
 this evidence here (rejected: drop).
 
+Decided 2026-11-21 (maintainer, /quest-run): a week of recorded tiers did
+not match their sense of risk, since high took 55% of PRs and nearly every
+code PR. [moq-dev/quest#794](https://github.com/moq-dev/quest/pull/794)
+narrowed high in `RISK.md` to breaking changes to exports, records, or
+output, new remote writes, uploads, or spending, merge authority,
+credentials, and the held paths. Re-tiered, the week's 56 tiered PRs went
+from 32 high to 22, with no low PR moving.
+
 This quest edits the shipped skills and rules, which the maintainer asked
 for by planning it.
 
@@ -96,11 +104,6 @@ automatic merging. That would also take out a trivial bump of a GitHub
 Action, which edits a workflow file: recommended to keep that class
 automatic, since the actions are pinned by SHA, Dependabot waits out a
 cooldown, and Pullfrog approves the head.
-
-## Required
-
-- [Read a week of risk tiers before guardrails act on them](/quest/m0/benchmark/risk-tier.md) -
-  the maintainer's verdict that the recorded tiers can be trusted
 
 ## Related
 
