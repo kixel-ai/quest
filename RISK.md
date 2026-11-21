@@ -7,9 +7,10 @@ the README's Risk tiers section describes.
 to `main` ships in the next release, which contributors and the maintainer's
 hosts install, and a revert ships in the one after. A bug that agents act on
 while its release is live is a risk every behavior change carries, and
-medium covers it. What a revert cannot undo is what the change itself does
-beyond the repository: writing to a forge, uploading, publishing, spending,
-or deleting.
+medium covers it, including a bug in a record, comment, or upload `quest`
+already writes. What a revert cannot undo is what a change newly makes
+`quest` or its agents do beyond the repository: merge, post, upload, or
+spend where they did not before.
 
 What others rely on here:
 
@@ -33,9 +34,10 @@ A change is high when it:
   its title with `!`, though a `!` for a CLI flag alone is not this.
 - changes when an agent may push, merge, post, or spend without asking,
   in `assets/` or in the code that acts on it.
-- changes the reviewer's sandbox, the credentials an agent gets, or what
-  `quest` writes, uploads, or posts beyond the checkout, such as a
-  record it sends or text it puts in a public comment.
+- changes the reviewer's sandbox or the credentials an agent gets, or
+  sends a new kind of data off the host or into a public comment, such as
+  a new upload destination or command output it now posts. New fields in
+  a record `quest` already sends are not this.
 
 A change is medium when behavior others rely on changes and a revert
 undoes it, such as an export, an optional field, or an output line that
