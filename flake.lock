@@ -101,11 +101,11 @@
         "quest": []
       },
       "locked": {
-        "lastModified": 1794632641,
-        "narHash": "sha256-2Qxp7REU59m4arLPw0pk+7uvJWQYxuaJ9hRd41HJH7w=",
+        "lastModified": 1795289142,
+        "narHash": "sha256-0mCwGbRtsMZKhTxPWDJevN3I7o9zRm9GtNfKrie7gC4=",
         "owner": "kixel-ai",
         "repo": "token-max",
-        "rev": "f2bfa79be9de52cf09bf3703aad887652ba57650",
+        "rev": "fff53685f9c86c86bef44864065d5859a800f0b6",
         "type": "github"
       },
       "original": {
