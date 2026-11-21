@@ -24,13 +24,16 @@ follow-up). Confirmed 2026-11-20 (maintainer, `/quest-plan` after a
   missing token fails `eval` with how to get one. No local-file fallback: this
   tree's Goal allows depending on Kixel Quest.
 - Key each set by the repository whose escape a case records, and tag each
-  case with what added it: the audit's name and run date, or `manual` for a
-  plain `quest eval add`. The mistake audit and review-dependents add each
-  case to its own repository's set, so "for every repository" means each
-  repository's set, not one shared pool. `quest eval run` runs the current
-  repository's set, every tag included; `--repo <owner/repo>` runs another
-  that the token can read, and `--source <tag>` narrows a run to one audit's
-  cases, so each audit reads and scores its own apart from another's.
+  defect, not its case, with what added it: the audit's name and run date, or
+  `manual` for a plain `quest eval add`. A defect `quest eval add` appends to
+  an existing culprit's case carries its own tag. The mistake audit and
+  review-dependents add each case to its own repository's set, so "for every
+  repository" means each repository's set, not one shared pool. `quest eval
+  run` runs the current repository's set, every tag included; `--repo
+  <owner/repo>` runs another that the token can read, and `--source <tag>`
+  narrows a run to the defects carrying that tag, scoring each case on only
+  those and skipping a case with none, so each audit scores its own defects
+  apart from another's.
 - Import this repository's `review-eval.json` before deleting it, and check
   that `quest eval run` scores the same before and after. It is the only
   one: on 2026-11-21 no other repository Quest serves kept a
