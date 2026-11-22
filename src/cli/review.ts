@@ -87,7 +87,6 @@ export interface Skip extends Model {
 	reason: string;
 }
 
-/** Every eligible reviewer of the size was unavailable, each for the reason `skipped` names. */
 /** The rounds a run saved before the second review a raise called for failed, by the error that stopped it. */
 const savedBefore = new WeakMap<object, Reviewed>();
 
@@ -96,6 +95,7 @@ export function savedReview(error: unknown): Reviewed | undefined {
 	return typeof error === "object" && error !== null ? savedBefore.get(error) : undefined;
 }
 
+/** Every eligible reviewer of the size was unavailable, each for the reason `skipped` names. */
 export class ReviewOutageError extends Error {
 	constructor(
 		size: Size,
