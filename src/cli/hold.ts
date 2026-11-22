@@ -11,7 +11,9 @@ import {
 	type Hold,
 	type Method,
 	type PullRequest,
+	recordedRisk,
 	Refusal,
+	undoProblem,
 	withoutHandBack,
 } from "../core";
 import { cleanAutoMergeRefusal, immediateMerge, queueHead } from "../github/merge";
@@ -156,6 +158,7 @@ export async function land(pr: PullRequest, request: LandRequest, deps: GitHubDe
 	open(snapshot);
 	current(snapshot);
 	unheld(snapshot, undefined, deps.now());
+	undoable(snapshot);
 	// The policy below is decided for the base read above; reread before landing, since a retarget decides nothing.
 	const unchanged = async () => {
 		const fresh = await labels.read();
@@ -270,6 +273,20 @@ export async function land(pr: PullRequest, request: LandRequest, deps: GitHubDe
 		await unsignaled(labels.github, pr, snapshot.url, sha);
 		await submit("mergePullRequest");
 	}
+}
+
+/**
+ * Refuse a PR whose body does not say how to undo it, unless its `## Review` record names it low risk, which a revert
+ * undoes whole. A body with no tier counts as riskier, so a skipped classification cannot skip the undo line.
+ */
+function undoable(snapshot: Snapshot): void {
+	const risk = recordedRisk(snapshot.body);
+	if (risk?.tier === "low") return;
+	const problem = undoProblem(snapshot.body);
+	if (problem !== null)
+		throw new Refusal(
+			`${snapshot.url} ${risk === null ? "records no risk tier" : `is ${risk.tier} risk`}, and ${problem}; add one, such as \`Revert: leaves nothing behind.\`, then land it again`,
+		);
 }
 
 /**

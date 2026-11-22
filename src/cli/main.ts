@@ -21,6 +21,8 @@ import {
 	parseRiskFile,
 	questBranch,
 	RISK_FILE,
+	TIERS,
+	type Tier,
 	renderBlocker,
 	FINDERS,
 	type Finder,
@@ -115,6 +117,7 @@ import { KIXEL_QUEST_URL, kixelUrl, tokensPath } from "./tokens";
 import { CONTEXT, GUIDE, GUIDE_SECTIONS, SKILLS, guideSections, sectionHeading, skill } from "./skills";
 import { type Terminal, Theme } from "./theme";
 import { type Snapshot, checkout, collect, load, snapshot, under } from "./tree";
+import { baseRiskFile, suiteFor } from "./suite";
 import { pullFileLines, statusLines, viewLines } from "./status";
 import { TOKEN_MAX_MISSING, daysBefore, runTokenMax, usage, usageDependencies, usageLines } from "./usage";
 import { waitForActivity, WaitTimeout } from "./wait";
@@ -711,6 +714,42 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 						return 1;
 					},
 				);
+		});
+
+	program
+		.command("suite")
+		.summary("Print the full-suite command a PR's risk tier calls for")
+		.description(
+			"Print the command in the ## Full suite section of the base's RISK.md when the PR's head needs the " +
+				"repository's whole test suite beyond the checks its diff reaches: its ## Review record names it high " +
+				"risk, or names no tier that covers the head, as when it is missing, stale, or cannot be compared. " +
+				"Prints nothing for a low or medium head, or when RISK.md names no full suite, so a repository's gate " +
+				"runs `cmd=$(quest suite <pr>)` and then the command when one printed. The tier is the PR body's, which " +
+				"its author writes, so a gate gives a PR from an author without write access the full suite itself. " +
+				"RISK.md is read from --base, fetched first, by default origin's default branch.\n\n" +
+				"Uses GH_TOKEN, GITHUB_TOKEN, or gh auth token. " +
+				FORGE_READS.replace("these reads", "the read") +
+				"Exits 0 whatever it prints, 2 for invalid arguments, and 1 for other failures, such as a RISK.md it " +
+				"cannot read.",
+		)
+		.argument("<pr>", PR_ARGUMENT)
+		.option("--base <remote/branch>", "Base branch whose RISK.md to read (default: origin's default branch)")
+		.action((value: string, options: { base?: string }) => {
+			const { pull: pr, hosted } = locatePull(value, root(), process.env);
+			pending = Promise.all([
+				forgeFor(pr, forgeDependencies(), Infinity, hosted).then((forge) => forge.status(pr)),
+				baseRiskFile(root(), options.base),
+			]).then(
+				([{ value: status }, file]) => {
+					const command = suiteFor(status.risk, file);
+					if (command !== null) print(command);
+					return 0;
+				},
+				(error: unknown) => {
+					warn(error instanceof Error ? error.message : String(error));
+					return 1;
+				},
+			);
 		});
 
 	const OWNERSHIP =
@@ -1761,11 +1800,20 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 			"--branch <name>",
 			"Branch whose review session to continue, instead of the checked-out one or its upstream",
 		)
+		.addOption(
+			new Option(
+				"--override <tier>",
+				"The maintainer's tier for the branch, in place of the reviewed one until its change grows riskier",
+			).choices(TIERS),
+		)
+		.option("--reason <text>", "Why the maintainer overrode the tier, which --override requires")
 		.option("--json", "Print one JSON object")
 		.action(
 			(options: {
 				base?: string;
 				branch?: string;
+				override?: Tier;
+				reason?: string;
 				harness?: HarnessName;
 				model?: string;
 				effort?: string;
@@ -1779,9 +1827,22 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 					options.responses === undefined
 						? undefined
 						: readFileSync(options.responses === "-" ? 0 : options.responses, "utf8");
+				if ((options.override === undefined) !== (options.reason === undefined))
+					throw new UsageError("--override and --reason go together");
+				const reason = options.reason?.replace(/\s+/g, " ").trim();
+				if (reason === "") throw new UsageError("--reason needs the maintainer's reason");
+				const override =
+					options.override === undefined ? undefined : { tier: options.override, reason: reason! };
 				const github = claimDependencies();
 				const run = review(
-					{ ...options, root: root(), exclude: options.excludeModel, responses, fresh: options.new },
+					{
+						...options,
+						root: root(),
+						exclude: options.excludeModel,
+						responses,
+						fresh: options.new,
+						override,
+					},
 					{
 						...reviewDependencies(),
 						models: (dir, base, branch) => pullModels(dir, base, branch, github),

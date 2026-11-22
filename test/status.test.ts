@@ -60,6 +60,7 @@ test("reports checks by requiredness, each reviewer's latest review against the 
 		"review-decision review_required",
 		"review-record -",
 		"risk -",
+		"class -",
 		"auto-merge -",
 		"merge-queue -",
 		"landing-stopped -",
@@ -120,7 +121,7 @@ test("a queued PR with auto-merge and no checks reports both, and JSON is determ
 		threads: page([]),
 	});
 	const status = await pullRequestStatus(pr, setup([body]).deps);
-	expect(statusLines(status).slice(2, 13)).toEqual([
+	expect(statusLines(status).slice(2, 14)).toEqual([
 		"draft true",
 		`head ${A}`,
 		"mergeable mergeable",
@@ -128,6 +129,7 @@ test("a queued PR with auto-merge and no checks reports both, and JSON is determ
 		"review-decision -",
 		"review-record -",
 		"risk -",
+		"class -",
 		"auto-merge squash kixelated 2026-10-07T12:00:00Z -",
 		"merge-queue awaiting_checks 2 2026-10-07T12:01:00Z",
 		"landing-stopped -",
@@ -846,7 +848,13 @@ describe("the risk tier", () => {
 	test("names the record's tier, the classifier's, and whether it covers the head", async () => {
 		expect(await risk(record(A))).toEqual({
 			line: "risk high current medium it rewrites the wire format",
-			risk: { tier: "high", reason: "it rewrites the wire format", classified: "medium", state: "current" },
+			risk: {
+				tier: "high",
+				reason: "it rewrites the wire format",
+				classified: "medium",
+				class: null,
+				state: "current",
+			},
 		});
 		// A record with an open finding names its head by 12 characters, and no full SHA.
 		expect((await risk(record(A.slice(0, 12)))).line).toBe("risk high current medium it rewrites the wire format");

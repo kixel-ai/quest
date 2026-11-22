@@ -35,9 +35,10 @@ export {
 } from "./doc";
 export { AUDIT, AUDITS, type Audit, SKIPPED, auditOf, covered, skippedOf } from "./audit";
 export { type ClosedPull, handBackWaits, handedBack, landed, withoutHandBack } from "./claim";
-export { reviewSection } from "./review";
+export { bodySection, reviewSection } from "./review";
 export {
 	ALWAYS_HIGH,
+	type Class,
 	DEFAULT,
 	type HighPath,
 	PATHS,
@@ -51,6 +52,8 @@ export {
 	patternError,
 	recordedRisk,
 	riskier,
+	UNDOS,
+	undoProblem,
 } from "./risk";
 export { type Missed, type Moved, type Source, move, promote, relocate, remove } from "./edit";
 export { comparePaths, normalize } from "./path";

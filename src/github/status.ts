@@ -182,7 +182,13 @@ function risk(body: string, head: string, record: ReviewRecord | null): Status["
 	const recorded = recordedRisk(body);
 	if (recorded === null) return null;
 	const state = record?.state ?? (head.startsWith(recorded.head) ? "current" : "stale");
-	return { tier: recorded.tier, reason: recorded.reason, classified: recorded.classified, state };
+	return {
+		tier: recorded.tier,
+		reason: recorded.reason,
+		classified: recorded.classified,
+		class: recorded.class,
+		state,
+	};
 }
 
 async function reviewRecord(
