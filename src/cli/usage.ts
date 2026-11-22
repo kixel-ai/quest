@@ -19,6 +19,7 @@ import {
 	SPLIT_CATEGORIES,
 	type SplitUsage,
 	type Tier,
+	riskier,
 	TIERS,
 	type TimeSplit,
 	WAIT_KINDS,
@@ -179,6 +180,8 @@ export interface ReviewerRow {
 	model: string;
 	effort: string;
 	shadow: boolean;
+	/** The second reviewer a high-risk head gets, whose findings show what the second review catches. */
+	second: boolean;
 	/** PRs whose record tallies this reviewer, each branch counted once, and its findings across every round. */
 	reviewed: number;
 	tally: Omit<Counts, "first">;
@@ -196,15 +199,37 @@ export interface ArmRow extends Omit<AccuracyRow, "size" | "spent"> {
 	spend: Tokens;
 }
 
-/** The PRs of one risk tier, or of none (`tier` null): how many merged, how many a reviewer raised, and later fixed. */
+/**
+ * The PRs of one risk tier, or of none (`tier` null): how many merged, how many a reviewer raised, how many the
+ * maintainer overrode, how many were later fixed, and how long they waited on a person.
+ */
 export interface TierRow {
 	tier: Tier | null;
 	pulls: number;
 	merged: number;
 	/** PRs a reviewer judged riskier than the classifier did. */
 	raised: number;
+	/** PRs whose tier the maintainer overrode, a reading of how often the tier is wrong. */
+	overridden: number;
 	/** PRs a later PR names under `## Caused by`. */
 	culprits: number;
+	/** Milliseconds their sessions waited on a person's answer, a shared session's in its share. */
+	person: number;
+}
+
+/**
+ * The PRs whose classifier found them in one of the risk file's `## Automatic` classes: how many merged, how many
+ * were later fixed, and how long they waited on a person, the numbers that argue for or against merging the class
+ * without a pick.
+ */
+export interface ClassRow {
+	class: string;
+	pulls: number;
+	/** Those whose tier is low, so the class lands them without a pick. */
+	low: number;
+	merged: number;
+	culprits: number;
+	person: number;
 }
 
 /** One online reviewer over the merged PRs reported. */
@@ -249,6 +274,7 @@ export interface Usage {
 	/** The writer A/B's arms, while it runs. */
 	arms: ArmRow[];
 	tiers: TierRow[];
+	classes: ClassRow[];
 	online: OnlineRow[];
 	/** Where each role's time went. */
 	splits: SplitRow[];
@@ -980,7 +1006,14 @@ function reviewerRows(pulls: PullRow[]): ReviewerRow[] {
 	const rows = new Map<string, ReviewerRow>();
 	const latest = tallied(pulls, () => true);
 	const row = (each: PullRow, review: ReviewSummary) => {
-		const id = JSON.stringify([each.size, review.harness, review.model, review.effort, review.shadow]);
+		const id = JSON.stringify([
+			each.size,
+			review.harness,
+			review.model,
+			review.effort,
+			review.shadow,
+			review.second,
+		]);
 		let found = rows.get(id);
 		if (!found) {
 			found = {
@@ -989,6 +1022,7 @@ function reviewerRows(pulls: PullRow[]): ReviewerRow[] {
 				model: review.model,
 				effort: review.effort,
 				shadow: review.shadow,
+				second: review.second,
 				reviewed: 0,
 				tally: noCounts(),
 				firstRounds: noFirst(),
@@ -1027,8 +1061,8 @@ function reviewerRows(pulls: PullRow[]): ReviewerRow[] {
 	}
 	return [...rows.values()].sort((a, b) =>
 		order(
-			[a.size, a.harness, a.model, a.effort, String(a.shadow)],
-			[b.size, b.harness, b.model, b.effort, String(b.shadow)],
+			[a.size, a.harness, a.model, a.effort, String(a.shadow), String(a.second)],
+			[b.size, b.harness, b.model, b.effort, String(b.shadow), String(b.second)],
 		),
 	);
 }
@@ -1078,11 +1112,57 @@ function tierRows(pulls: PullRow[]): TierRow[] {
 				tier,
 				pulls: rows.length,
 				merged: rows.filter((each) => each.state === "merged").length,
-				raised: rows.filter((each) => each.risk !== null && each.risk.tier !== each.risk.classified).length,
+				raised: rows.filter(
+					(each) =>
+						each.risk !== null && riskier(each.risk.overridden ?? each.risk.tier, each.risk.classified),
+				).length,
+				overridden: rows.filter((each) => each.risk?.overridden != null).length,
 				culprits: rows.filter((each) => each.fixedBy.length > 0).length,
+				person: rows.reduce((sum, each) => sum + personWait(each.sessions), 0),
 			},
 		];
 	});
+}
+
+/** One row per `## Automatic` class the PRs' classifiers named, by name. */
+function classRows(pulls: PullRow[]): ClassRow[] {
+	const names = [...new Set(pulls.flatMap((each) => each.risk?.class ?? []))].sort();
+	return names.map((name) => {
+		const rows = pulls.filter((each) => each.risk?.class === name);
+		return {
+			class: name,
+			pulls: rows.length,
+			low: rows.filter((each) => each.risk!.tier === "low").length,
+			merged: rows.filter((each) => each.state === "merged").length,
+			culprits: rows.filter((each) => each.fixedBy.length > 0).length,
+			person: rows.reduce((sum, each) => sum + personWait(each.sessions), 0),
+		};
+	});
+}
+
+/** How a record's tier came to differ from its classifier's: a reviewer's raise, the maintainer's override, or both. */
+function riskNote(risk: RecordedRisk): string {
+	const reviewed = risk.overridden ?? risk.tier;
+	return [
+		...(reviewed === risk.classified ? [] : [`raised from ${risk.classified} by a reviewer`]),
+		...(risk.overridden === null ? [] : [`overridden from ${risk.overridden} by the maintainer`]),
+	]
+		.map((note) => `; ${note}`)
+		.join("");
+}
+
+/** How long `sessions` waited on a person's answer, in milliseconds, a shared session's in its share. */
+function personWait(sessions: SessionRow[]): number {
+	return waitsByKind(sessions).get("person") ?? 0;
+}
+
+/** How long `sessions` waited, in milliseconds by kind, a shared session's waits counted in its share. */
+function waitsByKind(sessions: SessionRow[]): Map<string, number> {
+	const totals = new Map<string, number>();
+	for (const s of sessions)
+		for (const w of s.waits ?? [])
+			totals.set(w.kind, (totals.get(w.kind) ?? 0) + (Date.parse(w.end) - Date.parse(w.start)) / s.pulls.length);
+	return totals;
 }
 
 function onlineRows(pulls: PullRow[]): OnlineRow[] {
@@ -1217,6 +1297,7 @@ export async function usage(root: string, options: UsageOptions, deps: UsageDepe
 		reviewers: reviewerRows(rows),
 		arms: armRows(rows),
 		tiers: tierRows(rows),
+		classes: classRows(rows),
 		online: onlineRows(rows),
 		splits: splitRows(rows),
 		breakages,
@@ -1367,13 +1448,8 @@ function splitTotals(sessions: SessionRow[]): string {
  * waits are unknown, as for those read on another host; empty when there is nothing to say.
  */
 function waitTotals(sessions: SessionRow[]): string {
-	const totals = new Map<string, number>();
-	let unknown = 0;
-	for (const s of sessions) {
-		if (s.waits === null) unknown++;
-		for (const w of s.waits ?? [])
-			totals.set(w.kind, (totals.get(w.kind) ?? 0) + (Date.parse(w.end) - Date.parse(w.start)) / s.pulls.length);
-	}
+	const totals = waitsByKind(sessions);
+	const unknown = sessions.filter((s) => s.waits === null).length;
 	const parts = WAIT_KINDS.filter((kind) => totals.has(kind)).map((kind) => `${kind} ${duration(totals.get(kind)!)}`);
 	if (unknown) parts.push(`unknown for ${unknown} session${unknown === 1 ? "" : "s"} on other hosts`);
 	return parts.join(", ");
@@ -1403,7 +1479,7 @@ export function usageLines(report: Usage): string[] {
 		);
 		if (row.risk)
 			lines.push(
-				`  risk: ${row.risk.tier}, ${row.risk.reason}${row.risk.tier === row.risk.classified ? "" : `; raised from ${row.risk.classified} by a reviewer`}`,
+				`  risk: ${row.risk.tier}, ${row.risk.reason}${riskNote(row.risk)}${row.risk.class === null ? "" : `; class ${row.risk.class}`}`,
 			);
 		for (const i of row.implementers) {
 			const notes = [i.size, i.arm && `arm ${i.arm}`].filter(Boolean).join(", ");
@@ -1413,7 +1489,7 @@ export function usageLines(report: Usage): string[] {
 		if (row.unreadReview) lines.push(`  unread review: ${row.unreadReview}`);
 		for (const r of row.review)
 			lines.push(
-				`  review: ${r.harness}, ${r.model}, ${r.effort} effort${r.shadow ? ", shadow" : ""}; ${r.round === null ? "not in the latest run" : `round ${r.round}, score ${r.score ?? "-"}/10`}; ${r.tally === null ? "no tally" : `rounds ${r.tally.rounds}, ${findingsText(r.tally)}`}`,
+				`  review: ${r.harness}, ${r.model}, ${r.effort} effort${r.shadow ? ", shadow" : r.second ? ", second" : ""}; ${r.round === null ? "not in the latest run" : `round ${r.round}, score ${r.score ?? "-"}/10`}; ${r.tally === null ? "no tally" : `rounds ${r.tally.rounds}, ${findingsText(r.tally)}`}`,
 			);
 		for (const o of row.online)
 			lines.push(`  online review: ${o.reviewer}, ${o.finalHead ? "" : "not "}at the final head; ${answers(o)}`);
@@ -1480,7 +1556,7 @@ export function usageLines(report: Usage): string[] {
 					r.size ?? "-",
 					r.harness,
 					r.model,
-					`${r.effort}${r.shadow ? ", shadow" : ""}`,
+					`${r.effort}${r.shadow ? ", shadow" : r.second ? ", second" : ""}`,
 					`${r.reviewed} reviewed: rounds ${mean(r.tally.rounds, r.reviewed)}, ${findingsText({ ...r.tally, first: null })}, ${firsts(r.firstRounds)}; ${per(r.spent, "PR reviewed")}`,
 				]),
 			),
@@ -1509,7 +1585,19 @@ export function usageLines(report: Usage): string[] {
 				report.tiers.map((t) => [
 					" ",
 					t.tier ?? "-",
-					`${t.pulls} PRs, ${t.merged} merged, ${t.raised} raised by a reviewer, ${t.culprits} later fixed`,
+					`${t.pulls} PRs, ${t.merged} merged, ${t.raised} raised by a reviewer, ${t.overridden} overridden, ${t.culprits} later fixed; waited on a person ${duration(t.person)}`,
+				]),
+			),
+		);
+	if (report.classes.length)
+		lines.push(
+			"",
+			"By automatic class:",
+			...table(
+				report.classes.map((c) => [
+					" ",
+					c.class,
+					`${c.pulls} PRs, ${c.low} low, ${c.merged} merged, ${c.culprits} later fixed; waited on a person ${duration(c.person)}`,
 				]),
 			),
 		);

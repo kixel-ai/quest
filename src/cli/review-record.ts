@@ -37,9 +37,12 @@ function code(text: string): string {
 
 const capitalized = (word: string) => word[0]!.toUpperCase() + word.slice(1);
 
-/** A block's Reviewer line, ending in `, shadow` for the shadow, the size's pick one effort away. */
-const reviewerLine = (seat: Pick<Tally, "reviewer" | "model" | "effort" | "shadow">) =>
-	`- Reviewer: ${HARNESSES[seat.reviewer]}, ${seat.model}, ${seat.effort} effort${seat.shadow ? ", shadow" : ""}`;
+/**
+ * A block's Reviewer line, ending in `, shadow` for the shadow, the size's pick one effort away, or `, second` for the
+ * second reviewer a high-risk head gets.
+ */
+const reviewerLine = (seat: Pick<Tally, "reviewer" | "model" | "effort" | "shadow" | "second">) =>
+	`- Reviewer: ${HARNESSES[seat.reviewer]}, ${seat.model}, ${seat.effort} effort${seat.shadow ? ", shadow" : seat.second ? ", second" : ""}`;
 
 /** A tally's counts, as the record's `Rounds:` line and `quest usage` write them. */
 export interface Counts {
@@ -88,8 +91,7 @@ function classifiedBy({ by }: Risk["classified"]): string {
  * reviewer the run skipped since it could not run, then every tally on the branch, each round's reviewer's beside its
  * round, and a reviewer the run left out on its own.
  */
-export function reviewRecord({ rounds, tallies, risk, skipped }: Reviewed): string {
-	const [shared] = rounds;
+export function reviewRecord({ rounds, tallies, risk, skipped, head, base }: Reviewed): string {
 	// A reviewer the run left out may still hold open findings, which keep the head from passing too.
 	const clean =
 		rounds.every((round) => round.findings.length === 0) && tallies.every((tally) => counted(tally).open === 0);
@@ -97,10 +99,13 @@ export function reviewRecord({ rounds, tallies, risk, skipped }: Reviewed): stri
 		MARK,
 		"",
 		// `quest status` counts a full SHA here as a review of that head, which an open finding has not passed.
-		`- Head: ${clean ? shared!.head : `${shared!.head.slice(0, 12)}, named in full once no reviewer reports a finding`}`,
-		`- Base: ${shared!.base.ref} at ${shared!.base.sha.slice(0, 12)}`,
+		`- Head: ${clean ? head : `${head.slice(0, 12)}, named in full once no reviewer reports a finding`}`,
+		`- Base: ${base.ref} at ${base.sha.slice(0, 12)}`,
 		`- Risk: ${risk.tier}, ${code(risk.reason)}`,
+		...(risk.overridden ? [`- Overridden: from ${risk.overridden} by the maintainer`] : []),
 		`- Classified: ${risk.classified.tier} by ${classifiedBy(risk.classified)}`,
+		...(risk.classified.class === null ? [] : [`- Class: \`${risk.classified.class}\``]),
+		...(rounds.length === 0 ? [`- Local review: none, since a low-risk head needs only the online reviewer`] : []),
 		// Outside the Reviewer blocks, which `parseReview` reads as reviewers that ran.
 		...skipped.map(
 			(skip) => `- Skipped: ${HARNESSES[skip.harness]}, ${skip.model}, ${skip.effort} effort: ${skip.reason}`,
@@ -151,6 +156,8 @@ export interface ReviewSummary {
 	effort: string;
 	/** Whether it is the shadow: the size's pick one effort away, beside it on the same heads. */
 	shadow: boolean;
+	/** Whether it is the second reviewer a high-risk head gets, on a model other than the pick's. */
+	second: boolean;
 	/** Its latest session, null when the record names none; its round, null when the latest run left it out. */
 	session: string | null;
 	round: number | null;
@@ -209,7 +216,7 @@ export function parseReview(body: string): ReviewSummary[] {
 			if (!found) throw new Error(`the ## Review record has no line matching ${pattern.source}`);
 			return found;
 		};
-		const reviewer = match(/^- Reviewer: (.+?), (\S+), (\S+) effort(, shadow)?\r?$/m);
+		const reviewer = match(/^- Reviewer: (.+?), (\S+), (\S+) effort(?:(, shadow)|(, second))?\r?$/m);
 		const tally = parseCounts(text);
 		// A reviewer the latest run left out has its tally, and its session with no round once tallies name it.
 		const session =
@@ -229,6 +236,7 @@ export function parseReview(body: string): ReviewSummary[] {
 			model: reviewer[2]!,
 			effort: reviewer[3]!,
 			shadow: reviewer[4] !== undefined,
+			second: reviewer[5] !== undefined,
 			session: session && session[2]!,
 			round: session?.[3] === undefined ? null : Number(session[3]),
 			score: score ? Number(score[1]) : null,
@@ -352,8 +360,7 @@ export async function pullModels(
 
 /** Record a run in the `## Review` section of its branch's open PR. The edit is the token's user's, which `/quest-merge` counts only when that user wrote the PR. */
 export async function recordRounds(root: string, reviewed: Reviewed, deps: ClaimDependencies): Promise<Recorded> {
-	const [shared] = reviewed.rounds;
-	const pull = await openPull(root, shared!.base.ref, shared!.branch, deps);
+	const pull = await openPull(root, reviewed.base.ref, reviewed.branch, deps);
 	if ("skipped" in pull) return pull;
 	const next = withReview(pull.body, reviewRecord(reviewed));
 	if (next !== pull.body) await pull.edit(next);

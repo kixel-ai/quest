@@ -38,6 +38,7 @@ export { type ClosedPull, handBackWaits, handedBack, landed, withoutHandBack } f
 export { reviewSection } from "./review";
 export {
 	ALWAYS_HIGH,
+	type Class,
 	DEFAULT,
 	type HighPath,
 	PATHS,

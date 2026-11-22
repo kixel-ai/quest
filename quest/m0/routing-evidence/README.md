@@ -120,7 +120,8 @@ three hosts' saved review rounds:
     routed pick at S and M, to measure whether raising them pays, and one
     below at L until L reaches its sample (rejected: unchanged until
     12-20, then end it; end it now; a permanent second reviewer at L and
-    XL, left to [the guardrails](/quest/m0/benchmark/guardrails.md)). XL
+    XL, left to the risk tiers, whose high tier seats a second reviewer
+    since [moq-dev/quest#802](https://github.com/moq-dev/quest/pull/802)). XL
     keeps its step down with L. Compare the step up's pairs as the step
     down's were, counting only rounds after the retarget merged.
 - Writer A/B, PRs per arm, first-round findings over the PRs counted in

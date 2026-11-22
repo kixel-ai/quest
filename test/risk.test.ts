@@ -85,9 +85,16 @@ test("a risk file's ## High list is each backticked pattern and its reason; the 
 			{ pattern: "src/billing/", reason: "charges customers, and refunds are manual" },
 			{ pattern: "**/*.proto", reason: "peers on older releases read the wire format" },
 		],
+		classes: [],
+		suite: null,
 		problems: [],
 	});
-	expect(parseRiskFile("# Risk\n\nNothing is always high here.\n")).toEqual({ high: [], problems: [] });
+	expect(parseRiskFile("# Risk\n\nNothing is always high here.\n")).toEqual({
+		high: [],
+		classes: [],
+		suite: null,
+		problems: [],
+	});
 
 	const broken = parseRiskFile(
 		[
@@ -132,6 +139,8 @@ test("the review record's risk reads back, and a record without one names none",
 		by: "model",
 		session: "thread-9",
 		head,
+		class: null,
+		overridden: null,
 	});
 	expect(
 		recordedRisk(
@@ -152,6 +161,82 @@ test("the review record's risk reads back, and a record without one names none",
 		recordedRisk(record([`- Head: ${head}`, "- Risk: severe, `x`", "- Classified: low by default"])),
 	).toThrow("risk is malformed");
 	expect(() => recordedRisk(record([`- Head: ${head}`, "- Risk: low, `x`"]))).toThrow("risk is malformed");
+});
+
+test("a risk file's ## Automatic list names each class and its rule, and ## Full suite one command", () => {
+	const text = [
+		"# Risk",
+		"",
+		"## Automatic",
+		"",
+		"Each class below lands without a pick once low.",
+		"",
+		"- `tests` - only tests and their fixtures",
+		"- `internal-docs` - documentation no user reads,",
+		"  such as plans",
+		"",
+		"## Full suite",
+		"",
+		"Run it for a high change.",
+		"",
+		"```sh",
+		"just gate --all",
+		"```",
+	].join("\n");
+	expect(parseRiskFile(text)).toEqual({
+		high: [],
+		classes: [
+			{ name: "tests", rule: "only tests and their fixtures" },
+			{ name: "internal-docs", rule: "documentation no user reads, such as plans" },
+		],
+		suite: "just gate --all",
+		problems: [],
+	});
+
+	const broken = parseRiskFile(
+		[
+			"## Automatic",
+			"",
+			"- `Tests` - capitalized",
+			"- tests - not backticked",
+			"- `docs` - one",
+			"- `docs` - twice",
+			"",
+			"## Full suite",
+			"",
+			"just gate",
+		].join("\n"),
+	);
+	expect(broken.classes).toEqual([
+		{ name: "docs", rule: "one" },
+		{ name: "docs", rule: "twice" },
+	]);
+	expect(broken.suite).toBeNull();
+	expect(broken.problems).toEqual([
+		"RISK.md:3: `Tests` is no class name: use lowercase words joined by hyphens",
+		"RISK.md:4: an `## Automatic` item is a backticked class name, ` - `, and the rule over the diff",
+		"RISK.md lists the class `docs` twice",
+		"RISK.md's ## Full suite must hold one fenced code block with the command",
+	]);
+	expect(parseRiskFile("## Full suite\n\n```\na\n```\n\n```\nb\n```\n").problems).toEqual([
+		"RISK.md's ## Full suite must hold one fenced code block with the command",
+	]);
+});
+
+test("the review record's class and override read back", () => {
+	const record = (lines: string[]) =>
+		["## Review", "", `- Head: ${"a".repeat(40)}`, "- Risk: low, `the maintainer says so`", ...lines].join("\n");
+	expect(
+		recordedRisk(
+			record(["- Overridden: from medium by the maintainer", "- Classified: low by default", "- Class: `tests`"]),
+		),
+	).toMatchObject({ tier: "low", class: "tests", overridden: "medium" });
+	expect(() => recordedRisk(record(["- Classified: low by default", "- Class: tests"]))).toThrow(
+		"class or override is malformed",
+	);
+	expect(() => recordedRisk(record(["- Classified: low by default", "- Overridden: by someone"]))).toThrow(
+		"class or override is malformed",
+	);
 });
 
 test("tiers order from low to high", () => {

@@ -20,6 +20,7 @@ export function statusLines(status: Status): string[] {
 		status.risk === null
 			? "risk -"
 			: `risk ${status.risk.tier} ${status.risk.state} ${status.risk.classified} ${status.risk.reason}`,
+		`class ${dash(status.risk?.class ?? null)}`,
 		status.autoMerge === null
 			? "auto-merge -"
 			: `auto-merge ${status.autoMerge.method} ${status.autoMerge.enabledBy} ${status.autoMerge.enabledAt} ${dash(status.autoMerge.head)}`,

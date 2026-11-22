@@ -4,11 +4,11 @@
 
 Reduce repeated manual prompts during interactive, mobile/travel, and AFK sessions across three coordinated improvements:
 
-1. **`/quest-afk` modes (`assets/skills/afk.md`):** Keep bare `afk` conservative (standing picks only, deferring other merges until [risk-tier guardrails](/quest/m0/benchmark/guardrails.md) earn wider auto-merge), and add two explicit modes: `afk merge` (merge any non-high-risk PR the agent strongly recommends with a clean review and no open decisions, still deferring high-risk or uncertain PRs and quest deletions) and `afk soon` (flush pending decisions in one batch, then automatically enter `afk`).
+1. **`/quest-afk` modes (`assets/skills/afk.md`):** Keep bare `afk` conservative (standing picks only, deferring other merges until classes in [`RISK.md`](/RISK.md)'s `## Automatic` list earn wider auto-merge), and add two explicit modes: `afk merge` (merge any non-high-risk PR the agent strongly recommends with a clean review and no open decisions, still deferring high-risk or uncertain PRs and quest deletions) and `afk soon` (flush pending decisions in one batch, then automatically enter `afk`).
 2. **PC-local vs tap-anywhere waits (`src/core/waiting.ts`, `quest waiting`, `quest check`, `assets/AGENTS.md`, `assets/skills/run.md`):** Distinguish local/PC maintainer actions (such as password-manager unlocks, hardware checks, or local logins) from decisions answerable from any device, with filtering on `quest waiting` so remote/travel sessions skip PC-local waits and `"at my PC"` sessions batch them.
 3. **Pending-CI waiting in `/quest-run` (`assets/skills/run.md`):** When no sub-agent is running and every current question is asked, also block with `quest wait` on open PRs whose required checks are still pending (in addition to queued PRs whose merge unblocks a quest) so those PRs get picked in the same session instead of ending early.
 
-Non-goal: changing risk-tier definitions or automatic low-risk merge classes on bare `afk` (owned by [Scale review, CI, and approval to a PR's risk tier](/quest/m0/benchmark/guardrails.md)).
+Non-goal: changing risk-tier definitions or automatic low-risk merge classes on bare `afk` (set by [`RISK.md`](/RISK.md) and the README's Risk tiers section since [moq-dev/quest#802](https://github.com/moq-dev/quest/pull/802)).
 
 ## Plan
 
@@ -38,4 +38,4 @@ Agent's choices, for the implementer to revisit:
 
 ## Related
 
-- [Scale review, CI, and approval to a PR's risk tier](/quest/m0/benchmark/guardrails.md) - risk tiers define the `high` boundary `afk merge` defers and will widen standing auto-merge separately
+- [`RISK.md`](/RISK.md) and the README's Risk tiers section, since [moq-dev/quest#802](https://github.com/moq-dev/quest/pull/802) - risk tiers define the `high` boundary `afk merge` defers and will widen standing auto-merge separately
