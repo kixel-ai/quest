@@ -2074,7 +2074,8 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 		if (next === undefined) throw new ReviewOutageError(sized.size, skipped, messages);
 		return next;
 	};
-	const high = (risk: Risk) => auto && !named && overridden(risk, override).tier === "high";
+	// --model or --effort changes only the pick, so a high head still gets its second reviewer; --harness's runs alone.
+	const high = (risk: Risk) => auto && overridden(risk, override).tier === "high";
 	// Below high, a second reviewer still settles the findings it left open: its own model while that may review,
 	// else another, whose new session settles them by number as a replaced pick's does.
 	const seconded = sessions.find((session) => session.second);

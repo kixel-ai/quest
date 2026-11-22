@@ -1687,6 +1687,13 @@ fakes(
 			git(s.repo, "commit", "-qam", "another constant");
 			const kept = await quest("--root", s.repo, "review");
 			expect(kept.stdout).toContain("\nrisk high It ships tonight.\n");
+			// --effort changes only the pick, so a high head still gets its second reviewer.
+			write(s.repo, "src/lib.ts", "export const x = 7;\n");
+			git(s.repo, "commit", "-qam", "a constant at a named effort");
+			const effort = await quest("--root", s.repo, "review", "--effort", "high");
+			expect(effort.code, effort.stderr).toBe(0);
+			expect(effort.stdout).toContain("\nreviewer codex gpt-6.1-sol high\n");
+			expect(effort.stdout).toContain("\nreviewer claude claude-sonnet-5-5 medium second\n");
 			// A riskier change than the one overridden ends it.
 			vi.stubEnv("FAKE_RISK", JSON.stringify({ tier: "medium", reason: "It changes the output.", class: null }));
 			write(s.repo, "src/lib.ts", "export const x = 4;\n");
