@@ -29,7 +29,7 @@ Unless the mode or argument allows it, defer as blockers what no review can undo
 - `/quest-plan` sessions, and actions only the user can take, such as granting access or providing a secret.
 
 Carry on each pick the user already made until it lands or needs them again.
-When the work finishes, end with a final summary holding only the blockers, each linked, with its options and your recommendation, so a fresh session can act on it; the choices you took live in the PRs' bodies.
+When the work finishes, end with a final summary holding only the blockers, each linked, with its options and your recommendation, so a fresh session can act on it; list the `Maintainer (PC):` steps, which need the user at a computer, apart from the rest. The choices you took live in the PRs' bodies.
 
 A message that adds to these instructions, such as a newly granted merge or more work, amends them, and afk continues.
 Any other message is the user's return: afk ends. Answer it, then resume the session's skill, or `/quest-run` on the blockers when it ran none, which asks the questions it deferred.

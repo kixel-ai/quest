@@ -77,7 +77,7 @@ Make these edits in one draft PR on a `quest-run/<slug>` branch, run `quest chec
 ## Loop
 
 Each round, rerun `quest unblocked --unclaimed --json` and refresh the open PRs, since merges and released claims make more work ready.
-When no agent is running and every question has been asked, block with `quest wait` on the queued PRs whose merge would make a quest ready, and on each PR ready for review whose required checks are still running and which a round would then pick or ask about; run a round once one lands, leaves the queue, or its checks finish.
+When no agent is running and every question has been asked, block with `quest wait` on the queued PRs whose merge would make a quest ready, and on each PR ready for review whose checks are still running and which a round would then pick or ask about; run a round once one lands or leaves the queue, or its checks pass or fail.
 Wait on no other PR, such as a draft or a skipped one, and read none between rounds: list each PR left for a later round in the summary, with its pick.
 A usage or rate limit is waited out until its reset; it never ends the run.
 

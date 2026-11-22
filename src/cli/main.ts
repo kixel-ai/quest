@@ -495,7 +495,8 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"Prints one line per item: dependents, ready or blocked (whether Required entries or a future " +
 				"Scheduled date remain), the quest's path or the draft's URL, and the item. --json prints an ordered array of {path, pr, dependents, " +
 				"ready, waits: [{line, party, pc, text}]} objects, where pr is the draft's URL or null, path is the " +
-				"quest, the quest a draft carries, or null, and pc is whether the item opened Maintainer (PC):. " +
+				"quest, the quest a draft carries, or null; an item opened Maintainer (PC): has party Maintainer and pc " +
+				"true. " +
 				"--maintainer keeps only the items the maintainer settles, and --no-pc drops the Maintainer (PC): ones, " +
 				"for a session away from the maintainer's computers. " +
 				"Invalid trees fail before printing. Outside conditions are never checked, nor whether another " +
