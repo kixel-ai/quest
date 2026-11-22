@@ -535,33 +535,43 @@ async function failedBuild(
 	return { jobs, base: group.slice(prefix.length) };
 }
 
-/** The failing jobs of `runs`, and with `timedOut` those still running, each with its log. */
+/**
+ * The failing jobs of `runs`, and with `timedOut` those still running, each with its log. A cancelled
+ * job counts only when none failed: GitHub cancels a job past its time limit, which fails the build with
+ * no `failure`, while a failure's fail-fast siblings are cancelled in its wake.
+ */
 export async function failingJobs(
 	github: GitHub,
 	repository: string,
 	runs: ObjectValue[],
 	timedOut: boolean,
 ): Promise<(FailedJob & { log: string })[]> {
-	const jobs: (FailedJob & { log: string })[] = [];
+	const failed: { run: ObjectValue; job: ObjectValue }[] = [];
+	const cancelled: { run: ObjectValue; job: ObjectValue }[] = [];
 	for (const run of runs) {
 		const path = `/repos/${repository}/actions/runs/${Number(run.id)}/jobs?filter=latest&per_page=100`;
 		for (const job of await listed(github, path, "jobs")) {
 			const conclusion = typeof job.conclusion === "string" ? job.conclusion : null;
-			const running = job.status !== "completed";
-			if (!(conclusion !== null && FAILED.includes(conclusion)) && !(timedOut && running)) continue;
-			const step = array(job.steps ?? []).find(
-				(item) => typeof item.conclusion === "string" && FAILED.includes(item.conclusion),
-			);
-			const log = running ? "" : await jobLog(github, repository, Number(job.id));
-			jobs.push({
-				workflow: string(run.name),
-				name: string(job.name),
-				url: string(job.html_url),
-				conclusion: conclusion ?? string(job.status),
-				...(step ? { step: string(step.name) } : {}),
-				log,
-			});
+			if ((conclusion !== null && FAILED.includes(conclusion)) || (timedOut && job.status !== "completed"))
+				failed.push({ run, job });
+			else if (conclusion === "cancelled") cancelled.push({ run, job });
 		}
+	}
+	const jobs: (FailedJob & { log: string })[] = [];
+	for (const { run, job } of failed.length > 0 ? failed : cancelled) {
+		const conclusion = typeof job.conclusion === "string" ? job.conclusion : null;
+		const steps = array(job.steps ?? []);
+		const step =
+			steps.find((item) => typeof item.conclusion === "string" && FAILED.includes(item.conclusion)) ??
+			steps.find((item) => item.conclusion === "cancelled");
+		jobs.push({
+			workflow: string(run.name),
+			name: string(job.name),
+			url: string(job.html_url),
+			conclusion: conclusion ?? string(job.status),
+			...(step ? { step: string(step.name) } : {}),
+			log: job.status !== "completed" ? "" : await jobLog(github, repository, Number(job.id)),
+		});
 	}
 	return jobs;
 }

@@ -186,6 +186,14 @@ const queued = (pull: ObjectValue, since = "") =>
 	pull.mergeQueueEntry != null ||
 	(pull.autoMergeRequest != null && string(object(pull.autoMergeRequest).enabledAt) > since);
 
+/** `text` within `max` characters, cut at a word and ending in `…` when it was cut, or in `end` when it was not. */
+export function clip(text: string, max: number, end = ""): string {
+	if (text.length <= max) return end && !text.endsWith(end) ? text + end : text;
+	const cut = text.slice(0, max - 1);
+	const space = cut.lastIndexOf(" ");
+	return `${(space > max / 2 ? cut.slice(0, space) : cut).trimEnd()}…`;
+}
+
 const removalPath = (state: string, number: number) => join(state, `removal-${number}.json`);
 
 /** The latest removal the watcher recorded for PR `number`, if any. */
@@ -749,9 +757,9 @@ async function collect(
 		plan,
 		marked,
 		handback
-			? `${handback.slice(0, 300)}. Recommendation: run /quest-iterate before picking it again.`
+			? `${clip(handback, 300, ".")} Recommendation: run /quest-iterate before picking it again.`
 			: result?.action === "handback"
-				? `${result.diagnosis.slice(0, 200)}. Recommendation: ${result.recommendation.slice(0, 200)}`
+				? `${clip(result.diagnosis, 200, ".")} Recommendation: ${clip(result.recommendation, 200)}`
 				: "missing result; run /quest-iterate",
 		`handback ${name}`,
 		attribution,
