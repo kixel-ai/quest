@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 
-import { ALWAYS_HIGH, matches, parseRiskFile, patternError, recordedRisk, riskier, undoProblem } from "../src/core";
+import { ALWAYS_HIGH, matches, parseRiskFile, patternError, recordedRisk, riskier } from "../src/core";
 
 test("a pattern is a path from the root whose * stays in a segment and whose ** spans segments", () => {
 	const cases: [string, string, boolean][] = [
@@ -237,18 +237,6 @@ test("the review record's class and override read back", () => {
 	expect(() => recordedRisk(record(["- Classified: low by default", "- Overridden: by someone"]))).toThrow(
 		"class or override is malformed",
 	);
-});
-
-test("a PR body says how to undo it in a ## Undo section that opens with the way", () => {
-	expect(undoProblem("Summary.")).toContain("no ## Undo section");
-	expect(undoProblem("Summary.\n\n## Undo\n\n")).toContain("must open with how it is undone");
-	expect(undoProblem("## Undo\n\nRoll back the deploy.")).toContain("revert, flag, redeploy");
-	// Only a top-level heading counts, so an example in a code fence is not the section.
-	expect(undoProblem("```\n## Undo\n\nRevert.\n```")).toContain("no ## Undo section");
-	for (const way of ["Revert: nothing stays.", "flag `NEW_QUEUE` off; queued jobs stay", "Redeploy 1.4.2."])
-		expect(undoProblem(`Summary.\n\n## Undo\n\n${way}\n\n## Validation\n\nRan it.`)).toBeNull();
-	// "Reverting" is no way of undoing it the reader can act on.
-	expect(undoProblem("## Undo\n\nReverting is hard.")).not.toBeNull();
 });
 
 test("tiers order from low to high", () => {

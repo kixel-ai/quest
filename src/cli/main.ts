@@ -809,8 +809,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"for it, and refuses where nothing would wait, since an admin's token merges or enqueues past the requirement. It refuses a head on which quest check " +
 				"--no-stubs --base <base> --branch <head branch> finds anything, read from git objects fetched from the base repository, " +
 				"so nothing from the head runs, except findings the base already has; a base without quests skips it. It also refuses while an online reviewer's " +
-				"unanswered finding on the head, or a newer comment opening with 'Maintainer decision', holds it, and on GitHub while its body has no ## Undo section opening with " +
-				"revert, flag, or redeploy, unless its ## Review record names it low risk. It uses the method --squash or --rebase names, refusing one " +
+				"unanswered finding on the head, or a newer comment opening with 'Maintainer decision', holds it. It uses the method --squash or --rebase names, refusing one " +
 				"the repository disallows; otherwise the only method the repository allows, or else a merge commit. " +
 				"On a base with GitHub's merge queue, which applies its own method, it enqueues that head, or arms " +
 				"auto-merge bound to it while required checks may be pending; a head behind the base is enqueued as " +

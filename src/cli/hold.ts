@@ -11,9 +11,7 @@ import {
 	type Hold,
 	type Method,
 	type PullRequest,
-	recordedRisk,
 	Refusal,
-	undoProblem,
 	withoutHandBack,
 } from "../core";
 import { cleanAutoMergeRefusal, immediateMerge, queueHead } from "../github/merge";
@@ -158,15 +156,12 @@ export async function land(pr: PullRequest, request: LandRequest, deps: GitHubDe
 	open(snapshot);
 	current(snapshot);
 	unheld(snapshot, undefined, deps.now());
-	undoable(snapshot);
 	// The policy below is decided for the base read above; reread before landing, since a retarget decides nothing.
 	const unchanged = async () => {
 		const fresh = await labels.read();
 		open(fresh);
 		current(fresh);
 		unheld(fresh, undefined, deps.now());
-		// A body edited since the first read is judged again.
-		undoable(fresh);
 		if (fresh.base !== snapshot.base) {
 			throw new Refusal(`${snapshot.url} was retargeted from ${snapshot.base} to ${fresh.base}; land it again`);
 		}
@@ -275,34 +270,6 @@ export async function land(pr: PullRequest, request: LandRequest, deps: GitHubDe
 		await unsignaled(labels.github, pr, snapshot.url, sha);
 		await submit("mergePullRequest");
 	}
-}
-
-/**
- * Refuse a PR whose body does not say how to undo it, unless its `## Review` record names the head being landed, in
- * full, low risk, which a revert undoes whole. A body with no tier, or one for another head, counts as riskier, so a
- * skipped classification or a push after it cannot skip the undo line.
- */
-function undoable(snapshot: Snapshot): void {
-	let risk: ReturnType<typeof recordedRisk>;
-	try {
-		risk = recordedRisk(snapshot.body);
-	} catch (error) {
-		throw new Refusal(
-			`${snapshot.url}: ${error instanceof Error ? error.message : String(error)}; rerun quest review to rewrite the record, then land it again`,
-		);
-	}
-	if (risk?.tier === "low" && risk.head.toLowerCase() === snapshot.head.toLowerCase()) return;
-	const problem = undoProblem(snapshot.body);
-	if (problem === null) return;
-	const tier =
-		risk === null
-			? "records no risk tier"
-			: risk.tier === "low"
-				? `records low risk for ${risk.head}, not this head`
-				: `is ${risk.tier} risk`;
-	throw new Refusal(
-		`${snapshot.url} ${tier}, and ${problem}; add one, such as \`Revert: leaves nothing behind.\`, then land it again`,
-	);
 }
 
 /**

@@ -32,7 +32,6 @@ The repository's review policy decides whose record counts and may require more,
 Where it says nothing, only a record on a PR whose author has write access counts: anyone else writes their own PR body, so their head needs a local review that rewrites the record.
 On a trivial PR that `/quest-run`'s standing pick covers, Pullfrog's approval of the head stands in for that record unless that policy requires more.
 A low head's record counts without a local reviewer; a later head's rise in tier ends the pick: tell the user.
-Add `## Undo` to a body lacking one, as a bump's may, before queueing.
 
 Queue the head with `quest merge <pr> --land <full 40-character head SHA>`, adding `--squash` or `--rebase` when the repository's root instructions name that method for the PR's base.
 Run a `quest` the PR cannot modify, such as an installed release rather than a build from the head's checkout: it refuses a head that leaves its quest inaccurate, a check the head's own code could skip.

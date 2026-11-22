@@ -7,7 +7,7 @@ benchmark with several axes. Every change records its risk tier, what it
 cost (tokens, compute, and time split into working and blocked on CI,
 GitHub, git, or a person), who wrote and reviewed it, and what it later
 broke. The tier, set from the change itself, scales its guardrails: review
-depth, CI, human approval, and a stated way to undo it. The maintainer
+depth, CI, and human approval. The maintainer
 steers from a report of all of it without reading code, and adds or removes
 guardrails from that evidence. Every cost is measured so it can be driven
 toward zero.
@@ -71,6 +71,9 @@ maintainer's typed messages since 2026-10-01):
     section describe since
     [moq-dev/quest#802](https://github.com/moq-dev/quest/pull/802)
   - Rejected: review and approval only; approval only
+- Must a PR state how to undo it? ✅ No (maintainer, 2026-11-22: "I
+  definitely don't want Undo to be a gate"). Rejected: an `## Undo`
+  section that `quest merge` requires of every PR not tiered low.
 - Who moves a class of change into or out of automatic merging?
   - ✅ The maintainer, both ways: the report flags a class whose breakage
     rose, and it keeps merging until they act
@@ -83,12 +86,11 @@ maintainer's typed messages since 2026-10-01):
 
 What the posts add that these quests take: a tier set from the change and
 not its author, paths that always need a person, evidence and a brief
-read in place of the diff, a stated way to undo each change, automatic
-merging widened one class at a time on breakage data, and past incidents
-kept as a reviewer's test set. Already in place: a different model
-reviews each PR, every finding is answered before merge, a design
-checkpoint after repeated review rounds, a merge queue, and diff-scoped
-gates in moq-dev/moq and moq-dev/moq.pro.
+read in place of the diff, automatic merging widened one class at a time
+on breakage data, and past incidents kept as a reviewer's test set.
+Already in place: a different model reviews each PR, every finding is
+answered before merge, a design checkpoint after repeated review rounds,
+a merge queue, and diff-scoped gates in moq-dev/moq and moq-dev/moq.pro.
 
 No post describes attributing cost, model, and effort to each change, so
 that part has no precedent to copy.

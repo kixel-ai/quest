@@ -4,7 +4,7 @@
 import type { Code, List, ListItem, Paragraph, RootContent } from "mdast";
 
 import { markdown } from "./doc";
-import { bodySection, reviewSection } from "./review";
+import { reviewSection } from "./review";
 
 /** The tiers, from least risk to most. */
 export const TIERS = ["low", "medium", "high"] as const;
@@ -220,23 +220,6 @@ export function recordedRisk(body: string): RecordedRisk | null {
 		class: named ? named[1]! : null,
 		overridden: overridden ? (overridden[1] as Tier) : null,
 	};
-}
-
-/** How a PR is undone: a revert, a flag turned off, or a redeploy of the previous release. */
-export const UNDOS = ["revert", "flag", "redeploy"] as const;
-
-/**
- * Why `body` does not state how to undo its PR, or null when it does: a `## Undo` section that opens with one of
- * {@link UNDOS}, then what undoing it leaves behind, such as a migration already run. A low PR needs none, since a
- * revert undoes it whole.
- */
-export function undoProblem(body: string): string | null {
-	const section = bodySection(body, "Undo");
-	if (section === null) return "its body has no ## Undo section saying how to undo it";
-	const text = body.slice(section.start, section.end).trim();
-	if (!new RegExp(`^(?:${UNDOS.join("|")})\\b`, "i").test(text))
-		return `its ## Undo section must open with how it is undone, one of ${UNDOS.join(", ")}, then what that leaves behind`;
-	return null;
 }
 
 /** How the record names a tier the paths set, and the default where the base has no risk file. */

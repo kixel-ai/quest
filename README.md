@@ -751,9 +751,7 @@ online reviewer's that a ruleset requires (GitHub's review decision is
 for the approval, and refuses where nothing would wait, since an admin's token
 would merge or enqueue past the requirement.
 It also refuses while a [signal](#signals-that-hold-a-head) holds the head,
-naming each, and a PR whose body has no `## Undo` section saying how to undo
-it, unless its `## Review` record names it [low risk](#risk-tiers); a body
-with no tier counts as riskier.
+naming each.
 It enables auto-merge bound to that SHA, or merges at once when nothing is
 left to wait for. `--squash` or `--rebase` picks the method, and it refuses one
 the repository disallows; otherwise it uses the only method the repository
@@ -1709,9 +1707,7 @@ wrote it. The tier scales the PR's guardrails:
 | Medium | The size's pick | The checks its diff reaches | The maintainer's pick |
 | High | The size's pick and a second reviewer on another model | The full suite [`quest suite`](#run-the-full-suite) names | The maintainer's pick, with the full brief |
 
-`/quest-run` carries the picks, and `quest merge` refuses a PR whose body has
-no `## Undo` section opening with `Revert`, `Flag`, or `Redeploy`, then what
-that leaves behind, unless its record names it low.
+`/quest-run` carries the picks.
 
 A change is `high`, with no model, when a changed path on either side of a
 rename matches a pattern held high: `RISK.md` itself, everything under

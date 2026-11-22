@@ -187,7 +187,6 @@ Only a decision left for the maintainer, an outside condition, or unfinished wor
 Tools read only whether that heading is present; a draft without it still belongs to its starter.
 A draft suggests `/quest-iterate`; a PR ready for review suggests `/quest-merge`.
 Include a summary of the changes made and the `## Follow-ups` section Creation describes.
-Unless `quest review` tiers it low, add a `## Undo` section opening with how it is undone, revert, flag, or redeploy, then what that leaves behind, such as a migration already run; `quest merge` refuses a PR without one.
 Add a closing keyword for every issue under `Closes`.
 
 ## Deletion

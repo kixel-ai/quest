@@ -286,10 +286,6 @@ export function bumpBody(options: {
 		);
 	lines.push(
 		"",
-		"## Undo",
-		"",
-		"Revert: the pin returns to the previous release, leaving nothing behind.",
-		"",
 		"## Review",
 		"",
 		"Skipped: pin bump, no repository code changed; CI's quest check is the gate.",

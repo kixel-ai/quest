@@ -32,7 +32,7 @@ interface Event {
 class FakePull {
 	state = "OPEN";
 	draft = false;
-	body = "Summary.\n\n## Undo\n\nRevert: leaves nothing behind.";
+	body = "Summary.";
 	head = HEAD;
 	mergeState = "BLOCKED";
 	/** GitHub's review decision, null when the base requires no review. */
@@ -365,32 +365,6 @@ describe("merge --land", () => {
 		);
 		expect(pull.writes).toEqual([]);
 		expect(pull.state).toBe("OPEN");
-	});
-
-	test("refuses a PR that does not say how to undo it unless its record names it low risk", async () => {
-		const pull = new FakePull();
-		const record = (tier: string) =>
-			`\n\n## Review\n\nRewritten by \`quest review\` after each round.\n\n- Head: ${HEAD}\n- Risk: ${tier}, \`why\`\n- Classified: ${tier} by default\n`;
-		const landing = () => land(PR, { sha: HEAD, method: "merge", check: clean }, pull.deps());
-		// A body with no tier counts as riskier, so skipping the classifier skips no undo line.
-		pull.body = "Summary.";
-		expect(await refused(landing())).toContain("records no risk tier, and its body has no ## Undo section");
-		pull.body = `Summary.${record("medium")}\n## Undo\n\nRun the old release.`;
-		expect(await refused(landing())).toContain("is medium risk, and its ## Undo section must open with");
-		expect(pull.writes).toEqual([]);
-		// A low record counts only for the head it names, and a malformed one refuses rather than throws.
-		pull.body = `Summary.${record("low").replace(HEAD, "f".repeat(40))}`;
-		expect(await refused(landing())).toContain(`records low risk for ${"f".repeat(40)}, not this head`);
-		pull.body = `Summary.${record("low")}- Class: Not A Class\n`;
-		expect(await refused(landing())).toContain("malformed");
-		expect(pull.writes).toEqual([]);
-		pull.body = `Summary.${record("low")}`;
-		await landing();
-		expect(pull.writes).not.toEqual([]);
-		const high = new FakePull();
-		high.body = `Summary.${record("high")}\n## Undo\n\nFlag: turn off QUEST_NEW_WRITE; the comments it posted stay.`;
-		await land(PR, { sha: HEAD, method: "merge", check: clean }, high.deps());
-		expect(high.writes).not.toEqual([]);
 	});
 
 	test.each([false, true])("refuses a head whose latest run of any check failed (queue: %s)", async (queue) => {

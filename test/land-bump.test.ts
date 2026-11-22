@@ -327,8 +327,6 @@ test("bumpBody waits on a maintainer only for findings", () => {
 	expect(bumpBody(options)).toContain("to release v1.0.0 (`2222222`)");
 	expect(bumpBody(options)).not.toContain("## Waiting");
 	expect(bumpBody(options)).toContain("## Review\n\nSkipped: pin bump");
-	// A bump records no tier, so `quest merge --land` needs its undo line.
-	expect(bumpBody(options)).toContain("## Undo\n\nRevert: ");
 	expect(bumpBody({ ...options, findings: "quest/a.md: <bad>" })).toContain(
 		"## Waiting\n\n- Maintainer: `quest check`",
 	);
