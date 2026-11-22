@@ -1588,8 +1588,8 @@ fakes("a maintainer's checkout records on a contributor's fork PR and reads its 
 		expect(alone.stdout).toContain(
 			"record skipped: no open PR from feature into main from acme or with a head this checkout holds: https://github.com/acme/widget/pull/13\n",
 		);
-		// Its size went unread: no size picks the default.
-		expect(alone.stdout).not.toContain(" high shadow\n");
+		// Its size went unread: no size picks the default, M, whose shadow XS would not run.
+		expect(alone.stdout).toContain(" xhigh shadow\n");
 		expect(stranger.body).toBe("Stranger.\n\n## Models\n\n- Size: XS\n");
 
 		pulls.push(pull);
