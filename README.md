@@ -1517,7 +1517,8 @@ A reviewer that cannot run passes the round to the next whose model is not
 the latest writer's, so Sonnet reviews what Opus changed last while Sol is
 out. That is a failure the CLI or provider reports before any finding is
 saved, never text in the diff or a reply: a CLI that is not installed, logged
-out, or has its login rejected passes over every model of that CLI, and a
+out, sent to a gateway with no credential, or has its login rejected passes
+over every model of that CLI, and a
 model at its usage limit passes over only itself. The run prints a `skipped`
 line for each reviewer it passed over, and the record names it in its
 header:
@@ -1562,7 +1563,13 @@ CLI reads from the environment (`ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, or
 `CODEX_ACCESS_TOKEN` for Codex) passes only when the CLI has no stored login or
 a gateway or provider is set. A provider's own keys (`ANTHROPIC_AWS_API_KEY`,
 `ANTHROPIC_FOUNDRY_API_KEY`, `ANTHROPIC_FOUNDRY_AUTH_TOKEN`) pass only while a
-gateway or provider is set. Variables that would change the reviewer's plugins,
+gateway or provider is set. Claude Code never sends its stored login to a
+gateway: with `ANTHROPIC_BASE_URL` set and no cloud provider, it needs
+`ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, or an `Authorization` header in
+`ANTHROPIC_CUSTOM_HEADERS`, else it cannot run. Under
+`CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST`, as in a T3 Code session, it drops the
+host's gateway, provider, and credentials, and reviews on the stored login.
+Variables that would change the reviewer's plugins,
 permissions, model, or configuration stay stripped.
 A logged-out error names the profile the CLI checked, `CLAUDE_CONFIG_DIR` or
 `CODEX_HOME`, or the default when unset, and any gateway or provider.

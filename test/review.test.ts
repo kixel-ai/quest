@@ -539,17 +539,84 @@ fakes.each([
 	}
 });
 
-fakes("a gateway with no credential and no stored login names the gateway", async () => {
+fakes.each(["", "1"])(
+	"a gateway with no credential never gets the stored login (logged out: %j)",
+	async (loggedOut) => {
+		const s = setup("CODEX_THREAD_ID");
+		vi.stubEnv("FAKE_LOGGED_OUT", loggedOut);
+		vi.stubEnv("ANTHROPIC_BASE_URL", "https://gateway.example");
+		// A tenant header and a login token give the gateway no credential of its own.
+		vi.stubEnv("ANTHROPIC_CUSTOM_HEADERS", "X-Gateway-Tenant: review\nX-Authorization: no");
+		vi.stubEnv("CLAUDE_CODE_OAUTH_TOKEN", "oauth-login");
+		const result = await quest("--root", s.repo, "review");
+		expect(result.code).toBe(3);
+		expect(result.stderr).toContain(
+			"claude would send its stored login to the gateway ANTHROPIC_BASE_URL names, which has no credential; " +
+				"set ANTHROPIC_API_KEY, ANTHROPIC_AUTH_TOKEN, or an Authorization header in ANTHROPIC_CUSTOM_HEADERS " +
+				"for the gateway, or unset ANTHROPIC_BASE_URL",
+		);
+		// Refused before Claude runs at all, not even its status check.
+		expect(s.calls()).toEqual([]);
+	},
+);
+
+fakes("an Authorization header in ANTHROPIC_CUSTOM_HEADERS is the gateway's credential", async () => {
+	const s = setup("CODEX_THREAD_ID");
+	vi.stubEnv("ANTHROPIC_BASE_URL", "https://gateway.example");
+	vi.stubEnv("ANTHROPIC_CUSTOM_HEADERS", "X-Gateway-Tenant: review\r\n  authorization :  Bearer gateway");
+	const result = await quest("--root", s.repo, "review");
+	expect(result.code, result.stderr).toBe(0);
+	expect(s.calls().length).toBeGreaterThan(1);
+	for (const call of s.calls()) {
+		expect(call.env.ANTHROPIC_BASE_URL).toBe("https://gateway.example");
+		expect(call.env.ANTHROPIC_CUSTOM_HEADERS).toContain("Bearer gateway");
+	}
+});
+
+fakes("a cloud provider ignores ANTHROPIC_BASE_URL, so it needs no gateway credential", async () => {
+	const s = setup("CODEX_THREAD_ID");
+	vi.stubEnv("ANTHROPIC_BASE_URL", "https://gateway.example");
+	vi.stubEnv("CLAUDE_CODE_USE_BEDROCK", "1");
+	const result = await quest("--root", s.repo, "review");
+	expect(result.code, result.stderr).toBe(0);
+	for (const call of s.calls()) expect(call.env.CLAUDE_CODE_USE_BEDROCK).toBe("1");
+});
+
+fakes("a host-managed provider is dropped, and the review runs on the stored login", async () => {
+	const s = setup("CODEX_THREAD_ID");
+	vi.stubEnv("CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST", "1");
+	vi.stubEnv("ANTHROPIC_BASE_URL", "http://127.0.0.1:8317");
+	vi.stubEnv("ANTHROPIC_CUSTOM_HEADERS", "X-Host: t3");
+	vi.stubEnv("ANTHROPIC_AUTH_TOKEN", "host-token");
+	vi.stubEnv("CLAUDE_CODE_USE_BEDROCK", "1");
+	const result = await quest("--root", s.repo, "review");
+	expect(result.code, result.stderr).toBe(0);
+	expect(s.calls().length).toBeGreaterThan(1);
+	for (const call of s.calls()) {
+		for (const name of [
+			"CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST",
+			"ANTHROPIC_BASE_URL",
+			"ANTHROPIC_CUSTOM_HEADERS",
+			"ANTHROPIC_AUTH_TOKEN",
+			"CLAUDE_CODE_USE_BEDROCK",
+		]) {
+			expect(call.env[name], name).toBeUndefined();
+		}
+	}
+});
+
+fakes("a host-managed provider with no stored login fails as logged out", async () => {
 	const s = setup("CODEX_THREAD_ID");
 	vi.stubEnv("FAKE_LOGGED_OUT", "1");
-	vi.stubEnv("ANTHROPIC_BASE_URL", "https://gateway.example");
+	vi.stubEnv("CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST", "true");
+	vi.stubEnv("ANTHROPIC_BASE_URL", "http://127.0.0.1:8317");
+	vi.stubEnv("ANTHROPIC_AUTH_TOKEN", "host-token");
 	const result = await quest("--root", s.repo, "review");
 	expect(result.code).toBe(3);
 	expect(result.stderr).toContain(
-		"claude is not logged in to its default profile (CLAUDE_CONFIG_DIR is unset) through ANTHROPIC_BASE_URL; run `claude auth login`",
+		"claude is not logged in to its default profile (CLAUDE_CONFIG_DIR is unset), ignoring the host-managed " +
+			"provider's route; run `claude auth login`",
 	);
-	// The size's pick and its shadow each check the login, and the first to fail stops the other's; no turn runs.
-	expect(s.calls().length).toBeGreaterThanOrEqual(1);
 	for (const call of s.calls()) expect(call.argv).toEqual(["auth", "status"]);
 });
 
