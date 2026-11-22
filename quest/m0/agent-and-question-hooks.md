@@ -7,7 +7,7 @@ Move two recurring agent mistakes from prose into `quest hook` (`src/cli/hooks.t
 1. **Block stalls on running background agent/wait tasks:** Extend `Stop` and `SubagentStop` in `src/cli/hooks.ts` / `src/cli/rules.ts` to refuse ending a turn while background `quest agent` (`start` or `resume`) or `quest wait` commands started by that session are still running, matching the existing `quest gate` refusal.
 2. **Enforce `(Recommended)` on blocking question dialogs:** Add a `PreToolUse` hook check on `AskUserQuestion` (Claude Code) and `request_user_input` (Codex) that denies any multi-option question (2 or more options) when no option ends with `(Recommended)`, naming the fix in the denial reason, and update `quest setup`'s hook matchers accordingly. Trim the now-enforced recommendation reminder from always-loaded prose where hooks run (keeping it in `CHECKED_CONTEXT` or non-hook guidance).
 
-Non-goal: checking option text semantics beyond `(Recommended)` (such as requiring `"Explain it first"`), which remains judgment-based in [Mold common maintainer answers into dialog rules](/quest/m0/dialog-options.md).
+Non-goal: checking option text semantics beyond `(Recommended)`, such as requiring `"Explain it first"`, which the guide's Questions section leaves to judgment.
 
 ## Plan
 
@@ -34,4 +34,3 @@ Agent's choices, for the implementer to revisit:
 ## Related
 
 - [Mistake audit](/quest/m0/mistake-audit.md) - tracks stalls and recommendation rates weekly
-- [Mold common maintainer answers into dialog rules](/quest/m0/dialog-options.md) - prose dialog rules that complement the `(Recommended)` hook
