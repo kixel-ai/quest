@@ -6,7 +6,7 @@ Dependencies belong to the `deps` audit, and what tests cover to the `tests` aud
 
 Look for:
 
-- CI: table every workflow and job by signal (what it catches that nothing cheaper does), visibility (a gate, an alert, or a report someone reads; a result only in a log or artifact is invisible), and cost in runner minutes by runner type. Sum minutes from each job's own timing, never from billing totals. Count failures by cause: many jobs failing on one build error is one finding, and a green build is not a caught regression.
+- CI: table every workflow and job by signal (what it catches that nothing cheaper does), visibility (a required check, or a run on the default branch that files what it finds as work; a non-required check on a PR, or a result only in a log or artifact, is invisible), and cost in runner minutes by runner type. Sum minutes from each job's own timing, never from billing totals. Count failures by cause: many jobs failing on one build error is one finding, and a green build is not a caught regression.
 - The gate: its slowest, flakiest, and least valuable steps, compile time included, and changes that run steps they cannot affect. Classify a failure before calling it a flake, and fix a flake at its cause rather than deleting its test.
 - Tests: each test's time from one invocation, recording the test count, profile, and threads.
 - Build time: the crates, packages, or modules that cost the most, cold and after a typical edit. Repeat an edit before timing it, since the first only records incremental state.
