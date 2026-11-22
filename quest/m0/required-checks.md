@@ -16,4 +16,5 @@ Recommended:
 
 - The ruleset comes from kixel-ai/dotfiles' `bin/repo-settings`, so prefer keeping `Queue` as the only required context: move each PR job into the merge queue's build or onto `release.yml`'s nightly schedule, by the rule in `quest context` that the merge gate holds only fast, high-signal checks. Requiring a new context means changing the standard there, not in this repository.
 - A workflow filtered by `paths` never reports when its paths are untouched, so it cannot be required as is: move `gate-macos.yml` to the nightly run, or into the queue with a job-level condition that reports success.
+- Each run moved off pull requests, and the nightly `windows.yml` already there, files what it finds as work, as `quest context` asks: today a failed scheduled run only emails the account that last edited its cron.
 - Say in the PR how much the queue's run time changes, and which checks a PR author loses before the queue.

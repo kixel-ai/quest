@@ -67,13 +67,9 @@ export function culprits(body: string, repository: Repository): Cause[] {
  */
 export function culpritOf(pull: Pull): Culprit {
 	const own = recorded(pull.body);
-	let tier: Culprit["tier"] = null;
+	const risk = recordedRisk(pull.body);
+	const tier = risk === null || "malformed" in risk ? null : risk.tier;
 	let reviewers: Seat[] = [];
-	try {
-		tier = recordedRisk(pull.body)?.tier ?? null;
-	} catch {
-		// Malformed: no tier.
-	}
 	try {
 		reviewers = parseReview(pull.body);
 	} catch {

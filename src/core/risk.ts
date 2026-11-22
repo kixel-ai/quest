@@ -63,7 +63,8 @@ export function matches(pattern: string, path: string): boolean {
 		if (segment === "**") source += index === 0 ? (last ? ".*" : "(?:[^/]+/)*") : last ? "(?:/.*)?" : "(?:/[^/]+)*";
 		else source += (index === 0 || (index === 1 && segments[0] === "**") ? "" : "/") + segmentSource(segment);
 	});
-	return new RegExp(`^${source}(?:/.*)?$`).test(path);
+	// `s`, so a path holding a line break matches like any other.
+	return new RegExp(`^${source}(?:/.*)?$`, "s").test(path);
 }
 
 /** A class of change that may land without the maintainer's pick, and the rule over the diff that defines it. */
@@ -177,28 +178,36 @@ export interface RecordedRisk {
 	overridden: Tier | null;
 }
 
+/** A `## Review` record whose risk lines `quest review` did not write, and what is wrong with them. */
+export interface MalformedRisk {
+	malformed: string;
+}
+
 /**
  * The risk `body`'s `## Review` record names, or null when it names none, as a record `quest review` wrote before
- * tiers, or a record of a skipped review. A malformed risk line fails.
+ * tiers, or a record of a skipped review. A body is its author's text, so a risk line that does not parse is returned
+ * as {@link MalformedRisk} for the reader to refuse, rather than thrown to stop a read of many PRs.
  */
-export function recordedRisk(body: string): RecordedRisk | null {
+export function recordedRisk(body: string): RecordedRisk | MalformedRisk | null {
 	const section = reviewSection(body);
 	if (section === null) return null;
 	const text = body.slice(section.start, section.end);
-	const line = /^- Risk: (.*?)\r?$/m.exec(text);
-	if (line === null) return null;
+	// Any risk line makes a record, so a line that misses its pattern, such as `- Risk:dire`, is malformed, not absent.
+	if (!/^- (?:Risk|Classified|Class|Overridden):/m.test(text)) return null;
+	const line = /^- Risk:(.*?)\r?$/m.exec(text);
+	if (line === null) return { malformed: "the ## Review record's risk is malformed: it has no - Risk: line" };
 	// Model text is an inline code span, as long a run of backticks as it needs, padded when it starts or ends with one.
-	const risk = /^(low|medium|high), (`+) ?(.*?) ?\2$/.exec(line[1]!);
+	const risk = /^ (low|medium|high), (`+) ?(.*?) ?\2$/.exec(line[1]!);
 	const classified = /^- Classified: (low|medium|high) by (.*?)\r?$/m.exec(text);
 	const head = /^- Head: ([0-9a-f]{12,40})\b/m.exec(text);
 	if (risk === null || classified === null || head === null)
-		throw new Error(`the ## Review record's risk is malformed: ${line[1]}`);
+		return { malformed: `the ## Review record's risk is malformed: ${line[1]!.trim()}` };
 	const by = classified[2]!;
 	const session = /, session (`+) ?(.*?) ?\1$/.exec(by);
 	const named = /^- Class: `([a-z0-9-]+)`\r?$/m.exec(text);
 	const overridden = /^- Overridden: from (low|medium|high) by the maintainer\r?$/m.exec(text);
 	if (/^- Class:/m.test(text) !== (named !== null) || /^- Overridden:/m.test(text) !== (overridden !== null))
-		throw new Error("the ## Review record's class or override is malformed");
+		return { malformed: "the ## Review record's class or override is malformed" };
 	return {
 		tier: risk[1] as Tier,
 		reason: risk[3]!,

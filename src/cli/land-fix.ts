@@ -13,6 +13,30 @@ export class FixerAgentError extends Error {
 	}
 }
 
+/** The model Codex's startup banner names, read from its stderr: `OpenAI Codex v<version>`, then `key: value` lines between two `--------` rules. */
+class Banner {
+	model?: string;
+	private carry = "";
+	/** Rules still to read: unset before the banner, 0 after it, so a banner in the agent's later output counts for nothing. */
+	private rules?: number;
+
+	read(text: string): void {
+		if (this.rules === 0) return;
+		const lines = (this.carry + text).split("\n");
+		// A line that never ends is no banner line; keep only its tail.
+		this.carry = lines.pop()!.slice(-256);
+		for (const line of lines.map((line) => line.replace(/\r$/, ""))) {
+			if (this.rules === undefined) {
+				if (/^OpenAI Codex v\S+$/.test(line)) this.rules = 2;
+			} else if (line === "--------") {
+				if (--this.rules === 0) return;
+			} else {
+				this.model ??= /^model: ([a-zA-Z0-9._/-]{1,100})$/.exec(line)?.[1];
+			}
+		}
+	}
+}
+
 export const FIX_RESULT = "quest-land-result.json";
 /**
  * The repository's known flaky tests, which a daemon may write in the checkout's `.git` before a round,
@@ -294,8 +318,9 @@ export async function fix(
 		...(model ? ["--model", model] : []),
 		"-",
 	];
-	// Codex names its model in the header it prints first, whether or not the command line does.
-	let header = "";
+	// Codex names its model in the banner it prints, whether or not the command line does. Only the banner
+	// counts, since the agent's own output follows it, and whatever a wrapper printed before may be any length.
+	const banner = new Banner();
 	await new Promise<void>((done, reject) => {
 		// Relay the agent's output through pipes of its own rather than letting it inherit ours. Once Bun writes
 		// to a pipe it marks that pipe non-blocking, and an inheriting child shares the flag: Codex then panicked
@@ -304,7 +329,7 @@ export async function fix(
 		child.stdout.pipe(process.stdout, { end: false });
 		child.stderr.pipe(process.stderr, { end: false });
 		child.stderr.on("data", (chunk: Buffer) => {
-			if (header.length < 4096) header += chunk.toString("utf8");
+			banner.read(chunk.toString("latin1"));
 		});
 		child.once("error", reject);
 		child.stdin.on("error", () => {});
@@ -316,8 +341,7 @@ export async function fix(
 	const results = parseFixResult(readFixResult(root), numbers, flaky);
 	const index = argv.findIndex((arg) => arg === "-m" || arg === "--model");
 	const ranModel =
-		(index >= 0 ? argv[index + 1] : argv.find((arg) => arg.startsWith("--model="))?.slice(8)) ??
-		/^model: ([a-zA-Z0-9._/-]{1,100})$/m.exec(header)?.[1];
+		(index >= 0 ? argv[index + 1] : argv.find((arg) => arg.startsWith("--model="))?.slice(8)) ?? banner.model;
 	const identity = {
 		agent: basename(agent),
 		model: ranModel ?? "unknown",

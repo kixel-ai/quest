@@ -43,6 +43,7 @@ export {
 	type HighPath,
 	PATHS,
 	RISK_FILE,
+	type MalformedRisk,
 	type RecordedRisk,
 	type RiskFile,
 	TIERS,

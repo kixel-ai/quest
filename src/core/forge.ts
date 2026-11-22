@@ -141,9 +141,13 @@ export interface Status {
 	 * The head's risk tier as the `## Review` record names it, and the classifier's own tier, lower when a reviewer
 	 * raised it; null when the record names none. `state` is the review record's, which a line after it carries to a
 	 * later head, else `current` when the record names the head and `stale` when not. `class` is the risk file's
-	 * `## Automatic` class the classifier found the change in, or null.
+	 * `## Automatic` class the classifier found the change in, or null. A record whose risk lines do not parse is
+	 * `malformed`, with why, which `quest merge` refuses.
 	 */
-	risk: { tier: Tier; reason: string; classified: Tier; class: string | null; state: ReviewRecord["state"] } | null;
+	risk:
+		| { tier: Tier; reason: string; classified: Tier; class: string | null; state: ReviewRecord["state"] }
+		| { state: "malformed"; error: string }
+		| null;
 	reactions: Reaction[];
 	/** Unresolved review threads, oldest first. */
 	threads: Thread[];
@@ -460,6 +464,9 @@ export function parseForgeAnswer<C extends ForgeCall>(call: C, value: unknown): 
 	return answer(VALUES[call])(value, "answer") as Answer<ForgeCalls[C]["value"]>;
 }
 
+type RiskStatus = NonNullable<Status["risk"]>;
+type MalformedStatus = Extract<RiskStatus, { state: "malformed" }>;
+
 /** Parses untrusted JSON at a path named for its error, such as `answer.value.checks`. */
 type Parse<T> = (value: unknown, at: string) => T;
 
@@ -573,14 +580,16 @@ const status = shape<Status>({
 	),
 	checkpoints: list(shape<Status["checkpoints"][number]>({ reviewer: string, round: count, url: string })),
 	reviewRecord: nullable(shape<ReviewRecord>({ state: oneOf(reviewStates), head: string })),
-	risk: nullable(
-		shape<NonNullable<Status["risk"]>>({
-			tier,
-			reason: string,
-			classified: tier,
-			class: nullable(string),
-			state: oneOf(reviewStates),
-		}),
+	risk: nullable((value, at) =>
+		isRecord(value) && value.state === "malformed"
+			? shape<MalformedStatus>({ state: oneOf(["malformed"] as const), error: string })(value, at)
+			: shape<Exclude<RiskStatus, MalformedStatus>>({
+					tier,
+					reason: string,
+					classified: tier,
+					class: nullable(string),
+					state: oneOf(reviewStates),
+				})(value, at),
 	),
 	reactions: list(shape<Reaction>({ content: string, actor: string, createdAt: time, url: string })),
 	threads: list(

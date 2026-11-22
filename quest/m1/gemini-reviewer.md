@@ -55,7 +55,7 @@ Guidance:
 
 ## Waiting
 
-- Maintainer: sign `agy` in with the Ultra account on the Linux workstation that runs agent sessions and on a macOS host, then confirm Carbon runs there with a one-word prompt, such as `agy -p --model <Carbon's id> hi`. On 2026-11-22, `agy models` on the Linux workstation printed "Please sign in". An agent cannot finish Google's login for the maintainer's account; it can drive the maintainer's agent Chrome once they pick the account. Done when `agy models` lists Carbon on both hosts.
+- Maintainer (PC): sign `agy` in with the Ultra account on the Linux workstation that runs agent sessions and on a macOS host, then confirm Carbon runs there with a one-word prompt, such as `agy -p --model <Carbon's id> hi`. On 2026-11-22, `agy models` on the Linux workstation printed "Please sign in". An agent cannot finish Google's login for the maintainer's account; it can drive the maintainer's agent Chrome once they pick the account. Done when `agy models` lists Carbon on both hosts.
 - kixel-ai/token-max: `token-max sessions` prices `agy` sessions. Check that an `agy` review session shows a nonzero cost there. If that stalls, the Plan's fallback prices them in `quest eval`.
 
 ## Related

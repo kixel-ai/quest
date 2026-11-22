@@ -256,7 +256,7 @@ function headings(found: Finding[], docs: Doc[], doc: Doc) {
 			found.push({
 				path: doc.path,
 				line: entry.line,
-				message: `'## ${WAITING}' item must open with who acts, as '${MAINTAINER}: ...' or '<party>: ...'`,
+				message: `'## ${WAITING}' item must open with who acts, as '${MAINTAINER}: ...', '${MAINTAINER} (PC): ...' for a step only at their computer, or '<party>: ...'`,
 			});
 		}
 	}

@@ -555,6 +555,18 @@ describe("merge --land", () => {
 		expect(pull.writes).toEqual([]);
 	});
 
+	test("refuses a body whose ## Review risk record does not parse", async () => {
+		const pull = new FakePull();
+		pull.body = `Summary.\n\n## Review\n\n- Head: ${HEAD}\n- Risk:dire\n`;
+		expect(await refused(land(PR, { sha: HEAD, method: "merge", check: clean }, pull.deps()))).toContain(
+			"risk is malformed: dire; rerun quest review",
+		);
+		expect(pull.writes).toEqual([]);
+		pull.body = `Summary.\n\n## Review\n\n- Head: ${HEAD}\n- Risk: low, \`docs\`\n- Classified: low by default\n`;
+		await land(PR, { sha: HEAD, method: "merge", check: clean }, pull.deps());
+		expect(pull.writes).not.toEqual([]);
+	});
+
 	test("leaves a merge queue to decide, even with auto-merge off", async () => {
 		const pull = new FakePull();
 		pull.allowAutoMerge = false;
@@ -882,7 +894,7 @@ describe("merge --land", () => {
 		},
 	);
 
-	test.each(["head", "hold", "base", "gate", "queue"])(
+	test.each(["head", "hold", "base", "gate", "queue", "risk"])(
 		"does not merge after the clean refusal changes its %s",
 		async (change) => {
 			const pull = new FakePull();
@@ -894,6 +906,7 @@ describe("merge --land", () => {
 				if (change === "base") pull.baseRef = "release";
 				if (change === "gate") pull.required = ["quest land"];
 				if (change === "queue") pull.queue = true;
+				if (change === "risk") pull.body = `## Review\n\n- Head: ${HEAD}\n- Risk:dire`;
 				return "Pull request is in clean status";
 			};
 			await expect(land(PR, { sha: HEAD, method: "merge", check: clean }, pull.deps())).rejects.toThrow();

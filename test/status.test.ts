@@ -869,17 +869,15 @@ describe("the risk tier", () => {
 		expect((await risk(record(B), { diffs: { [A]: "new", [B]: "old" } })).line).toMatch(/^risk high stale /);
 	});
 
-	test("is absent from a record without one, and fails on a malformed one", async () => {
+	test("is absent from a record without one, and marks a malformed one without failing the read", async () => {
 		expect((await risk(`## Review\n\n- Head: ${A}`)).line).toBe("risk -");
-		const fixture = setup([
-			pull({
-				body: `## Review\n\n- Head: ${A}\n- Risk: dire`,
-				checks: null,
-				reviews: page([]),
-				threads: page([]),
-			}),
-		]);
-		await expect(pullRequestStatus(pr, fixture.deps)).rejects.toThrow("risk is malformed");
+		// Read beside a well-formed PR, as a reader of many PRs does: only the malformed one's risk is marked.
+		const [malformed, sound] = await Promise.all([risk(`## Review\n\n- Head: ${A}\n- Risk:dire`), risk(record(A))]);
+		expect(malformed).toEqual({
+			line: "risk - malformed - the ## Review record's risk is malformed: dire",
+			risk: { state: "malformed", error: "the ## Review record's risk is malformed: dire" },
+		});
+		expect(sound.line).toBe("risk high current medium it rewrites the wire format");
 	});
 });
 

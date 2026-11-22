@@ -244,13 +244,16 @@ second name in one `## Audit`, and `## Skipped audits` outside the root.
 
 A quest waiting outside the tree says so in a `## Waiting` section, one item
 per condition, each opening with who acts: `Maintainer:` for a decision or
-action only the maintainer can take, or the outside party, such as
-`moq-dev/moq:`. `quest check` rejects an item that names nobody.
+action only the maintainer can take, `Maintainer (PC):` for one they can take
+only at one of their computers, such as a local login or a hardware check, or
+the outside party, such as `moq-dev/moq:`. `quest check` rejects an item that
+names nobody, and a maintainer qualifier other than `(PC)`.
 
 ```markdown
 ## Waiting
 
 - Maintainer: open a Hetzner account; `GET /server` on the Robot API answers 200
+- Maintainer (PC): plug in the capture card; `v4l2-ctl --list-devices` lists it
 - moq-dev/moq: a release carries the VA-API bindings
 ```
 
@@ -261,8 +264,10 @@ body.
 milestone and the same downstream impact `quest unblocked` counts; a draft
 ranks as the quest its branch carries. Each line gives the dependents, whether
 the quest is otherwise ready or still blocked, its path or the draft's URL, and
-the item; `--maintainer` keeps only the maintainer's, and `--json` prints
-`{path, pr, dependents, ready, waits}` objects. A draft's item that names no
+the item; `--maintainer` keeps only the maintainer's, `--no-pc` drops the
+`Maintainer (PC):` ones for a session away from your computers, and `--json`
+prints `{path, pr, dependents, ready, waits}` objects, each wait's `pc` marking
+those. A draft's item that names no
 party is the maintainer's. Drafts come from
 the upstream's open PRs, found as for `unblocked --unclaimed`; without the
 remote, off GitHub, or when GitHub cannot be read, it lists the tree's items
@@ -569,7 +574,7 @@ comes last, and a missing value prints as `-`:
 | `url`, `state`, `draft`, `head` | The PR URL; `open`, `closed`, or `merged`; `true` or `false`; the head SHA. |
 | `mergeable`, `merge-state`, `review-decision` | GitHub's values, lowercased. |
 | `review-record` | Whether the PR body's [`## Review` record](#review-locally) still covers the head, and the head it names last: `current` when it is the head, `diff-identical` when `git diff <base>...<head>` prints the same as for it, `stale` otherwise, or `unknown` when GitHub cannot compare them, such as a diff too large; `-` when the record names no full SHA. Whose record counts is the reader's call. |
-| `risk` | The record's [risk tier](#risk-tiers), `low`, `medium`, or `high`; the same state as `review-record` for the head it names; the tier its classifier set before any reviewer raised it; and the reason. `-` when the record names none. |
+| `risk` | The record's [risk tier](#risk-tiers), `low`, `medium`, or `high`; the same state as `review-record` for the head it names; the tier its classifier set before any reviewer raised it; and the reason. `-` when the record names none, and `- malformed -` with why when its risk lines do not parse, which `quest merge` refuses. |
 | `class` | The `## Automatic` class of the base's `RISK.md` the record's classifier found the change in, or `-`. |
 | `auto-merge` | Method, who enabled it, when, and the head it was enabled on. |
 | `merge-queue` | Queue state, position, and when it was enqueued. |
@@ -751,7 +756,8 @@ online reviewer's that a ruleset requires (GitHub's review decision is
 for the approval, and refuses where nothing would wait, since an admin's token
 would merge or enqueue past the requirement.
 It also refuses while a [signal](#signals-that-hold-a-head) holds the head,
-naming each.
+naming each, and while the PR body's `## Review` record has risk lines that do
+not parse, until `quest review` rewrites it.
 It enables auto-merge bound to that SHA, or merges at once when nothing is
 left to wait for. `--squash` or `--rebase` picks the method, and it refuses one
 the repository disallows; otherwise it uses the only method the repository
@@ -917,12 +923,13 @@ its session is done. A held flaky-test disable PR is left for a maintainer too.
 A round whose collection fails three passes in a row, as when GitHub refuses its
 handback comment, is set aside with a logged warning, freeing its fixer slot.
 
-A PR's own CI is a signal, never a gate of its own: only the base's required
-checks keep GitHub from enqueuing a head. `/quest-merge` reports the failing
-optional checks on the head it picks, and the land fixer reads every check as
-context. A public repository may run its checks on pull requests too, since
-GitHub's hosted runners are free there; a private one can skip them and rely
-on the merge queue's build on the host alone.
+Only the base's required checks keep GitHub from enqueuing a head, and
+`quest context` asks that every check on a pull request be one, with anything
+that should not block a merge run on the default branch instead.
+`/quest-merge` still reports a failing optional check on the head it picks, and
+the land fixer reads every check as context. A public repository may run its
+checks on pull requests too, since GitHub's hosted runners are free there; a
+private one can skip them and rely on the merge queue's build on the host alone.
 
 The watcher also keeps the repository's flaky tests in `flaky.json` in its
 state directory: each flaky verdict, across every PR, by the failure signature
@@ -2453,7 +2460,7 @@ arrives with the guide sections and other skills it builds on, in one call:
 | `quest-review` | Review a PR's branch locally with a model other than its latest writer, then mark it ready for review. |
 | `quest-merge` | Queue a PR to land, running `quest-iterate` first when it needs work. |
 | `quest-run` | Orchestrate a project from one session: start ready quests, take PRs to merge, and settle what quests and drafts wait on you, in a loop until only your decisions remain, then plan the follow-ups no quest owns yet. Pass a filter such as `prs` to start no quests. |
-| `quest-afk` | Keep a session such as `quest-run` going while you are away: it acts on its recommendations, defers merges, and walks you through the rest when you return. |
+| `quest-afk` | Keep a session such as `quest-run` going while you are away: it acts on its recommendations, defers merges, and walks you through the rest when you return. `afk merge` also merges low- and medium-risk PRs it strongly recommends, and `afk soon` asks pending questions in one batch before you leave. |
 
 Use `/quest-plan` in Claude Code or `$quest-plan` in Codex. Skills coordinate
 within your agent session. A started quest stops at a pull request; merging is
