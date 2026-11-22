@@ -71,7 +71,8 @@ Readout, the agent's choices for the implementer to revisit:
   `src/cli/models.ts`, with `quest models --arm`, the `arm` field of
   `quest unblocked --json`, and the arm notes in the README, guide, and
   `/quest-run` and `/quest-iterate`. Keep the shadow reviewer only if the maintainer
-  chooses to.
+  chooses to: once L's pairs reach 116 first rounds, about 2026-12-20, end
+  its step down at L and XL, and read the step up at S and M below.
 - Carry the tallies into [the model check](/quest/m1/model-check.md)'s
   baseline.
 - Chart the arms' cost against quality as
@@ -111,6 +112,17 @@ three hosts' saved review rounds:
   on high-tier PRs more than medium. The shadow cost about $52 over the
   week. Both seats' findings were mostly fixed: refuted 9 of 103 routed and
   5 of 36 shadow at M, 5 of 78 and 2 of 47 at L.
+- Decided 2026-11-22 (maintainer, `/quest-run`,
+  [moq-dev/quest#801](https://github.com/moq-dev/quest/pull/801#issuecomment-7073966129)):
+  - Review table? ✅ Keep every cell, Sol medium, medium, high, xhigh,
+    xhigh for XS to XL (rejected: lower XS to low).
+  - Shadow reviewer? ✅ Retarget it: none at XS, one effort above the
+    routed pick at S and M, to measure whether raising them pays, and one
+    below at L until L reaches its sample (rejected: unchanged until
+    12-20, then end it; end it now; a permanent second reviewer at L and
+    XL, left to [the guardrails](/quest/m0/benchmark/guardrails.md)). XL
+    keeps its step down with L. Compare the step up's pairs as the step
+    down's were, counting only rounds after the retarget merged.
 - Writer A/B, PRs per arm, first-round findings over the PRs counted in
   parentheses, cost as the median merged PR with any attributed spend (5
   to 27% of each arm's merged PRs had none):
