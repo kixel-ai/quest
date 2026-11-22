@@ -917,12 +917,13 @@ its session is done. A held flaky-test disable PR is left for a maintainer too.
 A round whose collection fails three passes in a row, as when GitHub refuses its
 handback comment, is set aside with a logged warning, freeing its fixer slot.
 
-A PR's own CI is a signal, never a gate of its own: only the base's required
-checks keep GitHub from enqueuing a head. `/quest-merge` reports the failing
-optional checks on the head it picks, and the land fixer reads every check as
-context. A public repository may run its checks on pull requests too, since
-GitHub's hosted runners are free there; a private one can skip them and rely
-on the merge queue's build on the host alone.
+Only the base's required checks keep GitHub from enqueuing a head, and
+`quest context` asks that every check on a pull request be one, with anything
+that should not block a merge run on the default branch instead.
+`/quest-merge` still reports a failing optional check on the head it picks, and
+the land fixer reads every check as context. A public repository may run its
+checks on pull requests too, since GitHub's hosted runners are free there; a
+private one can skip them and rely on the merge queue's build on the host alone.
 
 The watcher also keeps the repository's flaky tests in `flaky.json` in its
 state directory: each flaky verdict, across every PR, by the failure signature
