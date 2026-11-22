@@ -42,7 +42,7 @@ A change is high when it:
 A change is medium when behavior others rely on changes and a revert
 undoes it, such as an export, an optional field, or an output line that
 existing consumers keep parsing, a new or changed command or option, a bug
-fix, a skill or audit's instructions that leave when an agent writes
+fix, a skill or audit's instructions that leave remote-write authority
 alone, or a routine dependency or pin bump.
 
 Tests, plans under `quest/`, and documentation change nothing others rely
