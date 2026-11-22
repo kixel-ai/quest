@@ -1752,10 +1752,10 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"and can only raise it: the head's tier is the riskiest, with the reason of the first to judge it so. " +
 				"The classifier also names the class of RISK.md's ## Automatic list every changed file falls in, or none. " +
 				"The tier scales the review: a low head with no finding to settle runs no reviewer unless --harness, " +
-				"--model, or --effort names one, and a high head also gets a second reviewer, even when --model or --effort " +
-				"changes the pick but not beside the one reviewer --harness runs alone, the first of the size's list " +
+				"--model, or --effort names one, and a high head also gets a second reviewer: the first of the size's list " +
 				"on a model other than the pick's that can run, in its own session, which reviews every head while the " +
-				"tier is high and settles its findings after; a round that raises the tier to high saves its rounds and " +
+				"tier is high and settles its findings after. --model and --effort change only the pick, so the second " +
+				"reviewer still runs; the one reviewer --harness names runs alone, with none. A round that raises the tier to high saves its rounds and " +
 				"runs it at once, printing those rounds before the error when that review fails, as when no second reviewer can run. " +
 				"--override and --reason record the maintainer's tier for the branch, which holds until the reviewed " +
 				"tier grows riskier than the one overridden.\n\n" +

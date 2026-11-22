@@ -1773,12 +1773,12 @@ to its block. A `- Class:` line follows when the classifier named a class.
 A low head with no finding left to settle runs no local reviewer, unless
 `--harness`, `--model`, or `--effort` names one: the record names the head in
 full, adds `- Local review: none, since a low-risk head needs only the online
-reviewer`, and `next done` says so. A high head also gets a second reviewer,
-even when `--model` or `--effort` changes the pick, though not beside the one
-reviewer `--harness` runs alone: the first of the size's list on a model other
-than the pick's that can run,
+reviewer`, and `next done` says so. A high head also gets a second reviewer:
+the first of the size's list on a model other than the pick's that can run,
 marked `second`, in a session of its own that reviews every head while the
-tier is high and settles its findings after. A round that raises the tier to
+tier is high and settles its findings after. `--model` and `--effort` change
+only the pick, so the second reviewer still runs; the one reviewer `--harness`
+names runs alone, with none. A round that raises the tier to
 high saves its rounds and runs the second reviewer at once; when that review
 fails, as when none can run, it prints those rounds before the error, so their
 findings can be answered. When every other model is avoided, as
