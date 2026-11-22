@@ -43,10 +43,10 @@ A PR with open decisions, its `## Waiting` section's or an issue you would solve
 A PR you would skip or delete rather than fix, such as a superseded one, gets that question instead.
 Leave a PR whose required checks are still running for a later round; an automated reviewer is not waited on, since the queue waits for an approval the base requires.
 
-A PR whose author has write access and that changes no user-facing behavior carries a standing `/quest-merge` pick, unless the repository's `CONTRIBUTING.md` opts out: run `/quest-merge` on it without asking, and name it as auto-picked in the summary.
-That covers only tests, benchmarks, CI, internal docs or comments, and behavior-preserving code. Anything users or other repositories get, such as CLI behavior or output, shipped skills or rules, user-facing docs, dependencies, or release artifacts, needs the user's pick, as does adding or expanding quests.
-A trivial PR, such as a dependency bump, carries it too whatever its author, under the same opt-out, but merges only once Pullfrog has approved its head; in a repository without Pullfrog, it needs the user's pick.
-Judge the diff, not the title, before every `/quest-merge` run, and ask when unsure: the standing pick ends at the first head that does not qualify, or once a person takes the PR out of the queue.
+A PR whose author has write access carries a standing `/quest-merge` pick, unless the repository's `CONTRIBUTING.md` opts out, when `quest status` shows its `risk` low for the head and its `class` in the base `RISK.md`'s `## Automatic` list, and it adds or expands no quests: run `/quest-merge` on it without asking, and name it as auto-picked in the summary.
+A trivial PR, such as a dependency bump, carries it too whatever its author and tier, under the same opt-out, but merges only once Pullfrog has approved its head; in a repository without Pullfrog, it needs the user's pick.
+Judge the diff against the class's rule, not the title, before every `/quest-merge` run, and ask when unsure: the standing pick ends at the first head that does not qualify, or once a person takes the PR out of the queue.
+Ask about a high PR with the full brief: its `## Undo`, both reviews' findings, and the full suite's result.
 
 Ask about every other PR in a question of its own that summarizes it and picks only the action, with `/quest-merge`'s pick options; none covers several PRs.
 Ask about each of its follow-ups in a question of its own beside it, as the guide's Creation section describes; the answers count only on a `/quest-merge` pick, and go in the brief of the `/quest-iterate` it dispatches.

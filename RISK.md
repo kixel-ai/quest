@@ -48,6 +48,21 @@ alone, or a routine dependency or pin bump.
 Tests, plans under `quest/`, and documentation change nothing others rely
 on, so they are low.
 
+## Automatic
+
+A low PR whose author has write access lands without the maintainer's pick
+when its whole diff falls in one class below. Only a PR the maintainer
+picks changes this list, proposed with `quest usage`'s numbers for the
+class: its PRs merged, the culprits among them, and their wait on a person.
+
+- `tests` - only tests, their fixtures, or benchmarks change
+- `internal-docs` - only comments, plans under `quest/`, or documentation
+  no user, contributor, or other repository reads change
+- `refactor` - code changes that keep every behavior and output the same,
+  such as a rename inside a module or a simplification
+- `trivial` - a dependency or pin bump, or another change as small, from
+  any author, which lands at any tier once Pullfrog approves its head
+
 ## High
 
 - `assets/CONTEXT.md` - every agent session in every repository using

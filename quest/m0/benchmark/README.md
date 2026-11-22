@@ -1,4 +1,4 @@
-# Development as a benchmark
+# [M] Development as a benchmark
 
 ## Goal
 
@@ -67,8 +67,9 @@ maintainer's typed messages since 2026-10-01):
   Rejected: set at planning and re-judged from the diff; a separate score
   per axis.
 - What does the tier scale?
-  - ✅ Review, approval, and CI, as
-    [tier guardrails](/quest/m0/benchmark/guardrails.md) lists
+  - ✅ Review, approval, and CI, as `RISK.md` and the README's Risk tiers
+    section describe since
+    [moq-dev/quest#802](https://github.com/moq-dev/quest/pull/802)
   - Rejected: review and approval only; approval only
 - Who moves a class of change into or out of automatic merging?
   - ✅ The maintainer, both ways: the report flags a class whose breakage
