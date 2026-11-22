@@ -192,8 +192,8 @@ Add a closing keyword for every issue under `Closes`.
 ## Deletion
 
 A quest that is no longer needed or cannot be completed is abandoned.
-Delete it with `quest rm`, which deletes the quest and every link to it, edit the mentions it reports, and explain why in a PR of quest deletions only, repurposing the quest's open PR if it has one.
-The user's pick to delete a quest is also the pick to merge that PR.
+Delete it with `quest rm`, which deletes the quest and every link to it, edit the mentions it reports, and explain why in the PR.
+A quest the user picks to delete goes in a PR of quest deletions only, repurposing the quest's open PR if it has one, and that pick is also the pick to merge it.
 Remove the `quest` label from issues no other quest tracks.
 
 ## Coordination
