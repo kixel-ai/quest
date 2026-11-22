@@ -9,7 +9,7 @@ still waits for free memory, and heavy commands queue as they do now.
 
 ## Plan
 
-From the 2026-11-18 [mistake audit](/quest/m0/mistake-audit.md) run, on
+From the 2026-11-18 [mistake audit](https://github.com/kixel-ai/kixel.quest/blob/main/quest/m0/mistake-audit.md) run, on
 the gate records [moq-dev/quest#747](https://github.com/moq-dev/quest/pull/747)
 added (2026-11-17 to 11-19, this host only): 887 of 3,048 gated runs (29%)
 used under 5 CPU-seconds, together 0.16% of gated CPU, against 20% to 22%
@@ -50,8 +50,3 @@ Recommended:
   keep today's behavior.
 - Leave `quest context`'s "gate by CPU" line as it is until the next audit
   shows whether misgated cheap runs still cost wait time.
-
-## Related
-
-- [Mistake audit](/quest/m0/mistake-audit.md) - counts gating mistakes each
-  week
