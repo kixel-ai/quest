@@ -5,7 +5,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { git } from "./git";
-import { type StopInput, runningGates } from "./rules";
+import { type StopInput, runningTasks } from "./rules";
 import {
 	Busy,
 	type Merged,
@@ -249,7 +249,7 @@ export async function claudeHook(
 		}
 		case "SubagentStop": {
 			// `quest hook` refuses this stop, and Claude continues the subagent without a SubagentStart.
-			if (runningGates(hook as StopInput).length > 0) return undefined;
+			if (runningTasks(hook as StopInput).length > 0) return undefined;
 			const record = await subagentCheckout(worktrees, hook);
 			if (record) await waiting(() => worktrees.release(record.id, [WORKSPACE]));
 			return undefined;
