@@ -200,7 +200,7 @@ checkpoints and outages to count by hand:
     [moq-dev/quest#493](https://github.com/moq-dev/quest/pull/493) (user,
     2026-11-04): Sol medium, medium, high, xhigh, and xhigh for XS to XL
     (user, 2026-11-11). It restores the efforts the
-    [token waste](/quest/m0/token-waste/README.md) audit lowered to low,
+    token waste audit lowered to low,
     medium, medium, high, and xhigh on 2026-11-05, raising XS, M, and L. Opus
     low, low, medium, high, and xhigh when Sol wrote the code (agent's choice).
     They replaced Codex `xhigh` and Claude `high` (maintainer, 2026-11-03), for
