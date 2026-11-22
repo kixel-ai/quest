@@ -10,6 +10,8 @@ Non-goals: the writer's model and effort (owned by [Routing evidence](/quest/m0/
 
 Decided 2026-11-22 (maintainer, `/quest-run`, on [moq-dev/quest#803](https://github.com/moq-dev/quest/pull/803)'s closing re-measure of the token waste epic): keep a follow-up on `quest-start` spend, scoped as this repository's rules size and place it (rejected: close the epic with no follow-up).
 
+Kept 2026-11-22 (maintainer, `/quest-run` pick round on [moq-dev/quest#803](https://github.com/moq-dev/quest/pull/803)): ✅ keep this quest (rejected: drop it). The auto-compact window question went to kixel-ai/dotfiles' quest tree: ✅ keep it, holding at 400k until this quest's cut is measured (rejected: drop it).
+
 Baseline, 2026-11-14 to 11-21, this host, from `token-max sessions` and the sessions' transcripts (a session counts as `quest-start` when it, or the session that spawned it, ran `/quest-start` first; dollars are API list prices):
 
 - 324 sessions (196 main, 128 sub-agents) cost $2.5k of the host's $5.3k Claude spend, 47%. The median session is $4.39, the 90th percentile $18.72, the most expensive $76.
