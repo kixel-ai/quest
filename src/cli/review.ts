@@ -88,9 +88,15 @@ export interface Skip extends Model {
 }
 
 /** Every eligible reviewer of the size was unavailable, each for the reason `skipped` names. */
+/** The rounds a run saved before the second review a raise called for failed, by the error that stopped it. */
+const savedBefore = new WeakMap<object, Reviewed>();
+
+/** The rounds a failed run saved before it failed, which still need their findings answered, if any. */
+export function savedReview(error: unknown): Reviewed | undefined {
+	return typeof error === "object" && error !== null ? savedBefore.get(error) : undefined;
+}
+
 export class ReviewOutageError extends Error {
-	/** The rounds a run finished and saved before the second review a raise called for could not run. */
-	reviewed?: Reviewed;
 	constructor(
 		size: Size,
 		readonly skipped: Skip[],
@@ -2128,39 +2134,38 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 	// run are saved first, so a second reviewer that cannot run costs them nothing; the next run seats it again.
 	if (!seats.some((seat) => seat.second) && high(judged())) {
 		const seated = kept.find((session) => session.second);
-		for (;;) {
-			let reviewer: Model;
-			try {
-				reviewer = secondTo(candidates[at]!);
-			} catch (error) {
-				// The saved rounds still need their findings answered, so the outage carries them to the report.
-				if (error instanceof ReviewOutageError)
-					error.reviewed = {
-						rounds: done.map((each) => each.round),
-						tallies: after,
-						risk,
-						skipped,
-						branch,
-						head,
-						base,
-						sized,
-					};
-				throw error;
+		try {
+			for (;;) {
+				const seat: Seat = { reviewer: secondTo(candidates[at]!), second: true, session: seated, first: 1 };
+				try {
+					const [extra] = await runSeats(shared, [seat], undefined, options.signal);
+					done = [...done, extra!];
+					seats = [...seats, seat];
+					kept = kept.filter((session) => session !== seated);
+					break;
+				} catch (error) {
+					if (!(error instanceof ReviewerUnavailableError)) throw error;
+					if (!(error instanceof ReviewLimitError)) down.set(error.harness, error);
+					skipped.push({ ...seat.reviewer, reason: error.reason });
+					messages.push(error.message);
+					secondOut.add(seat.reviewer.model);
+				}
 			}
-			const seat: Seat = { reviewer, second: true, session: seated, first: 1 };
-			try {
-				const [extra] = await runSeats(shared, [seat], undefined, options.signal);
-				done = [...done, extra!];
-				seats = [...seats, seat];
-				kept = kept.filter((session) => session !== seated);
-				break;
-			} catch (error) {
-				if (!(error instanceof ReviewerUnavailableError)) throw error;
-				if (!(error instanceof ReviewLimitError)) down.set(error.harness, error);
-				skipped.push({ ...seat.reviewer, reason: error.reason });
-				messages.push(error.message);
-				secondOut.add(seat.reviewer.model);
-			}
+		} catch (error) {
+			// Whatever stopped the second review, the rounds saved before it still need their findings answered, so
+			// the failure carries them to the report.
+			if (typeof error === "object" && error !== null)
+				savedBefore.set(error, {
+					rounds: done.map((each) => each.round),
+					tallies: after,
+					risk,
+					skipped,
+					branch,
+					head,
+					base,
+					sized,
+				});
+			throw error;
 		}
 		({ after, risk } = persist());
 	}

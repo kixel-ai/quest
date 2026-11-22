@@ -1557,6 +1557,32 @@ fakes(
 	},
 );
 
+fakes("a raise to high with no other model left prints its saved rounds before the usage error", async () => {
+	const s = setup();
+	moveBase(s.repo, (dir) => write(dir, "RISK.md", riskFile([])));
+	vi.stubEnv("FAKE_RAISE", "high");
+	try {
+		const out = await quest(
+			"--root",
+			s.repo,
+			"review",
+			"--size",
+			"S",
+			"--exclude-model",
+			"claude-opus-5-5",
+			"--exclude-model",
+			"claude-sonnet-5-5",
+		);
+		expect(out.code).toBe(2);
+		expect(out.stderr).toContain("every other model of the size's list is avoided");
+		expect(out.stdout).toContain("\nrisk high It rewrites the wire format peers read.\n");
+		expect(out.stdout).toContain("\nreviewer codex gpt-6.1-sol medium\n");
+		expect(out.stdout).toContain("\nfindings 1\n");
+	} finally {
+		vi.unstubAllGlobals();
+	}
+});
+
 fakes("a raise from a reviewer the run leaves out holds while its last round reviewed the head", async () => {
 	const s = setup();
 	const pull = {

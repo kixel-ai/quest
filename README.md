@@ -1779,9 +1779,9 @@ reviewer`, and `next done` says so. A high head also gets a second reviewer,
 the first of the size's list on a model other than the pick's that can run,
 marked `second`, in a session of its own that reviews every head while the
 tier is high and settles its findings after. A round that raises the tier to
-high saves its rounds and runs the second reviewer at once; when none can run,
-it prints those rounds before failing as an outage, so their findings can be
-answered. When every other model is avoided, as
+high saves its rounds and runs the second reviewer at once; when that review
+fails, as when none can run, it prints those rounds before the error, so their
+findings can be answered. When every other model is avoided, as
 with no `## Models` record under a harness the list has one model of, the run
 fails as a usage error; when they cannot run, as an outage.
 

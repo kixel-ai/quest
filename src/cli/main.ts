@@ -92,6 +92,7 @@ import {
 	review,
 	nextStep,
 	roundLines,
+	savedReview,
 } from "./review";
 import { EVAL_FILE, addCase, evalLines, evaluate } from "./review-eval";
 import { type Recorded, pullModels, recordRounds } from "./review-record";
@@ -1655,8 +1656,8 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 	const classifiers = CLASSIFIERS.map((e) => `${e.harness} ${e.model} ${e.effort}`).join(", then ");
 	/** quest review's exit code for `error`: 2 for a usage error, 3 when no reviewer could run, else 1. */
 	const reviewFailure = (error: unknown, json = false): number => {
-		// An outage after a raise saved the rounds that ran, so they print for their findings to be answered.
-		const reviewed = error instanceof ReviewOutageError ? error.reviewed : undefined;
+		// A failure after a raise saved the rounds that ran, so they print for their findings to be answered.
+		const reviewed = savedReview(error);
 		if (reviewed !== undefined) {
 			const { rounds, tallies, risk, skipped } = reviewed;
 			if (json) print(JSON.stringify({ rounds, tallies, risk, skipped, record: null, next: null }));
@@ -1754,7 +1755,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"--model, or --effort names one, and a high head also gets a second reviewer, the first of the size's list " +
 				"on a model other than the pick's that can run, in its own session, which reviews every head while the " +
 				"tier is high and settles its findings after; a round that raises the tier to high saves its rounds and " +
-				"runs it at once, printing those rounds before the outage when no second reviewer can run. " +
+				"runs it at once, printing those rounds before the error when that review fails, as when no second reviewer can run. " +
 				"--override and --reason record the maintainer's tier for the branch, which holds until the reviewed " +
 				"tier grows riskier than the one overridden.\n\n" +
 				"Prints the size and where it came from, base, and head, its risk tier and reason, the classifier's tier, " +
