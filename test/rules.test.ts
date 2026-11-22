@@ -200,6 +200,8 @@ test("a new GitHub post needs the footer and no em dashes; edits and bodies off 
 	expect(bash("gh pr review 5 --approve")).toEqual([]);
 	// quest pr posts the same way, on GitHub or Kixel Quest.
 	expect(bash('quest pr comment 5 --body "Done."')).toEqual([RULES.footer]);
+	expect(bash('bun run --silent quest --root . pr comment 5 --body "Done."')).toEqual([RULES.footer]);
+	expect(bash("quest gate --help && quest --root . gate git push")).toEqual([RULES.refspec]);
 	expect(bash('quest --root .worktrees/a pr comment 5 --body "Done."')).toEqual([RULES.footer]);
 	expect(bash('quest --root=. pr comment 5 --body "Done."')).toEqual([RULES.footer]);
 	expect(bash(`quest pr comment 5 --thread T -b "Done ${DASH} mostly.\n\n${FOOTER}"`)).toEqual([RULES.emDash]);

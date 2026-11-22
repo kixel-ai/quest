@@ -5,7 +5,7 @@
 // tell apart.
 
 import { existsSync, readFileSync, statSync } from "node:fs";
-import { dirname, isAbsolute, join, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 
 import { REFERENCE_MARKER, type Repository, lines } from "../core";
 import { hostedRepository } from "./forge";
@@ -81,15 +81,6 @@ export interface StopInput {
 	background_tasks?: { id: string; type: string; command?: string }[];
 }
 
-/** `quest` on a shell command line, directly or through `bun run quest` and the like, then its global `--root`, if any. */
-const QUEST = String.raw`(^|[^\w-])quest(\s+--root(=|\s+)("[^"]*"|'[^']*'|\S+))*\s+`;
-
-/** A shell command line that runs `quest gate`. */
-const GATE = new RegExp(String.raw`${QUEST}gate(\s|$)`);
-
-/** A shell command line that runs a turn of `quest agent`, or `quest wait`, which an agent blocks on. */
-const BLOCKING = new RegExp(String.raw`${QUEST}(agent\s+(start|resume)|wait)(\s|$)`);
-
 /**
  * The `quest gate`, `quest agent start` or `resume`, and `quest wait` commands
  * still running in the background that the agent ending its turn started, in
@@ -104,13 +95,16 @@ const BLOCKING = new RegExp(String.raw`${QUEST}(agent\s+(start|resume)|wait)(\s|
  * the list, from a Claude Code older than it, has none.
  */
 export function runningTasks(input: StopInput): string[] {
-	const tasks = (input.background_tasks ?? []).filter(
-		(task) =>
-			task.type === "shell" &&
-			typeof task.command === "string" &&
-			(GATE.test(task.command) || BLOCKING.test(task.command)),
-	);
-	if (tasks.length === 0 || !usesQuest(input.cwd)) return [];
+	const held = (input.background_tasks ?? []).flatMap((task) => {
+		if (task.type !== "shell" || typeof task.command !== "string") return [];
+		const calls = questCalls(task.command);
+		const gate = calls.some((call) => call[0] === "gate");
+		const blocking = calls.some(
+			(call) => call[0] === "wait" || (call[0] === "agent" && ["start", "resume"].includes(call[1] ?? "")),
+		);
+		return gate || blocking ? [{ id: task.id, command: task.command, gate }] : [];
+	});
+	if (held.length === 0 || !usesQuest(input.cwd)) return [];
 	const path = input.hook_event_name === "SubagentStop" ? input.agent_transcript_path : input.transcript_path;
 	let transcript: string | undefined;
 	try {
@@ -118,9 +112,35 @@ export function runningTasks(input: StopInput): string[] {
 	} catch (error) {
 		if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
 	}
-	return tasks
-		.filter((task) => (transcript === undefined ? GATE.test(task.command!) : transcript.includes(`ID: ${task.id}`)))
-		.map((task) => task.command!);
+	return held
+		.filter((task) => (transcript === undefined ? task.gate : transcript.includes(`ID: ${task.id}`)))
+		.map((task) => task.command);
+}
+
+/**
+ * The arguments, past its global options, of each `quest` a shell command line
+ * runs, through wrappers, `bun run`, and `sh -c`, and the command a `quest gate`
+ * runs in turn. Words are matched once the shell's quoting is removed, so a
+ * quoted argument, such as a `grep` pattern, runs nothing.
+ */
+function questCalls(line: string): string[][] {
+	const calls: string[][] = [];
+	for (const simple of parse(line)) {
+		let argv = unwrap([...simple.argv], new Set());
+		while (argv !== null) {
+			const [name, ...args] = argv;
+			if (SHELLS.has(name!)) {
+				const flag = args.findIndex((arg) => /^-[a-z]*c[a-z]*$/.test(arg));
+				if (flag !== -1 && args[flag + 1] !== undefined) calls.push(...questCalls(args[flag + 1]!));
+				break;
+			}
+			if (basename(name!) !== "quest") break;
+			const command = questCommand(args);
+			calls.push(command);
+			argv = command[0] === "gate" ? unwrap(command.slice(1), new Set()) : null;
+		}
+	}
+	return calls;
 }
 
 /** Options an agent marks recommended end with this, as `RULES.recommend` asks. */
@@ -304,7 +324,7 @@ function applyPatch(patch: string, check: Check) {
 
 /**
  * The command `argv` runs once wrappers such as `env`, `timeout`, `direnv
- * exec`, `nix develop --command`, and `quest gate` are peeled off, with the
+ * exec`, `nix develop --command`, and `bun run`'s `quest` script are peeled off, with the
  * variable assignments in front of it added to `env`; `null` for none.
  */
 function unwrap(argv: string[], env: Set<string>): string[] | null {
@@ -316,13 +336,24 @@ function unwrap(argv: string[], env: Set<string>): string[] | null {
 		if (["command", "exec", "nohup", "time", "builtin", "env", "nice"].includes(name)) rest = dropOptions(args);
 		else if (name === "timeout") rest = dropOptions(args).slice(1);
 		else if (name === "direnv" && args[0] === "exec") rest = args.slice(2);
-		else if (name === "quest" && args[0] === "gate") rest = args.slice(1);
+		else if (name === "bun" && args[0] === "run" && basename(dropOptions(args.slice(1))[0] ?? "") === "quest")
+			rest = dropOptions(args.slice(1));
 		else if (name === "nix" && ["develop", "shell"].includes(args[0] ?? "")) {
 			const at = args.findIndex((arg) => arg === "--command" || arg === "-c");
 			if (at === -1) return rest;
 			rest = args.slice(at + 1);
 		} else return rest;
 	}
+}
+
+/** The shells whose `-c` script runs as a command line of its own. */
+const SHELLS = new Set(["bash", "sh", "zsh", "dash"]);
+
+/** The command `argv` runs, as `unwrap` finds it, once each `quest gate` in front of it is peeled off too. */
+function ungate(argv: string[] | null, env: Set<string>): string[] | null {
+	while (argv !== null && basename(argv[0]!) === "quest" && questCommand(argv.slice(1))[0] === "gate")
+		argv = unwrap(questCommand(argv.slice(1)).slice(1), env);
+	return argv;
 }
 
 /** `args` past its leading options, where `-n`, `-s`, `-k`, `-u`, and `-C` take a value. */
@@ -364,14 +395,14 @@ function shell(
 		elsewhere ||= ["cd", "pushd", "popd"].includes(simple.argv[0] ?? "");
 		const env = new Set(inherited);
 		const words = simple.argv.map((word, i) => (simple.expanded?.includes(i) ? `${word}${OPAQUE}` : word));
-		const argv = unwrap([...words], env);
+		const argv = ungate(unwrap([...words], env), env);
 		for (const { op, target } of simple.redirects)
 			if ([">", ">>", ">|", "&>", "&>>"].includes(op) && scratch(target)) found.add("tmp");
 		if (argv === null) continue;
 		const [name, ...args] = argv;
 		// A wrapper such as `env --chdir` moves where the command reads a relative path from.
 		const moved = words.slice(0, words.length - argv.length).some((word) => /^(-C|--chdir)/.test(word));
-		if (["bash", "sh", "zsh", "dash"].includes(name!)) {
+		if (SHELLS.has(name!)) {
 			const flag = args.findIndex((arg) => /^-[a-z]*c[a-z]*$/.test(arg));
 			// The script's own parse finds its expansions.
 			if (flag !== -1 && args[flag + 1] !== undefined)
