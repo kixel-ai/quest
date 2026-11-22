@@ -110,7 +110,6 @@ test("the pick avoids the case's writer, and --harness runs alone at its size's 
 	expect(names(evalSeats(high, {}))).toEqual(["gpt-6.1-sol xhigh", "claude-sonnet-5-5 high second"]);
 	expect(names(evalSeats({ ...high, size: "L" }, {}))).toEqual([
 		"gpt-6.1-sol xhigh",
-		"gpt-6.1-sol high shadow",
 		"claude-sonnet-5-5 high second",
 	]);
 	expect(names(evalSeats(high, { harness: "claude" }))).toEqual(["claude-opus-5-5 xhigh"]);

@@ -1280,6 +1280,20 @@ fakes(
 			`\nrisk high ${reason}\nclassified high paths ${reason}\n\nreviewer codex gpt-6.1-sol xhigh\n`,
 		);
 		expect(listed.stdout).toContain("\nreviewer claude claude-sonnet-5-5 high second\n");
+		// An L PR's shadow would step down from the pick, but a high head runs none.
+		const large = await quest(
+			"--root",
+			s.repo,
+			"review",
+			"--new",
+			"--size",
+			"L",
+			"--exclude-model",
+			"claude-opus-5-5",
+		);
+		expect(large.code, large.stderr).toBe(0);
+		expect(large.stdout).toContain("\nreviewer codex gpt-6.1-sol xhigh\n");
+		expect(large.stdout).not.toContain(" shadow\n");
 		expect(classifying(s.calls())).toEqual([]);
 
 		// Workflows are high in every repository, whatever its risk file lists, and a rename out of them counts.
@@ -1531,14 +1545,16 @@ fakes(
 			expect(out.stdout).toContain("\nrisk high It rewrites the wire format peers read.\n");
 			expect(out.stdout).toContain("\nfindings 1\n");
 
-			// The pick's raising round was saved, so the next run, high from the start, moves the pick to the largest
-			// size's entry, whose new session settles the old one's findings, and seats the second reviewer at once.
+			// The pick's raising round was saved, so the next run resumes it, still at the size's entry since the
+			// classifier set no high tier, and seats the second reviewer at once.
 			vi.stubEnv("FAKE_LIMITED", undefined);
 			vi.stubEnv("FAKE_FAILS", undefined);
 			const resumed = await quest("--root", s.repo, "review", "--responses", responses);
 			expect(resumed.code, resumed.stderr).toBe(0);
 			expect(seconds(resumed.stdout)).toEqual(["reviewer claude claude-sonnet-5-5 high second"]);
-			expect(pull.body).toContain("- Reviewer: Codex, gpt-6.1-sol, xhigh effort\n- Session: `thread-1`, round 1");
+			expect(pull.body).toContain(
+				"- Reviewer: Codex, gpt-6.1-sol, medium effort\n- Session: `thread-1`, round 2",
+			);
 
 			// On a new head the tier starts at medium, and the second reviewer settles its findings; when the
 			// round raises the tier again, that same seat is its second review, not another.

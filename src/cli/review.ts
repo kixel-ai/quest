@@ -1951,9 +1951,9 @@ export function overridden(risk: Risk, override: Override | undefined): Risk {
  * that cannot run, logged out, not installed, or at its usage limit, passes the round to the size's next eligible
  * reviewer, unless the options name the reviewer; once none is left, the run fails as an outage.
  *
- * The head's tier scales the review: a low head with nothing left to settle gets no local review, and a high one is
- * reviewed from the largest size's list, whatever the PR's size, by its pick and a second reviewer on another model,
- * which a round that raises the tier to high runs at once.
+ * The head's tier scales the review: a low head with nothing left to settle gets no local review, and a high one gets
+ * no shadow but a second reviewer on another model from the largest size's list, which a round that raises the tier
+ * to high runs at once. A head classified or overridden high also takes its pick from that list.
  */
 export async function review(options: ReviewOptions, deps: ReviewDependencies): Promise<Reviewed> {
 	// Native Windows installs the reviewer CLIs as batch shims, which `run` cannot start without a shell.
@@ -1996,8 +1996,17 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 		next += session.rounds.at(-1)!.findings.length;
 	}
 	const sessions = all.filter(runs);
+	let unshadowed = false;
 	const plan = (routed: Model, second: Model | null = null) =>
-		seatsFor({ routed, second, size: sized.size, auto, sessions, firsts, responses: options.responses });
+		seatsFor({
+			routed,
+			second,
+			size: unshadowed ? null : sized.size,
+			auto,
+			sessions,
+			firsts,
+			responses: options.responses,
+		});
 
 	// The first candidate's seats are checked before the classifier spends a turn.
 	let at = 0;
@@ -2068,9 +2077,12 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 		return { rounds: [], tallies, risk: low, skipped: [], branch, head, base, sized };
 	}
 
-	// A high head's reviewers come from the largest size's list, so they are ranked again from it.
-	const listed = reviewingSize(sized.size, overridden(before, override).tier);
+	// A head classified or overridden high takes its pick from the largest size's list. A reviewer's raise adds only
+	// the second reviewer, so the pick, and its session, never flip between lists on the same head.
+	const listed = reviewingSize(sized.size, overridden(settle(classified.value, []), override).tier);
 	if (listed !== sized.size) candidates = rankedReviewers(listed, options, avoided);
+	// A high head gets its two reviewers on different models and no shadow.
+	unshadowed = overridden(before, override).tier === "high";
 	const skipped: Skip[] = [];
 	const messages: string[] = [];
 	// A login or a missing CLI rules out its harness's every model; a usage limit only the model that hit it.
@@ -2207,8 +2219,8 @@ interface Seating {
 	routed: Model;
 	/** The second reviewer a high-risk head gets, or null. */
 	second: Model | null;
-	/** The PR's size, which sets the shadow's step. */
-	size: Size;
+	/** The PR's size, which sets the shadow's step, or null for a head that runs none. */
+	size: Size | null;
 	auto: boolean;
 	sessions: Session[];
 	/** Each session's first finding number, as the last run printed them. */
@@ -2224,7 +2236,7 @@ function seatsFor({ routed, second, size, auto, sessions, firsts, responses }: S
 	seats: Seat[];
 	kept: Session[];
 } {
-	const shadow = auto ? shadowOf(size, routed) : null;
+	const shadow = auto && size !== null ? shadowOf(size, routed) : null;
 	const seated = (session: Session | undefined) => ({
 		session,
 		first: session === undefined ? 1 : firsts.get(session)!,

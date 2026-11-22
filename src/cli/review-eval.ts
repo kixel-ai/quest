@@ -389,9 +389,9 @@ export interface EvalReport {
 }
 
 /**
- * The reviewers a case gets, as `quest review` seats them for its tier: `harness`'s alone, or the pick, avoiding its
- * writer, and the pick's shadow, and for a high case a second reviewer on another model, both from the largest size's
- * list.
+ * The reviewers a case gets, as `quest review` seats them for its classified tier: `harness`'s alone, or the pick,
+ * avoiding its writer, and its shadow, or for a high case no shadow but a second reviewer on another model, both from
+ * the largest size's list.
  */
 export function evalSeats(
 	entry: EvalCase,
@@ -401,8 +401,8 @@ export function evalSeats(
 	if (options.harness !== undefined) return [{ reviewer: pickReviewer(listed, options, () => false) }];
 	const avoided = (model: Model) => model.model === entry.writer;
 	const pick = pickReviewer(listed, {}, avoided);
-	const shadow = shadowOf(entry.size, pick);
 	const seats: { reviewer: Model; shadow?: true; second?: true }[] = [{ reviewer: pick }];
+	const shadow = entry.tier === "high" ? null : shadowOf(entry.size, pick);
 	if (shadow) seats.push({ reviewer: shadow, shadow: true });
 	if (entry.tier === "high") {
 		const second = REVIEWERS[listed].find((each) => !avoided(each) && each.model !== pick.model);

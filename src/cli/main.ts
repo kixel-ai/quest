@@ -1718,11 +1718,14 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"and can only raise it: the head's tier is the riskiest, with the reason of the first to judge it so. " +
 				"The classifier also names the class of RISK.md's ## Automatic list every changed file falls in, or none. " +
 				"The tier scales the review: a low head with no finding to settle runs no reviewer unless --harness, " +
-				"--model, or --effort names one, and a high head also gets a second reviewer: the first of the size's list " +
-				"on a model other than the pick's that can run, in its own session, which reviews every head while the " +
-				"tier is high and settles its findings after. --model and --effort change only the pick, so the second " +
-				"reviewer still runs; the one reviewer --harness names runs alone, with none. A round that raises the tier to high saves its rounds and " +
-				"runs it at once, printing those rounds before the error when that review fails, as when no second reviewer can run. " +
+				"--model, or --effort names one, and a high head runs no shadow but gets a second reviewer: the first of the " +
+				"largest size's list on a model other than the pick's that can run, in its own session, which reviews " +
+				"every head while the tier is high and settles its findings after. A head the classifier or the " +
+				"maintainer's override holds high also takes its pick from that list, whatever the PR's size; a " +
+				"reviewer's raise changes only the second reviewer, so the pick stays the same on the head. --model and " +
+				"--effort change only the pick, so the second reviewer still runs; the one reviewer --harness names runs " +
+				"alone, at its entry in the pick's list, with none. A round that raises the tier to high saves its rounds and " +
+				"runs the second reviewer at once, printing those rounds before the error when that review fails, as when no second reviewer can run. " +
 				"--override and --reason record the maintainer's tier for the branch, which holds until the reviewed " +
 				"tier grows riskier than the one overridden.\n\n" +
 				"Prints the size and where it came from, base, and head, its risk tier and reason, the classifier's tier, " +
@@ -1759,13 +1762,13 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		.addOption(
 			new Option(
 				"--harness <name>",
-				"The only reviewer to run, instead of the size's pick and the shadow",
+				"The only reviewer to run, instead of the pick and the shadow or second reviewer",
 			).choices(HARNESSES),
 		)
-		.option("--model <model>", "Model the size's pick, or --harness's reviewer, runs instead")
+		.option("--model <model>", "Model the pick, or --harness's reviewer, runs instead")
 		.option(
 			"--effort <level>",
-			"Reasoning effort the size's pick, or --harness's reviewer, runs at instead, never max",
+			"Reasoning effort the pick, or --harness's reviewer, runs at instead, never max",
 			effortLevel,
 		)
 		.option(
@@ -1889,7 +1892,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"session: the base's AGENTS.md and CLAUDE.md at the case's merge base, its classified tier, and the prompts of " +
 				"this build, with the review rules of this checkout, its committed REVIEW.md at HEAD, so a change to the " +
 				"reviewer table, the prompts, or REVIEW.md is scored before it lands. The reviewers are the size's pick, " +
-				"avoiding the case's writer, and its shadow, and for a high case a second reviewer on another model, " +
+				"avoiding the case's writer, and its shadow, or for a high case no shadow but a second reviewer on another model, " +
 				"both from the largest size's list, as quest review runs them, or --harness's alone, at its tier's " +
 				"entry's model and effort unless --model and --effort override them. A reviewer that cannot run fails the run " +
 				"rather than passing the case to the next, so the score measures the reviewers it names. Cases run one at a time, their reviewers " +

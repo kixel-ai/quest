@@ -1717,7 +1717,7 @@ run catches what those miss.
 |---|---|---|
 | Low | None; the online reviewer only | Its own, once its class is in `RISK.md`'s `## Automatic` list; else the maintainer's pick |
 | Medium | The size's pick | The maintainer's pick |
-| High | Two reviewers on different models from the largest size's list | The maintainer's pick, with the full brief |
+| High | Two reviewers on different models from the largest size's list, and no shadow | The maintainer's pick, with the full brief |
 
 `/quest-run` carries the picks.
 
@@ -1747,8 +1747,9 @@ everything under it, then ` - ` and why changing it is high. The rest of the
 file is prose for the classifier, such as what is customer-facing, except
 `## Automatic`, whose items are each a backticked class name of lowercase
 words joined by hyphens, ` - `, and the rule over the diff a change meets to
-fall in it. Each section appears at most once. `quest review` reads the file from the base's tip, so a change cannot lower its own
-tier, and fails on one it cannot read, which the repository's own `quest check`
+fall in it. Each section appears at most once. `quest review` reads the file
+from the base's tip, so a change cannot lower its own tier, and fails on one
+it cannot read, which the repository's own `quest check`
 reports first. A base with no `RISK.md` makes every change no path holds high
 `medium`.
 
@@ -1777,15 +1778,17 @@ to its block. A `- Class:` line follows when the classifier named a class.
 A low head with no finding left to settle runs no local reviewer, unless
 `--harness`, `--model`, or `--effort` names one: the record names the head in
 full, adds `- Local review: none, since a low-risk head needs only the online
-reviewer`, and `next done` says so. A high head is reviewed from the largest
-size's list, XL's, whatever the PR's size: its pick, and a second reviewer,
-the first of that list on a model other than the pick's that can run, marked
-`second`, in a session of its own that reviews every head while the tier is
-high and settles its findings after. `--model` and `--effort` change only the
-pick, so the second reviewer still runs; the one reviewer `--harness` names
-runs alone, at its entry in that list, with none. A round that raises the
-tier to high saves its rounds and runs the second reviewer at once, and the
-next run moves the pick to the largest size's entry; when that review
+reviewer`, and `next done` says so. A high head runs no shadow but gets a
+second reviewer: the first of the largest size's list, XL's, on a model other
+than the pick's that can run, marked `second`, in a session of its own that
+reviews every head while the tier is high and settles its findings after. A
+head the classifier or `--override` holds high also takes its pick from that
+list, whatever the PR's size; a reviewer's raise changes only the second
+reviewer, so the pick, and its session, stay the same on the head. `--model`
+and `--effort` change only the pick, so the second reviewer still runs; the
+one reviewer `--harness` names runs alone, at its entry in the pick's list,
+with none. A round that raises the tier to high saves its rounds and runs the
+second reviewer at once; when that review
 fails, as when none can run, it prints those rounds before the error, so their
 findings can be answered. When every other model is avoided, as
 with no `## Models` record under a harness the list has one model of, the run
@@ -1820,8 +1823,8 @@ clone scores its upstream's set, and reviews it at its head in a detached checko
 giving the reviewers the first round `quest review` gives, with the base's
 `AGENTS.md` and `CLAUDE.md` and this checkout's committed `REVIEW.md`. A
 finding on any line of a defect's places finds it; every finding on a clean PR
-is noise. Each case gets the reviewers `quest review` seats for its tier: the
-pick and its shadow, and a high case's second reviewer. It prints defects
+is noise. Each case gets the reviewers `quest review` seats for its classified tier: the
+pick and its shadow, or for a high case the pick and a second reviewer. It prints defects
 found and clean findings by severity for the pick, its shadow, the second
 reviewer, and either, by size and by tier, each case's rounds, and the cost
 token-max prices for the run's sessions.
