@@ -112,7 +112,7 @@ Baseline from the 2026-11-11 audit, at API list price:
 
   The table predates Pullfrog's move to Claude (2026-11-12) and its review
   replacing the DeepSeek one in `quest review`
-  ([token waste](/quest/m0/token-waste/README.md), 2026-11-13).
+  (the token waste epic, 2026-11-13).
 
 ## Waiting
 
