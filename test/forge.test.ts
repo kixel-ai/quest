@@ -179,6 +179,21 @@ describe("status", () => {
 					}),
 				]),
 		],
+		...[
+			["a malformed risk record", "- Risk:dire"],
+			["a risk record", "- Risk: high, `wire`\n- Classified: medium by default\n- Class: `wire`"],
+		].map(([name, lines]): (typeof scenarios)[number] => [
+			name!,
+			() =>
+				status.setup([
+					status.pull({
+						body: `## Review\n\n- Head: ${status.A}\n${lines}`,
+						checks: null,
+						reviews: status.page([]),
+						threads: status.page([]),
+					}),
+				]),
+		]),
 		[
 			"a maintainer decision and a hold",
 			() =>

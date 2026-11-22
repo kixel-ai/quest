@@ -32,6 +32,13 @@ test("a pattern is a path from the root whose * stays in a segment and whose ** 
 		["src/**/**/wire.ts", "src/a/wire.ts", true],
 		["src/**/**", "src/a/b", true],
 		["src/**/**", "lib/a", false],
+		// A line break in a path is just another character, so it escapes no `**` or directory rule.
+		["src/**", "src/a\nb/c.ts", true],
+		["**", "a\nb", true],
+		["src/**/wire.ts", "src/a\nb/wire.ts", true],
+		["src/billing", "src/billing/a\nb.ts", true],
+		["src/billing/", "src/billing/\n", true],
+		["*.md", "a\nb.md", true],
 		// Regular expression characters are literal.
 		["a.b+c", "a.b+c", true],
 		["a.b+c", "aXbbc", false],
@@ -156,11 +163,21 @@ test("the review record's risk reads back, and a record without one names none",
 	).toMatchObject({ by: "default" });
 	expect(recordedRisk(record([`- Head: ${head}`]))).toBeNull();
 	expect(recordedRisk("Summary.\n\n## Models\n\n- Size: S\n")).toBeNull();
-	// A risk line `quest review` did not write fails loud.
-	expect(() =>
-		recordedRisk(record([`- Head: ${head}`, "- Risk: severe, `x`", "- Classified: low by default"])),
-	).toThrow("risk is malformed");
-	expect(() => recordedRisk(record([`- Head: ${head}`, "- Risk: low, `x`"]))).toThrow("risk is malformed");
+	// A risk line `quest review` did not write reads as malformed, never as no record.
+	const malformed = (lines: string[]) => recordedRisk(record([`- Head: ${head}`, ...lines]));
+	expect(malformed(["- Risk: severe, `x`", "- Classified: low by default"])).toEqual({
+		malformed: "the ## Review record's risk is malformed: severe, `x`",
+	});
+	expect(malformed(["- Risk: low, `x`"])).toEqual({
+		malformed: "the ## Review record's risk is malformed: low, `x`",
+	});
+	expect(malformed(["- Risk:dire"])).toEqual({ malformed: "the ## Review record's risk is malformed: dire" });
+	expect(malformed(["- Risk:low, `x`", "- Classified: low by default"])).toMatchObject({
+		malformed: expect.any(String),
+	});
+	expect(malformed(["- Classified: low by default"])).toEqual({
+		malformed: "the ## Review record's risk is malformed: it has no - Risk: line",
+	});
 });
 
 test("a risk file's ## Automatic list names each class and its rule, and ## Full suite one command", () => {
@@ -231,12 +248,9 @@ test("the review record's class and override read back", () => {
 			record(["- Overridden: from medium by the maintainer", "- Classified: low by default", "- Class: `tests`"]),
 		),
 	).toMatchObject({ tier: "low", class: "tests", overridden: "medium" });
-	expect(() => recordedRisk(record(["- Classified: low by default", "- Class: tests"]))).toThrow(
-		"class or override is malformed",
-	);
-	expect(() => recordedRisk(record(["- Classified: low by default", "- Overridden: by someone"]))).toThrow(
-		"class or override is malformed",
-	);
+	const malformed = { malformed: "the ## Review record's class or override is malformed" };
+	expect(recordedRisk(record(["- Classified: low by default", "- Class: tests"]))).toEqual(malformed);
+	expect(recordedRisk(record(["- Classified: low by default", "- Overridden: by someone"]))).toEqual(malformed);
 });
 
 test("tiers order from low to high", () => {

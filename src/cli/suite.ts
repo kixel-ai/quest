@@ -6,7 +6,7 @@ import { fetchBase, parseBase } from "./review";
 
 /**
  * The risk file's full-suite command when `risk` calls for it: a high tier, or no tier that covers the head, since a
- * record that is missing, stale, or cannot be compared says nothing about it. Null otherwise, or when the file names
+ * record that is missing, malformed, stale, or cannot be compared says nothing about it. Null otherwise, or when the file names
  * no full suite.
  */
 export function suiteFor(risk: Status["risk"], file: RiskFile | null): string | null {

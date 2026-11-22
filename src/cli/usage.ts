@@ -570,16 +570,15 @@ function pullRow(each: Pull, fixedBy: Map<number, number[]>): PullRow {
 	// reported on its PR instead of stopping every other PR's. Its reviewers and its tier are read apart, so a
 	// garbled line in one keeps the other.
 	const unread: string[] = [];
-	const read = <T>(parse: () => T, fallback: T): T => {
-		try {
-			return parse();
-		} catch (error) {
-			unread.push(error instanceof Error ? error.message : String(error));
-			return fallback;
-		}
-	};
-	const review = read(() => settledOnMerge(parseReview(each.body), each.state === "merged"), []);
-	const risk = read(() => recordedRisk(each.body), null);
+	let review: PullRow["review"] = [];
+	try {
+		review = settledOnMerge(parseReview(each.body), each.state === "merged");
+	} catch (error) {
+		unread.push(error instanceof Error ? error.message : String(error));
+	}
+	const named = recordedRisk(each.body);
+	if (named !== null && "malformed" in named) unread.push(named.malformed);
+	const risk = named === null || "malformed" in named ? null : named;
 	const unreadReview = unread.length ? unread.join("; ") : null;
 	return {
 		number: each.number,

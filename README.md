@@ -569,7 +569,7 @@ comes last, and a missing value prints as `-`:
 | `url`, `state`, `draft`, `head` | The PR URL; `open`, `closed`, or `merged`; `true` or `false`; the head SHA. |
 | `mergeable`, `merge-state`, `review-decision` | GitHub's values, lowercased. |
 | `review-record` | Whether the PR body's [`## Review` record](#review-locally) still covers the head, and the head it names last: `current` when it is the head, `diff-identical` when `git diff <base>...<head>` prints the same as for it, `stale` otherwise, or `unknown` when GitHub cannot compare them, such as a diff too large; `-` when the record names no full SHA. Whose record counts is the reader's call. |
-| `risk` | The record's [risk tier](#risk-tiers), `low`, `medium`, or `high`; the same state as `review-record` for the head it names; the tier its classifier set before any reviewer raised it; and the reason. `-` when the record names none. |
+| `risk` | The record's [risk tier](#risk-tiers), `low`, `medium`, or `high`; the same state as `review-record` for the head it names; the tier its classifier set before any reviewer raised it; and the reason. `-` when the record names none, and `- malformed -` with why when its risk lines do not parse, which `quest merge` refuses. |
 | `class` | The `## Automatic` class of the base's `RISK.md` the record's classifier found the change in, or `-`. |
 | `auto-merge` | Method, who enabled it, when, and the head it was enabled on. |
 | `merge-queue` | Queue state, position, and when it was enqueued. |
@@ -751,7 +751,8 @@ online reviewer's that a ruleset requires (GitHub's review decision is
 for the approval, and refuses where nothing would wait, since an admin's token
 would merge or enqueue past the requirement.
 It also refuses while a [signal](#signals-that-hold-a-head) holds the head,
-naming each.
+naming each, and while the PR body's `## Review` record has risk lines that do
+not parse, until `quest review` rewrites it.
 It enables auto-merge bound to that SHA, or merges at once when nothing is
 left to wait for. `--squash` or `--rebase` picks the method, and it refuses one
 the repository disallows; otherwise it uses the only method the repository

@@ -19,8 +19,10 @@ export function statusLines(status: Status): string[] {
 			: `review-record ${status.reviewRecord.state} ${status.reviewRecord.head}`,
 		status.risk === null
 			? "risk -"
-			: `risk ${status.risk.tier} ${status.risk.state} ${status.risk.classified} ${status.risk.reason}`,
-		`class ${dash(status.risk?.class ?? null)}`,
+			: status.risk.state === "malformed"
+				? `risk - malformed - ${status.risk.error}`
+				: `risk ${status.risk.tier} ${status.risk.state} ${status.risk.classified} ${status.risk.reason}`,
+		`class ${dash(status.risk === null || status.risk.state === "malformed" ? null : status.risk.class)}`,
 		status.autoMerge === null
 			? "auto-merge -"
 			: `auto-merge ${status.autoMerge.method} ${status.autoMerge.enabledBy} ${status.autoMerge.enabledAt} ${dash(status.autoMerge.head)}`,

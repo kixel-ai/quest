@@ -674,7 +674,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"covers the head, as current, diff-identical (git diff <base>...<head> prints the same as for the head it names), " +
 				"stale, or unknown when GitHub cannot compare them, then the head it names last; risk gives the record's risk " +
 				"tier, the same state for its head, the tier its classifier set before any reviewer raised it, and the " +
-				"reason last, or - when the record names none; class gives the RISK.md ## Automatic class the record's classifier named, or -; auto-merge gives its method, who enabled it and when, and the head it was " +
+				"reason last, - when the record names none, or - malformed - and why when its risk lines do not parse; class gives the RISK.md ## Automatic class the record's classifier named, or -; auto-merge gives its method, who enabled it and when, and the head it was " +
 				"enabled on, which differs from head once a push follows, as GitHub keeps auto-merge across a writer's " +
 				"push (- when it cannot be told: a quest land pin names it, and otherwise the head branch's push " +
 				"activity, which GitHub lists up to minutes late); landing-stopped is the latest exit from the merge queue, auto-merge, or " +
@@ -808,7 +808,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"lacks (GitHub's review decision is review_required or changes_requested), it only arms auto-merge, which waits " +
 				"for it, and refuses where nothing would wait, since an admin's token merges or enqueues past the requirement. It refuses a head on which quest check " +
 				"--no-stubs --base <base> --branch <head branch> finds anything, read from git objects fetched from the base repository, " +
-				"so nothing from the head runs, except findings the base already has; a base without quests skips it. It also refuses while an online reviewer's " +
+				"so nothing from the head runs, except findings the base already has; a base without quests skips it. It refuses a body whose ## Review record's risk lines do not parse, until quest review rewrites it. It also refuses while an online reviewer's " +
 				"unanswered finding on the head, or a newer comment opening with 'Maintainer decision', holds it. It uses the method --squash or --rebase names, refusing one " +
 				"the repository disallows; otherwise the only method the repository allows, or else a merge commit. " +
 				"On a base with GitHub's merge queue, which applies its own method, it enqueues that head, or arms " +
