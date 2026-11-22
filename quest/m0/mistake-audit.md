@@ -132,8 +132,12 @@ Check first next run:
   escape class: about 41 of 204 real escapes, 26 catchable or maybe, all
   past a local review. [Review dependents](/quest/m0/review-dependents.md)
   takes it, if kept.
-- Gating mistakes, after [the gate's cheap commands](/quest/m1/gate-cheap-commands.md)
-  lands, if kept: 887 of 3,048 gated runs (29%) used under 5 CPU-seconds,
+- Gating mistakes, now that the gate starts an invocation whose recent runs
+  were cheap at once ([moq-dev/quest#800](https://github.com/moq-dev/quest/pull/800)).
+  Its replay of this host's runs predicted it starts about 16% of cheap runs
+  early and saves about 8% of their queue time, since most invocations are
+  one-offs with no history; measure what it saved and whether misgated cheap
+  runs still cost enough wait to coarsen its key. Before it: 887 of 3,048 gated runs (29%) used under 5 CPU-seconds,
   together 0.16% of gated CPU, against 20% to 22% before the 2026-11-15
   rule. They queued 46,000 agent-seconds, a median 5 each. `bun test` in
   moq-dev/moq made 347 of the gated runs at a median 0.5 CPU-seconds.

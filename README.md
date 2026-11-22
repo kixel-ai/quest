@@ -1281,17 +1281,31 @@ the load counts as at least the sum of those records, and nothing starts while
 they kept every CPU busy. macOS, Windows, and Linux without a systemd user
 manager have no scope to measure, so the load average alone decides there.
 
+A command that uses little CPU starts without waiting on the load. Where a
+systemd scope measures it, the gate keeps the CPU time of each invocation's
+last 5 runs, keyed by a hash of its repository (shared by every worktree), the
+directory within it, and its full argument list; the arguments themselves are
+never stored. Once at least 3 of those 5 runs used under 5 CPU-seconds, one
+core busy for the 5 seconds admissions are spaced, the invocation starts at
+once, ahead of the queue, and counts as busy as its median run's CPUs, rounded
+up, until its gate measures it. It still waits for free memory, and once those
+counts and the running commands' fill every CPU, it waits like any other. A
+first run, or a usually heavy command's one cheap run, starts nothing early, and
+a command that turned heavy queues again within 3 runs. The runs are kept
+beside the ledger in `gate-runs-v1/<hostname>`, for the current and the last
+month.
+
 A user's admissions on one host are recorded under
-`~/.cache/quest/admissions-v2/<hostname>`, whatever the caller's environment or
+`~/.cache/quest/admissions-v3/<hostname>`, whatever the caller's environment or
 login session. A gate judges whether another still runs by its process ID, so
 on Linux each PID namespace, such as a sandbox's, keeps a ledger of its own,
 named `<hostname>-pid<inode>`, and its gates do not count the host's. A gate
 that finds its running admission dropped records it again and warns. The home
 directory comes from the user database, not `$HOME`; an account missing from
 it, as in arbitrary-UID containers, uses
-`/tmp/quest-<uid>/admissions-v2/<hostname>`, and refuses that directory unless
+`/tmp/quest-<uid>/admissions-v3/<hostname>`, and refuses that directory unless
 only its UID can write it. `quest agent` keeps its admissions beside them, in
-`agents-v2/<hostname>`.
+`agents-v3/<hostname>`.
 
 A check that lands PRs goes ahead of the rest: with `QUEST_GATE_PRIORITY=1` in
 its environment, every gate inside the check waits

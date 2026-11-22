@@ -28,6 +28,7 @@ import { argvName } from "../core";
 import { runs } from "./program";
 import { envSessions, logWait } from "./waits";
 import { cgroupUsage, measuredRun, questScope, scopeGroup, startTime, systemdScopes } from "./supervise";
+import { cheapCores, historyDirectory, invocationKey, readRuns, recordRun } from "./gate-history";
 
 /**
  * One admitted command: a unique id, the wall-clock time it was admitted, and the process ID of
@@ -35,7 +36,9 @@ import { cgroupUsage, measuredRun, questScope, scopeGroup, startTime, systemdSco
  * (see `processStart`), so a reused process ID holds nothing. `queued` marks a caller still
  * waiting for its turn instead, as of `at`: it holds a place in the queue, the ledger's order of
  * queued entries, and no slot. `cores` is the most CPUs the command kept busy over any
- * SETTLE_MS of the last RECENT_MS, where its gate measures it (see `measure`).
+ * SETTLE_MS of the last RECENT_MS, where its gate measures it (see `measure`). `cheap` marks a
+ * command admitted without waiting on the load (see `Precedence`): its `cores` start at its
+ * typical run's, and it never counts as a recent admission, whose load has yet to show.
  */
 export interface Admission {
 	id: string;
@@ -44,6 +47,7 @@ export interface Admission {
 	queued?: boolean;
 	start?: string;
 	cores?: number;
+	cheap?: boolean;
 }
 
 /** One version of the host's admission ledger and queue. Versions only grow; 0 is the empty ledger. */
@@ -102,9 +106,15 @@ export const RECENT_MS = 60_000;
  *   gated command runs. Its admissions still count against every other caller's
  *   headroom, so it goes first while the host is loaded. For work whose own
  *   runner bounds it, such as a check that lands PRs.
+ * - `cheap`: the CPUs the command's typical run keeps busy, when its recent runs show it uses
+ *   little CPU (see gate-history.ts). Wait only for memory and until those CPUs fit beside the
+ *   running commands', never for the load, the queue, or spacing. Its admission is charged those
+ *   CPUs until its gate measures it, so a burst of cheap starts stops once they fill the host.
+ *   Otherwise it waits as any caller.
  */
 export interface Precedence {
 	priority?: boolean;
+	cheap?: number;
 }
 
 /** The memory one gated build or test stack is assumed to need. */
@@ -238,7 +248,7 @@ export function pidNamespace(): string | undefined {
  * The format version of the gate and agents ledgers, part of their paths, so builds whose ledgers disagree never share one.
  * Bump it with any change to what an admission records or how a gate keeps one.
  */
-export const LEDGER_VERSION = 2;
+export const LEDGER_VERSION = 3;
 
 /**
  * Every caller of one user on one host and PID namespace shares this directory, whatever its
@@ -287,7 +297,8 @@ function parse(text: string): Admission[] {
 				(entry.pid === undefined || (Number.isSafeInteger(entry.pid) && entry.pid > 0)) &&
 				(entry.queued === undefined || entry.queued === true) &&
 				(entry.start === undefined || typeof entry.start === "string") &&
-				(entry.cores === undefined || (Number.isSafeInteger(entry.cores) && entry.cores >= 0)),
+				(entry.cores === undefined || (Number.isSafeInteger(entry.cores) && entry.cores >= 0)) &&
+				(entry.cheap === undefined || entry.cheap === true),
 		);
 	return valid ? (value as Admission[]) : [];
 }
@@ -437,11 +448,13 @@ export function fileHost(directory: string, now = Date.now): Host {
 /**
  * The load and memory a caller is admitted against while the `running` admissions hold the host:
  * the load counts as at least the CPUs they kept busy, and without one the raw load counts as
- * having room (see `admit`). A priority caller counts no load.
+ * having room (see `admit`); a cheap one, soon done, still leaves that room. A priority caller
+ * counts no load.
  */
 function standing(limits: Limits, host: Host, running: Admission[], priority = false) {
 	const used = priority ? 0 : running.reduce((sum, admission) => sum + (admission.cores ?? 0), 0);
-	const load = priority ? 0 : running.length > 0 ? Math.max(host.load(), used) : Math.min(host.load(), limits.load);
+	const held = running.some((admission) => !admission.cheap);
+	const load = priority ? 0 : held ? Math.max(host.load(), used) : Math.min(host.load(), limits.load);
 	return { used, load, memory: host.memory() };
 }
 
@@ -451,7 +464,8 @@ function standing(limits: Limits, host: Host, running: Admission[], priority = f
  * not reached the gate yet, such as an agent still reading (see admission.ts). It counts every
  * queued caller as ahead, and never the spaced admissions `admit` grants on raw room, which would
  * pass the reserved work one by one. Like the gate, it admits a lone arrival whatever the load:
- * with nothing gated running, recent, queued, or reserved, the load is work no gate can wait out.
+ * with nothing gated running but cheap commands, and nothing recent, queued, or reserved, the load
+ * is work no gate can wait out.
  */
 export function room(limits: Limits, host: Host, reserved: number): Waiting | null {
 	const ledger = host.ledger();
@@ -462,12 +476,12 @@ export function room(limits: Limits, host: Host, reserved: number): Waiting | nu
 	).length;
 	const admissions = ledger.admissions.filter((admission) => !admission.queued);
 	const running = admissions.filter((admission) => live.includes(admission));
-	const recent = admissions.filter((admission) => admission.at > now - RECENT_MS).length;
+	const recent = admissions.filter((admission) => !admission.cheap && admission.at > now - RECENT_MS).length;
 	const { used, load, memory } = standing(limits, host, running);
 	if (load > limits.load || used >= limits.load) return "load";
 	if (memory < limits.memory) return "memory";
 	const taken = recent + queued + reserved;
-	if (running.length === 0 && taken === 0) return null;
+	if (running.every((admission) => admission.cheap) && taken === 0) return null;
 	if (load + taken >= limits.load) return queued > 0 ? "queue" : "load";
 	return memory - taken * limits.memory >= limits.memory ? null : queued > 0 ? "queue" : "memory";
 }
@@ -500,7 +514,7 @@ export function room(limits: Limits, host: Host, reserved: number): Waiting | nu
  * lasts until its caller is admitted, cancelled, or its gate ends; one whose
  * gate's start time is unknown, as on Windows, could pass for a reused process
  * ID, so its caller refreshes it, and it frees a minute after the last refresh.
- * A priority caller goes ahead of the queue (see `Precedence`).
+ * A priority or cheap caller goes ahead of the queue (see `Precedence`).
  *
  * Each caller decides against the newest ledger and publishes atomically, so
  * concurrent callers never exceed the rule and one always wins while it has
@@ -535,7 +549,8 @@ export async function admit(
 		);
 		const admissions = kept.filter((admission) => !admission.queued);
 		const running = new Set(admissions.filter((admission) => live.has(admission)));
-		const recent = admissions.filter((admission) => admission.at > now - RECENT_MS);
+		// A cheap admission's load is its charged cores, counted while it runs.
+		const recent = admissions.filter((admission) => !admission.cheap && admission.at > now - RECENT_MS);
 		if (kept.some((admission) => admission.at > now)) {
 			// Date those now, so they still count and space admissions but expire a minute after
 			// the step. A forward step can only expire admissions up to a minute early.
@@ -544,6 +559,14 @@ export async function admit(
 				kept.map((admission) => ({ ...admission, at: Math.min(admission.at, now) })),
 			);
 			return false;
+		}
+		if (precedence.cheap !== undefined) {
+			const used = [...running].reduce((sum, admission) => sum + (admission.cores ?? 0), 0);
+			if (used + precedence.cheap <= limits.load && host.memory() >= limits.memory)
+				return host.publish(ledger, [
+					...kept.filter((admission) => admission.id !== place),
+					{ id, at: now, ...self, cheap: true, cores: precedence.cheap },
+				]);
 		}
 		const position = kept.findIndex((admission) => admission.id === place);
 		const mine = kept[position];
@@ -886,6 +909,11 @@ const message = (error: unknown) => (error instanceof Error ? error.message : St
 export interface GateOptions {
 	/** The admission ledger and host measures; this user's on this host when omitted. */
 	host?: Host;
+	/**
+	 * Where measured runs are kept by invocation (see gate-history.ts); beside the ledger when it
+	 * and `host` are omitted, and nowhere when only `host` is given.
+	 */
+	history?: string;
 }
 
 /** What one gate observed of its run, for its record. */
@@ -999,6 +1027,10 @@ async function gated(
 ): Promise<number> {
 	const { run, unit } = owner();
 	let admitted: { host: Host; id: string } | undefined;
+	const ledger = outermost && options.host === undefined ? claimDirectory() : undefined;
+	// Only a measured run tells how much CPU an invocation takes, so unmeasured hosts keep no history.
+	const directory = unit === undefined ? undefined : (options.history ?? (ledger && historyDirectory(ledger)));
+	const history = outermost && directory ? { directory, key: invocationKey(command, process.cwd()) } : undefined;
 	// A nested invocation executes inside the already admitted command.
 	if (outermost) {
 		const shown = new Set<Waiting>();
@@ -1010,8 +1042,9 @@ async function gated(
 			};
 			const precedence = {
 				priority: process.env[PRIORITY] === "1",
+				cheap: history && cheapCores(readRuns(history.directory, history.key)),
 			};
-			const host = options.host ?? fileHost(claimDirectory());
+			const host = options.host ?? fileHost(ledger!);
 			admitted = { host, id: await admit(hostLimits(), host, cancel.signal, notice, precedence) };
 			observed.admitted = Date.now();
 		} catch (error) {
@@ -1044,5 +1077,8 @@ async function gated(
 	const failed = await measuring;
 	if (cancel.signal.aborted) return cancelled(cancel.signal);
 	if (failed) throw failed.error;
+	// A cancelled or unmeasured run says nothing of the invocation's typical run.
+	if (history && typeof observed.cpu === "number" && observed.admitted !== undefined)
+		recordRun(history.directory, history.key, { cpu: observed.cpu, wall: Date.now() - observed.admitted });
 	return result;
 }

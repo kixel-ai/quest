@@ -214,7 +214,10 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"only the raw measures do. The load limit applies only while a gated command still runs. Where a " +
 				"systemd scope owns each running command, the load counts as at least the sum of their peak CPU " +
 				"use in the last minute, and nothing starts while those fill every CPU, so a lull between a " +
-				"command's phases does not free its CPUs. Gate by CPU, not run time: leave model calls, such as " +
+				"command's phases does not free its CPUs. There, an invocation (its repository, directory, and " +
+				"arguments) of which at least 3 of the last 5 runs used under 5 CPU-seconds starts at once, ahead of " +
+				"the queue, waiting only for memory and for its typical CPUs to fit beside the running commands'. " +
+				"Gate by CPU, not run time: leave model calls, such as " +
 				"quest review, long-running servers, and quick tools such as formatters out of the gate. Nested gate " +
 				"calls run immediately. Limits come from the host; there is " +
 				"no configuration.\n\n" +

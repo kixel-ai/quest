@@ -37,11 +37,13 @@ import {
 	owner,
 	processStart,
 	RECENT_MS,
+	room,
 	SETTLE_MS,
 	job,
 	scope,
 } from "../src/cli/gate";
 import { forwards, foregroundStat, statProcess } from "../src/cli/interrupt";
+import { invocationKey, readRuns, recordRun } from "../src/cli/gate-history";
 import { gateBoundary, main } from "../src/cli/main";
 import { measuredRun, alive as ownerAlive, questScope } from "../src/cli/supervise";
 import { readWaits } from "../src/cli/waits";
@@ -415,6 +417,72 @@ test("a priority caller goes ahead of the queue", async () => {
 	await admit(limits, testHost(directory, state, events), signal, undefined, { priority: true });
 	expect(events).toEqual([]);
 	expect(host.ledger().admissions).toEqual([build, earlier, { id: expect.any(String), at: 0, ...me }]);
+});
+
+test("a cheap caller starts at once past the load, the queue, and spacing, charged its cores until the CPUs fill", async () => {
+	const limits = { load: 4, memory: GiB };
+	// A saturated host: a running build, a recent admission to space from, and a caller queued earlier.
+	const build = { id: "build", at: -10 * RECENT_MS, ...me, cores: 1 };
+	const recent = { id: "recent", at: -1, ...me };
+	const earlier = { id: "earlier", at: 0, ...me, queued: true };
+	const directory = tempDir();
+	const state = { now: 0, load: 99, memory: GiB };
+	const host = testHost(directory, state);
+	expect(host.publish(host.ledger(), [build, recent, earlier])).toBe(true);
+	const events: string[] = [];
+	const cheap = (cores: number) =>
+		admit(limits, testHost(directory, state, events), signal, (reason) => events.push(reason), { cheap: cores });
+	await cheap(2);
+	await cheap(1);
+	expect(events).toEqual([]);
+	const charged = { id: expect.any(String), at: 0, ...me, cheap: true };
+	expect(host.ledger().admissions).toEqual([
+		build,
+		recent,
+		earlier,
+		{ ...charged, cores: 2 },
+		{ ...charged, cores: 1 },
+	]);
+	// The build's core and the two charges fill the host's 4 CPUs, so the next waits as any caller.
+	const next = testHost(directory, state, events);
+	next.sleep = async (ms) => {
+		events.push(`sleep ${ms}`);
+		throw new Error("stop");
+	};
+	await expect(admit(limits, next, signal, (reason) => events.push(reason), { cheap: 1 })).rejects.toThrow("stop");
+	expect(events).toEqual(["load", `sleep ${SETTLE_MS}`]);
+});
+
+test("a cheap caller still waits for free memory", async () => {
+	const events: string[] = [];
+	const state = { now: 0, load: 0, memory: 0 };
+	const host = testHost(tempDir(), state, events);
+	const sleep = host.sleep;
+	host.sleep = async (ms, signal) => {
+		await sleep(ms, signal);
+		state.memory = GiB;
+	};
+	await admit({ load: 4, memory: GiB }, host, signal, (reason) => events.push(reason), { cheap: 1 });
+	expect(events).toEqual(["memory", `sleep ${SETTLE_MS}`]);
+	expect(host.ledger().admissions).toEqual([{ id: expect.any(String), at: SETTLE_MS, ...me, cheap: true, cores: 1 }]);
+});
+
+test("cheap admissions neither count as recent nor hold the host against load from outside the gate", async () => {
+	const limits = { load: 4, memory: GiB };
+	const directory = tempDir();
+	// Load from outside the gate, while a cheap command admitted just now still runs.
+	const state = { now: 0, load: 12, memory: 8 * GiB };
+	const host = testHost(directory, state);
+	expect(host.publish(host.ledger(), [{ id: "cheap", at: 0, ...me, cheap: true, cores: 1 }])).toBe(true);
+	expect(room(limits, host, 0)).toBeNull();
+	const events: string[] = [];
+	host.sleep = async () => {
+		throw new Error("waited behind a cheap command");
+	};
+	await admit(limits, host, signal, (reason) => events.push(reason));
+	expect(events).toEqual([]);
+	// An ordinary admission does hold the host, so the next caller waits for the load.
+	expect(room(limits, host, 0)).toBe("load");
 });
 
 test("a lone priority caller starts at once on load from outside the gate", async () => {
@@ -1699,3 +1767,39 @@ describe.skipIf(process.platform === "win32")("the run record", () => {
 		for (const argument of recorded) expect(argument).toBe(argument[0].repeat(64 * 1024));
 	});
 });
+
+describe.runIf(owner({ ...process.env, QUEST_GATE_ADMITTED: undefined }).unit !== undefined)(
+	"a measured outermost gate",
+	() => {
+		test("starts an invocation whose recent runs were cheap without waiting on the load, and records the run", async () => {
+			vi.stubEnv("QUEST_GATE_ADMITTED", undefined);
+			vi.stubEnv("QUEST_GATE_PRIORITY", undefined);
+			vi.stubEnv("QUEST_GATE_RECORD", undefined);
+			const history = tempDir();
+			// The load is far past every CPU while a gated build runs, so an ordinary caller would wait.
+			const host: Host = {
+				...fileHost(tempDir()),
+				load: () => 999,
+				memory: () => Infinity,
+				// A queued caller fails the test at once; the admitted gate's measuring sleeps until stopped.
+				sleep: (_ms, signal) =>
+					new Promise((_resolve, reject) => {
+						if (host.ledger().admissions.some((admission) => admission.queued))
+							reject(new Error("waited for the load"));
+						signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+					}),
+			};
+			expect(host.publish(host.ledger(), [{ id: "build", at: Date.now(), ...me }])).toBe(true);
+			const command = [process.execPath, "-e", "process.exit(4)"];
+			const key = invocationKey(command, process.cwd());
+			for (let i = 0; i < 3; i++) recordRun(history, key, { cpu: 100, wall: 200 });
+			expect(await gate(command, { host, history })).toBe(4);
+			expect(host.ledger().admissions[1]).toMatchObject({ cheap: true, cores: 1 });
+			const runs = readRuns(history, key);
+			expect(runs).toHaveLength(4);
+			expect(runs[3]!.cpu).toBeGreaterThan(0);
+			// Another invocation has no runs of its own, so it waits.
+			await expect(gate([...command, "other"], { host, history })).rejects.toThrow("waited for the load");
+		});
+	},
+);
