@@ -67,10 +67,14 @@ maintainer's typed messages since 2026-10-01):
   Rejected: set at planning and re-judged from the diff; a separate score
   per axis.
 - What does the tier scale?
-  - ✅ Review, approval, and CI, as `RISK.md` and the README's Risk tiers
-    section describe since
-    [moq-dev/quest#802](https://github.com/moq-dev/quest/pull/802)
-  - Rejected: review and approval only; approval only
+  - ✅ Review and approval only (maintainer, 2026-11-22, reversing
+    [moq-dev/quest#802](https://github.com/moq-dev/quest/pull/802)'s full
+    suite for high: "we're so CPU starved that we shouldn't waste it on more
+    CI unless it actually catches issues. Running the full suite is dumb
+    because the next commit (or nightly) can catch the issue anyway. We
+    should use RISK to get additional/stronger reviews instead."), as
+    [review, not CI](/quest/m0/benchmark/review-not-ci.md) plans
+  - Rejected: review, approval, and CI; approval only
 - Must a PR state how to undo it? ✅ No (maintainer, 2026-11-22: "I
   definitely don't want Undo to be a gate"). Rejected: an `## Undo`
   section that `quest merge` requires of every PR not tiered low.
