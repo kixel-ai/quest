@@ -148,16 +148,14 @@ work or `/quest-import` to bring in open GitHub issues.
 
 ## Remove
 
-1. Run `quest skill export` and follow it, so active quests become GitHub
-   issues. Skip this only if the user says so.
-2. Run `quest uninstall`. It removes only unmodified stubs of any version, the
+1. Run `quest uninstall`. It removes only unmodified stubs of any version, the
    `Quests: ` line, and the merge driver, and never deletes the quest tree.
-3. Remove the pin added above: the mise entry, or the flake input and dev
+2. Remove the pin added above: the mise entry, or the flake input and dev
    shell package. For an unpinned install, delete the `quest` binary the
    installer placed (`~/.local/bin/quest` by default, or `quest.exe` in the
    chosen Windows install directory). Remove any PATH entry you added. If the
    user uses Quest in no other repository, run `quest setup --remove` before
    removing the binary, since Quest's worktree hooks stop Claude Code making
    worktrees once it cannot find `quest`.
-4. Ask the user whether to delete `quest/`. Git history keeps the plans either
+3. Ask the user whether to delete `quest/`. Git history keeps the plans either
    way.
