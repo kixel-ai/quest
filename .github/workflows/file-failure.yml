@@ -1,0 +1,37 @@
+name: File failure
+
+# Opens an issue when a run on main fails, or comments on the one already open,
+# so a failure in a check that runs off pull requests reaches the repository's
+# watchers and /quest-import instead of only the account that last edited a
+# cron. Callers run it only on main, after their own jobs.
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  file:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      issues: write
+    steps:
+      - name: File the failed run
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          WORKFLOW: ${{ github.workflow }}
+          RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          title="$WORKFLOW fails on main"
+          note="[Run $GITHUB_RUN_ID]($RUN) failed at $GITHUB_SHA."
+          # Only an issue this workflow opened, so another with the same title is never reused.
+          number=$(gh api --paginate "repos/$REPO/issues?state=open&creator=github-actions%5Bbot%5D&per_page=100" \
+            --jq ".[] | select(.pull_request == null and .title == \"$title\") | .number" | head -n 1)
+          if [[ -n $number ]]; then
+            gh issue comment "$number" -R "$REPO" --body "$note"
+          else
+            gh issue create -R "$REPO" --title "$title" \
+              --body "$note Fix it at its root cause, or import it as a quest with /quest-import; close this once main passes again."
+          fi

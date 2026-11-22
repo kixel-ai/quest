@@ -312,9 +312,10 @@ the way, or work on the branch), 2 for invalid arguments, and 1 for other
 failures. On GitHub it
 uses `GH_TOKEN`, `GITHUB_TOKEN`, or `gh auth token`.
 
-Draft claims are placeholders. This repository reports skipped checks on PRs;
-its `Queue` workflow runs the checks when a reviewed head enters GitHub's merge
-queue. Platform verification also runs after pushes to `main`.
+Draft claims are placeholders. This repository's only PR check is the required
+`Queue`, skipped on the PR; its `Queue` workflow runs the checks when a reviewed
+head enters GitHub's merge queue. Platform verification runs after pushes to
+`main` and daily, and a failure there opens an issue.
 
 ## Check a quest's PR
 

@@ -1,10 +1,12 @@
 name: Check
 
+# Runs after each push to main, outside pull requests and the merge queue, which
+# already runs `just check` and `just test`: this adds the flake check and the
+# installed lifecycle on Linux and macOS. A newer push cancels a pending run, so
+# runs coalesce, and a failure on main files an issue.
 on:
   push:
     branches: [main]
-  pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
   workflow_dispatch:
 
 permissions:
@@ -16,7 +18,6 @@ concurrency:
 
 jobs:
   check:
-    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -43,12 +44,8 @@ jobs:
 
   lifecycle:
     name: lifecycle (${{ matrix.runner }})
-    if: github.event_name != 'pull_request'
     strategy:
       fail-fast: false
-      # Hosted macOS runners can queue past the timeout, which then reports a job
-      # that never ran as failed. Main checks the flake's macOS build,
-      # and tags check the released binaries.
       matrix:
         runner: [ubuntu-latest, macos-15]
     runs-on: ${{ matrix.runner }}
@@ -68,3 +65,11 @@ jobs:
       - name: Check that the gate admits and owns its command's descendants
         shell: bash
         run: bash scripts/gate-check.sh "$RUNNER_TEMP/quest-lifecycle-install/bin/quest"
+
+  file-failure:
+    needs: [check, lifecycle]
+    if: failure() && github.ref == 'refs/heads/main'
+    permissions:
+      contents: read
+      issues: write
+    uses: ./.github/workflows/file-failure.yml
