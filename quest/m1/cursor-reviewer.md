@@ -1,65 +1,63 @@
-# [L] quest review runs reviewers through the Cursor CLI
+# [L] quest review runs Gemini reviewers through the Antigravity CLI
 
 ## Goal
 
-`quest review --harness cursor --model <id> [--effort <level>]` reviews a branch through Cursor's CLI (`cursor-agent -p`), read-only, on the user's own Cursor login, so a contributor with a Cursor plan can review with Gemini 4 Carbon or any other model Cursor serves. The PR scores Gemini 4 Carbon through Cursor with `quest eval run` against the current reviewers, and moves it ahead of Codex Sol in each PR size's `REVIEWERS` ranking where it catches more culprits per dollar.
+`quest review --harness agy --model <id> [--effort <level>]` reviews a branch through Google's Antigravity CLI (`agy -p`), read-only, isolated from the checkout's and the user's config, on the user's own Antigravity login, so a contributor with a Google AI plan can review with Gemini 4 Carbon. The PR scores Gemini 4 Carbon with `quest eval run` against the current reviewers, and moves it ahead of Codex Sol in each PR size's `REVIEWERS` ranking where it catches more culprits per dollar.
 
-Non-goals: Cursor as a writer, iterate, or land-fixer harness; a Grok or other non-Gemini entry in the ranking, which [the model check](/quest/m1/model-check.md) can add from its own evidence once the harness exists.
+Non-goals: `agy` as a writer, iterate, or land-fixer harness; models other than Gemini in the ranking, which [the model check](/quest/m1/model-check.md) can add from its own evidence once the harness exists.
 
 ## Plan
 
-Decided 2026-11-16 (user, /quest-plan). The user reports Gemini 4 Carbon, run through Cursor, catching bugs that Claude Opus 5.5 at medium effort missed in their own work, at a lower price.
+Decided 2026-11-16 (user, /quest-plan), still standing. The user reports Gemini 4 Carbon catching bugs that Claude Opus 5.5 at medium effort missed in their own work.
 
-- What should the quest promise?
-  - ✅ an opt-in reviewer harness, scored with `quest eval run` before any ranking change (recommended)
-  - Gemini in the default ranking right away (rejected: no eval, which `AGENTS.md` requires for a change to `src/cli/models.ts`)
-  - a generic any-model harness again (rejected: [moq-dev/quest#701](https://github.com/moq-dev/quest/pull/701) removed opencode's on 2026-11-13; Cursor reaches the same models through one subscription the user already has)
+- ✅ An opt-in reviewer harness, scored with `quest eval run` before any ranking change (rejected: Gemini in the default ranking right away, with no eval, which `AGENTS.md` requires for a change to `src/cli/models.ts`; a generic any-model harness, which [moq-dev/quest#701](https://github.com/moq-dev/quest/pull/701) removed).
+- ✅ The eval decides and this PR moves Carbon ahead of Codex Sol where it wins (rejected: post the scores and leave the ranking to a `Maintainer:` decision).
+- ✅ m1 (rejected: m0, m2): contributors must be able to run `quest review` on their forks, including those whose only plan is Google's.
+
+Decided 2026-11-21 (maintainer, /quest-plan), carried over from the Cursor plan: ✅ a review reaches the login where the CLI keeps it, never a copy, so the refresh token stays in one place (rejected: a copied credential file, which splits it). The isolation test must also show a hostile checkout cannot read other credentials that store holds. ✅ The implementing agent may run `quest eval run` on the maintainer's plan.
+
+Decided 2026-11-22 (maintainer, /quest-run on [moq-dev/quest#805](https://github.com/moq-dev/quest/pull/805), then /quest-plan):
+
 - Which harness?
-  - ✅ the Cursor CLI (recommended): headless print mode, `--model`, `--resume <chatId>`, `--output-format stream-json`, and a read-only `--mode ask`; one login reaches Gemini, Grok, GPT, and Claude models
-  - Google's Gemini CLI (rejected: a second login or subscription, and Gemini only)
-- If Gemini 4 Carbon scores better:
-  - ✅ the eval decides and this PR moves it ahead of Codex Sol where it wins (recommended: the question is which model should review Opus-written work, and the eval is the evidence the ranking change needs; the maintainer still judges it in review)
-  - post the scores and leave the ranking to a `Maintainer:` decision (rejected)
-- ✅ m1 (rejected: m0, m2): the public release promises contributors can run Quest on their forks, and one whose only plan is Cursor cannot run `quest review` today.
-
-Decided 2026-11-21 (maintainer, /quest-plan), after the Linux login below:
-
-- How does a review reach the login?
-  - ✅ the OS credential store (recommended): the clean per-review home holds no credential, so the refresh token stays in one place; the isolation test must also show a hostile checkout cannot get the reviewer to read other entries in that store
-  - a copied file store via `AGENT_CLI_CREDENTIAL_STORE=file` (rejected: each copy splits the refresh token)
-  - leave it to the implementer (rejected: a security tradeoff the maintainer owns)
-- When does work start?
-  - ✅ now, on the Linux host, with the macOS isolation test under the PR's `## Waiting` before merge (recommended)
-  - once both hosts are logged in (rejected: the macOS host is often offline)
-  - Linux only (rejected: macOS contributors would get an unverified sandbox)
-- ✅ The implementing agent may run `quest eval run` on the maintainer's Cursor plan (rejected: ask first; no eval and no ranking change), since the ranking change needs it.
+  - ✅ The Antigravity CLI, `agy`
+  - Rejected: the Cursor CLI. The maintainer uses Cursor only through a Grok subscription, and on 2026-11-21 its plan refused every Carbon turn with "Gemini 4 Carbon is not included in your weekly usage".
+- Which login?
+  - ✅ The maintainer's Google AI Ultra login, run the way T3 Code's Antigravity provider runs `agy`. The maintainer: "agy is allowed for T3Code. We should do the same thing."
+  - Rejected: an AI Studio or Gemini Enterprise API key; deleting the quest; waiting on Google.
+  - Google's FAQ (https://antigravity.google/docs/faq, read 2026-11-22) says "Wrapping `agy` inside third-party coding agents or applications, or automating account rotation, is not supported under consumer plans", and that using third-party software to access Antigravity "can result in suspension or termination of your account". It recommends an API key for third-party agents. The maintainer chose the Ultra login knowing this.
+- ✅ Close #805, which holds only a claim commit and the Cursor findings, once this replan merges (rejected: leave it open).
 
 Guidance:
 
-- Keep Cursor a reviewer-only harness, per the Non-goal: give `quest review` its own reviewer harness list (a `ReviewHarness` union beside `HARNESSES`, as `review.ts` and `review-record.ts` had before [moq-dev/quest#701](https://github.com/moq-dev/quest/pull/701)) rather than adding `cursor` to `HARNESSES` in `src/cli/agent.ts`, which would also reach `quest agent start --harness` and `transcriptFacts()`.
-- Use the CLI's stored login (`cursor-agent login`), not `CURSOR_API_KEY`, as [moq-dev/quest#492](https://github.com/moq-dev/quest/pull/492) settled for the other harnesses. `cursor-agent status` exits 0 when logged out (`Not logged in`) and with expired credentials (`Logged in (unable to fetch user details)`), per Cursor CLI `2026.11.13-eacade1`, so the login check reads its output, not only its exit code, and a turn's `Authentication failed` maps to logged out.
-- Strip Cursor's credential and model overrides from the reviewer's environment (`CURSOR_AGENT`, `CURSOR_API_KEY`, `CURSOR_AUTH_TOKEN*`, `CURSOR_MODEL`), and make `runningHarness()` recognize `CURSOR_AGENT`, so `quest review` from a Cursor session avoids the right writer.
-- The reviewers run nothing from a reviewed head. Cursor's read-only `--mode ask` is necessary but not the isolation boundary: the reviewer must also load none of the user's or the checkout's rules, skills, plugins, MCP servers, hooks, or `.cursor/` config, the way `quest review` runs Codex with `--ignore-user-config`. The public `--help` has no flag for that. Hidden `--disable-project-configs` (`.cursor/cli.json` only), `--exclude-workspace-context` (workspace rules, skills, transcripts, and notes), and `--disable-indexing` exist in `2026.11.05-86047df` and `2026.11.13-eacade1`. `CURSOR_CONFIG_DIR` and `CURSOR_DATA_DIR` do not cover the rest: per `2026.11.05-86047df`'s bundle, it reads `~/.cursor/mcp.json` and the Claude plugins under `~/.claude/plugins` from `homedir()`, enables the plugins a workspace's `.claude/settings.json` lists, and loads skills from `.cursor/`, `.claude/`, `.codex/`, `.grok/`, and `.agents/` in both the home and the workspace. Recommended: run it with `HOME`, `XDG_CONFIG_HOME`, `CURSOR_CONFIG_DIR`, and `CURSOR_DATA_DIR` in a clean per-review directory that holds no credential, plus `--exclude-workspace-context`, `--disable-project-configs`, `--disable-indexing`, and `--sandbox enabled`. The login comes from the OS credential store, as decided above: on Linux, CLI `2026.11.19-f005e9d` keeps it in the desktop keyring over D-Bus (`~/.config/cursor/auth.json` holds only `{"storedIn":"os-secret-store"}`), and `cursor-agent status` from a home with nothing copied still printed `Logged in as` on 2026-11-21; on macOS its default store is the keychain. Check that the login survives a token refresh during a review, and that `quest review` fails loud, as logged out, when no credential store is reachable, such as over ssh without a session bus. Verify it with a test like `test/live/review-sandbox.test.ts`'s: an untrusted checkout whose rules, skills, plugins, MCP config, and hooks try to read outside the review snapshot or run a process, on Linux and macOS. If the pinned CLI cannot reliably disable both inherited user config and checkout config, record that under `## Waiting` instead of shipping the harness.
-- Run the CLI as `cursor-agent`, not `agent`: nixpkgs' `cursor-cli` installs only `cursor-agent` (and is unfree), and a Grok CLI also installs an `agent` binary (`agent --version` printed `grok 1.0.77` on one of the maintainer's hosts), so `agent` on `PATH` may not be Cursor's.
-- The CLI has no `--effort` flag (effort rides on the model, as `model[effort=high]`, only for models that take it) and no output-schema flag. Map the effort ladder onto that syntax where the model takes it; where it does not, run the model at its one effort and skip the shadow, as `quest review` does for an effort off the ladder. With no `REVIEWERS` entry to supply one, `--effort` stays required for a Cursor model that takes an effort, as `pickReviewer()` requires it today, and is not needed for one that takes none. Parse the verdict from the response text as `verdict()` already does.
-- `quest review` classifies the head's risk with the first `CLASSIFIERS` entry that can run before any reviewer starts, and today that list holds only Claude Haiku and Codex Sol, so a Cursor-only contributor would stop there. Append a cheap Cursor-served classifier last (its id from the CLI's model list), so classification reaches Cursor only when neither of the others can run.
-- Detect Cursor's usage-limit and logged-out errors from its structured output as a `ReviewLimitError` or `ReviewerUnavailableError` in `src/cli/review.ts`, so `quest review` passes the round past an unavailable Cursor reviewer as it does the other harnesses'.
-- Look up Gemini 4 Carbon's Cursor model id with the CLI's model list rather than guessing it; record the CLI version checked.
-- `quest eval run` prices sessions through [kixel-ai/token-max](https://github.com/kixel-ai/token-max), which reads only Claude Code and Codex transcripts, so a Cursor run would report a lower-bound `$0.00`. Recommended: add Cursor transcripts to token-max in its own PR first, since `quest eval` already delegates all pricing there; else price Cursor seats in `quest eval` from the usage its stream reports. The culprits-per-dollar comparison needs one of them before the ranking change.
-- Run `quest eval run` with the base's build and the head's, per `AGENTS.md`, and put both scores, the per-size catch rates, and their cost in the PR's `## Validation`. Compare Carbon with Sol for each size, and with Opus and Sonnet where they review.
-- Keep the harness opt-in (`--harness cursor`) until the eval moves a Cursor model into `REVIEWERS`; contributors without Cursor installed then fall through past it, as `quest review` passes an uninstalled reviewer's round to the next.
-- Update `README.md`'s reviewer list and `quest review --help` to name the new harness.
+- [moq-dev/quest#805](https://github.com/moq-dev/quest/pull/805)'s body holds the Cursor probes in full. Repeat each one for `agy` before choosing the isolation design:
+  - A clean `HOME` did not keep out workspace config. Cursor ran the checkout's `.cursor/` and `.claude/` hooks as the user, outside its sandbox. Plant every format another CLI reads (`.claude/`, `.codex/`, `.agents/`, `.gemini/`, `AGENTS.md`, `GEMINI.md`), not only `agy`'s own.
+  - Hooks fired on read and shell events, not only at session start.
+  - Run from inside a repository, including its `.git/`, Cursor walked up to the root's hooks and rules. Run from a directory outside any repository, it still loaded ancestor rules. Run from an empty directory outside any repository, reading the checkout by absolute path, nothing planted loaded. That is the candidate design if `agy` also scopes config to its workspace (`--add-dir` may serve the checkout).
+  - The read tool read outside the workspace, and the read-only mode blocked every shell call, including `git diff`. Check what `agy --mode plan` and `--sandbox` confine and allow.
+  - Resume was keyed by workspace path and silently started an empty chat from another directory. Test `--conversation <id>` across a changed working directory.
+  - The login depended on display variables over ssh. Find where `agy` keeps its login (it keeps state under `~/.gemini/antigravity/`) and whether the review fails loud, as logged out, when it cannot reach it.
+  - A headless run spawned `npx` helpers from the workspace. Plant a `package.json` and `node_modules/.bin/` binaries.
+- `agy` 1.5.14 (the maintainer's workstation, 2026-11-22) has the flags a reviewer needs: `-p`, `--output-format stream-json`, `--json-schema` for the verdict, `--effort low|medium|high|xhigh|max`, `--mode plan`, `--sandbox`, `--settings` (inline, never saved), `--disable-slash-commands`, and `--conversation <id>`. `agy models` lists model ids only when signed in. Look up Carbon's id there rather than guessing, and record the CLI version you checked.
+- Read T3 Code's Antigravity driver for how it launches `agy` (print mode or `agy acp`), and match it, since the maintainer's reason for using the Ultra login is that use.
+- Keep `agy` a reviewer-only harness: give `quest review` its own `ReviewHarness` union beside `HARNESSES`, rather than adding `agy` to `HARNESSES` in `src/cli/agent.ts`, which would also reach `quest agent start --harness` and `transcriptFacts()`.
+- Strip credential and model overrides from the reviewer's environment, so it reviews on the CLI's login as [moq-dev/quest#492](https://github.com/moq-dev/quest/pull/492) settled for the other harnesses. Make `runningHarness()` recognize an `agy` session, so `quest review` from one avoids the right writer.
+- The reviewers run nothing from a reviewed head. Verify it with a test like `test/live/review-sandbox.test.ts`, on Linux and macOS: an untrusted checkout whose rules, skills, plugins, MCP config, hooks, and helper binaries try to read outside the review snapshot or run a process. If the pinned CLI cannot reliably keep out both user and checkout config, record that under `## Waiting` instead of shipping the harness.
+- Append a cheap `agy`-served classifier last in `CLASSIFIERS`, so a contributor with only `agy` can still classify risk.
+- Detect `agy`'s usage-limit and logged-out errors from its structured output as a `ReviewLimitError` or `ReviewerUnavailableError`, so the round passes over an unavailable reviewer.
+- Ultra is a flat plan and token-max prices only Claude Code and Codex sessions, so a culprits-per-dollar comparison needs a per-token price. Recommended: price `agy` sessions from the usage their stream reports, at Google's API list price for the model, through token-max if it gains them first, else in `quest eval`.
+- Run `quest eval run` with the base's build and the head's, per `AGENTS.md`. Put both scores, the per-size catch rates, and their cost in `## Validation`.
+- Keep the harness opt-in until the eval moves an `agy` model into `REVIEWERS`. Update `README.md`'s reviewer list and `quest review --help`.
 
 ## Hosts
 
-- linux - the logged-in Cursor CLI the work starts on
+- linux - the maintainer's workstation with `agy` installed
 - macos - the isolation test must pass there before merge
+
+## Waiting
+
+- Maintainer: sign `agy` in with the Ultra account on the Linux workstation that runs agent sessions and on a macOS host, then confirm Carbon runs there with a one-word prompt, such as `agy -p --model <Carbon's id> hi`. On 2026-11-22, `agy models` on the Linux workstation printed "Please sign in". An agent cannot finish Google's login for the maintainer's account; it can drive the maintainer's agent Chrome once they pick the account. Done when `agy models` lists Carbon on both hosts.
+- kixel-ai/token-max: `token-max sessions` prices `agy` sessions. Check that an `agy` review session shows a nonzero cost there. If that stalls, the Plan's fallback prices them in `quest eval`.
 
 ## Related
 
 - [Model check](/quest/m1/model-check.md) - audits each milestone's reviewer ranking
-
-## Waiting
-
-- Maintainer: log Cursor's CLI in on a macOS host of the maintainer's, at a version no older than `2026.11.13-eacade1`, so an agent can run the isolation test on macOS before this quest's PR merges. Check with `cursor-agent status`, which prints `Logged in as <email>` when done. An agent cannot finish Cursor's browser login on the maintainer's account; it can drive the maintainer's agent browser through `NO_OPEN_BROWSER=1 cursor-agent login`'s URL once the maintainer picks the account, as it did on Linux. The maintainer's Linux workstation that runs agent sessions was logged in on 2026-11-21 (CLI `2026.11.19-f005e9d`, from nixpkgs' unfree `cursor-cli` through `nix shell`, not installed); until kixel-ai/dotfiles installs it on the hosts, the implementer gets it with `NIXPKGS_ALLOW_UNFREE=1 nix shell --impure nixpkgs#cursor-cli`.
-- kixel-ai/token-max: `token-max sessions` prices Cursor CLI sessions, so `quest eval run` reports Cursor reviewers' real cost instead of a lower-bound `$0.00`. Check that a Cursor review session's line in `token-max sessions` shows a nonzero cost. Advance it with `/quest-plan` in that repository; its tree had no such quest on 2026-11-17. If that stalls, the Plan's fallback prices Cursor seats in `quest eval` from the usage its stream reports.
