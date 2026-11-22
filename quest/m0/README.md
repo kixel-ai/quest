@@ -60,8 +60,8 @@ Decided 2026-10-30 (user, /quest-plan), replacing "First public release":
   The queue watcher epic recorded the full interview: moq first, self-hosted
   `merge_group` runners, host-gate work frozen, build concurrency 1,
   re-enqueue at the back, unlimited attempts while progressing, and flaky
-  re-enqueues. Its git history keeps it; only
-  [its first flaky-test disable](/quest/m0/queue-watcher/README.md) remains.
+  re-enqueues. Its git history keeps it; the epic finished once its first
+  flaky-test disable, moq-dev/moq#9195, landed through the queue.
 
 Decided while planning m0 (2026-09-26), replacing the earlier copied-files and
 ownership-manifest design:
