@@ -1064,11 +1064,13 @@ test.each([
 	const { deps, uploads } = sender({ ...env, QUEST_KIXEL_URL: named }, 200, sessions);
 	const hosts = viaHosts(deps);
 	expect(await sendPass(deps)).toHaveLength(2);
-	expect(hosts.filter((h) => h.path === "/records").map((h) => [h.host, h.token])).toEqual([
+	// Queue files are named by random IDs, so the Kixel Quests are reached in no fixed order.
+	const reached = hosts.filter((h) => h.path === "/records").map((h) => [h.host, h.token]);
+	expect(reached.sort()).toEqual([
 		[URL_, "Bearer one"],
 		[OTHER, "Bearer two"],
 	]);
-	expect(uploads.map((u) => parseUpload(u.body).records.map((r) => r.session))).toEqual([["s1"], ["s2"]]);
+	expect(uploads.map((u) => parseUpload(u.body).records.map((r) => r.session)).sort()).toEqual([["s1"], ["s2"]]);
 	expect(pending(env)).toEqual([]);
 });
 
@@ -1081,7 +1083,7 @@ test("a Kixel Quest that refuses its token drops only its own records", async ()
 	const { deps, uploads } = sender(env, 200, [session("s1", "quest/m0/a"), session("s2", "quest/m0/a")]);
 	viaHosts(deps, [OTHER]);
 	const sent = await sendPass(deps);
-	expect(sent.map((s) => [s.endpoint, s.refused])).toEqual([
+	expect(sent.map((s) => [s.endpoint, s.refused]).sort()).toEqual([
 		[ENDPOINT, false],
 		[`${OTHER}/records`, true],
 	]);
