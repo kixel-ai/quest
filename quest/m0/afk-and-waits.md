@@ -36,10 +36,6 @@ Agent's choices, for the implementer to revisit:
 - In `assets/skills/run.md`: bound pending-CI waits to open, ready-for-review PRs whose required checks are pending and that still need a merge pick (not drafts waiting on outside parties, not skipped PRs, and not optional reviewers), so `/quest-run` still finishes cleanly when nothing actionable is in flight.
 - Verify with unit tests for `src/core/waiting.ts` and `quest waiting` filters, plus `just check` and `just test`.
 
-## Required
-
-- [Trim unused skills, controls, and prompt bloat](/quest/m0/trim-skills.md) - folds `## Waits` into `/quest-run` and frees composed skill budget before editing `run.md` and `afk.md`
-
 ## Related
 
 - [Scale review, CI, and approval to a PR's risk tier](/quest/m0/benchmark/guardrails.md) - risk tiers define the `high` boundary `afk merge` defers and will widen standing auto-merge separately

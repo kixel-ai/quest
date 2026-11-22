@@ -130,7 +130,7 @@ Automate a step rather than leave it to a person whenever an agent can take it.
 A `Maintainer:` item says why an agent cannot take the step and what automation was considered.
 Record a wait there, not in a draft PR holding only evidence or steps for a person.
 Unlike a blocked quest it stays ready, so it resurfaces whenever ready work is triaged instead of stalling in the backlog.
-`quest waiting` lists every waiting item, the maintainer's first, ranked by what each unblocks, and `/quest-complete` walks the maintainer through them.
+`quest waiting` lists every waiting item, the maintainer's first, ranked by what each unblocks, and `/quest-run` walks the maintainer through them.
 
 A PR that launches something new for users to try, such as a site, demo, or feature, adds a follow-up quest for the maintainer to try and promote it, its `Maintainer:` item saying where to find it.
 
@@ -166,7 +166,7 @@ it over, saying how long ago it was last active.
 A quest's branch is its path without `.md`.
 For example, `quest/m1/foo/bar.md` is branch `quest/m1/foo/bar`.
 Only claims use that namespace: no other branch is named `quest` or starts with `quest/`, since git cannot hold a branch named after another's directory.
-Branches for `/quest-plan`, `/quest-recurring`, and other skill PRs use a prefix of their own, such as `quest-plan/<slug>`.
+Branches for `/quest-plan`, `/quest-run`, and other skill PRs use a prefix of their own, such as `quest-plan/<slug>`.
 If `quest start` names a branch in the way, stop and report it; never delete or rename it yourself.
 Never rename an open PR's head branch either: GitHub closes the PR.
 Its warning that the quest's local branch already exists is not that refusal: the claim succeeded, and the branch holds an earlier attempt.
@@ -192,9 +192,8 @@ Add a closing keyword for every issue under `Closes`.
 ## Deletion
 
 A quest that is no longer needed or cannot be completed is abandoned.
-Delete it and explain why in the PR.
-Use `quest rm`, which deletes the quest and every link to it.
-
+Delete it with `quest rm`, which deletes the quest and every link to it, edit the mentions it reports, and explain why in a PR of quest deletions only, repurposing the quest's open PR if it has one.
+The user's pick to delete a quest is also the pick to merge that PR.
 Remove the `quest` label from issues no other quest tracks.
 
 ## Coordination
@@ -217,7 +216,6 @@ While the error persists, such as a rate limit before its reset, resume and star
 Answer these requests at any point, without stopping running agents:
 
 - "finish up": start nothing new, let running agents report, then clean up and write the final summary.
-- "pause": start nothing new until the user says to resume; reports are handled as usual.
 - "status": a compact list of each agent with its quest or PR, state, and how long ago it started or last reported.
 
 Once every sub-agent has finished, remove each agent checkout `quest worktree status` lists with `quest worktree remove`, since Claude never removes a subagent's checkout; it refuses one with unpreserved work.
@@ -228,9 +226,8 @@ Run each agent at an entry of `quest`'s ranked lists unless the repository's `AG
 Size each `/quest-iterate` you dispatch as a quest, by the work left on its PR, and name that size in its brief.
 Start it on the PR's writer, the model of its first `Implementer:` line, at the entry `quest models <size> --writer <model>` prints, or `quest models <PR size> --arm <arm>` when that line names a writer A/B arm, as `(arm B)`, naming the arm in its brief, waiting out its usage limit so the other model can review; a PR whose writer no list names, such as `unknown` or a retired model, takes its size's first entry that can run.
 
-`quest agent start --harness <claude|codex> --model <model> --effort <level> --permission-mode <mode> <worktree> <prompt>` runs a headless agent on that CLI's own login; start it as a background command in its own isolated worktree, so the harness reports its exit like a sub-agent's.
-`--permission-mode` is Claude Code's permission mode, or Codex's sandbox mode.
-It prints the session id, then the outcome and the agent's final reply, and exits 3 at the account's usage limit, or 4 when the CLI is logged out, printing the login command.
+`quest agent start` runs a headless agent on that CLI's own login, as its `--help` describes; start it as a background command in its own isolated worktree, so the harness reports its exit like a sub-agent's.
+It exits 3 at the account's usage limit, or 4 when the CLI is logged out.
 Tell the agent it cannot prompt, so it ends with its decisions and recommendations in its final reply, and that ending its turn kills its background commands, so it waits in the foreground.
 Answer it in the background with `quest agent resume`, passing the same options, worktree, session id, and the answer.
 Stop one with `quest agent stop <worktree>`, and each you started that still runs before you finish; `--all` would stop other sessions' agents too.

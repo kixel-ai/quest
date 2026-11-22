@@ -108,7 +108,7 @@ test("skill lists every skill", () => {
 test("skill prints what the skill builds on", () => {
 	const out = run("skill", "plan");
 	expect(out.code).toBe(0);
-	expect(out.stdout).toContain("\n# /quest-grill\n");
+	expect(out.stdout).toContain("\n# The grill skill\n");
 	expect(out.stdout).toContain("\n# Quest guide\n\n## Model\n");
 });
 
@@ -122,7 +122,7 @@ test("guide prints the named sections in the guide's order", () => {
 test("skill rejects an unknown name", () => {
 	const out = run("skill", "nope");
 	expect(out.code).toBe(1);
-	expect(out.stderr).toMatch(/^quest: no skill named nope \(have: afk, complete, /);
+	expect(out.stderr).toMatch(/^quest: no skill named nope \(have: afk, import, /);
 });
 
 test("audit lists the pack, and prints a definition with how every run plans the next", () => {

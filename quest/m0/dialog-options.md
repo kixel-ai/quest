@@ -6,7 +6,7 @@ Update `assets/AGENTS.md` (`## Questions`) and `assets/skills/` so blocking ques
 
 1. Every non-trivial decision, plan, or follow-up dialog reserves an option for `"Explain it first"` (preferring 2 to 3 concrete choices plus `"Explain it first"` within the 4-option limit), and `/quest-plan` Goal prompts include a `"Drop"` option.
 2. `Maintainer:` wait and manual-action dialogs (a step only the maintainer can do, with no choice to make) standardize on: Agent handles or drives the browser (when plausible), Done / I'll do it now, `"Not at my PC (defer)"`, and Drop wait.
-3. `assets/skills/review.md` removes its stale option list (`- /quest-iterate`, `- skip`, `- /quest-delete`) so merge picks follow `#768`'s option set in `assets/skills/merge.md` everywhere.
+3. `assets/skills/review.md` removes its stale option list (`- /quest-iterate`, `- skip`, `- delete`) so merge picks follow `#768`'s option set in `assets/skills/merge.md` everywhere.
 
 Non-goal: enforcing `(Recommended)` in a `PreToolUse` hook (tracked in [Block agent stalls in Stop hook and missing recommendations in PreToolUse](/quest/m0/agent-and-question-hooks.md)), or changing follow-ups from one question per follow-up (`#636`).
 
@@ -34,7 +34,3 @@ Agent's choices, for the implementer to revisit:
 - Keep `"Rethink it"` on merge picks in `assets/skills/merge.md`, and update `assets/skills/review.md` so it delegates its pick options wholly to `/quest-merge` without restating a conflicting bullet list.
 - For `Maintainer:` wait dialogs, note that `"Not at my PC (defer)"` leaves the `## Waiting` item in place and skips it for the current session without re-asking.
 - Check `test/skills.test.ts` and `INLINE_LIMIT` after edits so every composed skill stays well under 30,000 characters.
-
-## Required
-
-- [Trim unused skills, controls, and prompt bloat](/quest/m0/trim-skills.md) - frees composed skill budget before adding dialog guidance to `assets/AGENTS.md` and `assets/skills/`

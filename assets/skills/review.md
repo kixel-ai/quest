@@ -53,7 +53,7 @@ Name any decisions the review raised without answering them, then ask the user f
 - `/quest-merge`: the PR is landable as `/quest-merge` defines it, or will be once fixed with no decision left for the user, such as failing checks or unaddressed automated review findings; `/quest-merge` runs `/quest-iterate` on it first.
 - `/quest-iterate`: the review raised significant issues or decisions, which it settles with the grill skill's interview.
 - skip: the PR should not be merged yet.
-- `/quest-delete`: the quest should be deleted.
+- delete: the quest should be deleted.
 
 While its required checks are still running, report that instead of asking; `/quest-run` asks once they finish.
 
