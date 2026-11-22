@@ -1,6 +1,7 @@
 // What a quest waits on outside its own work: the `## Waiting` section, where
-// each top-level item opens with who acts, `Maintainer:` or an outside party
-// such as `moq-dev/moq:`. The same heading hands a draft PR back (claim.ts).
+// each top-level item opens with who acts, `Maintainer:`, `Maintainer (PC):`, or
+// an outside party such as `moq-dev/moq:`. The same heading hands a draft PR back
+// (claim.ts).
 
 import { type Doc, type Entry, entries } from "./doc";
 
@@ -16,6 +17,8 @@ export interface Wait {
 	line: number;
 	/** Who acts, as the item opens: `Maintainer`, or an outside party. */
 	party: string;
+	/** A step the maintainer can take only at one of their computers, opened as `Maintainer (PC):`. */
+	pc: boolean;
 	/** The condition, and how to check or advance it. */
 	text: string;
 }
@@ -24,11 +27,19 @@ export interface Wait {
 // `Akamai sales`. A longer run reads as a sentence that happens to hold a colon.
 const PARTY = /^([^:\s][^:]{0,39}):\s+(\S[\s\S]*)$/;
 
+// The maintainer with a qualifier; only `(PC)` is one, so a typo such as `(local)` fails
+// `quest check` instead of reading as an outside party.
+const QUALIFIED = /^maintainer\s*\((.*)\)$/i;
+
 /** Parse one `## Waiting` item, or `null` when it does not open with its party. */
 export function parseWait(entry: Pick<Entry, "line" | "text">): Wait | null {
 	const match = PARTY.exec(entry.text.replace(/\s+/g, " ").trim());
 	if (!match) return null;
-	return { line: entry.line, party: match[1].trim(), text: match[2] };
+	const party = match[1].trim();
+	const qualified = QUALIFIED.exec(party);
+	if (!qualified) return { line: entry.line, party, pc: false, text: match[2] };
+	if (qualified[1].trim().toLowerCase() !== "pc") return null;
+	return { line: entry.line, party: MAINTAINER, pc: true, text: match[2] };
 }
 
 /** `doc`'s waits, in source order; an item without a party is left to `quest check`. */

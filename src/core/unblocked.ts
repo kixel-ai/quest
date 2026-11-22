@@ -108,15 +108,27 @@ export interface WaitingQuest {
 	waits: Wait[];
 }
 
+/** What `waiting` reads beyond the tree, and which items it keeps. */
+export interface WaitingOptions {
+	/** The open drafts to read hand-backs from. */
+	drafts?: Draft[];
+	/** Keep only the maintainer's items. */
+	maintainer?: boolean;
+	/** `false` drops `Maintainer (PC):` items, for a session away from the maintainer's computers. */
+	pc?: boolean;
+}
+
 /**
  * Every quest with a `## Waiting` section and every draft in `drafts` handed
- * back with one: those waiting on the maintainer first, then milestone order,
+ * back with one, holding the items `options` keeps: those waiting on the maintainer first, then milestone order,
  * descending downstream impact, ready before blocked, then tree order, with
  * drafts after quests in the order given. A draft ranks as the quest its branch
  * carries, or last when it carries none. Readiness is as of `today`, a
  * `YYYY-MM-DD` date. Validates the tree first, as `unblocked` does.
  */
-export function waiting(docs: Doc[], today: string, drafts: Draft[] = []): WaitingQuest[] {
+export function waiting(docs: Doc[], today: string, options: WaitingOptions = {}): WaitingQuest[] {
+	const { drafts = [], maintainer: only = false, pc = true } = options;
+	const kept = (wait: Wait) => (!only || onMaintainer(wait)) && (pc || !wait.pc);
 	const rank = ranking(docs);
 	const startable = new Set(ready(docs, today));
 	const maintainer = (quest: WaitingQuest) => (quest.waits.some(onMaintainer) ? 0 : 1);
@@ -127,7 +139,7 @@ export function waiting(docs: Doc[], today: string, drafts: Draft[] = []): Waiti
 		pr,
 		dependents: path === null ? 0 : rank.impact(path),
 		ready: path === null || startable.has(path),
-		waits: found,
+		waits: found.filter(kept),
 	});
 	const quests = treeOrder(docs).map((path) => entry(path, null, waits(byPath.get(path)!)));
 	const pulls = drafts.map((draft) => {

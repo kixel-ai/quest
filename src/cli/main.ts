@@ -29,7 +29,6 @@ import {
 	SIZES,
 	type Size,
 	unblocked,
-	onMaintainer,
 	waiting,
 	InputError,
 	Refusal,
@@ -489,13 +488,17 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"transitive dependents as quest unblocked counts them, ready before blocked, then path order, with " +
 				"drafts after quests by PR number. A draft ranks as the quest its branch carries, or last when it " +
 				"carries none. Each item opens with who acts, Maintainer: or an outside party such as moq-dev/moq:, " +
-				"followed by the condition and how to check or advance it. A draft's item without a party is the " +
+				"followed by the condition and how to check or advance it; Maintainer (PC): marks a step the maintainer " +
+				"can take only at one of their computers, such as a local login or a hardware check. A draft's item without a party is the " +
 				"maintainer's; a draft's section without items is one maintainer item " +
 				"holding its prose.\n\n" +
 				"Prints one line per item: dependents, ready or blocked (whether Required entries or a future " +
 				"Scheduled date remain), the quest's path or the draft's URL, and the item. --json prints an ordered array of {path, pr, dependents, " +
-				"ready, waits: [{line, party, text}]} objects, where pr is the draft's URL or null and path is the " +
-				"quest, the quest a draft carries, or null. --maintainer keeps only the items the maintainer settles. " +
+				"ready, waits: [{line, party, pc, text}]} objects, where pr is the draft's URL or null, path is the " +
+				"quest, the quest a draft carries, or null; an item opened Maintainer (PC): has party Maintainer and pc " +
+				"true. " +
+				"--maintainer keeps only the items the maintainer settles, and --no-pc drops the Maintainer (PC): ones, " +
+				"for a session away from the maintainer's computers; both filter before ranking, so order follows the items kept. " +
 				"Invalid trees fail before printing. Outside conditions are never checked, nor whether another " +
 				"session holds a draft.\n\n" +
 				"Drafts are read from the open PRs of the remote's upstream, found as for quest unblocked " +
@@ -506,18 +509,18 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		)
 		.option("--json", "Print a deterministic JSON array")
 		.option("--maintainer", "Only items waiting on the maintainer")
+		.option("--no-pc", "Skip the steps only the maintainer's computers can take, Maintainer (PC): items")
 		.option("--limit <count>", "Maximum number of entries to print", positiveInteger("limit"))
 		.option("--remote <name>", "Remote whose upstream holds the draft PRs", "origin")
-		.action((options: { json?: boolean; maintainer?: boolean; limit?: number; remote: string }) => {
+		.action((options: { json?: boolean; maintainer?: boolean; pc: boolean; limit?: number; remote: string }) => {
 			const tree = checkout(root(), warn);
 			if (!valid(tree)) return;
 			settle(openDrafts(root(), options.remote, claimDependencies()), (drafts) => {
-				const found = waiting(tree.docs, today(), drafts)
-					.map((quest) =>
-						options.maintainer ? { ...quest, waits: quest.waits.filter(onMaintainer) } : quest,
-					)
-					.filter((quest) => quest.waits.length > 0)
-					.slice(0, options.limit);
+				const found = waiting(tree.docs, today(), {
+					drafts,
+					maintainer: options.maintainer,
+					pc: options.pc,
+				}).slice(0, options.limit);
 				if (options.json) {
 					print(JSON.stringify(found));
 					return;
@@ -527,7 +530,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				for (const quest of found) {
 					for (const wait of quest.waits) {
 						print(
-							`${quest.dependents}\t${quest.ready ? "ready" : "blocked"}\t${quest.pr ?? quest.path}\t${wait.party}: ${wait.text}`,
+							`${quest.dependents}\t${quest.ready ? "ready" : "blocked"}\t${quest.pr ?? quest.path}\t${wait.party}${wait.pc ? " (PC)" : ""}: ${wait.text}`,
 						);
 					}
 				}
