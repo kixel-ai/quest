@@ -285,9 +285,11 @@ quest start --release quest/m0/export.md
 It pushes an empty claim commit, built on the upstream default branch, to the
 quest's branch (its path without `.md`), then opens a draft PR
 from it right away and prints the PR's URL. A checkout on the default branch,
-such as the main clone, stays there: a second line prints the path of a
-worktree on the claim's branch to work in, the one that already has the branch
-checked out, else a new one under `.worktrees/` that `quest worktree` owns. Any
+such as the main clone, stays there: a second line prints the directory to
+work in, the one matching where it ran, in a worktree on the claim's branch:
+the one that already has the branch checked out, else a new one under
+`.worktrees/` that `quest worktree` owns. The default branch is the one of the
+repository the claim was pushed to, a fork's own. Any
 other checkout switches to the claim on a new local branch, or fast-forwards
 that branch if it is already checked out. A local branch left from an earlier
 attempt is not moved: the claim still succeeds, with a warning to merge the

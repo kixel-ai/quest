@@ -1,7 +1,7 @@
 // `quest start`: claim a ready quest by pushing an empty claim commit to its
 // branch and opening a draft PR from it right away, and release that claim
 // while nothing but the claim commit is on the branch.
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { join } from "node:path";
 
 import { type OpenPull, Refusal, questBranch } from "../core";
@@ -20,7 +20,7 @@ import {
 import { GitError, git } from "./git";
 import { requireRemote } from "./github";
 import { ago } from "../github/hold";
-import { Worktrees, derivedDefaults, mainCheckout } from "./worktree";
+import { Worktrees, canonical, derivedDefaults, mainCheckout } from "./worktree";
 import { mergedPull, pullsFrom } from "../github/claims";
 
 export interface Started {
@@ -29,7 +29,10 @@ export interface Started {
 	sha: string;
 	/** The draft PR; `null` off GitHub. */
 	url: string | null;
-	/** The worktree on `branch` to work in, when the checkout `quest start` ran in stayed on the default branch. */
+	/**
+	 * The directory in a worktree on `branch` that matches the one `quest start` ran in, to work in, when that
+	 * checkout stayed on the default branch; `null` when it moved onto the claim.
+	 */
 	worktree: string | null;
 }
 
@@ -90,7 +93,10 @@ export async function startQuest(
 
 	let worktree: string | null;
 	try {
-		worktree = await place(root, up.hosting?.defaultBranch ?? defaultBranch(root, up.git), branch, sha, deps.warn);
+		// The repository the claim was pushed to, such as a fork, names the default branch; it may differ from the upstream's.
+		const top = await place(root, defaultBranch(root, up.push), branch, sha, deps.warn);
+		// A quest tree below the repository root is found again at the same place in the worktree.
+		worktree = top === null ? null : join(top, git(root, ["rev-parse", "--show-prefix"]).replace(/\/$/, ""));
 	} catch (error) {
 		const message = error instanceof Error ? error.message : String(error);
 		throw new Error(
@@ -162,14 +168,18 @@ async function place(
 		checkout(root, branch, sha, warn);
 		return null;
 	}
+	const worktrees = new Worktrees();
 	const held = checkedOut(root).get(`refs/heads/${branch}`);
 	if (held !== undefined) {
+		// A quest worktree an earlier release left stays charged for its growth again.
+		const owned = worktrees.registered(canonical(held));
+		if (owned) worktrees.restore(owned.id);
 		checkout(held, branch, sha, warn);
 		return held;
 	}
 	const main = mainCheckout(root);
-	const name = branch.replaceAll("/", "-");
-	const worktrees = new Worktrees();
+	// The hash tells apart branches that differ only where the name keeps nothing, such as `a/b-c` and `a-b/c`.
+	const name = `${branch.replace(/[^A-Za-z0-9._-]/g, "-")}-${createHash("sha256").update(branch).digest("hex").slice(0, 8)}`;
 	const earlier = worktrees.registered(join(main, ".worktrees", name));
 	let path: string;
 	if (earlier) {
