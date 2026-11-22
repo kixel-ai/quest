@@ -550,6 +550,7 @@ merge-state dirty
 review-decision -
 review-record diff-identical 5f1c2e9a8b7d6c5e4f3a2b1c0d9e8f7a6b5c4d3e
 risk medium diff-identical low It changes when quest gate admits a command.
+class -
 auto-merge -
 merge-queue -
 landing-stopped -
@@ -569,6 +570,7 @@ comes last, and a missing value prints as `-`:
 | `mergeable`, `merge-state`, `review-decision` | GitHub's values, lowercased. |
 | `review-record` | Whether the PR body's [`## Review` record](#review-locally) still covers the head, and the head it names last: `current` when it is the head, `diff-identical` when `git diff <base>...<head>` prints the same as for it, `stale` otherwise, or `unknown` when GitHub cannot compare them, such as a diff too large; `-` when the record names no full SHA. Whose record counts is the reader's call. |
 | `risk` | The record's [risk tier](#risk-tiers), `low`, `medium`, or `high`; the same state as `review-record` for the head it names; the tier its classifier set before any reviewer raised it; and the reason. `-` when the record names none. |
+| `class` | The `## Automatic` class of the base's `RISK.md` the record's classifier found the change in, or `-`. |
 | `auto-merge` | Method, who enabled it, when, and the head it was enabled on. |
 | `merge-queue` | Queue state, position, and when it was enqueued. |
 | `landing-stopped` | The reason the latest merge-queue entry, auto-merge, or [`quest land`](#the-watchers-own-queue) queue entry ended (such as `merge_conflict`, `failed_checks`, `manual`, `manually_disabled`, or `merged`), who ended it, and when; `-` once the PR has entered the merge queue or auto-merge again since. |
@@ -1697,36 +1699,58 @@ own retries, which also counts as the limit there.
 
 Each head also gets a risk tier, `low`, `medium`, or `high`: what could break,
 for whom, and how hard it is to undo, set from the change and never from who
-wrote it. Nothing acts on the tier yet; `quest status` and `quest usage` report
-it.
+wrote it. The tier scales the PR's guardrails:
+
+| Tier | Local review | CI | Lands on |
+|---|---|---|---|
+| Low | None; the online reviewer only | The checks its diff reaches | Its own, once its class is in `RISK.md`'s `## Automatic` list; else the maintainer's pick |
+| Medium | The size's pick | The checks its diff reaches | The maintainer's pick |
+| High | The size's pick and a second reviewer on another model | The full suite [`quest suite`](#run-the-full-suite) names | The maintainer's pick, with the full brief |
+
+`/quest-run` carries the picks.
 
 A change is `high`, with no model, when a changed path on either side of a
 rename matches a pattern held high: `RISK.md` itself, everything under
 `.github/workflows/` and `.github/actions/`, and each pattern in the `## High`
 list of the base's `RISK.md`, at the repository's root:
 
-```markdown
+````markdown
 # Risk
 
 Customers run the relay and the player; the CLI is for contributors.
+
+## Automatic
+
+- `tests` - only tests and their fixtures change
 
 ## High
 
 - `src/billing/` - charges customers, and refunds are manual
 - `**/*.proto` - peers on older releases read the wire format
+
+## Full suite
+
+```sh
+just gate --all
 ```
+````
 
 Each item is a backticked path from the root, where `*` and `?` stay within one
 segment, a whole `**` segment spans any number, and a matched directory covers
 everything under it, then ` - ` and why changing it is high. The rest of the
-file is prose for the classifier, such as what is customer-facing. `quest
+file is prose for the classifier, such as what is customer-facing, except
+`## Automatic`, whose items are each a backticked class name of lowercase
+words joined by hyphens, ` - `, and the rule over the diff a change meets to
+fall in it, and `## Full suite`, one fenced block holding the command that
+runs the whole test suite. Each section appears at most once. `quest
 review` reads the file from the base's tip, so a change cannot lower its own
 tier, and fails on one it cannot read, which the repository's own `quest check`
 reports first. A base with no `RISK.md` makes every change no path holds high
 `medium`.
 
 Otherwise a classifier reads the diff and the base's `RISK.md` in one read-only
-turn and replies with a tier and one sentence on why: Claude Code
+turn and replies with a tier, one sentence on why, and the `## Automatic`
+class every changed file falls in, or none: Claude Code
 `claude-haiku-5-5` at low effort, or Codex `gpt-6.1-sol` at low when Claude
 Code is missing, logged out, has its login rejected, or hit its usage limit.
 When neither can run, the review fails on the limit that resets first if both
@@ -1744,7 +1768,38 @@ the reason of the first to judge it so. The record names it after the base:
 
 `Classified:` names `the always-high paths` or `default` when no model set the
 tier, and a reviewer that raised it adds `- Raised the risk to high: <reason>`
-to its block.
+to its block. A `- Class:` line follows when the classifier named a class.
+
+A low head with no finding left to settle runs no local reviewer, unless
+`--harness`, `--model`, or `--effort` names one: the record names the head in
+full, adds `- Local review: none, since a low-risk head needs only the online
+reviewer`, and `next done` says so. A high head also gets a second reviewer:
+the first of the size's list on a model other than the pick's that can run,
+marked `second`, in a session of its own that reviews every head while the
+tier is high and settles its findings after. `--model` and `--effort` change
+only the pick, so the second reviewer still runs; the one reviewer `--harness`
+names runs alone, with none. A round that raises the tier to
+high saves its rounds and runs the second reviewer at once; when that review
+fails, as when none can run, it prints those rounds before the error, so their
+findings can be answered. When every other model is avoided, as
+with no `## Models` record under a harness the list has one model of, the run
+fails as a usage error; when they cannot run, as an outage.
+
+`--override <tier> --reason <text>` records the maintainer's tier for the
+branch in place of the reviewed one, as `- Risk: <tier>, <reason>` and
+`- Overridden: from <tier> by the maintainer`. It holds across heads until
+the reviewed tier grows riskier than the one overridden, and `quest usage`
+counts overrides as a reading of the tier's accuracy.
+
+### Run the full suite
+
+`quest suite <pr>` prints the base's `## Full suite` command when the PR's
+head needs it: its record names it high, or names no tier that covers the
+head. It prints nothing otherwise, so a repository's gate runs the command it
+prints beside its scoped checks. The tier is the PR body's, which its author
+writes, so a gate runs the full suite itself for an author without write
+access. `--base` names the branch whose `RISK.md` it reads, fetched first,
+by default origin's default branch.
 
 ### Score the reviewer
 
@@ -1867,8 +1922,12 @@ the record names, or its sub-agent, goes to that reviewer. Spend still left
 fitting several, such as a routed and a shadow reviewer at one effort whose
 sessions no record names, is split evenly among them and reported as `split`.
 Each risk tier's PRs, how many merged,
-how many a reviewer raised, and how many a later PR's `## Caused by` names
-show whether the tiers predict what breaks. Each breakage a merged PR in the
+how many a reviewer raised, how many the maintainer overrode, how many a later
+PR's `## Caused by` names, and how long they waited on a person show whether
+the tiers predict what breaks and what each costs. Each `## Automatic` class
+the classifiers named gets the same numbers, and how many of its PRs were low,
+to argue for or against merging the class without a pick. A local reviewer
+row marked `second` shows what the high tier's second review catches. Each breakage a merged PR in the
 window names under `## Caused by` follows on its own line, by culprit, even one
 older than the window, which is read from GitHub: the culprit's tier, size,
 writers, and local reviewers, who found it and the incident it closes when

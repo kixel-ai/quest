@@ -1271,7 +1271,8 @@ fakes(
 	async () => {
 		const s = setup();
 		moveBase(s.repo, (dir) => write(dir, "RISK.md", riskFile(["- `src/` - customers' averages run on it"])));
-		const listed = await quest("--root", s.repo, "review");
+		// A high head gets a second reviewer on a model other than the pick's and the writer's.
+		const listed = await quest("--root", s.repo, "review", "--exclude-model", "claude-opus-5-5");
 		expect(listed.code, listed.stderr).toBe(0);
 		const reason = "it changes src/lib.ts, which is always high: customers' averages run on it";
 		expect(listed.stdout).toContain(`\nrisk high ${reason}\nclassified high paths ${reason}\n\nreviewer codex`);
@@ -1287,7 +1288,7 @@ fakes(
 		git(t.repo, "merge", "-q", "--no-edit", "origin/main");
 		git(t.repo, "mv", ".github/workflows/ci.yml", "ci.yml");
 		git(t.repo, "commit", "-qm", "retire the workflow");
-		const moved = await quest("--root", t.repo, "review");
+		const moved = await quest("--root", t.repo, "review", "--exclude-model", "claude-opus-5-5");
 		expect(moved.code, moved.stderr).toBe(0);
 		expect(moved.stdout).toContain(`base ${base} origin/main\n`);
 		expect(moved.stdout).toContain(
@@ -1302,7 +1303,7 @@ fakes(
 	async () => {
 		const s = setup();
 		moveBase(s.repo, (dir) => write(dir, "RISK.md", riskFile(["- `billing/**/*.ts` - charges customers"])));
-		vi.stubEnv("FAKE_RISK", JSON.stringify({ tier: "low", reason: "Only a constant\nchanges." }));
+		vi.stubEnv("FAKE_RISK", JSON.stringify({ tier: "medium", reason: "Only a constant\nchanges." }));
 		vi.stubEnv("FAKE_REPLY", JSON.stringify({ score: 10, rationale: "Lands as is.", findings: [] }));
 		const first = await quest("--root", s.repo, "review");
 		expect(first.code, first.stderr).toBe(0);
@@ -1311,8 +1312,8 @@ fakes(
 		const session = call!.argv[call!.argv.indexOf("--session-id") + 1];
 		expect(first.stdout).toContain(
 			[
-				"risk low Only a constant changes.",
-				"classified low model Only a constant changes.",
+				"risk medium Only a constant changes.",
+				"classified medium model Only a constant changes.",
 				`classifier claude claude-haiku-5-5 low ${session}`,
 				"usage classify input 40 cached 0 output 3",
 				"",
@@ -1449,7 +1450,10 @@ fakes("a question no model answers usably throws with what each reply took", asy
 fakes("a reviewer raises the tier, and the record keeps the classifier's beside it", async () => {
 	const s = setup();
 	moveBase(s.repo, (dir) => write(dir, "RISK.md", riskFile([])));
-	const pull = { number: 7, body: "Fixes averaging.\n\n## Models\n\n- Size: S\n" };
+	const pull = {
+		number: 7,
+		body: "Fixes averaging.\n\n## Models\n\n- Size: S\n- Implementer: Claude Code, claude-opus-5-5, high effort\n",
+	};
 	onGitHub(s.repo, [pull]);
 	vi.stubEnv("FAKE_RAISE", "high");
 	try {
@@ -1470,6 +1474,9 @@ fakes("a reviewer raises the tier, and the record keeps the classifier's beside 
 				"- Raised the risk to high: `It rewrites the wire format peers read.`",
 			].join("\n"),
 		);
+		// The raise to high gets the second review the medium tier skipped, in the same run.
+		expect(result.stdout).toContain("\nreviewer claude claude-sonnet-5-5 medium second\n");
+		expect(pull.body).toContain("- Reviewer: Claude Code, claude-sonnet-5-5, medium effort, second\n");
 		expect(recordedRisk(pull.body)).toEqual({
 			tier: "high",
 			reason: "It rewrites the wire format peers read.",
@@ -1477,6 +1484,8 @@ fakes("a reviewer raises the tier, and the record keeps the classifier's beside 
 			by: "model",
 			session,
 			head: git(s.repo, "rev-parse", "HEAD").slice(0, 12),
+			class: null,
+			overridden: null,
 		});
 
 		// A reviewer never lowers it.
@@ -1491,9 +1500,97 @@ fakes("a reviewer raises the tier, and the record keeps the classifier's beside 
 	}
 });
 
+fakes(
+	"a raise to high saves its rounds before the second review, which falls back, and seats one second reviewer",
+	async () => {
+		const s = setup();
+		moveBase(s.repo, (dir) => write(dir, "RISK.md", riskFile([])));
+		const pull = {
+			number: 7,
+			body: "Fixes averaging.\n\n## Models\n\n- Size: S\n- Implementer: Claude Code, claude-opus-5-5, high effort\n",
+		};
+		onGitHub(s.repo, [pull]);
+		vi.stubEnv("FAKE_RAISE", "high");
+		const responses = join(s.repo, ".tmp", "responses.md");
+		write(s.repo, ".tmp/responses.md", "1. Fixed.\n2. Fixed.\n3. Fixed.\n");
+		const seconds = (out: string) => out.split("\n").filter((line) => /^reviewer .* second$/.test(line));
+		try {
+			// The second reviewer the raise calls for cannot run, and no other model is left: an outage naming it.
+			vi.stubEnv("FAKE_LIMITED", "reset");
+			vi.stubEnv("FAKE_FAILS", "claude-sonnet-5-5");
+			const out = await quest("--root", s.repo, "review");
+			expect(out.code).toBe(3);
+			expect(out.stderr).toContain("no eligible S reviewer could run: claude-sonnet-5-5 medium (");
+			expect(out.stderr).not.toContain("gpt-6.1-sol");
+			// The rounds that ran are saved and printed, so their findings can be answered.
+			expect(out.stdout).toContain("\nreviewer codex gpt-6.1-sol medium\n");
+			expect(out.stdout).toContain("\nrisk high It rewrites the wire format peers read.\n");
+			expect(out.stdout).toContain("\nfindings 1\n");
+
+			// The pick's raising round was saved, so the next run resumes it and seats the second reviewer at once.
+			vi.stubEnv("FAKE_LIMITED", undefined);
+			vi.stubEnv("FAKE_FAILS", undefined);
+			const resumed = await quest("--root", s.repo, "review", "--responses", responses);
+			expect(resumed.code, resumed.stderr).toBe(0);
+			expect(seconds(resumed.stdout)).toEqual(["reviewer claude claude-sonnet-5-5 medium second"]);
+			expect(pull.body).toContain(
+				"- Reviewer: Codex, gpt-6.1-sol, medium effort\n- Session: `thread-1`, round 2",
+			);
+
+			// On a new head the tier starts at medium, and the second reviewer settles its findings; when the
+			// round raises the tier again, that same seat is its second review, not another.
+			write(s.repo, "src/lib.ts", "export const x = 3;\n");
+			git(s.repo, "commit", "-qam", "another constant");
+			const again = await quest("--root", s.repo, "review", "--responses", responses);
+			expect(again.code, again.stderr).toBe(0);
+			expect(again.stdout).toContain("\nrisk high It rewrites the wire format peers read.\n");
+			expect(seconds(again.stdout)).toEqual(["reviewer claude claude-sonnet-5-5 medium second"]);
+
+			// A run naming the pick's effort still seats the second reviewer to settle its findings, from the
+			// size's whole list rather than the one reviewer --effort narrows the pick to.
+			write(s.repo, "src/lib.ts", "export const x = 4;\n");
+			git(s.repo, "commit", "-qam", "a third constant");
+			const named = await quest("--root", s.repo, "review", "--effort", "high", "--responses", responses);
+			expect(named.code, named.stderr).toBe(0);
+			expect(seconds(named.stdout)).toEqual(["reviewer claude claude-sonnet-5-5 medium second"]);
+		} finally {
+			vi.unstubAllGlobals();
+		}
+	},
+);
+
+fakes("a raise to high with no other model left prints its saved rounds before the usage error", async () => {
+	const s = setup();
+	moveBase(s.repo, (dir) => write(dir, "RISK.md", riskFile([])));
+	vi.stubEnv("FAKE_RAISE", "high");
+	try {
+		const out = await quest(
+			"--root",
+			s.repo,
+			"review",
+			"--size",
+			"S",
+			"--exclude-model",
+			"claude-opus-5-5",
+			"--exclude-model",
+			"claude-sonnet-5-5",
+		);
+		expect(out.code).toBe(2);
+		expect(out.stderr).toContain("every other model of the size's list is avoided");
+		expect(out.stdout).toContain("\nrisk high It rewrites the wire format peers read.\n");
+		expect(out.stdout).toContain("\nreviewer codex gpt-6.1-sol medium\n");
+		expect(out.stdout).toContain("\nfindings 1\n");
+	} finally {
+		vi.unstubAllGlobals();
+	}
+});
+
 fakes("a raise from a reviewer the run leaves out holds while its last round reviewed the head", async () => {
 	const s = setup();
-	const pull = { number: 7, body: "Fixes averaging.\n\n## Models\n\n- Size: S\n" };
+	const pull = {
+		number: 7,
+		body: "Fixes averaging.\n\n## Models\n\n- Size: S\n- Implementer: Claude Code, claude-opus-5-5, high effort\n",
+	};
 	onGitHub(s.repo, [pull]);
 	vi.stubEnv("FAKE_REPLY", JSON.stringify({ score: 10, rationale: "Lands as is.", findings: [] }));
 	// Only the shadow, Sol at high effort for an S PR, raises the tier.
@@ -1531,6 +1628,108 @@ fakes("a raise from a reviewer the run leaves out holds while its last round rev
 		vi.unstubAllGlobals();
 	}
 });
+
+fakes(
+	"a low head gets no local review, and the maintainer's override sets the tier until the change grows",
+	async () => {
+		const s = setup();
+		moveBase(s.repo, (dir) =>
+			write(dir, "RISK.md", `${riskFile([])}\n## Automatic\n\n- \`constants\` - only constants change\n`),
+		);
+		const pull = {
+			number: 7,
+			body: "Fixes averaging.\n\n## Models\n\n- Size: S\n- Implementer: Claude Code, claude-opus-5-5, high effort\n",
+		};
+		onGitHub(s.repo, [pull]);
+		vi.stubEnv(
+			"FAKE_RISK",
+			JSON.stringify({ tier: "low", reason: "Only a constant changes.", class: "constants" }),
+		);
+		vi.stubEnv("FAKE_REPLY", JSON.stringify({ score: 10, rationale: "Lands as is.", findings: [] }));
+		try {
+			const low = await quest("--root", s.repo, "review");
+			expect(low.code, low.stderr).toBe(0);
+			expect(low.stdout).toContain("\nrisk low Only a constant changes.\n");
+			expect(low.stdout).toContain("\nclass constants\n");
+			expect(low.stdout).not.toContain("\nreviewer ");
+			expect(low.stdout).toContain(
+				"\nnext done: the head is low risk, so the online reviewer alone reviews it\n",
+			);
+			// Only the classifier ran, told the classes it may name.
+			const reviewers = ["gpt-6.1-sol", "claude-opus-5-5", "claude-sonnet-5-5"];
+			expect(s.calls().filter((call) => reviewers.some((model) => call.argv.join(" ").includes(model)))).toEqual(
+				[],
+			);
+			const [call] = classifying(s.calls());
+			const schema = JSON.parse(call!.argv[call!.argv.indexOf("--json-schema") + 1]!);
+			expect(schema.properties.class.enum).toEqual(["constants", null]);
+			const head = git(s.repo, "rev-parse", "HEAD");
+			// The head is named in full, so the record counts as its review.
+			expect(pull.body).toContain(`- Head: ${head}\n`);
+			expect(pull.body).toContain(
+				"- Class: `constants`\n- Local review: none, since a low-risk head needs only the online reviewer",
+			);
+			expect(recordedRisk(pull.body)).toMatchObject({ tier: "low", class: "constants", overridden: null });
+
+			// The maintainer holds it high: the pick and a second reviewer on another model review it.
+			const held = await quest("--root", s.repo, "review", "--override", "high", "--reason", "It ships tonight.");
+			expect(held.code, held.stderr).toBe(0);
+			expect(held.stdout).toContain("\nrisk high It ships tonight.\noverridden low by the maintainer\n");
+			expect(held.stdout).toContain("\nreviewer codex gpt-6.1-sol medium\n");
+			expect(held.stdout).toContain("\nreviewer claude claude-sonnet-5-5 medium second\n");
+			expect(recordedRisk(pull.body)).toMatchObject({
+				tier: "high",
+				overridden: "low",
+				reason: "It ships tonight.",
+			});
+			// The override outlasts a new head whose change is no riskier.
+			write(s.repo, "src/lib.ts", "export const x = 3;\n");
+			git(s.repo, "commit", "-qam", "another constant");
+			const kept = await quest("--root", s.repo, "review");
+			expect(kept.stdout).toContain("\nrisk high It ships tonight.\n");
+			// --effort changes only the pick, so a high head still gets its second reviewer.
+			write(s.repo, "src/lib.ts", "export const x = 7;\n");
+			git(s.repo, "commit", "-qam", "a constant at a named effort");
+			const effort = await quest("--root", s.repo, "review", "--effort", "high");
+			expect(effort.code, effort.stderr).toBe(0);
+			expect(effort.stdout).toContain("\nreviewer codex gpt-6.1-sol high\n");
+			expect(effort.stdout).toContain("\nreviewer claude claude-sonnet-5-5 medium second\n");
+			// A riskier change than the one overridden ends it.
+			vi.stubEnv("FAKE_RISK", JSON.stringify({ tier: "medium", reason: "It changes the output.", class: null }));
+			write(s.repo, "src/lib.ts", "export const x = 4;\n");
+			git(s.repo, "commit", "-qam", "a riskier constant");
+			const grown = await quest("--root", s.repo, "review");
+			expect(grown.code, grown.stderr).toBe(0);
+			expect(grown.stdout).toContain("\nrisk medium It changes the output.\n");
+			expect(grown.stdout).not.toContain("\noverridden ");
+
+			// An override to the tier the reviews settled on changes nothing, so nothing records one.
+			const same = await quest("--root", s.repo, "review", "--override", "medium", "--reason", "As it is.");
+			expect(same.code, same.stderr).toBe(0);
+			expect(same.stdout).toContain("\nrisk medium It changes the output.\n");
+			expect(same.stdout).not.toContain("\noverridden ");
+			expect(recordedRisk(pull.body)).toMatchObject({ tier: "medium", overridden: null });
+
+			expect((await quest("--root", s.repo, "review", "--override", "low")).stderr).toContain(
+				"--override and --reason go together",
+			);
+
+			// A second reviewer that cannot run is the one the outage names, never the pick it ran beside.
+			// On a new head Codex runs until the failure stops it, so its seats fail with that same error.
+			write(s.repo, "src/lib.ts", "export const x = 5;\n");
+			git(s.repo, "commit", "-qam", "a constant for the outage");
+			vi.stubEnv("FAKE_HANG", join(s.bin, "..", "codex.pid"));
+			vi.stubEnv("FAKE_LIMITED", "reset");
+			vi.stubEnv("FAKE_FAILS", "claude-sonnet-5-5");
+			const out = await quest("--root", s.repo, "review", "--override", "high", "--reason", "It ships tonight.");
+			expect(out.code).toBe(3);
+			expect(out.stderr).toContain("no eligible S reviewer could run: claude-sonnet-5-5 medium (");
+			expect(out.stderr).not.toContain("gpt-6.1-sol");
+		} finally {
+			vi.unstubAllGlobals();
+		}
+	},
+);
 
 fakes("a malformed risk file on the base fails before any model runs", async () => {
 	const s = setup();

@@ -279,7 +279,13 @@ describe("PR records", () => {
 	const risk: Risk = {
 		tier: "medium",
 		reason,
-		classified: { tier: "medium", reason, by: { kind: "paths" }, usage: [] },
+		classified: { tier: "medium", reason, by: { kind: "paths" }, class: null, usage: [] },
+	};
+	const at = {
+		branch: round.branch,
+		head: round.head,
+		base: round.base,
+		sized: { size: round.size, from: round.sizeFrom },
 	};
 	const tallies = [
 		{ ...tally("codex", 3, { high: 1, medium: 1, low: 2 }, 2, 1), first: { high: 1, medium: 0, low: 1 } },
@@ -296,7 +302,7 @@ describe("PR records", () => {
 	};
 
 	test("reads back each reviewer's round and tally quest review records, after the land fixer's lines", () => {
-		const body = `Summary.\n\n## Review\n\nmechanical fix by codex, gpt-6.1-sol, medium effort: \`merged\` (head ${"d".repeat(40)})\n\n${reviewRecord({ rounds: [round, second], tallies, risk, skipped: [SKIP] })}\n\n## Models\n\n- Size: L\n`;
+		const body = `Summary.\n\n## Review\n\nmechanical fix by codex, gpt-6.1-sol, medium effort: \`merged\` (head ${"d".repeat(40)})\n\n${reviewRecord({ ...at, rounds: [round, second], tallies, risk, skipped: [SKIP] })}\n\n## Models\n\n- Size: L\n`;
 		expect(body).toContain(
 			"\n- Rounds: 3; first round 2 (high 1, low 1); findings 4 (high 1, medium 1, low 2): fixed 2, refuted 1, open 1\n",
 		);
@@ -310,6 +316,7 @@ describe("PR records", () => {
 				model: "gpt-6.1-sol",
 				effort: "high",
 				shadow: false,
+				second: false,
 				session: THREAD,
 				round: 3,
 				score: 7,
@@ -329,6 +336,7 @@ describe("PR records", () => {
 				model: "gpt-6.1-sol",
 				effort: "medium",
 				shadow: true,
+				second: false,
 				session: "thread-2",
 				round: 1,
 				score: 10,
@@ -349,6 +357,7 @@ describe("PR records", () => {
 				model: "m",
 				effort: "high",
 				shadow: false,
+				second: false,
 				session: CLAUDE,
 				round: null,
 				score: null,
@@ -368,9 +377,9 @@ describe("PR records", () => {
 		expect(body).not.toContain("b".repeat(40));
 		// Claude's left-out tally still holds an open finding, which keeps it short too.
 		const clean = [{ ...round, findings: [] }, second];
-		expect(reviewRecord({ rounds: clean, tallies, risk, skipped: [] })).not.toContain("b".repeat(40));
+		expect(reviewRecord({ ...at, rounds: clean, tallies, risk, skipped: [] })).not.toContain("b".repeat(40));
 		const settledAll = [tally("codex", 3, { high: 1, medium: 1, low: 2 }, 3, 1), tallies[1]!];
-		expect(reviewRecord({ rounds: clean, tallies: settledAll, risk, skipped: [] })).toContain(
+		expect(reviewRecord({ ...at, rounds: clean, tallies: settledAll, risk, skipped: [] })).toContain(
 			`- Head: ${"b".repeat(40)}\n`,
 		);
 		expect(fixes(body)).toEqual(["codex, gpt-6.1-sol, medium effort"]);
@@ -380,6 +389,7 @@ describe("PR records", () => {
 		expect(reviewSessions(newer)).toEqual([THREAD, "thread-2", CLAUDE]);
 		expect(classifierSessions(body)).toEqual([]);
 		const classified = reviewRecord({
+			...at,
 			rounds: [round],
 			tallies,
 			skipped: [],
@@ -395,7 +405,7 @@ describe("PR records", () => {
 	});
 
 	test("a record written before tallies has none, and a Rounds line that does not add up fails", () => {
-		const record = reviewRecord({ rounds: [second], tallies: [tallies[1]!], risk, skipped: [] });
+		const record = reviewRecord({ ...at, rounds: [second], tallies: [tallies[1]!], risk, skipped: [] });
 		const older = `## Review\n\n${record.replace(/^- Rounds: .*\n/m, "")}\n`;
 		expect(parseReview(older)[0]!.tally).toBeNull();
 		// The settled count `quest usage` prints reads back.
@@ -518,6 +528,7 @@ describe("usage", () => {
 	const RISK = [
 		"- Risk: high, `It rewrites the wire format.`",
 		`- Classified: medium by Claude Code, claude-haiku-5-5, low effort, session \`${OWNED}\``,
+		"- Class: `tests`",
 	].join("\n");
 	const json = (value: unknown) => new Response(JSON.stringify(value), { status: 200 });
 	const pr = (number: number, branch: string, body: string, created: string, extra: object = {}) => ({
@@ -1032,7 +1043,7 @@ describe("usage", () => {
 			"  review: Codex, gpt-6.1-sol, medium effort, shadow; not in the latest run; rounds 1, findings 3 (high 3): fixed 2, refuted 1, open 0\n",
 		);
 		expect(text).toContain(
-			"#10 L high merged: PR 10 (quest/m0/a)\n  risk: high, It rewrites the wire format.; raised from medium by a reviewer\n",
+			"#10 L high merged: PR 10 (quest/m0/a)\n  risk: high, It rewrites the wire format.; raised from medium by a reviewer; class tests\n",
 		);
 		expect(text).toContain("#11 - - merged: PR 11 (fix/a)\n");
 		// #11 breaks down by culprit, #2 read from GitHub; #12 never merged, and #99 is no PR.
@@ -1057,11 +1068,16 @@ describe("usage", () => {
 		);
 		// #10 is the one PR with a tier, and a later PR fixed it; #11, #5, and #6 of the rest merged.
 		expect(report.tiers).toEqual([
-			{ tier: "high", pulls: 1, merged: 1, raised: 1, culprits: 1 },
-			{ tier: null, pulls: 9, merged: 3, raised: 0, culprits: 0 },
+			{ tier: "high", pulls: 1, merged: 1, raised: 1, overridden: 0, culprits: 1, person: 0 },
+			{ tier: null, pulls: 9, merged: 3, raised: 0, overridden: 0, culprits: 0, person: 0 },
 		]);
 		expect(text).toContain(
-			"By risk tier:\n   high  1 PRs, 1 merged, 1 raised by a reviewer, 1 later fixed\n   -     9 PRs, 3 merged, 0 raised by a reviewer, 0 later fixed",
+			"By risk tier:\n   high  1 PRs, 1 merged, 1 raised by a reviewer, 0 overridden, 1 later fixed; waited on a person 0s\n   -     9 PRs, 3 merged, 0 raised by a reviewer, 0 overridden, 0 later fixed; waited on a person 0s",
+		);
+		// A class the classifier named, though the high tier keeps it from landing without a pick.
+		expect(report.classes).toEqual([{ class: "tests", pulls: 1, low: 0, merged: 1, culprits: 1, person: 0 }]);
+		expect(text).toContain(
+			"By automatic class:\n   tests  1 PRs, 0 low, 1 merged, 1 later fixed; waited on a person 0s",
 		);
 		expect(text).toContain("findings 2 (high 1, low 1): fixed 1, refuted 0, settled 1, open 0\n");
 		expect(text).toContain(

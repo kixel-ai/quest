@@ -140,9 +140,10 @@ export interface Status {
 	/**
 	 * The head's risk tier as the `## Review` record names it, and the classifier's own tier, lower when a reviewer
 	 * raised it; null when the record names none. `state` is the review record's, which a line after it carries to a
-	 * later head, else `current` when the record names the head and `stale` when not.
+	 * later head, else `current` when the record names the head and `stale` when not. `class` is the risk file's
+	 * `## Automatic` class the classifier found the change in, or null.
 	 */
-	risk: { tier: Tier; reason: string; classified: Tier; state: ReviewRecord["state"] } | null;
+	risk: { tier: Tier; reason: string; classified: Tier; class: string | null; state: ReviewRecord["state"] } | null;
 	reactions: Reaction[];
 	/** Unresolved review threads, oldest first. */
 	threads: Thread[];
@@ -573,7 +574,13 @@ const status = shape<Status>({
 	checkpoints: list(shape<Status["checkpoints"][number]>({ reviewer: string, round: count, url: string })),
 	reviewRecord: nullable(shape<ReviewRecord>({ state: oneOf(reviewStates), head: string })),
 	risk: nullable(
-		shape<NonNullable<Status["risk"]>>({ tier, reason: string, classified: tier, state: oneOf(reviewStates) }),
+		shape<NonNullable<Status["risk"]>>({
+			tier,
+			reason: string,
+			classified: tier,
+			class: nullable(string),
+			state: oneOf(reviewStates),
+		}),
 	),
 	reactions: list(shape<Reaction>({ content: string, actor: string, createdAt: time, url: string })),
 	threads: list(
