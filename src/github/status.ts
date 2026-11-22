@@ -181,6 +181,7 @@ export async function pullRequestStatus(
 function risk(body: string, head: string, record: ReviewRecord | null): Status["risk"] {
 	const recorded = recordedRisk(body);
 	if (recorded === null) return null;
+	if ("malformed" in recorded) return { state: "malformed", error: recorded.malformed };
 	const state = record?.state ?? (head.startsWith(recorded.head) ? "current" : "stale");
 	return {
 		tier: recorded.tier,
