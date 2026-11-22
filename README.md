@@ -2001,8 +2001,11 @@ repository commits a config file: a record names its repository by `owner/repo`
 from its checkout's `origin` (the repository its PRs open on, for a fork), and
 the token is sent only to the URL the user's own file pairs it with. The URL is
 `https://kixel.quest`, or HTTPS (HTTP to `localhost`) `QUEST_KIXEL_URL` for
-another Kixel Quest, such as one running locally. A user holding no token for
-it sends nothing, and the hook says so once as a system message.
+another Kixel Quest, such as one running locally, as the stop hook's environment names it.
+A user holding no token for it sends nothing, and the hook says so once as a system message.
+The hook queues each record with that URL, and the sender sends it there with that URL's token whatever
+its own environment names, so one queue can serve several Kixel Quests; it drops a record only when the
+person removed that token or its Kixel Quest refused it.
 
 Kixel Quest refuses a whole upload naming a repository it does not index or
 the sender cannot read, so the sender asks `GET /forge` which repositories it

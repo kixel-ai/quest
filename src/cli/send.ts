@@ -43,6 +43,8 @@ export interface Pending {
 	start: number;
 	/** A fresh ID per stop, naming its own queue file, so a sender removes only the stops it sent. */
 	queued: string;
+	/** The Kixel Quest the hook checked a token for, which this record is sent to whatever environment the sender runs in. */
+	url: string;
 	/** The checkout's quest root, its `origin` on GitHub as `owner/repo`, and where its quest tree sits below the top level. */
 	root: string;
 	origin: string;
@@ -145,6 +147,7 @@ export function queue(stopped: Stopped, env: NodeJS.ProcessEnv = process.env): Q
 		session: stopped.session,
 		start,
 		queued: randomUUID(),
+		url,
 		root,
 		origin: repository,
 		prefix: run(["rev-parse", "--show-prefix"]).stdout.trim(),
@@ -268,7 +271,7 @@ export async function runSender(deps: SendDependencies, log: (line: string) => v
 
 /**
  * Send every queued session's record once, with those of its sub-agents on this host, one upload per repository, to
- * the Kixel Quest the user's token is paired with. A repository Kixel Quest does not serve has its sessions dropped,
+ * the Kixel Quest its hook queued it for, with that URL's token. A repository Kixel Quest does not serve has its sessions dropped,
  * said once, so it costs no later request. An upload refused for access drops its sessions and says so once; any other
  * failure keeps them queued for the next pass, records it for the stop hook, and throws. A session queued again while
  * an upload ran stays queued.
@@ -286,7 +289,7 @@ export async function sendPass(deps: SendDependencies): Promise<Sent[]> {
 	}
 }
 
-const groupId = (p: Pending) => JSON.stringify([p.origin, p.prefix]);
+const groupId = (p: Pending) => JSON.stringify([p.url, p.origin, p.prefix]);
 
 async function sendOnce(deps: SendDependencies, dir: string): Promise<Sent[]> {
 	const queued = readdirSync(join(dir, "pending"))
@@ -295,12 +298,42 @@ async function sendOnce(deps: SendDependencies, dir: string): Promise<Sent[]> {
 			const path = join(dir, "pending", name);
 			return { path, pending: JSON.parse(readFileSync(path, "utf8")) as Pending };
 		});
-	const url = kixelUrl(deps.env);
+	// Each record goes to the Kixel Quest its hook queued it for, not the one this sender's environment names.
+	const byUrl = new Map<string, typeof queued>();
+	for (const q of queued) byUrl.set(q.pending.url, [...(byUrl.get(q.pending.url) ?? []), q]);
+	const out = { sent: [] as Sent[], failures: [] as string[], notes: [] as string[] };
+	let due = false;
+	for (const [url, records] of byUrl) {
+		try {
+			due = (await sendTo(deps, dir, url, records, out)) || due;
+		} catch (error) {
+			// One Kixel Quest's failure never holds back another's records.
+			out.failures.push(`${url}: ${error instanceof Error ? error.message : String(error)}`);
+		}
+	}
+	// A pass with nothing to say leaves the last failure for the stop hook, which a quiet group's backoff still owes.
+	return due || out.failures.length > 0 || out.notes.length > 0
+		? finish(deps, dir, out.sent, out.failures, out.notes)
+		: out.sent;
+}
+
+/**
+ * Send `queued`, all queued for `url`, adding to `out`. Returns whether the pass has something to say, so the last
+ * failure is replaced or cleared, rather than left for a pass in which every group sat out its backoff.
+ */
+async function sendTo(
+	deps: SendDependencies,
+	dir: string,
+	url: string,
+	queued: { path: string; pending: Pending }[],
+	out: { sent: Sent[]; failures: string[]; notes: string[] },
+): Promise<boolean> {
+	const { sent, failures, notes } = out;
 	const token = tokenFor(url, deps.env);
-	// The user removed the token since the session was queued, or Kixel Quest refused it: nothing is sent.
+	// The user removed the token since the session was queued, or Kixel Quest refused it: these are dropped.
 	if (token === null || existsSync(refusal(deps.env, url, token))) {
 		for (const q of queued) settle(q);
-		return [];
+		return false;
 	}
 	const groups = new Map<string, typeof queued>();
 	for (const q of queued) {
@@ -310,9 +343,6 @@ async function sendOnce(deps: SendDependencies, dir: string): Promise<Sent[]> {
 	// A group backing off sits the pass out, so it neither reruns token-max nor widens the others' window.
 	for (const id of [...groups.keys()]) if ((readBackoff(deps.env, id)?.next ?? 0) > deps.now()) groups.delete(id);
 	const client = new GitHub(deps.github());
-	const sent: Sent[] = [];
-	const failures: string[] = [];
-	const notes: string[] = [];
 	const failed = (id: string, origin: string, error: unknown) => {
 		const wait = backOff(deps, id);
 		failures.push(
@@ -367,16 +397,14 @@ async function sendOnce(deps: SendDependencies, dir: string): Promise<Sent[]> {
 		} catch (error) {
 			if (error instanceof Refused) {
 				refuseAll(error.status, origin, 0, 0);
-				return finish(deps, dir, sent, failures, notes);
+				return true;
 			}
 			failed(id, origin, error);
 		}
 		groups.delete(id);
 	}
 	const active = [...groups.values()].flat();
-	// A pass with nothing to say leaves the last failure for the stop hook, which a quiet group's backoff still owes.
-	if (active.length === 0)
-		return failures.length > 0 || notes.length > 0 ? finish(deps, dir, sent, failures, notes) : sent;
+	if (active.length === 0) return false;
 	const since = Math.min(...active.map((q) => q.pending.start));
 	const exported = deps.sessions(new Date(since));
 	if (exported === null)
@@ -524,7 +552,7 @@ async function sendOnce(deps: SendDependencies, dir: string): Promise<Sent[]> {
 			failed(id, origin, error);
 		}
 	}
-	return finish(deps, dir, sent, failures, notes);
+	return true;
 }
 
 /** End a pass: throw its failures, else leave its notes for the stop hook to say, or clear the last failure. */
