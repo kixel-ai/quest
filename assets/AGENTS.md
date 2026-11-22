@@ -83,6 +83,7 @@ An epic carries no size until its last child is deleted; its README is then the 
 A quest without it runs anywhere; `quest unblocked --json` reports the list as `hosts` so a dispatcher routes work without reading prose.
 
 `Waiting` lists what the work waits on outside the tree; each item opens with who acts, `Maintainer:` or the outside party, before a colon.
+Open a step the maintainer can take only at one of their computers, such as a password-manager unlock, a hardware check, or a local login, with `Maintainer (PC):` instead, so a session away from them skips it; a decision or a step on a website stays `Maintainer:`.
 A decision item gives its options and a recommendation.
 Remove an item once its condition clears, and the heading with its last item.
 

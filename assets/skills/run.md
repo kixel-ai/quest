@@ -67,6 +67,7 @@ Rewrite a quest that waits in prose into a `## Waiting` section.
 Check each condition yourself, in parallel sub-agents.
 An outside party's item that holds stays, asked about only when the user can advance it, such as by requesting an upstream release.
 Ask each maintainer item left among the round's questions, in that order, saying what it unblocks; a skip stands for the session.
+A `Maintainer (PC):` item needs the user at one of their computers: when the argument says they are away from one, such as `remote` or `on my phone`, read the waits with `--no-pc` and leave those items for a later session; when it says they are at one, such as `at my PC`, ask those first.
 For an action only the user can take, give the exact steps and the check you will run once they report it done; take any secret through the host's secret prompt.
 
 Settle a draft's items with its PR, naming cleared ones in its `/quest-iterate` brief.
@@ -76,11 +77,11 @@ Make these edits in one draft PR on a `quest-run/<slug>` branch, run `quest chec
 ## Loop
 
 Each round, rerun `quest unblocked --unclaimed --json` and refresh the open PRs, since merges and released claims make more work ready.
-When no agent is running and every question has been asked, block with `quest wait` on the queued PRs whose merge would make a quest ready, and run a round once one lands or leaves the queue.
-Never wait on any other PR, and read none between rounds: list each PR left for a later round in the summary, with its pick.
+When no agent is running and every question has been asked, block with `quest wait` on the queued PRs whose merge would make a quest ready, and on each PR ready for review whose required checks are still running and which a round would then pick or ask about; run a round once one lands, leaves the queue, or its checks finish.
+Wait on no other PR, such as a draft or a skipped one, and read none between rounds: list each PR left for a later round in the summary, with its pick.
 A usage or rate limit is waited out until its reset; it never ends the run.
 
-Finish once nothing is running, no queued merge would make a quest ready, every PR left needs the user or a later round, and every wait in scope is decided, skipped, or left to an outside party.
+Finish once nothing is running, no queued merge would make a quest ready, no PR waited on above still has checks running, every PR left needs the user or a later round, and every wait in scope is decided, skipped, or left to an outside party.
 Then run `/quest-plan` on the run's follow-ups, each in a checkout of the repository whose quest tree owns it: problems it surfaced that no quest or open PR owns, such as a blocker agents hit, and the follow-ups kept in each of this run's own merge picks for another repository's quest tree, landed or not, unless the user withdrew the pick.
 Write the final summary, naming those plan PRs and listing the waits settled, cleared, or deleted and each still held with who acts and its check's result, so a fresh session can act on it, with each open decision's options beside your recommendation.
 

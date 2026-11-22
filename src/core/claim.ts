@@ -94,12 +94,13 @@ export function handBackWaits(body: string): Wait[] {
 			.map((item): Wait => {
 				// GitHub renders a leading `[ ]` or `[x]` as a task-list checkbox, so the item's text follows it.
 				const entry = { line: item.position?.start.line ?? 1, text: collapse(text(item)).replace(TASK, "") };
-				return parseWait(entry) ?? { ...entry, party: MAINTAINER };
+				return parseWait(entry) ?? { ...entry, party: MAINTAINER, pc: false };
 			});
 		if (items.length === 0)
 			items.push({
 				line: body.slice(0, start).split("\n").length,
 				party: MAINTAINER,
+				pc: false,
 				text: collapse(nodes.map(text).join(" ")) || "the draft hands back without saying what it waits on",
 			});
 		found.push(...items);
