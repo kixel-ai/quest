@@ -1906,7 +1906,8 @@ export function settle(classified: Classified, rounds: Round[]): Risk {
 
 /** `risk` as the maintainer's `override` sets it, while `risk` is no riskier than the tier they overrode. */
 export function overridden(risk: Risk, override: Override | undefined): Risk {
-	if (override === undefined || riskier(risk.tier, override.from)) return risk;
+	// An override to the tier the reviews settled on changes nothing, so the record names none.
+	if (override === undefined || riskier(risk.tier, override.from) || override.tier === risk.tier) return risk;
 	const { raisedBy: _, ...rest } = risk;
 	return { ...rest, tier: override.tier, reason: override.reason, overridden: risk.tier };
 }
@@ -2039,20 +2040,41 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 	const messages: string[] = [];
 	// A login or a missing CLI rules out its harness's every model; a usage limit only the model that hit it.
 	const down = new Map<HarnessName, ReviewerUnavailableError>();
+	// Models passed over this run, which the second reviewer never falls to.
 	const secondOut = new Set<string>();
-	// The second reviewer: the next of the size's list after the pick, on another model, that can run.
+	// The second reviewer: the first of the size's list on a model other than the pick's that can run. A list with no
+	// other model, as when every other one is avoided, cannot review a high head; one whose others cannot run is out.
 	const secondTo = (routed: Model): Model => {
-		const others = candidates.slice(candidates.indexOf(routed) + 1).filter((each) => each.model !== routed.model);
+		const others = candidates.filter((each) => each.model !== routed.model);
 		if (others.length === 0)
 			throw new ReviewInputError(
-				`a high-risk head needs a second reviewer on a model other than ${routed.model}, and the size's list has none left that is not avoided; name the latest writer in the PR's ## Models record or with --exclude-model`,
+				`a high-risk head needs a second reviewer on a model other than ${routed.model}, and every other model of the size's list is avoided; name the latest writer in the PR's ## Models record or with --exclude-model`,
 			);
 		const next = others.find((each) => !secondOut.has(each.model) && !down.has(each.harness));
 		if (next === undefined) throw new ReviewOutageError(sized.size, skipped, messages);
 		return next;
 	};
 	const high = (risk: Risk) => auto && !named && overridden(risk, override).tier === "high";
-	let second: Model | null = high(before) ? secondTo(candidates[0]!) : null;
+	// Below high, a second reviewer still settles the findings it left open: its own model while that may review,
+	// else another, whose new session settles them by number as a replaced pick's does.
+	const seconded = sessions.find((session) => session.second);
+	const unsettledSecond = auto && seconded !== undefined && seconded.rounds.at(-1)!.findings.length > 0;
+	const secondFor = (routed: Model): Model | null => {
+		if (!high(before) && !unsettledSecond) return null;
+		if (!high(before)) {
+			const own = candidates.find(
+				(each) =>
+					each.harness === seconded!.reviewer &&
+					each.model === seconded!.last.model &&
+					each.model !== routed.model &&
+					!secondOut.has(each.model) &&
+					!down.has(each.harness),
+			);
+			if (own !== undefined) return own;
+		}
+		return secondTo(routed);
+	};
+	let second = secondFor(candidates[0]!);
 	planned = plan(candidates[0]!, second);
 	let done: Seated[];
 	for (;;) {
@@ -2075,11 +2097,12 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 			while (why !== undefined) {
 				skipped.push({ ...candidates[at]!, reason: why.reason });
 				messages.push(why.message);
+				secondOut.add(candidates[at]!.model);
 				at++;
 				why = at < candidates.length ? down.get(candidates[at]!.harness) : undefined;
 			}
 			if (at === candidates.length) throw new ReviewOutageError(sized.size, skipped, messages);
-			if (second !== null) second = secondTo(candidates[at]!);
+			if (second !== null) second = secondFor(candidates[at]!);
 			planned = plan(candidates[at]!, second);
 		}
 	}
@@ -2087,23 +2110,38 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 	// A reviewer this run left out, such as a shadow with nothing to settle, still judged the head its last round reviewed.
 	const standing = () => kept.map((session) => session.last).filter((round) => round.head === head);
 	const judged = () => settle(classified.value, [...done.map((each) => each.round), ...standing()]);
-	// A round that raised the tier to high gets the second review the lower tier skipped, at once.
-	if (second === null && high(judged())) {
-		const reviewer = secondTo(candidates[at]!);
-		second = reviewer;
+	const persist = () => {
+		const after = tallied(
+			tallies,
+			done.map((each, i) => ({ round: each.round, settles: seats[i]!.session })),
+		);
+		const risk = overridden(judged(), override);
+		save(statePath, state([...done.map((each) => each.session), ...kept], after, risk));
+		return { after, risk };
+	};
+	let { after, risk } = persist();
+	// A round that raised the tier to high gets the second review the lower tier skipped, at once. The rounds already
+	// run are saved first, so a second reviewer that cannot run costs them nothing; the next run seats it again.
+	if (!seats.some((seat) => seat.second) && high(judged())) {
 		const seated = kept.find((session) => session.second);
-		const seat: Seat = { reviewer, second: true, session: seated, first: 1 };
-		const [extra] = await runSeats(shared, [seat], undefined, options.signal);
-		done = [...done, extra!];
-		seats = [...seats, seat];
-		kept = kept.filter((session) => session !== seated);
+		for (;;) {
+			const seat: Seat = { reviewer: secondTo(candidates[at]!), second: true, session: seated, first: 1 };
+			try {
+				const [extra] = await runSeats(shared, [seat], undefined, options.signal);
+				done = [...done, extra!];
+				seats = [...seats, seat];
+				kept = kept.filter((session) => session !== seated);
+				break;
+			} catch (error) {
+				if (!(error instanceof ReviewerUnavailableError)) throw error;
+				if (!(error instanceof ReviewLimitError)) down.set(error.harness, error);
+				skipped.push({ ...seat.reviewer, reason: error.reason });
+				messages.push(error.message);
+				secondOut.add(seat.reviewer.model);
+			}
+		}
+		({ after, risk } = persist());
 	}
-	const after = tallied(
-		tallies,
-		done.map((each, i) => ({ round: each.round, settles: seats[i]!.session })),
-	);
-	const risk = overridden(judged(), override);
-	save(statePath, state([...done.map((each) => each.session), ...kept], after, risk));
 	const rounds = done.map((each) => each.round);
 	return { rounds, tallies: after, risk, skipped, branch, head, base, sized };
 }

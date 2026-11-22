@@ -1153,14 +1153,16 @@ function riskNote(risk: RecordedRisk): string {
 
 /** How long `sessions` waited on a person's answer, in milliseconds, a shared session's in its share. */
 function personWait(sessions: SessionRow[]): number {
-	return sessions.reduce(
-		(sum, s) =>
-			sum +
-			(s.waits ?? [])
-				.filter((w) => w.kind === "person")
-				.reduce((total, w) => total + (Date.parse(w.end) - Date.parse(w.start)) / s.pulls.length, 0),
-		0,
-	);
+	return waitsByKind(sessions).get("person") ?? 0;
+}
+
+/** How long `sessions` waited, in milliseconds by kind, a shared session's waits counted in its share. */
+function waitsByKind(sessions: SessionRow[]): Map<string, number> {
+	const totals = new Map<string, number>();
+	for (const s of sessions)
+		for (const w of s.waits ?? [])
+			totals.set(w.kind, (totals.get(w.kind) ?? 0) + (Date.parse(w.end) - Date.parse(w.start)) / s.pulls.length);
+	return totals;
 }
 
 function onlineRows(pulls: PullRow[]): OnlineRow[] {
@@ -1446,13 +1448,8 @@ function splitTotals(sessions: SessionRow[]): string {
  * waits are unknown, as for those read on another host; empty when there is nothing to say.
  */
 function waitTotals(sessions: SessionRow[]): string {
-	const totals = new Map<string, number>();
-	let unknown = 0;
-	for (const s of sessions) {
-		if (s.waits === null) unknown++;
-		for (const w of s.waits ?? [])
-			totals.set(w.kind, (totals.get(w.kind) ?? 0) + (Date.parse(w.end) - Date.parse(w.start)) / s.pulls.length);
-	}
+	const totals = waitsByKind(sessions);
+	const unknown = sessions.filter((s) => s.waits === null).length;
 	const parts = WAIT_KINDS.filter((kind) => totals.has(kind)).map((kind) => `${kind} ${duration(totals.get(kind)!)}`);
 	if (unknown) parts.push(`unknown for ${unknown} session${unknown === 1 ? "" : "s"} on other hosts`);
 	return parts.join(", ");

@@ -165,6 +165,8 @@ export async function land(pr: PullRequest, request: LandRequest, deps: GitHubDe
 		open(fresh);
 		current(fresh);
 		unheld(fresh, undefined, deps.now());
+		// A body edited since the first read is judged again.
+		undoable(fresh);
 		if (fresh.base !== snapshot.base) {
 			throw new Refusal(`${snapshot.url} was retargeted from ${snapshot.base} to ${fresh.base}; land it again`);
 		}
@@ -276,17 +278,31 @@ export async function land(pr: PullRequest, request: LandRequest, deps: GitHubDe
 }
 
 /**
- * Refuse a PR whose body does not say how to undo it, unless its `## Review` record names it low risk, which a revert
- * undoes whole. A body with no tier counts as riskier, so a skipped classification cannot skip the undo line.
+ * Refuse a PR whose body does not say how to undo it, unless its `## Review` record names the head being landed, in
+ * full, low risk, which a revert undoes whole. A body with no tier, or one for another head, counts as riskier, so a
+ * skipped classification or a push after it cannot skip the undo line.
  */
 function undoable(snapshot: Snapshot): void {
-	const risk = recordedRisk(snapshot.body);
-	if (risk?.tier === "low") return;
-	const problem = undoProblem(snapshot.body);
-	if (problem !== null)
+	let risk: ReturnType<typeof recordedRisk>;
+	try {
+		risk = recordedRisk(snapshot.body);
+	} catch (error) {
 		throw new Refusal(
-			`${snapshot.url} ${risk === null ? "records no risk tier" : `is ${risk.tier} risk`}, and ${problem}; add one, such as \`Revert: leaves nothing behind.\`, then land it again`,
+			`${snapshot.url}: ${error instanceof Error ? error.message : String(error)}; rerun quest review to rewrite the record, then land it again`,
 		);
+	}
+	if (risk?.tier === "low" && risk.head.toLowerCase() === snapshot.head.toLowerCase()) return;
+	const problem = undoProblem(snapshot.body);
+	if (problem === null) return;
+	const tier =
+		risk === null
+			? "records no risk tier"
+			: risk.tier === "low"
+				? `records low risk for ${risk.head}, not this head`
+				: `is ${risk.tier} risk`;
+	throw new Refusal(
+		`${snapshot.url} ${tier}, and ${problem}; add one, such as \`Revert: leaves nothing behind.\`, then land it again`,
+	);
 }
 
 /**

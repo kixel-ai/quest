@@ -1498,6 +1498,53 @@ fakes("a reviewer raises the tier, and the record keeps the classifier's beside 
 	}
 });
 
+fakes(
+	"a raise to high saves its rounds before the second review, which falls back, and seats one second reviewer",
+	async () => {
+		const s = setup();
+		moveBase(s.repo, (dir) => write(dir, "RISK.md", riskFile([])));
+		const pull = {
+			number: 7,
+			body: "Fixes averaging.\n\n## Models\n\n- Size: S\n- Implementer: Claude Code, claude-opus-5-5, high effort\n",
+		};
+		onGitHub(s.repo, [pull]);
+		vi.stubEnv("FAKE_RAISE", "high");
+		const responses = join(s.repo, ".tmp", "responses.md");
+		write(s.repo, ".tmp/responses.md", "1. Fixed.\n2. Fixed.\n3. Fixed.\n");
+		const seconds = (out: string) => out.split("\n").filter((line) => /^reviewer .* second$/.test(line));
+		try {
+			// The second reviewer the raise calls for cannot run, and no other model is left: an outage naming it.
+			vi.stubEnv("FAKE_LIMITED", "reset");
+			vi.stubEnv("FAKE_FAILS", "claude-sonnet-5-5");
+			const out = await quest("--root", s.repo, "review");
+			expect(out.code).toBe(3);
+			expect(out.stderr).toContain("no eligible S reviewer could run: claude-sonnet-5-5 medium (");
+			expect(out.stderr).not.toContain("gpt-6.1-sol");
+
+			// The pick's raising round was saved, so the next run resumes it and seats the second reviewer at once.
+			vi.stubEnv("FAKE_LIMITED", undefined);
+			vi.stubEnv("FAKE_FAILS", undefined);
+			const resumed = await quest("--root", s.repo, "review", "--responses", responses);
+			expect(resumed.code, resumed.stderr).toBe(0);
+			expect(seconds(resumed.stdout)).toEqual(["reviewer claude claude-sonnet-5-5 medium second"]);
+			expect(pull.body).toContain(
+				"- Reviewer: Codex, gpt-6.1-sol, medium effort\n- Session: `thread-1`, round 2",
+			);
+
+			// On a new head the tier starts at medium, and the second reviewer settles its findings; when the
+			// round raises the tier again, that same seat is its second review, not another.
+			write(s.repo, "src/lib.ts", "export const x = 3;\n");
+			git(s.repo, "commit", "-qam", "another constant");
+			const again = await quest("--root", s.repo, "review", "--responses", responses);
+			expect(again.code, again.stderr).toBe(0);
+			expect(again.stdout).toContain("\nrisk high It rewrites the wire format peers read.\n");
+			expect(seconds(again.stdout)).toEqual(["reviewer claude claude-sonnet-5-5 medium second"]);
+		} finally {
+			vi.unstubAllGlobals();
+		}
+	},
+);
+
 fakes("a raise from a reviewer the run leaves out holds while its last round reviewed the head", async () => {
 	const s = setup();
 	const pull = {
@@ -1608,6 +1655,13 @@ fakes(
 			expect(grown.code, grown.stderr).toBe(0);
 			expect(grown.stdout).toContain("\nrisk medium It changes the output.\n");
 			expect(grown.stdout).not.toContain("\noverridden ");
+
+			// An override to the tier the reviews settled on changes nothing, so nothing records one.
+			const same = await quest("--root", s.repo, "review", "--override", "medium", "--reason", "As it is.");
+			expect(same.code, same.stderr).toBe(0);
+			expect(same.stdout).toContain("\nrisk medium It changes the output.\n");
+			expect(same.stdout).not.toContain("\noverridden ");
+			expect(recordedRisk(pull.body)).toMatchObject({ tier: "medium", overridden: null });
 
 			expect((await quest("--root", s.repo, "review", "--override", "low")).stderr).toContain(
 				"--override and --reason go together",

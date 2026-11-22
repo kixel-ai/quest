@@ -378,6 +378,12 @@ describe("merge --land", () => {
 		pull.body = `Summary.${record("medium")}\n## Undo\n\nRun the old release.`;
 		expect(await refused(landing())).toContain("is medium risk, and its ## Undo section must open with");
 		expect(pull.writes).toEqual([]);
+		// A low record counts only for the head it names, and a malformed one refuses rather than throws.
+		pull.body = `Summary.${record("low").replace(HEAD, "f".repeat(40))}`;
+		expect(await refused(landing())).toContain(`records low risk for ${"f".repeat(40)}, not this head`);
+		pull.body = `Summary.${record("low")}- Class: Not A Class\n`;
+		expect(await refused(landing())).toContain("malformed");
+		expect(pull.writes).toEqual([]);
 		pull.body = `Summary.${record("low")}`;
 		await landing();
 		expect(pull.writes).not.toEqual([]);
