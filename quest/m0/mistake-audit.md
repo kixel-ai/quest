@@ -130,8 +130,10 @@ Check first next run:
   this run's.
 - Contract changes that left a dependent on the old contract, the largest
   escape class: about 41 of 204 real escapes, 26 catchable or maybe, all
-  past a local review. [Review dependents](/quest/m0/review-dependents.md)
-  takes it, if kept.
+  past a local review. Since
+  [moq-dev/quest#799](https://github.com/moq-dev/quest/pull/799) the review
+  prompt asks reviewers to trace each changed contract to its dependents:
+  count how many of this class still escape.
 - Gating mistakes, after [the gate's cheap commands](/quest/m1/gate-cheap-commands.md)
   lands, if kept: 887 of 3,048 gated runs (29%) used under 5 CPU-seconds,
   together 0.16% of gated CPU, against 20% to 22% before the 2026-11-15
