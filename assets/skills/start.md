@@ -6,6 +6,7 @@ guide: Model, Format, Creation, Execution, Summaries, Questions
 Implement the quest the argument names, or as much of it as possible, in its PR.
 
 Claim it with `quest start <quest>`; if it refuses, report what it printed and stop.
+When it prints a worktree path after the PR's URL, do all the work there, not in the checkout you ran it from.
 If you cannot go on before pushing any work, release the claim with `quest start --release <quest>`.
 
 Implement the quest until it is complete or blocked, then push to its PR and update the description.

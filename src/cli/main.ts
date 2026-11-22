@@ -542,10 +542,13 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		.summary("Claim a ready quest with a draft PR, or release that claim")
 		.description(
 			"Claim a ready quest: push an empty claim commit, built on the upstream default branch, to the quest's " +
-				"branch (its path without .md), then open a draft PR from it right away. Switches the " +
-				"checkout to the claim on a new local branch, or fast-forwards that branch when it is checked out, " +
-				"and prints the PR URL, or the branch off GitHub. A local branch left from an earlier attempt is not " +
-				"moved: the claim still succeeds, with a warning to switch to it and merge the claim commit.\n\n" +
+				"branch (its path without .md), then open a draft PR from it right away, and print its URL, or the " +
+				"branch off GitHub. A checkout on the default branch, such as the main clone, stays there: a second " +
+				"line prints the path of a worktree on the claim's branch to work in, the one that already has the " +
+				"branch checked out, else a new one under .worktrees/ that `quest worktree` owns. Any other " +
+				"checkout switches to the claim on a new local branch, or fast-forwards that branch when it is " +
+				"checked out. A local branch left from an earlier attempt is not moved: the claim still succeeds, " +
+				"with a warning to merge the claim commit into it.\n\n" +
 				"Readiness comes from the fetched upstream default branch's tree, not the checkout. Fails on a tree " +
 				"quest check rejects, which can hide a blocker. Refuses a blocked quest, one missing from the " +
 				"upstream default branch, and one already held: a branch upstream or an open PR from that branch in " +
@@ -599,6 +602,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				(started) => {
 					if (typeof started === "number") return started;
 					print(started.url ?? started.branch);
+					if (started.worktree !== null) print(started.worktree);
 				},
 			);
 		});
