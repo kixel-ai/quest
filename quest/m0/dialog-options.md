@@ -8,7 +8,7 @@ Update `assets/AGENTS.md` (`## Questions`) and `assets/skills/` so blocking ques
 2. `Maintainer:` wait and manual-action dialogs (a step only the maintainer can do, with no choice to make) standardize on: Agent handles or drives the browser (when plausible), Done / I'll do it now, `"Not at my PC (defer)"`, and Drop wait.
 3. `assets/skills/review.md` removes its stale option list (`- /quest-iterate`, `- skip`, `- /quest-delete`) so merge picks follow `#768`'s option set in `assets/skills/merge.md` everywhere.
 
-Non-goal: enforcing `(Recommended)` in a `PreToolUse` hook (tracked in [Block agent stalls in Stop hook and missing recommendations in PreToolUse](/quest/m0/agent-and-question-hooks.md)), or changing follow-ups from one question per follow-up (`#636`).
+Non-goal: enforcing `(Recommended)`, which `quest hook`'s `PreToolUse` check on question dialogs already does, or changing follow-ups from one question per follow-up (`#636`).
 
 ## Plan
 

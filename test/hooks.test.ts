@@ -21,6 +21,7 @@ import {
 	setup,
 	targets,
 } from "../src/cli/hooks";
+import { RULES } from "../src/cli/rules";
 import { init } from "../src/cli/setup";
 import { CONTEXT } from "../src/cli/skills";
 import { readCalls } from "../src/cli/calls";
@@ -103,6 +104,27 @@ test("setup replaces an earlier version's entries, including one sharing a group
 	expect(settings.hooks.SessionStart).toEqual([{ matcher: CLAUDE_HOOKS[0]!.matcher, hooks: [ours] }]);
 	expect(setup({ ...claude(path), hooks: [{ event: "Stop" }] })).toEqual([`${path}: installed Quest's hooks`]);
 	expect(Object.keys(read(path).hooks)).toEqual(["PreToolUse", "Stop"]);
+});
+
+test("setup widens an earlier version's tool matchers to the question dialogs", () => {
+	const dir = tempDir();
+	const path = join(dir, "settings.json");
+	writeFileSync(
+		path,
+		JSON.stringify({ hooks: { PreToolUse: [{ matcher: "Bash|Write|Edit|MultiEdit", hooks: [ours] }] } }),
+	);
+	expect(setup(claude(path))).toContain(`${path}: installed Quest's hooks`);
+	expect(read(path).hooks.PreToolUse).toEqual([
+		{ matcher: "Bash|Write|Edit|MultiEdit|AskUserQuestion", hooks: [ours] },
+	]);
+	const hooks = join(dir, "hooks.json");
+	writeFileSync(hooks, JSON.stringify({ hooks: { PreToolUse: [{ matcher: "Bash|apply_patch", hooks: [ours] }] } }));
+	expect(setup({ name: "Codex", path: hooks, hooks: CODEX_HOOKS, claude: false })).toEqual([
+		`${hooks}: installed Quest's hooks`,
+	]);
+	expect(read(hooks).hooks.PreToolUse).toEqual([
+		{ matcher: "Bash|apply_patch|request_user_input|request_user_input_async", hooks: [ours] },
+	]);
 });
 
 test("Codex's hooks file gets its hooks and their settings, but no timeout", () => {
@@ -254,6 +276,42 @@ test("PreToolUse denies a call that breaks a checked rule, only where the reposi
 	expect(() => hook({ hook_event_name: "PreToolUse", cwd }, deps)).toThrow("tool_name");
 });
 
+test("PreToolUse denies a question dialog that recommends no option, in Claude Code and Codex", () => {
+	const cwd = checkout(`${REFERENCE_LINE}\n`);
+	const deps = sampled();
+	const ask = (tool_name: string, labels: string[], extra = {}) =>
+		hook(
+			{
+				hook_event_name: "PreToolUse",
+				cwd,
+				session_id: "s1",
+				tool_use_id: "t1",
+				tool_name,
+				tool_input: {
+					questions: [{ question: "Which?", header: "Pick", options: labels.map((label) => ({ label })) }],
+				},
+				...extra,
+			},
+			deps,
+		);
+	const codex = { turn_id: "turn-1" };
+	for (const [tool, extra] of [
+		["AskUserQuestion", {}],
+		["request_user_input", codex],
+		["request_user_input_async", codex],
+	] as const) {
+		const output = JSON.parse(ask(tool, ["Keep it", "Drop it"], extra));
+		expect(output.hookSpecificOutput).toEqual({
+			hookEventName: "PreToolUse",
+			permissionDecision: "deny",
+			permissionDecisionReason: RULES.recommend,
+		});
+		expect(ask(tool, ["Keep it (Recommended)", "Drop it"], extra)).toBe("");
+	}
+	// A dialog is no shell call, so nothing samples it.
+	expect(deps.lines()).toEqual([]);
+});
+
 test("the tool hooks sample each shell call's start and return, naming its session, agent, and background task", () => {
 	const cwd = checkout(`${REFERENCE_LINE}\n`);
 	const deps = sampled();
@@ -305,13 +363,18 @@ const shell = (id: string, command: string) => ({ id, type: "shell", status: "ru
 test.each([
 	["Stop", "transcript_path"],
 	["SubagentStop", "agent_transcript_path"],
-])("%s refuses while a gate the agent started runs in the background", (event, key) => {
+])("%s refuses while a gate, agent turn, or wait the agent started runs in the background", (event, key) => {
 	const cwd = checkout(`${REFERENCE_LINE}\n`);
 	const transcript = join(tempDir(), "agent.jsonl");
 	writeFileSync(
 		transcript,
-		'{"content":"Command running in background with ID: b1. Output is being written to: x"}\n',
+		["b1", "b4", "b5", "b7", "b8"]
+			.map((id) => `{"content":"Command running in background with ID: ${id}. Output is being written to: x"}\n`)
+			.join(""),
 	);
+	const gate = shell("b1", "cd repo && quest gate just test > .tmp/test.log 2>&1");
+	const agent = shell("b4", "quest agent start .worktrees/a --prompt 'go' > .tmp/a.log");
+	const wait = shell("b5", "bun run --silent quest wait 806 --since 2026-11-21T00:00:00Z");
 	const stop = {
 		hook_event_name: event,
 		cwd,
@@ -320,10 +383,16 @@ test.each([
 		[key]: transcript,
 		stop_hook_active: true,
 		background_tasks: [
-			shell("b1", "cd repo && quest gate just test > .tmp/test.log 2>&1"),
-			// Another agent's gate, and this agent's command that is not a gate.
+			gate,
+			// Another agent's gate and agent turn.
 			shell("b2", "bun run --silent quest gate just check"),
+			shell("b6", "quest agent resume .worktrees/b --prompt 'more'"),
+			// This agent's commands that it need not block on.
 			shell("b3", "npm run dev"),
+			agent,
+			wait,
+			shell("b7", "quest agent stop .worktrees/a"),
+			shell("b8", "quest waiting"),
 			{ id: "a1", type: "subagent", status: "running", description: "review" },
 		],
 	};
@@ -336,14 +405,28 @@ test.each([
 		kind: "stop",
 		harness: "claude",
 		session: "s1",
-		running: ["b1", "b2", "b3"],
+		running: ["b1", "b2", "b6", "b3", "b4", "b5", "b7", "b8"],
 	});
-	expect(output.reason).toContain("- cd repo && quest gate just test");
-	expect(output.reason).not.toContain("just check");
-	// Without a transcript, each running gate counts as the agent's.
-	expect(JSON.parse(hook({ ...stop, [key]: "" }, deps)).reason).toContain("just check");
-	// It lets the turn end once the gate ends, and outside a repository that uses Quest.
-	expect(hook({ ...stop, background_tasks: stop.background_tasks.slice(1) }, deps)).toBe("");
+	expect(output.reason.split("\n").filter((line: string) => line.startsWith("- "))).toEqual([
+		`- ${gate.command}`,
+		`- ${agent.command}`,
+		`- ${wait.command}`,
+	]);
+	// Without a transcript, every running gate counts as the agent's, but no agent turn or wait does.
+	const unowned = JSON.parse(hook({ ...stop, [key]: "" }, deps)).reason;
+	expect(unowned).toContain("just check");
+	expect(unowned).not.toContain("quest agent");
+	expect(unowned).not.toContain("quest wait");
+	const gates = new Set(["b1", "b2"]);
+	const ungated = { ...stop, background_tasks: stop.background_tasks.filter((task) => !gates.has(task.id)) };
+	expect(hook({ ...ungated, [key]: "" }, deps)).toBe("");
+	// A running agent turn or wait alone still holds the agent that started it.
+	expect(JSON.parse(hook(ungated, deps)).reason).toContain(wait.command);
+	// It lets the turn end once they end, and outside a repository that uses Quest.
+	const owned = new Set(["b1", "b4", "b5"]);
+	expect(hook({ ...stop, background_tasks: stop.background_tasks.filter((task) => !owned.has(task.id)) }, deps)).toBe(
+		"",
+	);
 	expect(hook({ ...stop, cwd: checkout(null) }, deps)).toBe("");
 	expect(() => hook({ hook_event_name: event, cwd }, deps)).toThrow("background_tasks");
 });

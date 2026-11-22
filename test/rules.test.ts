@@ -285,6 +285,27 @@ test("a body file is read only for a command alone on its line", () => {
 	expect(bash(`git -C sub commit -F - <<'EOF'\nfix: a ${DASH} b\nEOF`)).toEqual([RULES.emDash]);
 });
 
+test("a question dialog recommends an option in each question offering two or more", () => {
+	const ask = (tool: string, ...questions: unknown[]) => broken({ tool, input: { questions }, cwd });
+	const labeled = (...labels: string[]) => ({ question: "Which?", options: labels.map((label) => ({ label })) });
+	// Claude Code's options are objects; every question with two or more options needs one recommended.
+	expect(ask("AskUserQuestion", labeled("A (Recommended)", "B"), labeled("Yes"))).toEqual([]);
+	expect(ask("AskUserQuestion", labeled("A (Recommended)", "B"), labeled("C", "D"))).toEqual([RULES.recommend]);
+	expect(ask("AskUserQuestion", labeled("A", "b (recommended)  "))).toEqual([]);
+	// The marker ends the label: one naming it elsewhere recommends nothing.
+	expect(ask("AskUserQuestion", labeled("(Recommended) A", "B"))).toEqual([RULES.recommend]);
+	// Codex's options may be absent, null, or empty for a free-form question, or plain strings.
+	for (const tool of ["request_user_input", "request_user_input_async"]) {
+		expect(ask(tool, { question: "Why?" }, { question: "How?", options: null }, { options: [] })).toEqual([]);
+		expect(ask(tool, { options: ["A (Recommended)", "B"] })).toEqual([]);
+		expect(ask(tool, { options: ["A", "B"] })).toEqual([RULES.recommend]);
+	}
+	// Input the tool would refuse anyway passes, as does another tool's.
+	expect(broken({ tool: "AskUserQuestion", input: {}, cwd })).toEqual([]);
+	expect(ask("AskUserQuestion", null, { options: [null, 1] })).toEqual([RULES.recommend]);
+	expect(ask("Agent", labeled("A", "B"))).toEqual([]);
+});
+
 test("docs/context.md is the rules `quest context` prints, for agents without the CLI", () => {
 	expect(readFileSync(join(import.meta.dirname, "../docs/context.md"), "utf8")).toBe(
 		`${CONTEXT}\n${CHECKED_CONTEXT}`,

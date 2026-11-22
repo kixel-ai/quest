@@ -27,6 +27,8 @@ export const RULES = {
 	rewrite:
 		"Never rebase or force-push, even a branch only you hold; merge the base instead, when the branch conflicts with it or a landing step refuses the head.",
 	tmp: "Put scratch files, such as PR bodies, logs, patches, helper scripts, and temporary clones, in the checkout's `.tmp/`, never `/tmp`, so they disappear with the worktree.",
+	recommend:
+		"In a question dialog, end each option you recommend with `(Recommended)`, and recommend one in every question with two or more options.",
 	kixel: "On a repository Kixel Quest hosts, `gh` cannot reach its PRs: use `quest pr view`, `list`, `create`, `edit`, `comment`, and `resolve`, and `quest status`, `ready`, and `merge`.",
 } as const;
 
@@ -67,7 +69,7 @@ export function questRoot(cwd: string): string | null {
 	}
 }
 
-/** The fields of a Claude Code `Stop` or `SubagentStop` hook's JSON input that `runningGates` reads. */
+/** The fields of a Claude Code `Stop` or `SubagentStop` hook's JSON input that `runningTasks` reads. */
 export interface StopInput {
 	hook_event_name: string;
 	cwd: string;
@@ -82,22 +84,30 @@ export interface StopInput {
 /** A shell command line that runs `quest gate`, directly or through `bun run quest` and the like. */
 const GATE = /(^|[^\w-])quest\s+gate(\s|$)/;
 
+/** A shell command line that runs a turn of `quest agent`, or `quest wait`, which an agent blocks on. */
+const BLOCKING = /(^|[^\w-])quest\s+(agent\s+(start|resume)|wait)(\s|$)/;
+
 /**
- * The `quest gate` commands still running in the background that the agent
- * ending its turn started, in a repository that uses Quest. Claude Code lists
- * the whole session's background work, subagents' included, so a command
- * counts as this agent's when its transcript holds the ID Claude Code gave the
- * command on backgrounding it (`ID: <id>`); without a transcript, every one
- * counts. Claude Code stops a subagent's background commands when it ends, so
- * ending on one loses its result, and it lists a command only while it runs,
- * so a refusal lasts no longer than the gate. Input without the list, from a
- * Claude Code older than it, has none.
+ * The `quest gate`, `quest agent start` or `resume`, and `quest wait` commands
+ * still running in the background that the agent ending its turn started, in
+ * a repository that uses Quest. Claude Code lists the whole session's
+ * background work, subagents' included, so a command counts as this agent's
+ * when its transcript holds the ID Claude Code gave the command on
+ * backgrounding it (`ID: <id>`). Without a transcript, every gate counts, since
+ * a gate is short, but no agent turn or wait does, since another agent's could
+ * hold this one for hours. Claude Code stops a subagent's background commands
+ * when it ends, so ending on one loses its result, and it lists a command only
+ * while it runs, so a refusal lasts no longer than the command. Input without
+ * the list, from a Claude Code older than it, has none.
  */
-export function runningGates(input: StopInput): string[] {
-	const gates = (input.background_tasks ?? []).filter(
-		(task) => task.type === "shell" && typeof task.command === "string" && GATE.test(task.command),
+export function runningTasks(input: StopInput): string[] {
+	const tasks = (input.background_tasks ?? []).filter(
+		(task) =>
+			task.type === "shell" &&
+			typeof task.command === "string" &&
+			(GATE.test(task.command) || BLOCKING.test(task.command)),
 	);
-	if (gates.length === 0 || !usesQuest(input.cwd)) return [];
+	if (tasks.length === 0 || !usesQuest(input.cwd)) return [];
 	const path = input.hook_event_name === "SubagentStop" ? input.agent_transcript_path : input.transcript_path;
 	let transcript: string | undefined;
 	try {
@@ -105,9 +115,25 @@ export function runningGates(input: StopInput): string[] {
 	} catch (error) {
 		if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
 	}
-	return gates
-		.filter((task) => transcript === undefined || transcript.includes(`ID: ${task.id}`))
+	return tasks
+		.filter((task) => (transcript === undefined ? GATE.test(task.command!) : transcript.includes(`ID: ${task.id}`)))
 		.map((task) => task.command!);
+}
+
+/** Options an agent marks recommended end with this, as `RULES.recommend` asks. */
+export const RECOMMENDED = /\(recommended\)\s*$/i;
+
+/** Whether a question tool's input asks a question of two or more options without marking one recommended. */
+function unrecommended(input: Record<string, unknown>): boolean {
+	if (!Array.isArray(input.questions)) return false;
+	return input.questions.some((question: unknown) => {
+		const options = (question as { options?: unknown } | null)?.options;
+		if (!Array.isArray(options) || options.length < 2) return false;
+		return !options.some((option: unknown) => {
+			const label = typeof option === "string" ? option : (option as { label?: unknown } | null)?.label;
+			return typeof label === "string" && RECOMMENDED.test(label);
+		});
+	});
 }
 
 /** What a denial adds to `rewrite`: the way through for a rebase or force-push the user asked for. */
@@ -151,6 +177,12 @@ export function broken(call: ToolCall, env: NodeJS.ProcessEnv = process.env): st
 			if (patch !== undefined) applyPatch(patch, state);
 			break;
 		}
+		// Claude Code's question dialog, and Codex's.
+		case "AskUserQuestion":
+		case "request_user_input":
+		case "request_user_input_async":
+			if (unrecommended(call.input)) found.add("recommend");
+			break;
 	}
 	return (Object.keys(RULES) as Rule[])
 		.filter((key) => found.has(key))
