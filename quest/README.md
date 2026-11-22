@@ -17,7 +17,8 @@ as a generic solution for now. The binary needs to runnable by
 contributors, but it's a non-goal to have them use their own (non-fork)
 repos". The Goal read "a reusable way to plan and coordinate repository
 work... with a reversible adoption path" until then. m1's public-release
-quests predate this and are due a `/quest-audit`.
+quests predate this, so [this tree's first `tree` audit](/quest/m1/audit-tree.md)
+checks them first.
 
 `m0` is adoption on moq-dev's own repositories, `m1` the public release,
 and `m2` later work. Add later horizons when concrete work warrants them,

@@ -288,10 +288,21 @@ describe("PR records", () => {
 		{ ...tally("claude", 2, { high: 2, medium: 0, low: 0 }, 1, 0), session: CLAUDE },
 	];
 
+	const SKIP = {
+		harness: "claude" as const,
+		model: "claude-opus-5-5",
+		effort: "high",
+		reason: "usage limit, resets 2026-11-18T03:00:00Z",
+	};
+
 	test("reads back each reviewer's round and tally quest review records, after the land fixer's lines", () => {
-		const body = `Summary.\n\n## Review\n\nmechanical fix by codex, gpt-6.1-sol, medium effort: \`merged\` (head ${"d".repeat(40)})\n\n${reviewRecord({ rounds: [round, second], tallies, risk })}\n\n## Models\n\n- Size: L\n`;
+		const body = `Summary.\n\n## Review\n\nmechanical fix by codex, gpt-6.1-sol, medium effort: \`merged\` (head ${"d".repeat(40)})\n\n${reviewRecord({ rounds: [round, second], tallies, risk, skipped: [SKIP] })}\n\n## Models\n\n- Size: L\n`;
 		expect(body).toContain(
 			"\n- Rounds: 3; first round 2 (high 1, low 1); findings 4 (high 1, medium 1, low 2): fixed 2, refuted 1, open 1\n",
+		);
+		// A reviewer the run skipped is named in the header, outside the blocks parseReview reads.
+		expect(body).toContain(
+			"\n- Skipped: Claude Code, claude-opus-5-5, high effort: usage limit, resets 2026-11-18T03:00:00Z\n\n- Reviewer: Codex,",
 		);
 		expect(parseReview(body)).toEqual([
 			{
@@ -357,9 +368,11 @@ describe("PR records", () => {
 		expect(body).not.toContain("b".repeat(40));
 		// Claude's left-out tally still holds an open finding, which keeps it short too.
 		const clean = [{ ...round, findings: [] }, second];
-		expect(reviewRecord({ rounds: clean, tallies, risk })).not.toContain("b".repeat(40));
+		expect(reviewRecord({ rounds: clean, tallies, risk, skipped: [] })).not.toContain("b".repeat(40));
 		const settledAll = [tally("codex", 3, { high: 1, medium: 1, low: 2 }, 3, 1), tallies[1]!];
-		expect(reviewRecord({ rounds: clean, tallies: settledAll, risk })).toContain(`- Head: ${"b".repeat(40)}\n`);
+		expect(reviewRecord({ rounds: clean, tallies: settledAll, risk, skipped: [] })).toContain(
+			`- Head: ${"b".repeat(40)}\n`,
+		);
 		expect(fixes(body)).toEqual(["codex, gpt-6.1-sol, medium effort"]);
 		// The reviewer sessions read even from a record whose other lines this version cannot parse.
 		const newer = body.replace(/^- Rounds: 3;/m, "- Rounds: 3; first round 1 (medium 1);");
@@ -369,6 +382,7 @@ describe("PR records", () => {
 		const classified = reviewRecord({
 			rounds: [round],
 			tallies,
+			skipped: [],
 			risk: {
 				...risk,
 				classified: {
@@ -381,7 +395,7 @@ describe("PR records", () => {
 	});
 
 	test("a record written before tallies has none, and a Rounds line that does not add up fails", () => {
-		const record = reviewRecord({ rounds: [second], tallies: [tallies[1]!], risk });
+		const record = reviewRecord({ rounds: [second], tallies: [tallies[1]!], risk, skipped: [] });
 		const older = `## Review\n\n${record.replace(/^- Rounds: .*\n/m, "")}\n`;
 		expect(parseReview(older)[0]!.tally).toBeNull();
 		// The settled count `quest usage` prints reads back.
@@ -413,6 +427,12 @@ describe("PR records", () => {
 
 	test("a skipped review or a fixer-only section has no round", () => {
 		expect(parseReview("## Review\n\nSkipped: too trivial to need one.\n")).toEqual([]);
+		// A skip written by hand under the mark a round rewrote, as `/quest-review` allows.
+		expect(
+			parseReview(
+				"## Review\n\nRewritten by `quest review` after each round.\n\n- Head: 6c2ce3d381 (skipped review)\n- Skip: one reworded sentence.\n",
+			),
+		).toEqual([]);
 		expect(parseReview("## Review\n\nmechanical fix by quest land watch: `merged main` (head x)\n")).toEqual([]);
 		expect(fixes("## Review\n\nmechanical fix by quest land watch: `merged main` (head x)\n")).toEqual([
 			"quest land watch",
@@ -805,14 +825,18 @@ describe("usage", () => {
 				now: Date.now,
 				sleep: async () => {},
 				token: "t",
+				quota: "wait" as const,
 				warn: () => {},
 			}),
+			forge: () => Promise.reject(new Error("usage reads no forge")),
+			live: () => Promise.reject(new Error("usage reads no forge")),
 			warn: () => {},
 			sessions: (since: Date, ssh: string[]) => {
 				calls.push([since, ssh]);
 				return exported;
 			},
 			waits: () => waits,
+			calls: () => [],
 			split: () => null,
 		});
 		return { root, deps, sessions, calls, requests };
@@ -1076,6 +1100,40 @@ describe("usage", () => {
 		const report = await usage(root, { since: "2026-11-05" }, deps(sessions));
 		expect(report.pulls.flatMap((p) => p.sessions).some((s) => s.session?.startsWith("5555"))).toBe(false);
 		expect(report.unattributed!.sessions).toBe(6);
+	});
+
+	test("reports the part of a review record it cannot read on its PR and reads the rest", async () => {
+		const record = (...lines: string[]) =>
+			["## Review", "", "Rewritten by `quest review` after each round.", "", ...lines, ""].join("\n");
+		const head = `- Head: ${"a".repeat(40)}`;
+		const reviewer = "- Reviewer: Codex, gpt-6.1-sol, high effort";
+		// #30's tier survives its garbled Rounds line, and #31's reviewer its garbled Risk line.
+		const garbledRounds = record(head, RISK, reviewer, "- Rounds: garbled");
+		const garbledRisk = record(
+			head,
+			"- Risk: garbled",
+			reviewer,
+			"- Rounds: 2; findings 1 (medium 1): fixed 1, refuted 0, open 0",
+		);
+		const { root, deps, sessions } = setup({
+			pulls: [
+				pr(30, "quest/m0/bad", garbledRounds, "2026-11-06T00:00:00Z", { updated_at: "2026-11-07T00:00:00Z" }),
+				pr(31, "quest/m0/worse", garbledRisk, "2026-11-06T00:00:00Z", { updated_at: "2026-11-07T00:00:00Z" }),
+			],
+		});
+		const report = await usage(root, { since: "2026-11-05" }, deps(sessions));
+		const rounds = report.pulls.find((p) => p.number === 30)!;
+		expect(rounds.review).toEqual([]);
+		expect(rounds.risk?.tier).toBe("high");
+		expect(rounds.unreadReview).toBe("the ## Review record's Rounds line is malformed: garbled");
+		const risk = report.pulls.find((p) => p.number === 31)!;
+		expect(risk.review.map((r) => r.model)).toEqual(["gpt-6.1-sol"]);
+		expect(risk.risk).toBeNull();
+		expect(risk.unreadReview).toBe("the ## Review record's risk is malformed: garbled");
+		expect(report.pulls.find((p) => p.number === 10)!.unreadReview).toBeNull();
+		expect(usageLines(report).join("\n")).toContain(
+			"  unread review: the ## Review record's Rounds line is malformed: garbled",
+		);
 	});
 
 	test("rolls up the writer A/B by size and arm, leaving out a PR a writer ran off its arm", async () => {

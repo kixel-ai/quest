@@ -45,12 +45,35 @@ Agent's choices, for the implementer to revisit. Each run:
   `--root`), for each PR's review rounds, findings fixed and refuted,
   hand-backs, and the later PRs naming it under `## Caused by`; the diffs
   of those culprits and their fixes; and the typed messages from
-  `quest messages --since <date> --json`.
+  `quest messages --since <date> --json` on every host the maintainer
+  types on, since `quest messages` reads only its own host. Where a host
+  lacks `quest`, copy a `bun run compile` build of this checkout there,
+  built for that host's OS and CPU (`bun build --compile --target`
+  when they differ from this one's), and remove it afterwards. Keep one host's counts apart when comparing
+  with a baseline that read only that host.
+- Count a culprit pair once its fix merged since the last run, so a fix
+  open across a run's start counts in exactly one run. 245 pairs whose fix
+  opened since 2026-11-11 were read on 2026-11-18, too many for one session: split them by repository
+  into sub-agents of about 50 pairs, each writing one JSON line per pair
+  under `.tmp/`, and classify messages in another.
 - Read each culprit pair's `## Caused by` line before counting it. On
   2026-11-11 only 7 of 20 pairs were escapes. `fixedBy` now counts only a
   merged fix's bullet that opens with the culprit's link, but a culprit
   can still name a PR that left the work to a planned follow-up or kept
   older behavior.
+- Read both kinds of gating mistake from each record's `gated` and
+  `shell` lists: gated runs ranked by least CPU, and unshared shell groups
+  by most, with no threshold, judging each command's class rather than one
+  cheap run of a usually heavy command. List `shared` groups apart, as CPU
+  no command owns: their `cpu` also covers another session's calls in the
+  cgroup, such as a sub-agent's build, so ranking them per command would
+  make a cheap parent command look CPU-heavy. A `command` holds only program names and
+  subcommands, such as `cd; cargo build`, so judge the class by those. Count
+  `nix build` apart, since
+  `nix-daemon` builds outside its gate's scope. A `shell` group's `cpu` is
+  null outside a cgroup that holds the session alone, as in a terminal, so
+  say how many groups were unmeasured. Records only hold calls from hosts
+  whose hooks `quest setup` updated since that PR.
 - `quest messages` returns every human turn as a `kind: "message"` entry,
   beside the `kind: "answer"` entries tallied below, so set aside machine-written
   ones yourself: bare skill invocations, pasted relays and logs, accepted
@@ -66,6 +89,13 @@ Agent's choices, for the implementer to revisit. Each run:
   owns that gate, so it goes in the run PR's `## Follow-ups` for
   `/quest-plan` there, as the guide's Creation section says (user,
   2026-11-11, [routing evidence](/quest/m0/routing-evidence/README.md)).
+- Add each escape classified catchable or maybe to its repository's eval
+  set with `quest eval add`, its defect located at the culprit's head from
+  the fix's diff and confirmed against the culprit's own diff, so `quest
+  eval run` scores reviewers on it. A private repository's set stays in
+  that repository. Another repository's cases go in its run-PR follow-up
+  for `/quest-plan` there; moq-dev/moq and moq-dev/moq.pro had no set on
+  2026-11-18.
 - Before proposing a fix, find the quest, check, or rule that already owns
   the class, and report whether its count fell since that landed. A rule
   whose class still recurs is the case for moving it up a level.
@@ -94,60 +124,95 @@ Agent's choices, for the implementer to revisit. Each run:
 
 Check first next run:
 
+- The 15 culprit pairs (11 in moq-dev/moq, 4 in moq-dev/moq.pro) whose fix
+  opened before 2026-11-11 and merged after it: the 2026-11-18 run keyed
+  pairs by when the fix opened, so neither run read them. Read them with
+  this run's.
+- Contract changes that left a dependent on the old contract, the largest
+  escape class: about 41 of 204 real escapes, 26 catchable or maybe, all
+  past a local review. [Review dependents](/quest/m0/review-dependents.md)
+  takes it, if kept.
+- Gating mistakes, after [the gate's cheap commands](/quest/m1/gate-cheap-commands.md)
+  lands, if kept: 887 of 3,048 gated runs (29%) used under 5 CPU-seconds,
+  together 0.16% of gated CPU, against 20% to 22% before the 2026-11-15
+  rule. They queued 46,000 agent-seconds, a median 5 each. `bun test` in
+  moq-dev/moq made 347 of the gated runs at a median 0.5 CPU-seconds.
+  `quest review` was gated 16 times in 2.3 days, against 591 in the 14
+  days before the rule. These records began with
+  [moq-dev/quest#747](https://github.com/moq-dev/quest/pull/747) on
+  2026-11-17, so this is 2.3 days, on this host only.
+- Ungated shell CPU: unmeasured. No host had a shell-call log on
+  2026-11-18, so every `shell` list was empty; the hooks
+  [moq-dev/quest#747](https://github.com/moq-dev/quest/pull/747) added
+  were not installed. Planned in kixel-ai/dotfiles, if kept.
 - Stalls after the stop hook of
-  [moq-dev/quest#600](https://github.com/moq-dev/quest/pull/600) (landed
-  2026-11-10T18:34Z): 3.8 per 100 typed messages after it against 6.5
-  before, on only 27 hours and 3 stalls.
-- Hand-run `/quest-complete` after `/quest-run`
-  ([moq-dev/quest#608](https://github.com/moq-dev/quest/pull/608), landed
-  2026-11-10T20:04Z): 6.6 a day in its first day against 5.2 before, with
-  3 `/quest-run` runs; `/quest-spawn` fell from 4.1 to 0.9 a day.
+  [moq-dev/quest#600](https://github.com/moq-dev/quest/pull/600): 5.0 per
+  100 typed messages on all hosts (4.3 on the audit's host), against 3.8
+  before.
+  Without the 12 asks for new work after a `/quest-run` ended, 2.4.
 - Output handed back unchecked, after the verification rule of
-  [moq-dev/quest#625](https://github.com/moq-dev/quest/pull/625) landed
-  2026-11-11T18:43Z: no data yet.
-- Heads that landed past a finding or decision, after
-  [moq-dev/quest#652](https://github.com/moq-dev/quest/pull/652) lands.
+  [moq-dev/quest#625](https://github.com/moq-dev/quest/pull/625): 5, 1.1
+  per 100, all on the two hosts the earlier baseline did not read; 0 on
+  the audit's host.
+- Heads that landed past a related finding or decision after
+  [moq-dev/quest#652](https://github.com/moq-dev/quest/pull/652) landed
+  (2026-11-13T22:12Z): 2 in moq-dev/moq, each a finding the agent answered
+  by deferring it to a follow-up, which `quest merge` accepts as answered.
+  A class if it recurs.
+- Hand-run `/quest-complete` after `/quest-run`
+  ([moq-dev/quest#608](https://github.com/moq-dev/quest/pull/608)): 1.7 a
+  day bare, none after 2026-11-15, against 6.6 in its first day.
+  `/quest-run` ran 3.6 a day; `/quest-spawn` was never run bare.
 - Whether moq-dev/moq and moq-dev/moq.pro planned the runtime follow-ups
-  of moq-dev/quest's 2026-11-11 run PR, and whether their escapes recurred.
+  of both runs: none of 2026-11-11's had a quest there on 2026-11-18.
+- `## Review` records edited by hand: 96 skip records in the window, 3 of
+  which stopped `quest usage` for a whole repository until this run's PR
+  reported them per PR instead.
 
-Baseline from the 2026-11-11 run (PRs updated 2026-11-09 to 11-11; typed
-messages 2026-10-26 to 11-11, classed by one sub-agent, approximate):
+Baseline from the 2026-11-18 run (PRs updated 2026-11-11 to 11-19; culprit
+pairs whose fix opened since 2026-11-11; typed messages since 2026-11-11 on
+the maintainer's three hosts, of which "the audit's host" below is the
+one the 2026-11-11 baseline read alone; each class from sub-agents' hand labels, so
+approximate):
 
-- PRs: moq-dev/moq 194 (158 merged), moq-dev/moq.pro 150 (99), and
-  moq-dev/quest 69 (59). Hand-backs: 4, 20, and 0. 57 of the 316 merged
-  PRs record implementers that `quest usage` dropped
-  until its Implementer parsing was fixed.
-- Escapes: 7 real of 20 culprit pairs. Catchable 2, maybe 2, runtime 3;
-  races 2 (one maybe, one runtime). All 7 culprits passed a local Sol
-  review. The routing audit's sample of 30 earlier escapes split 6, 17,
-  and 7, with 5 races.
-- Landed past an open signal: 3 in moq-dev/moq, 2 catchable and 1
-  maybe. A review finding posted after enqueue, a recorded decision the
-  head lacked, and a red platform run. [moq-dev/quest#652](https://github.com/moq-dev/quest/pull/652) takes the
-  first two; `quest merge`'s refusal of failed checks
-  ([moq-dev/quest#601](https://github.com/moq-dev/quest/pull/601)) covers
-  none of them.
-- A scoped gate skipped a test the change reached, runtime: 2, one each in
-  moq-dev/moq and moq-dev/moq.pro.
-- A shell pipeline under `pipefail` whose reader exits early, a race: 1
-  this week in moq-dev/moq.pro, its third fix there.
-- Named a PR that deferred the work, or kept older behavior, as a
-  culprit: 4 in moq-dev/moq; `quest context` now requires confirming
-  the culprit in the blamed PR's diff.
-- Typed mid-session messages, per 100, before 2026-11-09 (841) then after
-  (131): stalls until nudged 6.5 then 4.6; proposals steered simpler 4.8
-  then 0; misread intent 1.9 then 3.1; reported instead of fixed 0.7 then
-  2.3; routine choices asked 3.4 then 1.5; answers that only picked the
-  recommendation 7.7 then 3.8 (`/quest-plan` 11, `/quest-complete` 10,
-  `/quest-spawn` 6, `/quest-iterate` 1, unknown skill 42). The after
-  window is under 3 days.
-- `quest messages` counts more than the 2026-11-09 hand scan: 1,088
-  mid-session messages to its 579 over the same days, likely from the
-  Codex and T3 Code threads and worktree directories it covers.
+- PRs: moq-dev/moq 700 (635 merged), moq-dev/moq.pro 492 (431), and
+  moq-dev/quest 165 (151). `quest usage` attributed sessions from this
+  host only, as the others had neither `quest` nor `token-max`.
+- Escapes: 204 real of 245 pairs. moq-dev/moq 141 of 164 (catchable 24,
+  maybe 61, runtime 56; races 24, 10 runtime); moq-dev/moq.pro 48 of 64
+  (8, 27, 13; races 17, 8 runtime); moq-dev/quest 15 of 17 (4, 10, 1;
+  races 3). 83 of the 170 distinct culprits merged before 2026-11-04.
+  Not escapes: 41, mostly kept older behavior (11), deferred (6), or a
+  design the maintainer later reversed.
+- Classes: a contract changed without its dependents, about 41; races,
+  44; Linux behavior assumed in portable code or platform-gated code with
+  no off-platform build, 12 runtime (10 in moq-dev/moq, caught only by
+  nightly macOS and Windows lanes or by none); unbounded or super-linear
+  growth, 9.
+- Merged past an open signal, any escape: 30 in moq-dev/moq, 3 in
+  moq-dev/moq.pro, 2 in moq-dev/quest, most of them red checks or findings
+  unrelated to the defect.
+- Eval set: moq-dev/quest's grew from 26 to 32 cases with this run's
+  escapes.
+- Typed messages: 577, 118 set aside as machine-written, 459 left (230 on
+  the audit's host). Per 100, all hosts then the audit's host: stalls until nudged 5.0 then
+  4.3; waited on a blocked dependency instead of removing it 4.1 then 5.7
+  (8 behind Pullfrog); routine choices asked 4.1 then 2.6 (7 asked to plan
+  follow-ups a session had found); resumed after a rate limit or API
+  error 3.5 then 4.8; reported instead of fixed 2.6 then 3.5; UI and copy
+  rejected 2.6 then 2.6, all in moq-dev/moq.pro; proposals steered simpler
+  2.0 then 0.9; searched only its own host 1.5 then 1.7; followed a plan
+  past findings that undercut it 1.3 then 1.3; output handed back
+  unchecked 1.1 then 0; misread intent 0.7 then 0.4.
+- Decision prompts: 1,592 answers, 1,517 with a recommendation, 80% of
+  which picked it. Merge picks 94% (220 of 234), follow-up keep-or-drop
+  79%, other questions 73%. By skill: `/quest-merge` 90%,
+  `/quest-complete` 88%, `/quest-run` 85%, `/quest-afk` 79%,
+  `/quest-spawn` 75%, `/quest-plan` 68%.
 
 ## Scheduled
 
-- 2026-11-18 - one week after the 2026-11-11 run
+- 2026-11-25 - one week after the 2026-11-18 run
 
 ## Related
 

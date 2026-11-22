@@ -4,10 +4,11 @@ import { rmSync } from "node:fs";
 import { resolve } from "node:path";
 import { gunzipSync, gzipSync } from "node:zlib";
 import { remoteRepository, requireRemote } from "./github";
-import { GitHub, type GitHubDependencies, type PullRequest, object, string } from "../github/client";
+import { GitHub, type GitHubDependencies, object, string } from "../github/client";
+import type { PullRequest } from "../core";
 import { discoveryEnv } from "./git";
 import { contains, git, gitEnvironment, tryGit } from "./land";
-import { Refusal } from "./start";
+import { Refusal } from "../core";
 
 /** GitHub refuses a comment body longer than this many characters. */
 export const COMMENT_LIMIT = 65_536;

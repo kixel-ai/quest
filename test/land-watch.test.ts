@@ -189,6 +189,7 @@ function removalPage(pull: Pull, since: string, after: unknown) {
 function deps(world: World): GitHubDependencies {
 	return {
 		token: "fake",
+		quota: "wait",
 		now: () => world.now,
 		sleep: async () => {},
 		warn: () => {},
@@ -1959,7 +1960,8 @@ git commit -qm 'disable render_timeout'`;
 			`printf '[{"number":%s,"action":"handback","diagnosis":"the test asserts the old behavior","recommendation":"decide which behavior is right","log":[1,1]}]' "$2" > quest-land-result.json\n`,
 		);
 		fix.round(10, fixScript("fixed.txt"));
-		fix.round(11, "echo 'agent crashed' >&2\nexit 3\n");
+		// rind's fixers on 2026-11-15 failed so before Codex started: the host's launcher refused the upload.
+		fix.round(11, "echo 'starting' \necho 'quest land check: upload exceeds 256 MiB <@maintainer>' >&2\nexit 1\n");
 		fix.round(13, fixScript("fixed.txt"));
 		expect(await watchPass(REPOSITORY, { state }, deps(github), context)).toEqual([
 			"removed 8 failed_checks fix",
@@ -2016,11 +2018,13 @@ git commit -qm 'disable render_timeout'`;
 		expect(handback).toContain("<pre>The merge queue removed");
 		expect(history(state, 9)!.rounds).toMatchObject([{ outcome: "handback" }]);
 		// A crash ends the pick too, with a round of its own.
-		// Its handback names the crash as the reason and quotes the gate's failure, not the fixer's output.
+		// Its handback names the crash as the reason, quotes the gate's failure, then the fixer's output, escaped.
 		const crash = github.comments[11].at(-1)!.body;
-		expect(crash).toContain("fixer crashed (exit 3)");
+		expect(crash).toContain("fixer crashed (exit 1)");
 		expect(crash).toContain("running tests\nFAIL queue.test.ts");
-		expect(crash).not.toContain("agent crashed");
+		expect(crash).toContain(
+			"The fixer's output ended with:\n\n<pre>starting\nquest land check: upload exceeds 256 MiB &lt;@maintainer></pre>",
+		);
 		expect(history(state, 11)!.rounds).toMatchObject([
 			{ outcome: "handback", before: crashed, failure: "Check / test: just test" },
 		]);

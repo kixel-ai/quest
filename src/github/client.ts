@@ -1,28 +1,98 @@
 // The GitHub client: authenticated REST and GraphQL requests with paging, retries, rate limits, and a deadline.
 // No Node APIs, so it runs wherever `fetch` does; the caller supplies the token and clock.
+import type { Repository } from "../core";
 import { cancelled, currentContexts, latestContexts, type RollupContext, type WorkflowRun } from "./checks";
 
 const API = "https://api.github.com";
 const MAX_SLEEP = 2_147_483_647;
 
-/** A repository on github.com. */
-export interface Repository {
-	owner: string;
-	repo: string;
-}
-
-/** A pull request by its repository and number. */
-export interface PullRequest extends Repository {
-	number: number;
-}
-
-/** What the client needs from its host: `fetch`, a clock, a way to pause, the token, and where warnings go. */
-export interface GitHubDependencies {
+/**
+ * What a read-only client needs from its host: `fetch`, a clock, a way to pause, the token it reads
+ * with, where warnings go, and what to do once the token's hourly quota is spent. The read token may
+ * be an App installation's, which can read but never write; a write takes {@link GitHubDependencies}.
+ */
+export interface GitHubReadDependencies {
 	fetch: typeof fetch;
 	now(): number;
 	sleep(milliseconds: number): Promise<unknown>;
-	token: string;
+	readToken: string;
 	warn(message: string): void;
+	/**
+	 * `wait` sleeps until a spent quota resets, up to an hour, for a daemon or a waiter whose job is to
+	 * outlast it; `fail` fails at once, naming the reset, so a one-shot command never stalls on it.
+	 */
+	quota: "wait" | "fail";
+	/** Where GET answers are kept to revalidate by ETag, so an unchanged read costs no quota; none when absent. */
+	cache?: ResponseCache;
+	/**
+	 * Where to read a repository's name by its id when the read token cannot see that repository, such as the person's
+	 * own dependencies behind an installation token scoped to one repository: a ruleset names a required workflow's
+	 * repository only by id. None when the read token is the person's.
+	 */
+	names?: GitHubReadDependencies;
+}
+
+/**
+ * What a client that writes needs: the same, with the person's own token, so what it writes is in their
+ * name. It has no `readToken`, so it never stands in for read dependencies built on another token.
+ */
+export interface GitHubDependencies extends Omit<GitHubReadDependencies, "readToken" | "names"> {
+	token: string;
+}
+
+/**
+ * `deps` as read dependencies, reading on the person's own token. Each member is forwarded, called on `deps`, so a
+ * host whose members are a class's methods keeps them and their receiver.
+ */
+export function reading(deps: GitHubDependencies): GitHubReadDependencies {
+	return {
+		fetch: ((input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) =>
+			deps.fetch(input, init)) as typeof fetch,
+		now: () => deps.now(),
+		sleep: (milliseconds) => deps.sleep(milliseconds),
+		warn: (message) => deps.warn(message),
+		readToken: deps.token,
+		quota: deps.quota,
+		...(deps.cache === undefined ? {} : { cache: deps.cache }),
+	};
+}
+
+/** A comment, block string, string, or name, possibly a variable's, at the start of a GraphQL document's rest. */
+const TOKEN = /^(?:#[^\n\r]*|"""(?:\\"""|[^])*?"""|"(?:\\.|[^"\\\n\r])*"|\$?[_A-Za-z][_0-9A-Za-z]*)/;
+
+/**
+ * Whether a GraphQL document may define a mutation: whether `mutation` is a name outside every brace and parenthesis,
+ * skipping comments and strings, since GraphQL lets an operation follow a comment, a comma, or a fragment. It errs
+ * toward a mutation, as for a fragment or operation named `mutation`, which is never repeated blindly and which a
+ * read-only client refuses.
+ */
+export function mutates(query: string): boolean {
+	let depth = 0;
+	for (let i = 0; i < query.length;) {
+		const token = TOKEN.exec(query.slice(i));
+		if (token) {
+			if (depth === 0 && token[0] === "mutation") return true;
+			i += token[0].length;
+			continue;
+		}
+		const char = query[i++];
+		if (char === "{" || char === "(") depth++;
+		else if ((char === "}" || char === ")") && depth > 0) depth--;
+	}
+	return false;
+}
+
+/** A 200 answer to a GET, kept to serve when GitHub answers its ETag with a 304. */
+export interface CachedResponse {
+	etag: string;
+	headers: [string, string][];
+	body: string;
+}
+
+/** Stored GET answers by an opaque key, a hex SHA-256 that covers the token, so no token is stored. */
+export interface ResponseCache {
+	get(key: string): Promise<CachedResponse | undefined>;
+	set(key: string, entry: CachedResponse): Promise<void>;
 }
 
 /** A request or pause reached the client's deadline; the caller decides what that means. */
@@ -51,7 +121,7 @@ const backoff = (failures: number) => 1000 * 2 ** failures;
 /** How far GitHub's clock may run behind ours, as when looking for what a lost request created. */
 export const CLOCK_SKEW = 60_000;
 /** Statuses whose response has no body. */
-const NULL_BODY = [204, 205, 304];
+const NULL_BODY = [204, 205];
 
 /**
  * Whether a request may repeat after a 5xx or a dropped connection, after which GitHub may have
@@ -62,7 +132,6 @@ export type Repeat = boolean | ((started: number) => Promise<Response | undefine
 
 /** How {@link GitHub.request} sends a request and which refusals it returns rather than throws. */
 export interface RequestOptions {
-	etag?: string;
 	body?: unknown;
 	method?: "POST" | "PUT" | "PATCH" | "DELETE";
 	allow?: number[];
@@ -83,15 +152,52 @@ function limited(response: Response, body: string): boolean {
 	);
 }
 
-/** Authenticated REST and GraphQL requests that wait out rate limits, bounded by an optional deadline. */
-export class GitHub {
+/** How {@link GitHubReader.request} reads: a GET, so it takes neither method nor body. */
+export type ReadOptions = Pick<RequestOptions, "allow" | "accept">;
+
+/**
+ * Authenticated REST GETs and GraphQL queries that wait out rate limits, bounded by an optional deadline. It
+ * cannot write, so it may hold an installation token; {@link GitHub} writes too, on the person's own.
+ */
+export class GitHubReader {
 	/** The longest X-Poll-Interval GitHub asked for since the caller last set this, in milliseconds. */
 	pollInterval = 0;
+	/** The response cache, dropped after its first failure. */
+	private cache: ResponseCache | undefined;
 
 	constructor(
-		private readonly deps: GitHubDependencies,
-		private readonly deadline = Infinity,
-	) {}
+		protected readonly deps: GitHubReadDependencies,
+		protected readonly deadline = Infinity,
+	) {
+		this.cache = deps.cache;
+	}
+
+	/**
+	 * The `owner/name` of the repository with `id`, read on {@link GitHubReadDependencies.names} when the read token
+	 * cannot see it; null when neither can.
+	 */
+	async repositoryName(id: number): Promise<string | null> {
+		for (const github of [this, ...(this.deps.names ? [new GitHubReader(this.deps.names, this.deadline)] : [])]) {
+			const response = await github.request(`/repositories/${id}`, { allow: [404] });
+			if (response.ok) return string(object(await response.json()).full_name);
+		}
+		return null;
+	}
+
+	/**
+	 * A cache operation's result, or undefined once it fails: the cache only saves quota, so a full
+	 * or unwritable disk warns once and leaves the client reading GitHub uncached.
+	 */
+	private async cached<T>(operation: () => Promise<T>): Promise<T | undefined> {
+		if (!this.cache) return undefined;
+		try {
+			return await operation();
+		} catch (error) {
+			this.cache = undefined;
+			this.deps.warn(`GitHub response cache failed, reading uncached: ${message(error)}`);
+			return undefined;
+		}
+	}
 
 	/** Sleep, cut short by the deadline. */
 	async pause(milliseconds: number): Promise<void> {
@@ -101,19 +207,30 @@ export class GitHub {
 		if (this.deps.now() >= this.deadline) throw new GitHubDeadline();
 	}
 
+	/** A GET: see {@link GitHubReader.send}. */
+	request(path: string, options: ReadOptions = {}): Promise<Response> {
+		return this.send(path, options);
+	}
+
 	/**
-	 * A 2xx or 304 response, its body already read; anything else fails, with GitHub's reason when
-	 * it gives one, unless `allow` lists its status. Rate limits are waited out. A 5xx or a
+	 * A 2xx response, its body already read; anything else fails, with GitHub's reason when it gives
+	 * one, unless `allow` lists its status. A GET revalidates the cached answer by its ETag and serves
+	 * it on a 304, under the 304's own headers. Rate limits are waited out. A 5xx or a
 	 * connection dropped before the body is in, after which GitHub may or may not have acted, is
 	 * retried with bounded backoff as `repeat` allows, then fails with the last error. `body` makes
 	 * it a POST unless `method` says otherwise.
 	 */
-	async request(path: string, options: RequestOptions = {}): Promise<Response> {
+	protected async send(path: string, options: RequestOptions = {}): Promise<Response> {
 		// Follow only same-origin pagination links; never send a token to another host.
 		const url = new URL(path, API);
 		if (url.origin !== API || url.username || url.password) throw new Error("invalid GitHub pagination URL");
 		const started = this.deps.now();
 		const repeat = options.repeat ?? (await this.repeatable(url, options, started));
+		const accept = options.accept ?? "application/vnd.github+json";
+		const get = options.body === undefined && options.method === undefined;
+		const cache = get ? this.cache : undefined;
+		const key = cache && (await cacheKey(this.deps.readToken, accept, url.href));
+		const cached = key === undefined ? undefined : await this.cached(() => cache!.get(key));
 		let limits = 0;
 		let failures = 0;
 		for (;;) {
@@ -127,11 +244,11 @@ export class GitHub {
 						? options.method && { method: options.method }
 						: { method: options.method ?? "POST", body: JSON.stringify(options.body) }),
 					headers: {
-						Accept: options.accept ?? "application/vnd.github+json",
-						Authorization: `Bearer ${this.deps.token}`,
+						Accept: accept,
+						Authorization: `Bearer ${this.deps.readToken}`,
 						"X-GitHub-Api-Version": "2022-11-28",
 						"User-Agent": "quest",
-						...(options.etag ? { "If-None-Match": options.etag } : {}),
+						...(cached ? { "If-None-Match": cached.etag } : {}),
 					},
 					...(Number.isFinite(remaining) ? { signal: AbortSignal.timeout(Math.ceil(remaining)) } : {}),
 				});
@@ -147,13 +264,27 @@ export class GitHub {
 					(text) => ({ text }),
 					(error: unknown) => ({ error }),
 				);
+				if (response.status === 304) {
+					if (!cached) throw new Error(`unexpected GitHub 304 for ${url.pathname} without a cached response`);
+					const headers = new Headers(cached.headers);
+					response.headers.forEach((value, name) => headers.set(name, value));
+					return new Response(cached.body, { status: 200, statusText: "OK", headers });
+				}
 				// A rate limit is waited out even when the caller allows its status, such as a 403 refusal.
 				if (
 					response.ok ||
-					response.status === 304 ||
 					(options.allow?.includes(response.status) && !limited(response, "text" in read ? read.text : ""))
 				) {
 					const { status, statusText, headers } = response;
+					const etag = headers.get("etag");
+					if (
+						"text" in read &&
+						key !== undefined &&
+						status === 200 &&
+						etag &&
+						settled(response, url, read.text)
+					)
+						await this.cached(() => cache!.set(key, { etag, headers: [...headers], body: read.text }));
 					if ("text" in read)
 						return new Response(NULL_BODY.includes(status) ? null : read.text, {
 							status,
@@ -214,13 +345,21 @@ export class GitHub {
 
 	/**
 	 * Wait out a rate limit, the `limits`th in a row, as its headers say: Retry-After, else the
-	 * primary limit's reset, else a minute doubling each time. Fails with `persisted` after six.
+	 * primary limit's reset, else a minute doubling each time. Fails with `persisted` after six, and
+	 * at once on a spent quota unless `quota` says to wait.
 	 */
 	private async waitOut(headers: Headers, limits: number, persisted: string): Promise<void> {
 		if (limits >= 6) throw new Error(persisted);
 		const retry = seconds(headers.get("retry-after"));
 		const reset =
 			headers.get("x-ratelimit-remaining") === "0" ? seconds(headers.get("x-ratelimit-reset")) : undefined;
+		if (retry === undefined && reset !== undefined && this.deps.quota === "fail") {
+			const minutes = Math.max(1, Math.ceil((reset - this.deps.now()) / 60_000));
+			const resource = headers.get("x-ratelimit-resource") ?? "API";
+			throw new Error(
+				`GitHub's ${resource} rate limit for this token is spent until ${new Date(reset).toISOString()}, ${minutes} minute${minutes === 1 ? "" : "s"} from now`,
+			);
+		}
 		const delay = retry ?? (reset === undefined ? 60_000 * 2 ** limits : Math.max(1000, reset - this.deps.now()));
 		this.deps.warn(`GitHub rate limited this request; waiting ${Math.ceil(delay / 1000)} seconds`);
 		await this.pause(delay);
@@ -285,7 +424,6 @@ export class GitHub {
 	/** One page of a REST listing, and its response for the next link. */
 	async list(path: string): Promise<{ rows: ObjectValue[]; response: Response }> {
 		const response = await this.request(path);
-		if (response.status !== 200) throw new Error("unexpected GitHub 304 without a cached response");
 		return { rows: array(await response.json()), response };
 	}
 
@@ -301,15 +439,19 @@ export class GitHub {
 	}
 
 	/**
-	 * Run a GraphQL query and return its data, failing on any reported error. A query repeats after
-	 * a 5xx or a dropped connection; a mutation only once its effect is confirmed missing, and one
-	 * confirmed to have taken effect returns no data. GitHub can report a rate limit as a 200 whose
-	 * errors say `RATE_LIMITED`; that is waited out like a REST one.
+	 * Run a GraphQL query and return its data, failing on any reported error, and on a mutation, which only
+	 * {@link GitHub} runs. A query repeats after a 5xx or a dropped connection. GitHub can report a rate limit as a
+	 * 200 whose errors say `RATE_LIMITED`; that is waited out like a REST one.
 	 */
 	async graphql(query: string, variables: ObjectValue): Promise<ObjectValue> {
-		const repeat = this.mutationRepeat(query, variables);
+		if (mutates(query)) throw new Error("a read-only GitHub client cannot run a mutation");
+		return this.operate(query, variables, true);
+	}
+
+	/** Run a GraphQL operation that repeats as `repeat` says. */
+	protected async operate(query: string, variables: ObjectValue, repeat: Repeat): Promise<ObjectValue> {
 		for (let limits = 0; ; limits++) {
-			const response = await this.request("/graphql", { body: { query, variables }, repeat });
+			const response = await this.send("/graphql", { body: { query, variables }, repeat });
 			const body = object(await response.json());
 			if (body.errors === undefined) return object(body.data);
 			const errors = array(body.errors);
@@ -322,6 +464,26 @@ export class GitHub {
 			await this.waitOut(response.headers, limits, "GitHub GraphQL rate limit persisted");
 		}
 	}
+}
+
+/** A client that reads and writes on the person's own token, so what it writes is in their name. */
+export class GitHub extends GitHubReader {
+	constructor(deps: GitHubDependencies, deadline = Infinity) {
+		super(reading(deps), deadline);
+	}
+
+	/** A request of any method, with {@link GitHubReader.send}'s retries. */
+	override request(path: string, options: RequestOptions = {}): Promise<Response> {
+		return this.send(path, options);
+	}
+
+	/**
+	 * Run a GraphQL query, or a mutation: it repeats only once its effect is confirmed missing, and one
+	 * confirmed to have taken effect returns no data.
+	 */
+	override graphql(query: string, variables: ObjectValue): Promise<ObjectValue> {
+		return this.operate(query, variables, this.mutationRepeat(query, variables));
+	}
 
 	/**
 	 * Repeat a query; confirm a pull request mutation `PULL_MUTATIONS` knows; never repeat another.
@@ -329,7 +491,7 @@ export class GitHub {
 	 * GitHub's refusal for the caller.
 	 */
 	private mutationRepeat(query: string, variables: ObjectValue): Repeat {
-		if (!/^\s*mutation\b/.test(query)) return true;
+		if (!mutates(query)) return true;
 		const call = /^\s*mutation\b[^{]*\{\s*(\w+)\s*\(\s*input:\s*\{\s*pullRequestId:\s*\$(\w+)\b/.exec(query);
 		const effect = call && Object.hasOwn(PULL_MUTATIONS, call[1]) ? PULL_MUTATIONS[call[1]] : undefined;
 		const id = call && variables[call[2]];
@@ -366,6 +528,28 @@ const PULL_MUTATIONS: Record<string, { fields: string; landed(pull: ObjectValue)
 	markPullRequestReadyForReview: { fields: "isDraft", landed: (pull) => pull.isDraft === false },
 };
 
+/** The cache key of a GET: a hex SHA-256 of the token, media type, and URL, so tokens never share answers. */
+async function cacheKey(token: string, accept: string, url: string): Promise<string> {
+	const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`${token}\n${accept}\n${url}`));
+	return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+/**
+ * Whether a 304 can show that an answer is still whole. A 304 carries no Link header and its ETag
+ * covers only the body, so a full last page of a listing, whose next page may since have appeared
+ * without changing it, is reread whole instead; a page not full changes when anything joins it.
+ */
+function settled(response: Response, url: URL, body: string): boolean {
+	if (link(response, "next")) return true;
+	let rows: unknown;
+	try {
+		rows = JSON.parse(body);
+	} catch {
+		return true;
+	}
+	return !Array.isArray(rows) || rows.length < Number(url.searchParams.get("per_page") ?? 30);
+}
+
 /** The REST path of a repository. */
 export function repositoryPath(repository: Repository): string {
 	return `/repos/${encodeURIComponent(repository.owner)}/${encodeURIComponent(repository.repo)}`;
@@ -393,7 +577,7 @@ export interface Requirements {
  * Every rule a branch's active rulesets apply. GitHub Free offers no rulesets on a private repository and
  * answers 403 with an upgrade notice, so none apply there; any other refusal fails.
  */
-async function branchRules(github: GitHub, path: string): Promise<ObjectValue[]> {
+async function branchRules(github: GitHubReader, path: string): Promise<ObjectValue[]> {
 	const first = await github.request(path, { allow: [403] });
 	if (first.status !== 403) {
 		const next = link(first, "next");
@@ -415,7 +599,7 @@ export function workflowKey(repository: string, path: string): string {
 }
 
 /** The workflow files `rules` require, each keyed by {@link workflowKey} from its rule's `repository_id`. */
-async function requiredWorkflows(github: GitHub, rules: ObjectValue[]): Promise<string[]> {
+async function requiredWorkflows(github: GitHubReader, rules: ObjectValue[]): Promise<string[]> {
 	const names = new Map<number, string>();
 	const keys: string[] = [];
 	for (const row of rules
@@ -423,9 +607,8 @@ async function requiredWorkflows(github: GitHub, rules: ObjectValue[]): Promise<
 		.flatMap((rule) => array(object(rule.parameters).workflows))) {
 		const id = Number(row.repository_id);
 		if (!names.has(id)) {
-			const response = await github.request(`/repositories/${id}`, { allow: [404] });
-			// A repository the token cannot see is still required; nothing on the head can match its name.
-			names.set(id, response.ok ? string(object(await response.json()).full_name) : `repository ${id}`);
+			// A repository no token can see is still required; nothing on the head can match its name.
+			names.set(id, (await github.repositoryName(id)) ?? `repository ${id}`);
 		}
 		keys.push(workflowKey(names.get(id)!, string(row.path)));
 	}
@@ -433,7 +616,11 @@ async function requiredWorkflows(github: GitHub, rules: ObjectValue[]): Promise<
 }
 
 /** What `branch` of `repository` requires, read with read access from branch protection and rulesets. */
-export async function requirements(github: GitHub, repository: Repository, branch: string): Promise<Requirements> {
+export async function requirements(
+	github: GitHubReader,
+	repository: Repository,
+	branch: string,
+): Promise<Requirements> {
 	const base = `/repos/${encodeURIComponent(repository.owner)}/${encodeURIComponent(repository.repo)}`;
 	const ref = encodeURIComponent(branch);
 	const protection = object(object(await (await github.request(`${base}/branches/${ref}`)).json()).protection ?? {});
@@ -470,7 +657,7 @@ export async function requirements(github: GitHub, repository: Repository, branc
 }
 
 /** Every GitHub Actions workflow run on `head`. Reading them needs Actions read access. */
-export async function workflowRuns(github: GitHub, repository: Repository, head: string): Promise<WorkflowRun[]> {
+export async function workflowRuns(github: GitHubReader, repository: Repository, head: string): Promise<WorkflowRun[]> {
 	const runs: WorkflowRun[] = [];
 	let path: string | undefined =
 		`/repos/${encodeURIComponent(repository.owner)}/${encodeURIComponent(repository.repo)}/actions/runs?head_sha=${head}&per_page=100`;
@@ -496,7 +683,7 @@ export async function workflowRuns(github: GitHub, repository: Repository, head:
  * report they can drop.
  */
 export async function currentChecks<T extends RollupContext>(
-	github: GitHub,
+	github: GitHubReader,
 	repository: Repository,
 	head: string,
 	contexts: T[],
@@ -511,7 +698,7 @@ export async function currentChecks<T extends RollupContext>(
  * Whether a merged PR in `repository` had `commit` as its head or below it, as when `quest land` merged
  * the base into the head before squashing; false for a commit GitHub does not have.
  */
-export async function mergedHolds(github: GitHub, repository: Repository, commit: string): Promise<boolean> {
+export async function mergedHolds(github: GitHubReader, repository: Repository, commit: string): Promise<boolean> {
 	const data = await github.graphql(
 		"query($owner: String!, $name: String!, $oid: GitObjectID!) { repository(owner: $owner, name: $name) { " +
 			"object(oid: $oid) { ... on Commit { associatedPullRequests(first: 100) { nodes { merged headRefOid } } } } } }",

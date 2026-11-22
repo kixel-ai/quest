@@ -2,7 +2,27 @@
 // the work went by the PR's own record. token-max reads and prices the sessions, on this host and any SSH host
 // named; quest ties each to a PR by the branches and repositories token-max exports for it.
 import { spawnSync } from "node:child_process";
-import { type RecordedRisk, type Size, SIZES, TIERS, type Tier, handedBack, questBranch, recordedRisk } from "../core";
+import {
+	breakageKey,
+	type BreakageRecord,
+	handedBack,
+	questBranch,
+	type RecordedRisk,
+	recordedRisk,
+	type Repository,
+	type Role,
+	ROLES,
+	type Seat,
+	type SessionRecord,
+	type Size,
+	SIZES,
+	SPLIT_CATEGORIES,
+	type SplitUsage,
+	type Tier,
+	TIERS,
+	type TimeSplit,
+	WAIT_KINDS,
+} from "../core";
 import type { Arm } from "./models";
 import { recorded } from "./models-record";
 import { type ClaimDependencies, upstream } from "./claims";
@@ -12,7 +32,7 @@ import { culpritOf, culprits } from "./breakage";
 import { fixes } from "./land-fixer";
 import { MERGER } from "./land-watch-fix";
 import { githubRepository, requireRemote } from "./github";
-import { type GitHub, type ObjectValue, type Repository, link, object } from "../github/client";
+import { type GitHub, type ObjectValue, link, object } from "../github/client";
 import { type OnlineReview, readOnlineReviews } from "../github/online-review";
 import {
 	type Counts,
@@ -24,22 +44,11 @@ import {
 	severityText,
 } from "./review-record";
 import { SEVERITIES } from "./review";
-import {
-	type BreakageRecord,
-	ROLES,
-	breakageKey,
-	type Role,
-	SPLIT_CATEGORIES,
-	type Seat,
-	type SessionRecord,
-	type SplitUsage,
-	type TimeSplit,
-	WAIT_KINDS,
-} from "../core";
 import { type RecordInput, buildRecords } from "./records";
 import { stateDirectory } from "./send";
 import { keptSplit } from "./split";
 import { type LoggedWait, readWaits } from "./waits";
+import { type CallLine, readCalls } from "./calls";
 
 /** A session's tokens, and their cost at the model's API list price, which subscriptions do not bill. */
 export interface Tokens {
@@ -105,6 +114,8 @@ export interface PullRow {
 	review: ReviewSummary[];
 	/** The risk tier the record names for its head, null when it names none. */
 	risk: RecordedRisk | null;
+	/** Why part of its `## Review` record could not be read: its reviewers, its tier, or both, which it then lacks. */
+	unreadReview: string | null;
 	/** Who made each mechanical fix the land fixer recorded, or `quest land watch` for a base merge it made alone. */
 	landFixes: string[];
 	/** Later PRs that list it under `## Caused by`. */
@@ -268,13 +279,15 @@ export interface UsageDependencies extends ClaimDependencies {
 	sessions(since: Date, ssh: string[]): Session[] | null;
 	/** The waits logged on this host that ended since an instant, epoch ms. */
 	waits(since: number): LoggedWait[];
+	/** The shell calls sampled on this host around an instant, epoch ms (see `readCalls`). */
+	calls(since: number): CallLine[];
 	/** A local session's time split from the labels the record sender kept, never asking a model. */
 	split: NonNullable<RecordInput["split"]>;
 }
 
 /** The install hint printed when token-max is missing. */
 export const TOKEN_MAX_MISSING =
-	"token-max is not installed, so no session tokens or cost are reported; install it with `cargo install --locked --git https://github.com/kixel-ai/token-max`";
+	"token-max is not installed, so no session tokens or cost are reported; install it with `cargo install --locked token-max`";
 
 /** The local date `days` before `now`, as `YYYY-MM-DD`. */
 export function daysBefore(now: Date, days: number): string {
@@ -521,30 +534,49 @@ function pullRows(pulls: Pull[], repository: Repository): PullRow[] {
 	for (const each of pulls.filter((pull) => pull.state === "merged"))
 		for (const cause of causes(each.body, repository))
 			if (cause !== each.number) fixedBy.set(cause, [...(fixedBy.get(cause) ?? []), each.number]);
-	return pulls.map((each) => {
-		const own = recorded(each.body);
-		return {
-			number: each.number,
-			url: each.url,
-			title: each.title,
-			branch: each.branch,
-			repository: each.repository,
-			state: each.state,
-			draft: each.draft,
-			handedBack: each.draft && handedBack(each.body),
-			size: own.sizes.map(sized).find((s) => s !== null) ?? null,
-			implementers: own.implementers.flatMap(({ fields }) =>
-				fields ? [{ ...fields, size: sized(fields.size) }] : [],
-			),
-			unread: own.implementers.filter(({ fields }) => fields === null).map(({ item }) => item),
-			review: settledOnMerge(parseReview(each.body), each.state === "merged"),
-			risk: recordedRisk(each.body),
-			landFixes: fixes(each.body),
-			fixedBy: (fixedBy.get(each.number) ?? []).sort((a, b) => a - b),
-			online: [],
-			sessions: [],
-		};
-	});
+	return pulls.map((each) => pullRow(each, fixedBy));
+}
+
+/** `each`'s record, given the merged PRs that name each culprit as `fixedBy`. */
+function pullRow(each: Pull, fixedBy: Map<number, number[]>): PullRow {
+	const own = recorded(each.body);
+	// The `## Review` record is its writer's text, at times edited by hand, so one this version cannot read is
+	// reported on its PR instead of stopping every other PR's. Its reviewers and its tier are read apart, so a
+	// garbled line in one keeps the other.
+	const unread: string[] = [];
+	const read = <T>(parse: () => T, fallback: T): T => {
+		try {
+			return parse();
+		} catch (error) {
+			unread.push(error instanceof Error ? error.message : String(error));
+			return fallback;
+		}
+	};
+	const review = read(() => settledOnMerge(parseReview(each.body), each.state === "merged"), []);
+	const risk = read(() => recordedRisk(each.body), null);
+	const unreadReview = unread.length ? unread.join("; ") : null;
+	return {
+		number: each.number,
+		url: each.url,
+		title: each.title,
+		branch: each.branch,
+		repository: each.repository,
+		state: each.state,
+		draft: each.draft,
+		handedBack: each.draft && handedBack(each.body),
+		size: own.sizes.map(sized).find((s) => s !== null) ?? null,
+		implementers: own.implementers.flatMap(({ fields }) =>
+			fields ? [{ ...fields, size: sized(fields.size) }] : [],
+		),
+		unread: own.implementers.filter(({ fields }) => fields === null).map(({ item }) => item),
+		review,
+		risk,
+		unreadReview,
+		landFixes: fixes(each.body),
+		fixedBy: (fixedBy.get(each.number) ?? []).sort((a, b) => a - b),
+		online: [],
+		sessions: [],
+	};
 }
 
 const add = (to: Tokens, from: Tokens) => {
@@ -579,36 +611,62 @@ function owners(sessions: Session[]): (session: Session) => string[] | null {
 	};
 }
 
+/** `pulls` by head branch, oldest first, as {@link headed} takes them. */
+function byBranch(pulls: Pull[]): Map<string, Pull[]> {
+	const branches = new Map<string, Pull[]>();
+	for (const each of [...pulls].sort((a, b) => a.created - b.created))
+		branches.set(each.branch, [...(branches.get(each.branch) ?? []), each]);
+	return branches;
+}
+
+/** A branch a session reached at `first`, epoch ms, in one of `repositories`, as matching it to a PR needs. */
+export interface Reached {
+	name: string;
+	first: number;
+	repositories: string[];
+}
+
 /**
- * The PR each session's own branch heads: the one whose head branch it last named, among those still open when the
- * session reached the branch and headed from a repository its host resolved for it. `evidence` holds every exported
- * copy, folded ones included, since a dropped copy may be the only one naming its directory's repository.
+ * The PR `reached` heads: the oldest still open when the session reached the branch and headed from one of its
+ * repositories, or null when none is, or when such PRs come from several repositories, since a checkout with remotes
+ * for both a fork and its upstream cannot tell which one's branch it was on.
+ */
+function headed(branches: Map<string, Pull[]>, reached: Reached): Pull | null {
+	const open = (branches.get(reached.name) ?? []).filter(
+		(each) =>
+			(each.closed === null || each.closed >= reached.first) &&
+			each.repository !== null &&
+			reached.repositories.includes(each.repository),
+	);
+	if (new Set(open.map((each) => each.repository)).size > 1) return null;
+	return open[0] ?? null;
+}
+
+/** Whether some PR among `pulls` heads a branch, by the rule that attributes a session's own PR. */
+export function heading(pulls: Pull[]): (reached: Reached) => boolean {
+	const branches = byBranch(pulls);
+	return (reached) => headed(branches, reached) !== null;
+}
+
+/**
+ * The PR each session's own branch heads: the one {@link headed} finds for the branch it last named that heads one.
+ * Another repository may use the same branch name, so a session counts only where its repository is known. `evidence`
+ * holds every exported copy, folded ones included, since a dropped copy may be the only one naming its directory's
+ * repository.
  */
 function attribute(
 	sessions: Session[],
 	evidence: Session[],
 	pulls: Pull[],
 ): { own: Map<Session, Pull>; known: (session: Session) => string[] | null } {
-	const byBranch = new Map<string, Pull[]>();
-	for (const each of [...pulls].sort((a, b) => a.created - b.created))
-		byBranch.set(each.branch, [...(byBranch.get(each.branch) ?? []), each]);
+	const branches = byBranch(pulls);
 	const own = new Map<Session, Pull>();
 	const owned = owners(evidence);
 	for (const session of sessions) {
-		// Another repository may use the same branch name, so a session counts only where its repository is known.
 		const known = owned(session);
 		if (known === null) continue;
 		for (const seen of [...session.branches].sort((a, b) => b.last - a.last)) {
-			// A branch can head a new PR after an earlier one closed: take the one open when the session reached it.
-			const open = (byBranch.get(seen.name) ?? []).filter(
-				(each) =>
-					(each.closed === null || each.closed >= seen.first) &&
-					each.repository !== null &&
-					known.includes(each.repository),
-			);
-			// A checkout with remotes for both a fork and its upstream cannot tell which one's branch it was on.
-			if (new Set(open.map((each) => each.repository)).size > 1) continue;
-			const found = open[0];
+			const found = headed(branches, { name: seen.name, first: seen.first, repositories: known });
 			if (found) {
 				own.set(session, found);
 				break;
@@ -616,6 +674,25 @@ function attribute(
 		}
 	}
 	return { own, known: owned };
+}
+
+/**
+ * Each of `sessions` whose latest branch heads no PR among `pulls`, by the rule {@link attribute} uses, with that
+ * branch, so a PR that opens on it later can be noticed. A session whose repository is unknown, or that named no
+ * branch, has none to wait for.
+ */
+export function unheaded(sessions: Session[], evidence: Session[], pulls: Pull[]): Map<Session, Reached> {
+	const branches = byBranch(pulls);
+	const owned = owners(evidence);
+	const waiting = new Map<Session, Reached>();
+	for (const session of sessions) {
+		const repositories = owned(session);
+		const latest = [...session.branches].sort((a, b) => b.last - a.last)[0];
+		if (repositories === null || latest === undefined) continue;
+		const reached = { name: latest.name, first: latest.first, repositories };
+		if (headed(branches, reached) === null) waiting.set(session, reached);
+	}
+	return waiting;
 }
 
 /** What `sessionRecords` builds from. */
@@ -630,6 +707,8 @@ export interface RecordSources {
 	pulls: Pull[];
 	/** The waits logged on this host. */
 	waits: LoggedWait[];
+	/** The shell calls sampled on this host. */
+	calls: CallLine[];
 	/** The sessions to build records for; by default, those on a PR. */
 	emit?: Set<Session>;
 	/** The window's start, epoch ms. */
@@ -640,7 +719,7 @@ export interface RecordSources {
 
 /** Each session's record, attributed to the PRs in the window, whose review records name their reviewers and classifier. */
 export function sessionRecords(sources: RecordSources): Map<Session, SessionRecord> {
-	const { repository, sessions, evidence, pulls, waits, emit, since, split } = sources;
+	const { repository, sessions, evidence, pulls, waits, calls, emit, since, split } = sources;
 	// Only the reviewer sessions are read, so no PR author can stop every session's record with a body this version
 	// cannot parse.
 	const reviewers = new Set(pulls.flatMap((pull) => reviewSessions(pull.body)));
@@ -652,6 +731,7 @@ export function sessionRecords(sources: RecordSources): Map<Session, SessionReco
 		reviewers,
 		classifiers,
 		waits,
+		calls,
 		emit,
 		since,
 		split,
@@ -1083,6 +1163,7 @@ export async function usage(root: string, options: UsageOptions, deps: UsageDepe
 			evidence: exported,
 			pulls: all,
 			waits: deps.waits(since),
+			calls: deps.calls(since),
 			since,
 			split: deps.split,
 		});
@@ -1329,6 +1410,7 @@ export function usageLines(report: Usage): string[] {
 			lines.push(`  implementer: ${i.harness}, ${i.model}, ${i.effort} effort${notes ? ` (${notes})` : ""}`);
 		}
 		for (const item of row.unread) lines.push(`  unread: ${item}`);
+		if (row.unreadReview) lines.push(`  unread review: ${row.unreadReview}`);
 		for (const r of row.review)
 			lines.push(
 				`  review: ${r.harness}, ${r.model}, ${r.effort} effort${r.shadow ? ", shadow" : ""}; ${r.round === null ? "not in the latest run" : `round ${r.round}, score ${r.score ?? "-"}/10`}; ${r.tally === null ? "no tally" : `rounds ${r.tally.rounds}, ${findingsText(r.tally)}`}`,
@@ -1498,6 +1580,7 @@ export function usageDependencies(github: ClaimDependencies): UsageDependencies 
 		...github,
 		sessions: runTokenMax,
 		waits: (since) => readWaits(since),
+		calls: (since) => readCalls(since),
 		split: (session, waits, since) => keptSplit(state, session, waits, since),
 	};
 }

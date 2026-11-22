@@ -12,7 +12,6 @@ import { PREFIX, type SkillDir } from "../core";
 import guide from "../../assets/AGENTS.md";
 import context from "../../assets/CONTEXT.md";
 import afk from "../../assets/skills/afk.md";
-import audit from "../../assets/skills/audit.md";
 import complete from "../../assets/skills/complete.md";
 import del from "../../assets/skills/delete.md";
 import exportSkill from "../../assets/skills/export.md";
@@ -170,7 +169,6 @@ export function compose(skills: readonly Skill[]): string {
 /** Every skill, sorted by name. */
 export const SKILLS: readonly Skill[] = Object.entries({
 	afk,
-	audit,
 	complete,
 	delete: del,
 	export: exportSkill,

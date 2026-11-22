@@ -4,9 +4,15 @@
 // The plan touches only skill stubs (writing missing or outdated ones and
 // removing those of retired skills), one reference line in the root agent
 // instructions, one `.gitattributes` line, and `quest/README.md` when missing.
+// A second plan (`planAudits`) adds a stub per shipped audit no quest names
+// and the root does not skip, with the milestone it goes in. It never edits a
+// quest, so a planted stub is the repository's from then on.
 // It writes no Claude Code hooks: Quest's hooks are a user-level opt-in
 // (`quest setup`), since a repository's settings would force them on every
 // contributor.
+
+import { AUDITS, type Audit, covered } from "./audit";
+import { type Doc, has, holds, isQuest, parse } from "./doc";
 
 /** Installed skills carry this prefix so they don't collide with a repository's own. */
 export const PREFIX = "quest-";
@@ -143,6 +149,89 @@ export function planInit(repo: Checkout, stubs: readonly Stub[], options: { goal
 		if (content !== null) changes.push({ path, content });
 	}
 	return changes;
+}
+
+/**
+ * The stubs for every shipped audit no quest names and the root README does
+ * not skip, with any milestone they need. Each first run waits for the work
+ * under way: it goes in m(N+1), creating it when missing, with `Required` on
+ * the lowest open milestone mN. Where no milestone is open, nothing is under
+ * way to wait for, and a link to a finished milestone would fail `quest
+ * check`, so the stubs go in m(N+1) after the lowest milestone, m0 created
+ * when there is none, and are ready at once.
+ */
+export function planAudits(repo: Checkout): InitChange[] {
+	const docs = questDocs(repo);
+	const done = covered(docs, "quest/README.md");
+	const missing = AUDITS.filter((audit) => !done.has(audit.name));
+	if (missing.length === 0) return [];
+
+	const milestones = new Map<number, Doc>();
+	for (const doc of docs) {
+		const match = /^quest\/m(0|[1-9]\d*)\/README\.md$/.exec(doc.path);
+		if (match) milestones.set(Number(match[1]), doc);
+	}
+	const open = [...milestones]
+		.filter(([, milestone]) => has(milestone, "Required") || docs.some((d) => holds(milestone.path, d.path)))
+		.map(([number]) => number);
+	const after = open.length > 0 ? Math.min(...open) : milestones.size > 0 ? Math.min(...milestones.keys()) : 0;
+	const next = after + 1;
+
+	const changes: InitChange[] = [];
+	for (const [number, content] of [
+		[after, milestoneReadme(after)],
+		[next, milestoneReadme(next)],
+	] as const) {
+		const path = `quest/m${number}/README.md`;
+		if (milestones.has(number)) continue;
+		checkPath(repo, path, "file");
+		if (repo.lstat(path) !== null) refuse(path, "is not a quest document");
+		// Its branch, `quest/mN`, cannot exist beside the milestone's.
+		if (repo.lstat(`quest/m${number}.md`) !== null)
+			refuse(`quest/m${number}.md`, `is in the way of milestone m${number}, which an audit's stub needs`);
+		changes.push({ path, content });
+	}
+	for (const audit of missing) {
+		const path = `quest/m${next}/audit-${audit.name}.md`;
+		checkPath(repo, path, "file");
+		// No quest names the audit, so whatever sits here is other work, and its branch would nest a stub's.
+		for (const taken of [path, path.slice(0, -".md".length)])
+			if (repo.lstat(taken) !== null)
+				refuse(taken, `is in the way of the \`${audit.name}\` audit's stub, which no quest names`);
+		changes.push({ path, content: auditStub(audit, open.length > 0 ? after : null) });
+	}
+	return changes;
+}
+
+/** A milestone README `quest init` creates for a stub to sit in, with a one-line Goal. */
+function milestoneReadme(number: number): string {
+	return number === 0
+		? "# Now\n\n## Goal\n\nThe work under way now.\n"
+		: `# After m${number - 1}\n\n## Goal\n\nThe work that follows m${number - 1}.\n`;
+}
+
+/** A planted audit stub: the audit's title and name, a Goal pointing at its definition, and the milestone it waits for. */
+function auditStub(audit: Audit, after: number | null): string {
+	const required =
+		after === null ? "" : `\n## Required\n\n- [m${after}](/quest/m${after}/README.md) - the audit runs after it\n`;
+	return (
+		`# ${audit.title}\n\n## Goal\n\nRun the \`${audit.name}\` audit: \`quest audit ${audit.name}\` prints what it ` +
+		`checks, what each finding becomes, and how to plan its next run.\n\n## Audit\n\n- ${audit.name}\n${required}`
+	);
+}
+
+/** Every quest document under `quest/`, as `quest check` collects them: symlinked files are read, symlinked directories skipped. */
+function questDocs(repo: Checkout): Doc[] {
+	const docs: Doc[] = [];
+	const walk = (dir: string) => {
+		for (const name of repo.list(dir)) {
+			const path = `${dir}/${name}`;
+			if (repo.lstat(path) === "dir") walk(path);
+			else if (isQuest(path) && repo.stat(path) === "file") docs.push(parse(path, repo.read(path)));
+		}
+	};
+	if (repo.stat("quest") === "dir") walk("quest");
+	return docs;
 }
 
 /** Check an install destination and its parents before any writes, following valid symlinks. */

@@ -1,233 +1,10 @@
 import { describe, expect, test } from "vitest";
 
-import type { GitHubDependencies } from "../src/github/client";
+import { GitHubReader } from "../src/github/client";
 import { main } from "../src/cli/main";
 import { statusLines } from "../src/cli/status";
-import { pullRequestStatus } from "../src/github/status";
-
-const A = "a".repeat(40);
-const B = "b".repeat(40);
-const pr = { owner: "example", repo: "project", number: 1 };
-const URL_ = "https://github.com/example/project/pull/1";
-
-type Node = Record<string, unknown>;
-const page = (nodes: Node[], next?: string) => ({
-	pageInfo: { hasNextPage: next !== undefined, endCursor: next ?? null },
-	nodes,
-});
-
-/** A recorded GraphQL response; omitted connections stand for ones the query skipped. */
-const CI = ".github/workflows/ci.yml";
-
-function pull(
-	fields: {
-		head?: string;
-		checks?: ReturnType<typeof page> | null;
-		reviews?: ReturnType<typeof page>;
-		threads?: ReturnType<typeof page>;
-		reactions?: Node[];
-	} & Node = {},
-) {
-	const { head = A, checks, reviews, threads, reactions = [], ...rest } = fields;
-	return {
-		data: {
-			repository: {
-				pullRequest: {
-					id: "PR_1",
-					url: URL_,
-					body: "Summary.",
-					updatedAt: "2026-10-07T12:00:00Z",
-					baseRefName: "main",
-					baseRefOid: "b".repeat(40),
-					headRefName: "quest/m0/example",
-					isMergeQueueEnabled: false,
-					labels: { nodes: [] },
-					state: "OPEN",
-					isDraft: false,
-					headRefOid: head,
-					mergeable: "MERGEABLE",
-					mergeStateStatus: "BLOCKED",
-					reviewDecision: "REVIEW_REQUIRED",
-					autoMergeRequest: null,
-					mergeQueueEntry: null,
-					timelineItems: { nodes: [] },
-					reactions: { nodes: reactions },
-					commits: {
-						nodes: [
-							{
-								commit: {
-									oid: head,
-									statusCheckRollup:
-										checks === null
-											? null
-											: { state: "FAILURE", ...(checks ? { contexts: checks } : {}) },
-								},
-							},
-						],
-					},
-					...(reviews ? { reviews } : {}),
-					...(threads ? { reviewThreads: threads } : {}),
-					...rest,
-				},
-			},
-		},
-	};
-}
-
-function run(name: string, status: string, conclusion: string | null, isRequired: boolean) {
-	return {
-		__typename: "CheckRun",
-		name,
-		status,
-		conclusion,
-		detailsUrl: `https://github.com/example/project/actions/runs/1/job/${name}`,
-		isRequired,
-	};
-}
-
-function review(login: string, state: string, commit: string | null, id: number, reactions: Node[] = []) {
-	return {
-		author: { login },
-		state,
-		submittedAt: `2026-10-07T12:0${id}:00Z`,
-		url: `${URL_}#pullrequestreview-${id}`,
-		commit: commit === null ? null : { oid: commit },
-		reactions: { nodes: reactions },
-	};
-}
-
-function thread(id: string, isResolved: boolean, line: number | null = 3, author = "reviewer") {
-	return {
-		id,
-		isResolved,
-		isOutdated: line === null,
-		path: "src/a.ts",
-		line,
-		originalLine: 2,
-		comments: { nodes: [{ author: { login: author }, url: `${URL_}#discussion_r${id}` }] },
-	};
-}
-
-function setup(
-	bodies: unknown[],
-	options: {
-		now?: number;
-		holdFields?: Node;
-		eventPages?: { rows: Node[]; next?: string }[];
-		/** Pages of the head repository's activity, newest first. */
-		activity?: { rows: Node[]; next?: string; status?: number }[];
-		warnings?: string[];
-		/** The base-to-head diff per compared head, or the status GitHub refuses it with. */
-		diffs?: Record<string, string | number>;
-		/** The PR's reviews, threads, and comments as the signal reader reads them; none by default. */
-		signals?: Node;
-		/** The base's active ruleset rules. */
-		rules?: Node[];
-		/** The base branch is gone, so reading it fails. */
-		noBase?: boolean;
-		/** The head's workflow runs, as `GET /actions/runs` lists them. */
-		runs?: Node[];
-	} = {},
-) {
-	const queries: Record<string, unknown>[] = [];
-	const texts: string[] = [];
-	const holdQueries: Record<string, unknown>[] = [];
-	const eventRequests: string[] = [];
-	let last: ReturnType<typeof pull> | undefined;
-	const eventPages = [...(options.eventPages ?? [])];
-	const activityPages = [...(options.activity ?? [])];
-	const activityRequests: string[] = [];
-	const deps: GitHubDependencies = {
-		token: "test-token",
-		now: () => options.now ?? 0,
-		sleep: async () => {},
-		warn: (message) => options.warnings?.push(message),
-		fetch: async (url, init) => {
-			const path = new URL(String(url));
-			if (path.pathname === "/repos/fork/project/activity") {
-				activityRequests.push(`${path.pathname}${path.search}`);
-				const page = activityPages.shift();
-				if (!page) return Response.json({ message: "Not Found" }, { status: 404 });
-				if (page.status === 403)
-					return Response.json({ message: "Resource not accessible by integration" }, { status: 403 });
-				return Response.json(page.rows, { headers: page.next ? { Link: `<${page.next}>; rel="next"` } : {} });
-			}
-			// Ruleset workflows name their repository by ID: 1 is this one, 2 another.
-			if (path.pathname === "/repositories/1") return Response.json({ full_name: "example/project" });
-			if (path.pathname === "/repositories/2") return Response.json({ full_name: "example/policies" });
-			if (path.pathname === "/repos/example/project/branches/main")
-				return options.noBase
-					? Response.json({ message: "Branch not found" }, { status: 404 })
-					: Response.json({ protection: { enabled: false } });
-			if (path.pathname === "/repos/example/project/rules/branches/main")
-				return Response.json(options.rules ?? []);
-			if (path.pathname === "/repos/example/project/actions/runs") {
-				if (!options.runs) throw new Error("unexpected workflow run request");
-				return Response.json({ total_count: options.runs.length, workflow_runs: options.runs });
-			}
-			const compare = /^\/repos\/example\/project\/compare\/main\.\.\.([0-9a-f]{40})$/.exec(path.pathname);
-			if (compare) {
-				expect(new Headers(init?.headers).get("Accept")).toBe("application/vnd.github.diff");
-				const diff = options.diffs?.[compare[1]!];
-				if (diff === undefined) throw new Error("unexpected compare request");
-				return typeof diff === "number"
-					? Response.json({ message: "No diff" }, { status: diff })
-					: new Response(diff);
-			}
-			if (path.pathname !== "/graphql") {
-				expect(path.pathname).toBe("/repos/example/project/issues/1/events");
-				eventRequests.push(String(url));
-				const page = eventPages.shift();
-				if (!page) throw new Error("unexpected event request");
-				return Response.json(page.rows, { headers: page.next ? { Link: `<${page.next}>; rel="next"` } : {} });
-			}
-			const request = JSON.parse(String(init?.body));
-			if (request.query.includes("p1: pullRequest(number: 1)")) {
-				if (!last) throw new Error("signals read before PR state");
-				const head = last.data.repository.pullRequest.headRefOid;
-				const empty = { pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] };
-				return Response.json({
-					data: {
-						repository: {
-							p1: {
-								headRefOid: head,
-								commits: { nodes: [{ commit: { oid: head, committedDate: "2026-10-16T00:00:00Z" } }] },
-								reviews: empty,
-								reviewThreads: empty,
-								comments: empty,
-								...options.signals,
-							},
-						},
-					},
-				});
-			}
-			if (request.query.includes("query HoldOwnership(")) {
-				holdQueries.push(request.variables);
-				if (!last) throw new Error("ownership read before PR state");
-				const row = last.data.repository.pullRequest;
-				const events = (row.timelineItems as { nodes: Node[] }).nodes.filter((event) =>
-					["LabeledEvent", "AutoMergeEnabledEvent", "AddedToMergeQueueEvent"].includes(
-						String(event.__typename),
-					),
-				);
-				return Response.json({
-					data: {
-						repository: {
-							pullRequest: { ...row, timelineItems: { nodes: events }, ...options.holdFields },
-						},
-					},
-				});
-			}
-			queries.push(request.variables);
-			texts.push(request.query);
-			const body = bodies.shift();
-			if (body === undefined) throw new Error("unexpected request");
-			last = body as ReturnType<typeof pull>;
-			return Response.json(body);
-		},
-	};
-	return { deps, queries, texts, holdQueries, eventRequests, activityRequests };
-}
+import { pullRequestStatus, requiredOf } from "../src/github/status";
+import { A, B, pr, URL_, type Node, page, CI, pull, run, review, thread, setup } from "./status-fakes";
 
 test("reports checks by requiredness, each reviewer's latest review against the head, and open threads", async () => {
 	const fixture = setup(
@@ -607,6 +384,54 @@ test("a required check or workflow nothing reports is pending, except the gate's
 	// With no checks on the head at all, the requirements still leave it pending.
 	const empty = setup([pull({ checks: null, reviews: page([]), threads: page([]) })], { rules });
 	expect((await pullRequestStatus(pr, empty.deps)).checks.state).toBe("pending");
+});
+
+test("a base's requirements read once give the status a read of its own would, and another base's are refused", async () => {
+	const rules = [
+		{ type: "required_status_checks", parameters: { required_status_checks: [{ context: "lint" }] } },
+		{ type: "workflows", parameters: { workflows: [{ path: ".github/workflows/pr.yml", repository_id: 1 }] } },
+	];
+	const body = () =>
+		pull({ checks: page([run("test", "COMPLETED", "SUCCESS", false)]), reviews: page([]), threads: page([]) });
+	/** The fixture, recording each request for the base's rules. */
+	const counted = () => {
+		const fixture = setup([body()], { rules });
+		const reads: string[] = [];
+		const fetch = fixture.deps.fetch;
+		fixture.deps.fetch = (url, init) => {
+			const path = new URL(String(url)).pathname;
+			if (/\/(branches|rules\/branches|repositories)\//.test(path)) reads.push(path);
+			return fetch(url, init);
+		};
+		return { deps: fixture.deps, reads };
+	};
+	const own = counted();
+	const expected = await pullRequestStatus(pr, own.deps);
+	expect(own.reads).not.toEqual([]);
+
+	const shared = counted();
+	const needs = await requiredOf(new GitHubReader(shared.deps), pr, "main");
+	const before = shared.reads.length;
+	expect(await pullRequestStatus(pr, shared.deps, { ...pr, branch: "main", needs })).toEqual(expected);
+	expect(shared.reads).toHaveLength(before);
+	expect(expected.checks.pending.map((check) => check.name)).toEqual([
+		"lint",
+		"example/project:.github/workflows/pr.yml",
+	]);
+
+	// The PR moved to another base after its requirements were read.
+	await expect(pullRequestStatus(pr, counted().deps, { ...pr, branch: "release", needs })).rejects.toThrow(
+		"the PR's base is main, not the release whose requirements were read",
+	);
+	// Another repository's requirements are refused, whatever their branch; names ignore case.
+	const other = counted();
+	await expect(
+		pullRequestStatus(pr, other.deps, { owner: "example", repo: "policies", branch: "main", needs }),
+	).rejects.toThrow("the requirements passed for example/project#1 were read for example/policies");
+	expect(other.reads).toEqual([]);
+	expect(
+		await pullRequestStatus(pr, counted().deps, { owner: "Example", repo: "Project", branch: "main", needs }),
+	).toEqual(expected);
 });
 
 test("a required check from another app than its requirement names stays pending, and a closed PR reads no requirements", async () => {
@@ -1122,5 +947,91 @@ describe("checkpoint", () => {
 			author: { __typename: "User", login: "alice" },
 		}));
 		expect(await line(person)).toEqual([]);
+	});
+});
+
+describe("duplicate quests", () => {
+	const other = "https://github.com/example/project/pull/2";
+	const third = "https://github.com/example/project/pull/3";
+	const files = (paths: [string, string][], more = false) => ({
+		pageInfo: { hasNextPage: more },
+		nodes: paths.map(([path, changeType]) => ({ path, changeType })),
+	});
+
+	test("reports each quest the PR adds that another open PR adds at its path or under its title", async () => {
+		const body = pull({ checks: null, reviews: page([]), threads: page([]) });
+		const status = await pullRequestStatus(
+			pr,
+			setup([body], {
+				open: {
+					pulls: [
+						{
+							number: 1,
+							url: URL_,
+							headRefOid: A,
+							files: files([
+								["quest/m0/hang.md", "ADDED"],
+								["quest/m1/fips.md", "ADDED"],
+								["quest/m0/edited.md", "MODIFIED"],
+								["quest/AGENTS.md", "ADDED"],
+								["src/a.ts", "ADDED"],
+							]),
+						},
+						{
+							number: 2,
+							url: other,
+							headRefOid: B,
+							files: files([
+								["quest/m0/hang.md", "ADDED"],
+								["quest/m0/edited.md", "ADDED"],
+							]),
+						},
+						{
+							number: 3,
+							url: third,
+							headRefOid: "c".repeat(40),
+							// Over 100 files, so REST lists them.
+							files: files([["quest/m0/edited.md", "MODIFIED"]], true),
+						},
+					],
+					files: {
+						3: [
+							{ filename: "quest/m0/fips-hang.md", status: "added" },
+							{ filename: "quest/m0/edited.md", status: "modified" },
+						],
+					},
+					blobs: {
+						[`${A}:quest/m0/hang.md`]: "# [S] Dart iOS hang\n\n## Goal\n\nx\n",
+						[`${A}:quest/m1/fips.md`]: "# [M] Fix the  FIPS fork-test hang\n\n## Goal\n\nx\n",
+						[`${B}:quest/m0/hang.md`]: "# [S] Something else\n\n## Goal\n\nx\n",
+						[`${B}:quest/m0/edited.md`]: "# [S] Edited\n\n## Goal\n\nx\n",
+						[`${"c".repeat(40)}:quest/m0/fips-hang.md`]:
+							"# [S] fix the fips fork-test hang\n\n## Goal\n\nx\n",
+					},
+				},
+			}).deps,
+		);
+		expect(status.duplicates).toEqual([
+			{ path: "quest/m0/hang.md", url: other, other: "quest/m0/hang.md" },
+			{ path: "quest/m1/fips.md", url: third, other: "quest/m0/fips-hang.md" },
+		]);
+		expect(statusLines(status).filter((line) => line.startsWith("duplicate "))).toEqual([
+			`duplicate quest/m0/hang.md ${other} quest/m0/hang.md`,
+			`duplicate quest/m1/fips.md ${third} quest/m0/fips-hang.md`,
+		]);
+	});
+
+	test("a PR that adds no quest reads no titles, and a closed one reads no open PRs", async () => {
+		const open = {
+			pulls: [
+				{ number: 1, url: URL_, headRefOid: A, files: files([["quest/m0/a.md", "MODIFIED"]]) },
+				{ number: 2, url: other, headRefOid: B, files: files([["quest/m0/a.md", "ADDED"]]) },
+			],
+		};
+		const body = pull({ checks: null, reviews: page([]), threads: page([]) });
+		expect((await pullRequestStatus(pr, setup([body], { open }).deps)).duplicates).toEqual([]);
+		const closed = pull({ checks: null, reviews: page([]), threads: page([]), state: "CLOSED" });
+		const opened = { pulls: [{ ...open.pulls[0]!, files: files([["quest/m0/a.md", "ADDED"]]) }, open.pulls[1]!] };
+		expect((await pullRequestStatus(pr, setup([closed], { open: opened }).deps)).duplicates).toEqual([]);
 	});
 });

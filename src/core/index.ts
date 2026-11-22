@@ -33,6 +33,7 @@ export {
 	type Size,
 	size,
 } from "./doc";
+export { AUDIT, AUDITS, type Audit, SKIPPED, auditOf, covered, skippedOf } from "./audit";
 export { type ClosedPull, handBackWaits, handedBack, landed, withoutHandBack } from "./claim";
 export { reviewSection } from "./review";
 export {
@@ -80,10 +81,11 @@ export {
 	installedStubs,
 	lines,
 	newline,
+	planAudits,
 	planInit,
 	questReadme,
 } from "./init";
-export { type Chunk, type Clean, type Conflict, LABELS, chunks, render, resolveLists } from "./merge";
+export { type Chunk, type Clean, type Conflict, LABELS, merge, render, resolveLists } from "./merge";
 
 export {
 	HOLD_PREFIX,
@@ -103,13 +105,17 @@ export {
 	breakageKey,
 	parseBreakage,
 } from "./breakage";
+export { COMMAND_LIMIT, type Runs, argvName, commandName, isCommandName } from "./command";
 export {
+	type GatedRun,
 	type ModelSpend,
 	type RecordUpload,
 	ROLES,
 	type Role,
 	type SessionRecord,
 	type SessionWait,
+	type ShellCall,
+	type ShellGroup,
 	SPLIT_CATEGORIES,
 	type SplitCategory,
 	type SplitUsage,
@@ -120,3 +126,50 @@ export {
 	parseRecord,
 	parseUpload,
 } from "./record";
+export {
+	type Answer,
+	type Check,
+	type Claim,
+	type ClaimSource,
+	type Comment,
+	type ClaimSources,
+	type Duplicate,
+	FORGE_CALLS,
+	type Forge,
+	type ForgeCall,
+	type ForgeCalls,
+	type ForgeInfo,
+	type HoldFact,
+	type Holdings,
+	InputError,
+	Refusal,
+	type ForgeWrites,
+	type Hold,
+	type Method,
+	type Opening,
+	type Pick,
+	FORGE_READS,
+	FORGE_WRITES,
+	type OpenPull,
+	type PostedReview,
+	type PullFiles,
+	type PullRequest,
+	type PullView,
+	type Reaction,
+	type Repository,
+	type Review,
+	type ReviewRecord,
+	type ReviewThread,
+	type Signal,
+	type StarterHold,
+	type Status,
+	type Thread,
+	type WaitEvent,
+	type Watch,
+	type WatchOptions,
+	type WatchPoll,
+	forgeJson,
+	parseForgeAnswer,
+	parseForgeInfo,
+	parseForgeRequest,
+} from "./forge";

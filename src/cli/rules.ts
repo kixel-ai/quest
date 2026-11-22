@@ -7,8 +7,11 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 
-import { REFERENCE_MARKER, lines } from "../core";
+import { REFERENCE_MARKER, type Repository, lines } from "../core";
+import { hostedRepository } from "./forge";
+import { readRemote, remoteHost } from "./github";
 import { parse } from "./shell";
+import { kixelUrl } from "./tokens";
 
 const EM_DASH = String.fromCharCode(0x2014);
 
@@ -24,6 +27,7 @@ export const RULES = {
 	rewrite:
 		"Never rebase or force-push, even a branch only you hold; merge the base instead, when the branch conflicts with it or a landing step refuses the head.",
 	tmp: "Put scratch files, such as PR bodies, logs, patches, helper scripts, and temporary clones, in the checkout's `.tmp/`, never `/tmp`, so they disappear with the worktree.",
+	kixel: "On a repository Kixel Quest hosts, `gh` cannot reach its PRs: use `quest pr view`, `list`, `create`, `edit`, `comment`, and `resolve`, and `quest status`, `ready`, and `merge`.",
 } as const;
 
 /**
@@ -116,9 +120,9 @@ export interface ToolCall {
 	cwd: string;
 }
 
-/** The rules `call` breaks, each said once, in the order of `RULES`. */
-export function broken(call: ToolCall): string[] {
-	const state = check(call.cwd);
+/** The rules `call` breaks, each said once, in the order of `RULES`; `env` names the Kixel Quest a remote may be on. */
+export function broken(call: ToolCall, env: NodeJS.ProcessEnv = process.env): string[] {
+	const state = check(call.cwd, env);
 	const { found, scratch } = state;
 	const text = (key: string) => (typeof call.input[key] === "string" ? (call.input[key] as string) : undefined);
 	const path = text("file_path");
@@ -150,7 +154,13 @@ export function broken(call: ToolCall): string[] {
 	}
 	return (Object.keys(RULES) as Rule[])
 		.filter((key) => found.has(key))
-		.map((key) => (key === "rewrite" ? RULES[key] + ASKED : RULES[key]));
+		.map((key) =>
+			key === "rewrite"
+				? RULES[key] + ASKED
+				: key === "kixel" && state.instead
+					? `${RULES[key]} Run \`${state.instead}\` instead.`
+					: RULES[key],
+		);
 }
 
 /** Em dashes outside `>` quote lines. */
@@ -176,14 +186,33 @@ interface Check {
 	 * A `$TMPDIR` path is unknown, since `TMPDIR` may name the checkout itself.
 	 */
 	scratch: (path: string) => boolean;
+	/** The hook's environment, which names the Kixel Quest a remote may be on. */
+	env: NodeJS.ProcessEnv;
+	/** The repository Kixel Quest hosts that the checkout's origin names, or null; read from git on first use. */
+	hosted: () => Repository | null;
+	/** The `quest` command to run in place of a denied `gh` call, when one does what it asked. */
+	instead?: string;
 }
 
-function check(cwd: string): Check {
+function check(cwd: string, env: NodeJS.ProcessEnv): Check {
 	const root = checkoutRoot(cwd);
+	let hosted: Repository | null | undefined;
 	return {
 		found: new Set(),
 		cwd,
+		env,
 		scratch: (path) => /^\/tmp(\/|$)/.test(path) && !`${path}/`.startsWith(`${root}/`),
+		hosted: () => {
+			if (hosted !== undefined) return hosted;
+			let origin = null;
+			try {
+				origin = readRemote(cwd, "origin");
+			} catch {
+				// Not a checkout, so gh has no repository of its own to reach either.
+			}
+			const host = origin === null ? null : remoteHost(origin, (url) => hostedRepository(kixelUrl(env), url));
+			return (hosted = host?.forge === "kixel" ? host.repository : null);
+		},
 	};
 }
 
@@ -269,19 +298,38 @@ function dropOptions(args: string[]): string[] {
 }
 
 /**
+ * Ends each word, or each value cut from one, whose text the shell expands. No argument can hold it, since the
+ * kernel passes each as a NUL-terminated string.
+ */
+const OPAQUE = "\0";
+
+/** `word`'s text, or `undefined` when the shell expands it, so only the shell knows it. */
+function literal(word: string): string | undefined {
+	return word.endsWith(OPAQUE) ? undefined : word;
+}
+
+/**
  * Check each simple command in a shell command line, following `sh -c` into
  * its script, which inherits the assignments in `inherited`. A body file is
  * read from disk only for a command that is `alone` on its line: after
  * another command, it may hold something else by the time the line posts it.
  */
-function shell(line: string, check: Check, inherited: ReadonlySet<string> = new Set(), alone = true) {
+function shell(
+	line: string,
+	check: Check,
+	inherited: ReadonlySet<string> = new Set(),
+	alone = true,
+	elsewhere = false,
+) {
 	const { found, scratch } = check;
 	const commands = parse(line);
 	alone &&= commands.length === 1 && !commands[0]!.runs;
 	for (const simple of commands) {
+		// From a `cd` on, gh may run in another checkout than the one the hook reads.
+		elsewhere ||= ["cd", "pushd", "popd"].includes(simple.argv[0] ?? "");
 		const env = new Set(inherited);
-		const words = [...simple.argv];
-		const argv = unwrap(simple.argv, env);
+		const words = simple.argv.map((word, i) => (simple.expanded?.includes(i) ? `${word}${OPAQUE}` : word));
+		const argv = unwrap([...words], env);
 		for (const { op, target } of simple.redirects)
 			if ([">", ">>", ">|", "&>", "&>>"].includes(op) && scratch(target)) found.add("tmp");
 		if (argv === null) continue;
@@ -290,7 +338,9 @@ function shell(line: string, check: Check, inherited: ReadonlySet<string> = new 
 		const moved = words.slice(0, words.length - argv.length).some((word) => /^(-C|--chdir)/.test(word));
 		if (["bash", "sh", "zsh", "dash"].includes(name!)) {
 			const flag = args.findIndex((arg) => /^-[a-z]*c[a-z]*$/.test(arg));
-			if (flag !== -1 && args[flag + 1] !== undefined) shell(args[flag + 1]!, check, env, alone && !moved);
+			// The script's own parse finds its expansions.
+			if (flag !== -1 && args[flag + 1] !== undefined)
+				shell(args[flag + 1]!.replace(/\0$/, ""), check, env, alone && !moved, elsewhere || moved);
 			continue;
 		}
 		const asked = env.has(USER_ASKED);
@@ -306,14 +356,22 @@ function shell(line: string, check: Check, inherited: ReadonlySet<string> = new 
 			fed === undefined ? here : simple.stdin === undefined ? from(fed.target, fed.expanded) : undefined;
 		const input = (file: string) =>
 			STDIN.has(file) ? stdin() : /^\/(dev|proc)\//.test(file) ? undefined : from(file);
-		const literal = (value: string) => (simple.expanded?.some((word) => word.endsWith(value)) ? undefined : value);
 		if (name === "tee") {
 			if (args.some((arg) => !arg.startsWith("-") && scratch(arg))) found.add("tmp");
 		} else if (name === "mkdir") {
 			if (positionals(args, new Set(["-m", "--mode"])).some(scratch)) found.add("tmp");
 		} else if (name === "mktemp") mktemp(args, env, check);
 		else if (name === "git") git(args, asked, input, check);
-		else if (name === "gh") gh(args, input, literal, check);
+		else if (name === "gh") {
+			const command = ghCommand(args);
+			gh(command, input, check);
+			if (!elsewhere && !moved) kixel({ args: command, env }, check);
+		}
+		// `quest pr` posts as `gh pr` does, to GitHub or Kixel Quest, with the same flags, after any `--root`.
+		else if (name === "quest") {
+			const command = questCommand(args);
+			if (command[0] === "pr") gh(command, input, check);
+		}
 	}
 }
 
@@ -462,7 +520,209 @@ function values(args: string[], names: string[], { attached = [] as string[] } =
 	return found;
 }
 
-/** `gh` subcommands that post text, by group and command, and whether each authors a new post. */
+/**
+ * `gh`'s arguments with any `-R`/`--repo` before `gh pr`'s or `gh issue`'s subcommand moved after it, where the
+ * checks look: the flag is persistent there, so `gh pr -R OWNER/REPO view 3` is `gh pr view -R OWNER/REPO 3`.
+ */
+function ghCommand(args: string[]): string[] {
+	const [group, ...rest] = args;
+	if (group !== "pr" && group !== "issue") return args;
+	let i = 0;
+	while (rest[i] === "-R" || rest[i] === "--repo" || /^(-R.|--repo=)/.test(rest[i] ?? ""))
+		i += rest[i] === "-R" || rest[i] === "--repo" ? 2 : 1;
+	if (i === 0 || i >= rest.length) return args;
+	return [group, rest[i]!, ...rest.slice(0, i), ...rest.slice(i + 1)];
+}
+
+/** `quest`'s arguments past its global options: `--root <path>` or `--root=<path>`. */
+function questCommand(args: string[]): string[] {
+	let i = 0;
+	while (args[i] === "--root" || args[i]?.startsWith("--root=")) i += args[i] === "--root" ? 2 : 1;
+	return args.slice(i);
+}
+
+/** The `quest` command doing what a `gh pr` subcommand does, on a repository Kixel Quest hosts. */
+const QUEST_PR: Record<string, string> = {
+	view: "quest pr view",
+	list: "quest pr list",
+	create: "quest pr create",
+	edit: "quest pr edit",
+	comment: "quest pr comment",
+	review: "quest pr comment",
+	checks: "quest status",
+	status: "quest status",
+	ready: "quest ready",
+	merge: "quest merge",
+};
+
+/**
+ * `gh pr` options that take the next word, so a URL in one, such as a body, is not taken for the PR. Short forms that
+ * are a boolean in another subcommand, such as `review -a` and `merge -r`, `-m`, and `-s`, are left out: their values
+ * there, an assignee, reviewer, milestone, or state, are never a URL.
+ */
+const PR_VALUE_OPTIONS = new Set([
+	"-R",
+	"--repo",
+	"-b",
+	"--body",
+	"-F",
+	"--body-file",
+	"-t",
+	"--title",
+	"--subject",
+	"-T",
+	"--template",
+	"-B",
+	"--base",
+	"-H",
+	"--head",
+	"--assignee",
+	"-A",
+	"--author",
+	"-l",
+	"--label",
+	"--milestone",
+	"-p",
+	"--project",
+	"--reviewer",
+	"-q",
+	"--jq",
+	"--json",
+	"-S",
+	"--search",
+	"--state",
+	"-L",
+	"--limit",
+	"--app",
+	"--add-assignee",
+	"--remove-assignee",
+	"--add-label",
+	"--remove-label",
+	"--add-reviewer",
+	"--remove-reviewer",
+	"--add-project",
+	"--remove-project",
+	"--match-head-commit",
+	"--author-email",
+	"--color",
+]);
+
+/** `gh api` options that take the next word. */
+const API_VALUE_OPTIONS = new Set([
+	"-X",
+	"--method",
+	"-f",
+	"--raw-field",
+	"-F",
+	"--field",
+	"-H",
+	"--header",
+	"--hostname",
+	"-q",
+	"--jq",
+	"-t",
+	"--template",
+	"--input",
+	"--cache",
+	"-p",
+	"--preview",
+]);
+
+/** A `gh` call: its arguments and the line's assignments. */
+interface GhCall {
+	args: string[];
+	env: ReadonlySet<string>;
+}
+
+/** gh's placeholders for the base repository's owner and name, which it fills in an endpoint or a `-F` field. */
+const PLACEHOLDER = /\{(owner|repo)\}|:(owner|repo)\b/g;
+
+/**
+ * Deny a `gh pr` or `gh api` call aimed at the repository the checkout's origin names on Kixel Quest, which gh
+ * cannot reach: one that names no repository, so gh takes the checkout's, or names that one. A call naming another
+ * repository, or none the line settles, such as `gh api graphql` or `gh pr view "$URL"`, passes. The line's
+ * `GH_REPO` assignment wins over the process's own.
+ */
+function kixel({ args, env }: GhCall, check: Check) {
+	const [group, command, ...rest] = args;
+	if ((group !== "pr" && group !== "api") || args.some((arg) => arg === "--help" || arg === "-h")) return;
+	const assigned = [...env].filter((each) => each.startsWith("GH_REPO=")).at(-1);
+	if (assigned !== undefined && literal(assigned) === undefined) return;
+	const ghRepo =
+		assigned === undefined ? check.env.GH_REPO || undefined : assigned.slice("GH_REPO=".length) || undefined;
+	// Whether the shell expands any of `words`, so only it knows which repository they name.
+	const opaque = (...words: (string | undefined)[]) =>
+		words.some((word) => word !== undefined && literal(word) === undefined);
+	// The repository the call names, or null for the checkout's.
+	let named: string | null;
+	if (group === "pr") {
+		const flag = values(rest, ["-R", "--repo"], { attached: ["-R"] }).at(-1);
+		const selectors = positionals(rest, PR_VALUE_OPTIONS);
+		if (opaque(flag, ...selectors)) return;
+		const url = selectors.find((arg) => /^https?:\/\//.test(arg));
+		// A PR URL names its repository before `--repo` or `GH_REPO` do.
+		named = url ?? flag ?? ghRepo ?? null;
+	} else {
+		const words = [command ?? "", ...rest];
+		const endpoint = positionals(words, API_VALUE_OPTIONS)[0];
+		const host = values(words, ["--hostname"]).at(-1);
+		const fields = values(words, ["-F", "--field"], { attached: ["-F"] });
+		if (endpoint === undefined || opaque(endpoint, host)) return;
+		const placeholders = [endpoint, ...fields].some((word) => word.search(PLACEHOLDER) !== -1);
+		// gh fills placeholders from `GH_REPO`, or else the checkout's repository: on Kixel Quest, it fails there.
+		if (placeholders && ghRepo === undefined) named = null;
+		else {
+			const [owner, repo] = ghRepo?.split("/").slice(-2) ?? [];
+			// `--hostname` picks the host the repository is on; filled placeholders also carry `GH_REPO`'s own.
+			const on =
+				host ?? (placeholders ? /^(?:[a-z]+:\/\/)?([^/]+)\/[^/]+\/[^/]+$/i.exec(ghRepo!)?.[1] : undefined);
+			const at = (slug: string) => (on === undefined ? slug : `${on}/${slug}`);
+			const path = endpoint.replace(PLACEHOLDER, (_, braced, bare) =>
+				(braced ?? bare) === "owner" ? owner! : repo!,
+			);
+			const match = /^\/?repos\/([^/?#]+\/[^/?#]+)/.exec(path);
+			// A full URL names its host, which is GitHub's API or another forge, never Kixel Quest's.
+			if (match !== null && !/^https?:\/\//.test(endpoint)) named = at(match[1]!);
+			// A `-F` field, as in a GraphQL query, names the repository `GH_REPO` does.
+			else if (placeholders) named = at(`${owner}/${repo}`);
+			else return;
+		}
+	}
+	const hosted = check.hosted();
+	if (hosted === null) return;
+	if (named !== null && !namesHosted(named, hosted, kixelUrl(check.env))) return;
+	check.found.add("kixel");
+	// The first denied call's pointer stands, so a later one without a pointer does not erase it.
+	if (group === "pr") check.instead ??= QUEST_PR[command ?? ""];
+}
+
+/**
+ * Whether `value`, as `--repo`, `GH_REPO`, a PR URL, or an endpoint's `OWNER/REPO` gives it, names `hosted` on the
+ * Kixel Quest at `base`: a URL there, `HOST/OWNER/REPO` with its host, or `OWNER/REPO` without one, which an agent in
+ * that checkout means for its own. A URL or host elsewhere, such as github.com, names another forge's repository.
+ */
+function namesHosted(value: string, hosted: Repository, base: string): boolean {
+	let parts: string[];
+	if (/^https?:\/\//.test(value)) {
+		if (!value.toLowerCase().startsWith(`${base.toLowerCase()}/`)) return false;
+		parts = value
+			.slice(base.length + 1)
+			.split(/[/?#]/)
+			.slice(0, 2);
+	} else {
+		parts = value.split("/").filter(Boolean);
+		if (parts.length === 3 && parts.shift()!.toLowerCase() !== new URL(base).host.toLowerCase()) return false;
+	}
+	return (
+		parts.length === 2 &&
+		parts
+			.join("/")
+			.replace(/\.git$/, "")
+			.toLowerCase() === `${hosted.owner}/${hosted.repo}`.toLowerCase()
+	);
+}
+
+/** `gh` and `quest pr` subcommands that post text, by group and command, and whether each authors a new post. */
 const POSTS: Record<string, Record<string, boolean>> = {
 	pr: { create: true, comment: true, review: true, edit: false },
 	issue: { create: true, comment: true, edit: false },
@@ -470,15 +730,10 @@ const POSTS: Record<string, Record<string, boolean>> = {
 
 /**
  * Check a `gh` command that posts text. `input` gives a body file's text,
- * `-` being stdin, and `literal` gives a word's text; each is `undefined`
- * when the line does not settle it, and an unknown body passes.
+ * `-` being stdin, or `undefined` when the line does not settle it, and an
+ * unknown body passes.
  */
-function gh(
-	args: string[],
-	input: (file: string) => string | undefined,
-	literal: (word: string) => string | undefined,
-	check: Check,
-) {
+function gh(args: string[], input: (file: string) => string | undefined, check: Check) {
 	const [group, command, ...rest] = args;
 	const file = (path: string | undefined) => (path === undefined ? undefined : input(path));
 	let body: (string | undefined)[];

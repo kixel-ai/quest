@@ -15,7 +15,9 @@ refuses one that does not. The tier replaces `/quest-run`'s standing pick:
 the classes that merge on their own are a list in the repository's risk
 file, starting with what the standing pick covers today, and only a PR the
 maintainer picks changes that list. Automatic merging stays limited to
-authors with write access.
+authors with write access, and to the trivial PRs of any author, such as
+dependency bumps, that the standing pick covers once Pullfrog approves
+their head.
 
 Each guardrail's cost and catches reach the PR's records: what each review
 found, what the full suite failed that the scoped checks passed, and how
@@ -36,6 +38,34 @@ Decided 2026-11-13 (user, /quest-plan):
   breaker that tightens on its own; automatic both ways.
 - Customer-facing changes get "rollbacks and higher quality" (user): the
   high tier's stated undo and second review.
+
+Decided 2026-11-15 (user, /quest-run, moq-dev/quest#738): trivial PRs
+merge on their own, so the starting list holds that class too.
+
+- Which PRs? ✅ Any trivial PR, such as a dependency bump, whatever its
+  author, judged by its diff (rejected: only Dependabot's and Renovate's
+  patch or lockfile-only bumps whose every commit is the bot's).
+- What review? ✅ Pullfrog's approval of the head, in place of the local
+  review an author without write access needs (rejected: a local
+  `quest review`; no review).
+
+Evidence from the 2026-11-18 [mistake audit](/quest/m0/mistake-audit.md)
+run: of 234 merge-pick answers from 2026-11-11 to 11-19, across the
+three repositories and the maintainer's hosts, 220 (94%) picked the PR the
+agent recommended. Follow-up keep-or-drop answers picked it 79% of the
+time, and other questions 73%. That supports widening the list once the
+tiers are trusted, not merging every pick on its own. Decided 2026-11-19
+(maintainer, merge pick of
+[moq-dev/quest#786](https://github.com/moq-dev/quest/pull/786)): ✅ keep
+this evidence here (rejected: drop).
+
+Decided 2026-11-21 (maintainer, /quest-run): a week of recorded tiers did
+not match their sense of risk, since high took 55% of PRs and nearly every
+code PR. [moq-dev/quest#794](https://github.com/moq-dev/quest/pull/794)
+narrowed high in `RISK.md` to breaking changes to exports, records, or
+output, new remote writes, uploads, or spending, merge authority,
+credentials, and the held paths. Re-tiered, the week's 56 tiered PRs went
+from 32 high to 22, with no low PR moving.
 
 This quest edits the shipped skills and rules, which the maintainer asked
 for by planning it.
@@ -70,12 +100,10 @@ Open question for the maintainer, asked before the list is written: the
 standing pick covers CI changes today, but the post requires a person for
 "any CI workflow file", and `quest review` holds workflow files always
 high. Recommended: keep them high, which takes CI changes out of
-automatic merging.
-
-## Required
-
-- [Read a week of risk tiers before guardrails act on them](/quest/m0/benchmark/risk-tier.md) -
-  the maintainer's verdict that the recorded tiers can be trusted
+automatic merging. That would also take out a trivial bump of a GitHub
+Action, which edits a workflow file: recommended to keep that class
+automatic, since the actions are pinned by SHA, Dependabot waits out a
+cooldown, and Pullfrog approves the head.
 
 ## Related
 

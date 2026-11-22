@@ -3,10 +3,10 @@
 import { DEFAULT, PATHS, reviewSection } from "../core";
 import { recorded } from "./models-record";
 import { type ClaimDependencies, upstream } from "./claims";
-import { repositoryPath } from "../github/client";
+import { pullsFrom } from "../github/claims";
 import { git } from "./git";
+import { contains } from "./land";
 import { requireRemote } from "./github";
-import { string } from "../github/client";
 import {
 	type PullModels,
 	type Reviewed,
@@ -84,10 +84,11 @@ function classifiedBy({ by }: Risk["classified"]): string {
 }
 
 /**
- * The `## Review` section's text for a run's `rounds` of the same head, without its heading: the head's risk, then
- * every tally on the branch, each round's reviewer's beside its round, and a reviewer the run left out on its own.
+ * The `## Review` section's text for a run's `rounds` of the same head, without its heading: the head's risk and each
+ * reviewer the run skipped since it could not run, then every tally on the branch, each round's reviewer's beside its
+ * round, and a reviewer the run left out on its own.
  */
-export function reviewRecord({ rounds, tallies, risk }: Reviewed): string {
+export function reviewRecord({ rounds, tallies, risk, skipped }: Reviewed): string {
 	const [shared] = rounds;
 	// A reviewer the run left out may still hold open findings, which keep the head from passing too.
 	const clean =
@@ -100,6 +101,10 @@ export function reviewRecord({ rounds, tallies, risk }: Reviewed): string {
 		`- Base: ${shared!.base.ref} at ${shared!.base.sha.slice(0, 12)}`,
 		`- Risk: ${risk.tier}, ${code(risk.reason)}`,
 		`- Classified: ${risk.classified.tier} by ${classifiedBy(risk.classified)}`,
+		// Outside the Reviewer blocks, which `parseReview` reads as reviewers that ran.
+		...skipped.map(
+			(skip) => `- Skipped: ${HARNESSES[skip.harness]}, ${skip.model}, ${skip.effort} effort: ${skip.reason}`,
+		),
 	];
 	for (const round of rounds) {
 		lines.push(
@@ -185,7 +190,7 @@ export function classifierSessions(body: string): string[] {
 
 /**
  * Each reviewer's latest round `body`'s `## Review` section records, or none when `quest review` wrote none
- * there, as when the section records a skipped review or only the land fixer's fixes.
+ * there, as when the section records a skipped review, even under the record's mark, or only the land fixer's fixes.
  */
 export function parseReview(body: string): ReviewSummary[] {
 	const section = reviewSection(body);
@@ -198,7 +203,6 @@ export function parseReview(body: string): ReviewSummary[] {
 		.slice(at)
 		.split(/^(?=- Reviewer: )/m)
 		.slice(1);
-	if (blocks.length === 0) throw new Error("the ## Review record names no reviewer");
 	return blocks.map((text) => {
 		const match = (pattern: RegExp) => {
 			const found = pattern.exec(text);
@@ -292,28 +296,45 @@ export function withReview(body: string, record: string): string {
 export type Recorded = { url: string } | { skipped: string };
 
 /**
- * The open PR from `branch` into the base `<remote>/<branch>` names, found among the upstream's PRs from the
- * repository the base's remote pushes to, as claims find a branch's PR; or why there is none.
+ * The open PR from `branch` into the base `<remote>/<branch>` names, or why there is none: the one from the repository
+ * the base's remote pushes to, else the only one from any repository whose head `HEAD` contains, as a maintainer's
+ * checkout of a contributor's fork PR finds it. It reads the forge itself, never an index that may lag, since its body is rewritten.
  */
-async function openPull(root: string, baseRef: string, branch: string, deps: ClaimDependencies) {
+async function openPull(
+	root: string,
+	baseRef: string,
+	branch: string,
+	deps: ClaimDependencies,
+): Promise<{ url: string; body: string; edit(body: string): Promise<void> } | { skipped: string }> {
 	// The checkout's top level: a subdirectory would look for the quest tree below it.
 	const top = git(root, ["rev-parse", "--show-toplevel"]);
 	const { remote, branch: base } = parseBase(top, baseRef);
 	const up = await upstream(top, requireRemote(top, remote), deps);
-	if (up.github === null) return { skipped: `${remote} is not on GitHub` };
-	const { client, repository, head } = up.github;
-	const from = `${head.owner}:${branch}`;
-	const query = `state=open&head=${encodeURIComponent(from)}&base=${encodeURIComponent(base)}&per_page=100`;
-	const [pull] = await client.all(`${repositoryPath(repository)}/pulls?${query}`);
-	if (pull === undefined) return { skipped: `no open PR from ${from} into ${base}` };
-	const path = `${repositoryPath(repository)}/pulls/${Number(pull.number)}`;
+	const hosting = up.hosting;
+	if (hosting === null) return { skipped: `${remote} is not on GitHub or Kixel Quest` };
+	const { repository, head } = hosting;
+	const name = `${head.owner}/${head.repo}`.toLowerCase();
+	const candidates = pullsFrom((await (await hosting.live()).pulls(repository)).value, branch).filter(
+		(each) => each.base === base,
+	);
+	const own = candidates.find((each) => each.head?.toLowerCase() === name);
+	// Another repository's PR counts only when this checkout holds its pushed head, so a stranger's PR from a
+	// branch of the same name neither sets the round's size nor receives its record.
+	const held = candidates.filter((each) => each.sha !== undefined && contains(top, each.sha, "HEAD"));
+	const pull = own ?? (held.length === 1 ? held[0] : undefined);
+	if (pull === undefined)
+		return {
+			skipped:
+				candidates.length === 0
+					? `no open PR from ${branch} into ${base}`
+					: held.length === 0
+						? `no open PR from ${branch} into ${base} from ${head.owner} or with a head this checkout holds: ${candidates.map((each) => each.url).join(", ")}`
+						: `several open PRs from ${branch} into ${base} with heads this checkout holds, none from ${head.owner}: ${held.map((each) => each.url).join(", ")}`,
+		};
 	return {
-		client,
-		path,
-		number: Number(pull.number),
-		repository,
-		url: string(pull.html_url),
-		body: typeof pull.body === "string" ? pull.body : "",
+		url: pull.url,
+		body: pull.body,
+		edit: (body) => hosting.writes().edit({ ...repository, number: pull.number }, { title: null, body }),
 	};
 }
 
@@ -335,6 +356,6 @@ export async function recordRounds(root: string, reviewed: Reviewed, deps: Claim
 	const pull = await openPull(root, shared!.base.ref, shared!.branch, deps);
 	if ("skipped" in pull) return pull;
 	const next = withReview(pull.body, reviewRecord(reviewed));
-	if (next !== pull.body) await pull.client.request(pull.path, { method: "PATCH", body: { body: next } });
+	if (next !== pull.body) await pull.edit(next);
 	return { url: pull.url };
 }

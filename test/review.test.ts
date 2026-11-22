@@ -1,9 +1,8 @@
 import { execFileSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { afterEach, expect, test, vi } from "vitest";
 
-import { type Output, main } from "../src/cli/main";
 import { REVIEWERS } from "../src/cli/models";
 import { SIZES, recordedRisk } from "../src/core";
 import {
@@ -19,6 +18,7 @@ import {
 	codexFlags,
 	nextStep,
 	pickReviewer,
+	rankedReviewers,
 	review,
 	runningHarness,
 	parseState,
@@ -30,356 +30,23 @@ import {
 import { withReview } from "../src/cli/review-record";
 import { implementer, recorded } from "../src/cli/models-record";
 import { tempDir } from "./fixture";
+import {
+	CLAUDE_LOGGED_OUT,
+	CODEX_LOGGED_OUT,
+	FINDING,
+	type Call,
+	at,
+	effortOf,
+	fakes,
+	git,
+	quest,
+	setup,
+	write,
+} from "./review-fakes";
 
 afterEach(() => {
 	vi.unstubAllEnvs();
 });
-
-/** The fake CLIs are shebang scripts found on a POSIX PATH, which Windows cannot run. */
-const fakes = test.skipIf(process.platform === "win32");
-
-const FINDING = { file: "src/lib.ts", line: 2, severity: "high", title: "Off by one", body: "average([3]) is 0." };
-
-const CODEX_LOGGED_OUT = "codex is not logged in to its default profile (CODEX_HOME is unset); run `codex login`";
-const CLAUDE_LOGGED_OUT =
-	"claude is not logged in to its default profile (CLAUDE_CONFIG_DIR is unset); run `claude auth login`";
-
-/**
- * The findings turn's reply, `reply`: FAKE_REPLY, or one finding. A JSON reply without `earlier` settles
- * each earlier finding the prompt numbers as FAKE_DISPOSITION says, `fixed` by default, and one without `risk`
- * reports FAKE_RAISE's tier, else the tier the prompt says the change was classified. FAKE_RAISE as
- * `<tier>@<effort>` raises only in turns at that effort.
- */
-const REPLY = `
-const listed = /<earlier-findings>\\n([\\s\\S]*?)\\n<\\/earlier-findings>/.exec(stdin)?.[1] ?? "";
-const earlier = [...listed.matchAll(/^(\\d+)\\. /gm)].map((m) => ({
-	finding: Number(m[1]),
-	disposition: process.env.FAKE_DISPOSITION ?? "fixed",
-	reason: "Checked against the head.",
-}));
-const classified = /was classified (low|medium|high) risk/.exec(stdin)?.[1] ?? "medium";
-const [raise, raiseAt] = (process.env.FAKE_RAISE ?? "").split("@");
-const effort = argv.includes("--effort")
-	? argv[argv.indexOf("--effort") + 1]
-	: JSON.parse((argv.find((arg) => arg.startsWith("model_reasoning_effort=")) ?? "=null").split("=")[1]);
-const risk = raise && (!raiseAt || raiseAt === effort)
-	? { tier: raise, reason: "It rewrites the wire format peers read." }
-	: { tier: classified, reason: "As classified." };
-let reply = process.env.FAKE_REPLY ?? JSON.stringify({ score: 8, rationale: "Lands once the off-by-one is fixed.", findings: [${JSON.stringify(FINDING)}] });
-try {
-	const parsed = JSON.parse(reply);
-	if (parsed && typeof parsed === "object" && !("earlier" in parsed)) reply = JSON.stringify({ ...parsed, earlier });
-	if (parsed && typeof parsed === "object" && !("risk" in parsed)) reply = JSON.stringify({ ...JSON.parse(reply), risk });
-} catch {}
-`;
-
-/** The classifier's reply: FAKE_RISK, or medium. */
-const RISK_REPLY = `JSON.stringify(process.env.FAKE_RISK ? JSON.parse(process.env.FAKE_RISK) : { tier: "medium", reason: "It changes what the library returns." })`;
-
-/**
- * Records one call as its own file in FAKE_LOG, a directory, renamed into place
- * once whole, named by its microsecond start so the files sort in call order. A
- * fake the review aborts can die mid-write, and a partial line in one shared
- * log would break the reader.
- */
-const LOG = `
-const logged = (call) => {
-	const name = Math.round((performance.timeOrigin + performance.now()) * 1000).toString() + "-" + process.pid;
-	const file = require("node:path").join(process.env.FAKE_LOG, name);
-	fs.writeFileSync(file + ".tmp", JSON.stringify(call));
-	fs.renameSync(file + ".tmp", file + ".json");
-};
-`;
-
-/**
- * Fake reviewer CLIs. Each logs its argv, stdin, and the variables it was
- * given, then answers as the FAKE_* variables say. FAKE_LOGGED_OUT removes the
- * stored login, so only a credential variable the real CLI reads, or Claude
- * Code's switch to a cloud provider, authenticates; like the real ones,
- * `claude auth status` counts such a variable, and `codex login status` counts
- * CODEX_ACCESS_TOKEN but not CODEX_API_KEY. FAKE_REJECTED has the API
- * reject the login in each turn with the real CLI's error, in the style it
- * names. FAKE_LIMITED fails a turn on the account's usage limit with the real
- * CLI's error, naming its reset unless set to `unknown`. FAKE_CLASSIFY fails
- * the classifier's turn of each `<harness>-rejected` or `<harness>-limited` it
- * lists, the same way. FAKE_REPLY replaces the findings reply.
- */
-const FAKES: Record<string, string> = {
-	claude: `
-const fs = require("node:fs");${LOG}
-const argv = process.argv.slice(2);
-const stdin = fs.readFileSync(0, "utf8");
-const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => /^(CLAUDE|CODEX|ANTHROPIC|FAKE_HOST|PATH$)/.test(k)));
-logged({ argv, stdin, env, cwd: process.cwd() });
-const credential = ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN"].some((k) => process.env[k]);
-const provider = Object.entries(process.env).some(([k, v]) => k.startsWith("CLAUDE_CODE_USE_") && v === "1");
-const loggedIn = !process.env.FAKE_LOGGED_OUT || credential || provider;
-if (argv[0] === "auth") process.exit(loggedIn ? 0 : 1);
-const at = (flag) => argv[argv.indexOf(flag) + 1];
-const result = (fields) => console.log(JSON.stringify({ type: "result", is_error: false, ...fields }));
-const rejected = process.env.FAKE_REJECTED ?? (loggedIn ? undefined : "status");
-if (rejected) {
-	const session_id = at("--session-id") ?? at("--resume");
-	if (rejected === "status") {
-		result({ session_id, is_error: true, api_error_status: 401, result: "Failed to authenticate. API Error: 401 Invalid bearer token" });
-	} else if (rejected === "stderr") {
-		console.error("Login expired · Please run /login");
-	} else {
-		result({ session_id, is_error: true, result: "OAuth token revoked · Please run /login" });
-	}
-	process.exit(1);
-}
-// The limit hits the findings turn, after the review turn passed.
-if (process.env.FAKE_LIMITED && argv.includes("--resume")) {
-	if (process.env.FAKE_LIMITED !== "unknown") {
-		console.log(JSON.stringify({ type: "rate_limit_event", rate_limit_info: { status: "rejected", resetsAt: 1900000000 } }));
-	}
-	result({ session_id: at("--resume"), is_error: true, result: "You've hit your weekly limit · resets Nov 5, 3pm (UTC)" });
-	process.exit(1);
-}
-const usage = { input_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, output_tokens: 0 };
-const failing = (process.env.FAKE_CLASSIFY ?? "").split(",");
-if (argv.includes("--session-id") && argv.includes("--json-schema")) {
-	if (failing.includes("claude-rejected")) {
-		result({ session_id: at("--session-id"), is_error: true, api_error_status: 401, result: "Failed to authenticate. API Error: 401 Invalid bearer token" });
-		process.exit(1);
-	}
-	if (failing.includes("claude-limited")) {
-		console.log(JSON.stringify({ type: "rate_limit_event", rate_limit_info: { status: "rejected", resetsAt: 1900000000 } }));
-		result({ session_id: at("--session-id"), is_error: true, result: "You've hit your weekly limit · resets Nov 5, 3pm (UTC)" });
-		process.exit(1);
-	}
-	const reply = failing.includes("claude-unusable") ? JSON.stringify({ tier: "huge", reason: "x" }) : ${RISK_REPLY};
-	result({
-		session_id: at("--session-id"),
-		result: reply,
-		structured_output: JSON.parse(reply),
-		usage: { ...usage, input_tokens: 40, output_tokens: 3 },
-	});
-} else if (argv.includes("--session-id")) {
-	result({
-		session_id: at("--session-id"),
-		result: "Found an off-by-one.",
-		usage,
-		modelUsage: {
-			"claude-small": { inputTokens: 1, outputTokens: 1, cacheReadInputTokens: 0, cacheCreationInputTokens: 0 },
-			"claude-big": { inputTokens: 10, outputTokens: 50, cacheReadInputTokens: 0, cacheCreationInputTokens: 90 },
-		},
-	});
-} else {
-	${REPLY}
-	result({
-		session_id: at("--resume"),
-		result: reply,
-		structured_output: process.env.FAKE_REPLY ? undefined : JSON.parse(reply),
-		usage: { ...usage, input_tokens: 5, cache_read_input_tokens: 80, cache_creation_input_tokens: 15, output_tokens: 7 },
-		modelUsage: { "claude-big": { inputTokens: 15, outputTokens: 57 } },
-	});
-}
-`,
-	codex: `
-const fs = require("node:fs");${LOG}
-const argv = process.argv.slice(2);
-const stdin = fs.readFileSync(0, "utf8");
-const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => /^(CLAUDE|CODEX|ANTHROPIC|FAKE_HOST|PATH$)/.test(k)));
-logged({ argv, stdin, env, cwd: process.cwd() });
-if (argv[0] === "login") process.exit(process.env.FAKE_LOGGED_OUT && !process.env.CODEX_ACCESS_TOKEN ? 1 : 0);
-if (process.env.FAKE_HANG) {
-	// It takes a while to exit when asked to, as a CLI saving its session does.
-	process.on("SIGTERM", () => setTimeout(() => process.exit(143), 300));
-	fs.writeFileSync(process.env.FAKE_HANG, String(process.pid));
-	setInterval(() => {}, 1000);
-	return;
-}
-const event = (value) => console.log(JSON.stringify(value));
-const loggedIn = !process.env.FAKE_LOGGED_OUT || process.env.CODEX_API_KEY || process.env.CODEX_ACCESS_TOKEN;
-const rejected = process.env.FAKE_REJECTED ?? (loggedIn ? undefined : "turn");
-if (rejected === "turn") {
-	const message = "unexpected status 401 Unauthorized: Missing bearer or basic authentication in header, url: https://api.openai.com/v1/responses";
-	event({ type: "thread.started", thread_id: "thread-1" });
-	event({ type: "error", message: "Reconnecting... 1/5 (" + message + ")" });
-	event({ type: "turn.failed", error: { message } });
-	process.exit(1);
-}
-if (rejected) {
-	console.error("Error: Your access token could not be refreshed because your refresh token was revoked. Please log out and sign in again.");
-	process.exit(1);
-}
-if (process.env.FAKE_LIMITED) {
-	const message = process.env.FAKE_LIMITED === "retried"
-		? "exceeded retry limit, last status: 429 Too Many Requests"
-		: process.env.FAKE_LIMITED === "unknown"
-		? "You've hit your usage limit."
-		: "You've hit your usage limit. Visit https://chatgpt.com/settings/usage to purchase more credits or try again at Nov 5th, 2026 3:15 PM.";
-	event({ type: "thread.started", thread_id: "thread-1" });
-	event({ type: "error", message });
-	event({ type: "turn.failed", error: { message } });
-	process.exit(1);
-}
-const message = (text) => event({ type: "item.completed", item: { type: "agent_message", text } });
-const zero = { input_tokens: 0, cached_input_tokens: 0, output_tokens: 0 };
-if (argv[1] === "review") {
-	event({ type: "thread.started", thread_id: "thread-1" });
-	message("Found an off-by-one.");
-	event({ type: "turn.completed", usage: zero });
-} else if (argv[1] !== "resume") {
-	event({ type: "thread.started", thread_id: "thread-classify" });
-	const failing = (process.env.FAKE_CLASSIFY ?? "").split(",");
-	if (failing.includes("codex-rejected")) {
-		event({ type: "turn.failed", error: { message: "unexpected status 401 Unauthorized: Missing bearer or basic authentication in header" } });
-		process.exit(1);
-	}
-	if (failing.includes("codex-limited")) {
-		const message = "You've hit your usage limit. Visit https://chatgpt.com/settings/usage to purchase more credits or try again at Nov 5th, 2026 3:15 PM.";
-		event({ type: "turn.failed", error: { message } });
-		process.exit(1);
-	}
-	message(failing.includes("codex-unusable") ? "not JSON" : ${RISK_REPLY});
-	event({ type: "turn.completed", usage: { input_tokens: 40, cached_input_tokens: 0, output_tokens: 3 } });
-} else {
-	event({ type: "thread.started", thread_id: argv[argv.length - 2] });
-	message("Checking the findings.");
-	${REPLY}
-	message(reply);
-	event({ type: "turn.completed", usage: { input_tokens: 100, cached_input_tokens: 80, output_tokens: 7 } });
-}
-`,
-};
-
-const git = (dir: string, ...args: string[]) =>
-	execFileSync("git", ["-C", dir, "-c", "user.name=Fixture", "-c", "user.email=fixture@localhost", ...args], {
-		encoding: "utf8",
-	}).trim();
-
-function write(dir: string, path: string, text: string) {
-	mkdirSync(join(dir, path, ".."), { recursive: true });
-	writeFileSync(join(dir, path), text);
-}
-
-interface Setup {
-	repo: string;
-	bin: string;
-	/** Every logged invocation of the fake Codex and Claude Code. */
-	calls(): Call[];
-}
-
-interface Call {
-	argv: string[];
-	stdin: string;
-	env: Record<string, string>;
-	cwd: string;
-}
-
-/** Credentials and routes the running session may hold, cleared so each test sets its own. */
-const HOST_CREDENTIALS = [
-	"ANTHROPIC_API_KEY",
-	"ANTHROPIC_AUTH_TOKEN",
-	"ANTHROPIC_AWS_API_KEY",
-	"ANTHROPIC_BASE_URL",
-	"ANTHROPIC_CUSTOM_HEADERS",
-	"ANTHROPIC_FOUNDRY_API_KEY",
-	"ANTHROPIC_FOUNDRY_AUTH_TOKEN",
-	"CLAUDE_CODE_OAUTH_TOKEN",
-	...["BEDROCK", "VERTEX", "FOUNDRY", "MANTLE", "ANTHROPIC_AWS", "ANTHROPIC_GOOGLE_CLOUD"].map(
-		(provider) => `CLAUDE_CODE_USE_${provider}`,
-	),
-	"CODEX_API_KEY",
-	"CODEX_ACCESS_TOKEN",
-	"CODEX_CA_CERTIFICATE",
-];
-
-/**
- * A clone whose origin's main holds instructions and review rules, checked out
- * on a branch that edits its own AGENTS.md and a file in `src/`.
- */
-function setup(host: "CLAUDECODE" | "CODEX_THREAD_ID" | null = "CLAUDECODE"): Setup {
-	const dir = tempDir();
-	const bin = join(dir, "bin");
-	mkdirSync(bin);
-	for (const [name, body] of Object.entries(FAKES)) {
-		writeFileSync(join(bin, name), `#!${process.execPath}\n${body}`);
-		chmodSync(join(bin, name), 0o755);
-	}
-	const origin = join(dir, "origin.git");
-	execFileSync("git", ["init", "-q", "--bare", "-b", "main", origin]);
-	const repo = join(dir, "repo");
-	execFileSync("git", ["init", "-q", "-b", "main", repo]);
-	write(repo, "AGENTS.md", "BASE-ROOT rule\n");
-	write(repo, "src/AGENTS.md", "BASE-SRC rule\n");
-	write(repo, "docs/AGENTS.md", "BASE-DOCS rule\n");
-	write(repo, "REVIEW.md", "BASE-REVIEW rule\n");
-	write(repo, "src/lib.ts", "export const x = 1;\n");
-	write(repo, ".gitignore", ".tmp/\n");
-	git(repo, "add", ".");
-	git(repo, "commit", "-qm", "base");
-	git(repo, "remote", "add", "origin", origin);
-	git(repo, "push", "-q", "origin", "main");
-	git(repo, "checkout", "-qb", "feature");
-	write(repo, "AGENTS.md", "HEAD-ROOT rule\n");
-	write(repo, "src/lib.ts", "export const x = 2;\n");
-	git(repo, "commit", "-qam", "change");
-
-	const log = join(dir, "calls");
-	mkdirSync(log);
-	vi.stubEnv("PATH", `${bin}:${process.env.PATH}`);
-	vi.stubEnv("FAKE_LOG", log);
-	// The session's own profile would change the logged-out errors.
-	const unset = [
-		...HOST_CREDENTIALS,
-		"CLAUDECODE",
-		"CODEX_THREAD_ID",
-		"CLAUDE_CONFIG_DIR",
-		"CODEX_HOME",
-		"OPENAI_BASE_URL",
-	];
-	for (const name of [
-		...unset,
-		"FAKE_LOGGED_OUT",
-		"FAKE_REJECTED",
-		"FAKE_LIMITED",
-		"FAKE_HANG",
-		"FAKE_DISPOSITION",
-		"FAKE_RISK",
-		"FAKE_RAISE",
-	]) {
-		vi.stubEnv(name, undefined);
-	}
-	if (host === "CLAUDECODE") vi.stubEnv("CLAUDECODE", "1");
-	if (host === "CODEX_THREAD_ID") vi.stubEnv("CODEX_THREAD_ID", "parent");
-	// Only whole calls: a fake's unfinished write stays a .tmp file.
-	const read = (path: string) =>
-		readdirSync(path)
-			.filter((name) => name.endsWith(".json"))
-			.sort()
-			.map((name) => JSON.parse(readFileSync(join(path, name), "utf8")));
-	return { repo, bin, calls: () => read(log) };
-}
-
-/** The effort a Codex or Claude Code turn runs at, or null for a status check. */
-function effortOf(call: Call): string | null {
-	const flag = call.argv.indexOf("--effort");
-	if (flag >= 0) return call.argv[flag + 1]!;
-	const setting = call.argv.find((arg) => arg.startsWith("model_reasoning_effort="));
-	return setting ? JSON.parse(setting.slice("model_reasoning_effort=".length)) : null;
-}
-
-/** The turns at `effort`, so the size's pick and its shadow, which run at once on the same CLI, read apart. */
-const at = (calls: Call[], effort: string) => calls.filter((call) => effortOf(call) === effort);
-
-async function quest(...args: string[]): Promise<{ code: number; stdout: string; stderr: string }> {
-	let stdout = "";
-	let stderr = "";
-	const out: Output = {
-		stdout: (text) => {
-			stdout += text;
-		},
-		stderr: (text) => {
-			stderr += text;
-		},
-	};
-	const code = await main(args, out);
-	return { code, stdout, stderr };
-}
 
 test("the reviewer is the harness this command is not running under", () => {
 	expect(runningHarness({ CLAUDECODE: "1" })).toBe("claude");
@@ -419,8 +86,23 @@ test("each size's reviewer is the first whose model is not the latest writer's",
 	expect(at("S", authored({ exclude: ["gpt-6.1-sol"] }, { CLAUDECODE: "1" }))).toBe("claude claude-opus-5-5 low");
 	// No harness need be detected once the implementers are named.
 	expect(at("M", authored({ exclude: ["other-model"] }, {}))).toBe("codex gpt-6.1-sol high");
-	const both = authored({ exclude: ["gpt-6.1-sol", "claude-opus-5-5"] }, {});
-	expect(() => pickReviewer("M", {}, both)).toThrow("is avoided; pass --harness and --model");
+	const all = authored({ exclude: ["gpt-6.1-sol", "claude-opus-5-5", "claude-sonnet-5-5"] }, {});
+	expect(() => pickReviewer("M", {}, all)).toThrow("is avoided; pass --harness and --model");
+
+	// A run tries every eligible reviewer in rank, or only the one the options name.
+	const ranked = (choice: Parameters<typeof rankedReviewers>[1], wrote: typeof claude) =>
+		rankedReviewers("L", choice, wrote).map(({ harness, model, effort }) => `${harness} ${model} ${effort}`);
+	const byOpus = authored({}, {}, "claude-opus-5-5");
+	expect(ranked({}, byOpus)).toEqual(["codex gpt-6.1-sol xhigh", "claude claude-sonnet-5-5 high"]);
+	expect(ranked({}, authored({}, {}, "gpt-6.1-sol"))).toEqual([
+		"claude claude-opus-5-5 high",
+		"claude claude-sonnet-5-5 high",
+	]);
+	// An unknown writer under Claude Code avoids every Claude model, so Sol has none after it.
+	expect(ranked({}, claude)).toEqual(["codex gpt-6.1-sol xhigh"]);
+	expect(ranked({ effort: "high" }, byOpus)).toEqual(["codex gpt-6.1-sol high"]);
+	expect(ranked({ model: "gpt-6-astra" }, byOpus)).toEqual(["codex gpt-6-astra xhigh"]);
+	expect(ranked({ harness: "claude" }, () => false)).toEqual(["claude claude-opus-5-5 high"]);
 
 	// --harness names the reviewer at its entry, unless that entry's model is avoided.
 	expect(pickReviewer("L", { harness: "claude" }, authored({ harness: "claude" }, { CLAUDECODE: "1" }))).toEqual({
@@ -498,10 +180,10 @@ fakes("--exclude-model picks the reviewer from the PR's implementers instead of 
 		"default",
 	]);
 
-	const both = ["--exclude-model", "gpt-6.1-sol", "--exclude-model", "claude-opus-5-5"];
-	const none = await quest("--root", s.repo, "review", ...both, "--new");
+	const all = ["gpt-6.1-sol", "claude-opus-5-5", "claude-sonnet-5-5"].flatMap((m) => ["--exclude-model", m]);
+	const none = await quest("--root", s.repo, "review", ...all, "--new");
 	expect(none.code).toBe(2);
-	expect(none.stderr).toContain("every M reviewer (gpt-6.1-sol, claude-opus-5-5) is avoided");
+	expect(none.stderr).toContain("every M reviewer (gpt-6.1-sol, claude-opus-5-5, claude-sonnet-5-5) is avoided");
 });
 
 fakes("an unknown harness is an error, never a same-model review", async () => {
@@ -512,7 +194,7 @@ fakes("an unknown harness is an error, never a same-model review", async () => {
 	expect(s.calls()).toEqual([]);
 });
 
-fakes("a missing or logged-out reviewer CLI is a usage error", async () => {
+fakes("a missing or logged-out reviewer CLI with no reviewer after it is an outage", async () => {
 	const s = setup();
 	// Only git is on PATH, so no codex install outside the fakes is found either.
 	const only = join(s.bin, "..", "git-only");
@@ -520,13 +202,13 @@ fakes("a missing or logged-out reviewer CLI is a usage error", async () => {
 	symlinkSync(execFileSync("which", ["git"], { encoding: "utf8" }).trim(), join(only, "git"));
 	vi.stubEnv("PATH", only);
 	const missing = await quest("--root", s.repo, "review");
-	expect(missing.code).toBe(2);
+	expect(missing.code).toBe(3);
 	expect(missing.stderr).toContain("codex is not installed");
 
 	const t = setup();
 	vi.stubEnv("FAKE_LOGGED_OUT", "1");
 	const out = await quest("--root", t.repo, "review");
-	expect(out.code).toBe(2);
+	expect(out.code).toBe(3);
 	expect(out.stderr).toContain(CODEX_LOGGED_OUT);
 	// The size's pick and its shadow each check the login, and the first to fail stops the other's; no turn runs.
 	expect(t.calls().length).toBeGreaterThanOrEqual(1);
@@ -549,7 +231,7 @@ fakes.each([
 		vi.stubEnv(variable, "/work");
 		vi.stubEnv(flag, value);
 		const result = await quest("--root", s.repo, "review");
-		expect(result.code, result.stderr).toBe(2);
+		expect(result.code, result.stderr).toBe(3);
 		expect(result.stderr).toContain(message);
 	},
 );
@@ -567,8 +249,9 @@ fakes.each([
 		vi.stubEnv("FAKE_REJECTED", variant);
 		const result = await quest("--root", s.repo, "review");
 		expect(result.stderr).toContain(message);
-		expect(result.code).toBe(2);
-		// The failing seat's status check passed, and the first turn to fail stopped the other seat before it
+		expect(result.code).toBe(3);
+		// A rejected login rules out every model of its CLI, so Claude's later reviewer never runs. The failing seat's
+		// status check passed, and the first turn to fail stopped the other seat before it
 		// resumed. That seat runs its own status check concurrently, so the abort may stop it before its CLI
 		// logs, or before it spawns at all.
 		const calls = s.calls();
@@ -588,10 +271,19 @@ const codexReset = new Date(2026, 10, 5, 15, 15).toISOString().replace(".000Z", 
 fakes.for([
 	["CLAUDECODE", "reset", `codex hit its usage limit; resets ${codexReset}`],
 	["CLAUDECODE", "unknown", "codex hit its usage limit; resets unknown"],
-	["CODEX_THREAD_ID", "reset", "claude hit its usage limit; resets 2030-03-17T17:46:40Z"],
-	["CODEX_THREAD_ID", "unknown", "claude hit its usage limit; resets unknown"],
+	// Claude's limit falls through to Sonnet, which hits it too.
+	[
+		"CODEX_THREAD_ID",
+		"reset",
+		"no eligible M reviewer could run: claude-opus-5-5 medium and claude-sonnet-5-5 medium (claude hit its usage limit; resets 2030-03-17T17:46:40Z)",
+	],
+	[
+		"CODEX_THREAD_ID",
+		"unknown",
+		"no eligible M reviewer could run: claude-opus-5-5 medium and claude-sonnet-5-5 medium (claude hit its usage limit; resets unknown)",
+	],
 ] as const)(
-	"a reviewer's usage limit exits 3 with its reset, and records no round (%s, %s)",
+	"a usage limit with no reviewer left exits 3 with its reset, and records no round (%s, %s)",
 	async ([host, variant, message]) => {
 		const s = setup(host);
 		vi.stubEnv("FAKE_LIMITED", variant);
@@ -604,6 +296,100 @@ fakes.for([
 		expect((await quest("--root", s.repo, "review")).code).toBe(0);
 	},
 );
+
+const OPUS_WROTE = ["--exclude-model", "claude-opus-5-5"];
+
+fakes("a reviewer at its usage limit passes the round to the next eligible one, and the record names it", async () => {
+	const s = setup(null);
+	vi.stubEnv("FAKE_FAILS", "codex");
+	vi.stubEnv("FAKE_LIMITED", "reset");
+	const plain = await quest("--root", s.repo, "review", ...OPUS_WROTE);
+	expect(plain.code, plain.stderr).toBe(0);
+	expect(plain.stdout).toContain(`\nskipped codex gpt-6.1-sol high usage limit, resets ${codexReset}\n`);
+	// Sonnet's shadow follows it, one effort lower.
+	expect(plain.stdout).toContain("\nreviewer claude claude-sonnet-5-5 medium\nsession ");
+	expect(plain.stdout).toContain("\nreviewer claude claude-sonnet-5-5 low shadow\nsession ");
+	// Only Sonnet and its shadow ran turns after Sol's limit, and Opus, the writer, never ran.
+	const turns = s.calls().filter((c) => effortOf(c) !== null);
+	expect(turns.filter((c) => c.argv.includes("claude-opus-5-5"))).toEqual([]);
+	expect(turns.filter((c) => c.argv.includes("claude-sonnet-5-5"))).toHaveLength(4);
+
+	// The responses answer Sonnet's finding, which Sol settles once it is back, as a replaced reviewer's.
+	vi.stubEnv("FAKE_LIMITED", undefined);
+	const responses = join(s.bin, "..", "responses.md");
+	writeFileSync(responses, "1. Fixed: the average divides by the count.\n2. Fixed: the same.\n");
+	write(s.repo, "src/lib.ts", "export const x = 3;\n");
+	git(s.repo, "commit", "-qam", "fix");
+	const back = await quest("--root", s.repo, "review", ...OPUS_WROTE, "--responses", responses, "--json");
+	expect(back.code, back.stderr).toBe(0);
+	const { rounds, skipped } = JSON.parse(back.stdout);
+	expect(skipped).toEqual([]);
+	expect(rounds.map((r: Round) => `${r.reviewer} ${r.model} ${r.effort}${r.shadow ? " shadow" : ""}`)).toEqual([
+		"codex gpt-6.1-sol high",
+		"codex gpt-6.1-sol medium shadow",
+	]);
+	// Sol settles Sonnet's finding, and Sol's shadow Sonnet's shadow's.
+	expect(rounds.map((r: Round) => r.earlier?.findings.map((f) => f.disposition))).toEqual([["fixed"], ["fixed"]]);
+});
+
+fakes("a model at its usage limit passes the round to its CLI's next model, whose shadow follows it", async () => {
+	const s = setup(null);
+	vi.stubEnv("FAKE_FAILS", "claude-opus-5-5");
+	vi.stubEnv("FAKE_LIMITED", "reset");
+	const args = ["--exclude-model", "gpt-6.1-sol", "--size", "L", "--json"];
+	const result = await quest("--root", s.repo, "review", ...args);
+	expect(result.code, result.stderr).toBe(0);
+	const { rounds, skipped } = JSON.parse(result.stdout);
+	expect(skipped).toEqual([
+		{
+			harness: "claude",
+			model: "claude-opus-5-5",
+			effort: "high",
+			reason: "usage limit, resets 2030-03-17T17:46:40Z",
+		},
+	]);
+	expect(rounds.map((r: Round) => `${r.model} ${r.effort}${r.shadow ? " shadow" : ""}`)).toEqual([
+		"claude-sonnet-5-5 high",
+		"claude-sonnet-5-5 medium shadow",
+	]);
+});
+
+fakes("a reviewer CLI that is not installed passes the round to the next eligible one", async () => {
+	const s = setup(null);
+	// Only git and Claude Code are on PATH, so no codex install outside the fakes is found either.
+	const only = join(s.bin, "..", "claude-only");
+	mkdirSync(only);
+	symlinkSync(execFileSync("which", ["git"], { encoding: "utf8" }).trim(), join(only, "git"));
+	symlinkSync(join(s.bin, "claude"), join(only, "claude"));
+	vi.stubEnv("PATH", only);
+	const result = await quest("--root", s.repo, "review", ...OPUS_WROTE);
+	expect(result.code, result.stderr).toBe(0);
+	expect(result.stdout).toContain("\nskipped codex gpt-6.1-sol high not installed\n");
+	expect(result.stdout).toContain("\nreviewer claude claude-sonnet-5-5 medium\n");
+});
+
+fakes.each([
+	["--harness", "codex"],
+	["--model", "gpt-6.1-sol"],
+	["--effort", "high"],
+])("a reviewer named with %s %s never falls through", async (flag, value) => {
+	const s = setup(null);
+	vi.stubEnv("FAKE_FAILS", "codex");
+	vi.stubEnv("FAKE_LIMITED", "reset");
+	const result = await quest("--root", s.repo, "review", ...OPUS_WROTE, flag, value);
+	expect(result.stderr).toBe(`error: codex hit its usage limit; resets ${codexReset}\n`);
+	expect(result.code).toBe(3);
+	expect(s.calls().filter((c) => c.argv[0] !== "exec" && c.argv[0] !== "login")).toEqual([]);
+});
+
+fakes("a failed turn whose reply only quotes a usage limit is no limit, so no other reviewer runs", async () => {
+	const s = setup("CODEX_THREAD_ID");
+	vi.stubEnv("FAKE_QUOTED", "1");
+	const result = await quest("--root", s.repo, "review");
+	expect(result.code).toBe(1);
+	expect(result.stderr).toContain("claude failed with exit status 1");
+	expect(s.calls().filter((c) => c.argv.includes("claude-sonnet-5-5"))).toEqual([]);
+});
 
 fakes("Codex reaches a gateway at OPENAI_BASE_URL, whose persistent 429 is the pool's usage limit", async () => {
 	const s = setup();
@@ -686,7 +472,7 @@ fakes("an environment credential the API rejects is named in the error", async (
 	vi.stubEnv("CODEX_API_KEY", "codex-key");
 	vi.stubEnv("FAKE_REJECTED", "turn");
 	const result = await quest("--root", s.repo, "review");
-	expect(result.code).toBe(2);
+	expect(result.code).toBe(3);
 	expect(result.stderr).toContain("codex rejected CODEX_API_KEY; replace it, or run `codex login`");
 });
 
@@ -695,7 +481,7 @@ fakes("a stored login the API rejects names the credential quest review strips b
 	vi.stubEnv("ANTHROPIC_API_KEY", "anthropic-key");
 	vi.stubEnv("FAKE_REJECTED", "status");
 	const result = await quest("--root", s.repo, "review");
-	expect(result.code).toBe(2);
+	expect(result.code).toBe(3);
 	expect(result.stderr).toContain(
 		`${CLAUDE_LOGGED_OUT}; quest review strips ANTHROPIC_API_KEY while a stored login exists`,
 	);
@@ -758,7 +544,7 @@ fakes("a gateway with no credential and no stored login names the gateway", asyn
 	vi.stubEnv("FAKE_LOGGED_OUT", "1");
 	vi.stubEnv("ANTHROPIC_BASE_URL", "https://gateway.example");
 	const result = await quest("--root", s.repo, "review");
-	expect(result.code).toBe(2);
+	expect(result.code).toBe(3);
 	expect(result.stderr).toContain(
 		"claude is not logged in to its default profile (CLAUDE_CONFIG_DIR is unset) through ANTHROPIC_BASE_URL; run `claude auth login`",
 	);
@@ -773,7 +559,7 @@ fakes("a gateway credential the API rejects is named with the gateway", async ()
 	vi.stubEnv("ANTHROPIC_BASE_URL", "https://gateway.example");
 	vi.stubEnv("FAKE_REJECTED", "status");
 	const result = await quest("--root", s.repo, "review");
-	expect(result.code).toBe(2);
+	expect(result.code).toBe(3);
 	expect(result.stderr).toContain(
 		"claude rejected ANTHROPIC_AUTH_TOKEN through ANTHROPIC_BASE_URL; replace it, or run `claude auth login`",
 	);
@@ -835,7 +621,7 @@ fakes("a provider's keys alone are no login, so the review stops before it start
 	for (const key of PROVIDER_KEYS) vi.stubEnv(key, "provider-key");
 	vi.stubEnv("FAKE_LOGGED_OUT", "1");
 	const result = await quest("--root", s.repo, "review");
-	expect(result.code).toBe(2);
+	expect(result.code).toBe(3);
 	expect(result.stderr).toContain("claude is not logged in");
 	// The size's pick and its shadow each check the login, and the first to fail stops the other's; no turn runs.
 	expect(s.calls().length).toBeGreaterThanOrEqual(1);
@@ -1035,7 +821,7 @@ fakes("codex reviews read-only with the base's instructions, then reports in the
 			"2. high src/lib.ts:2 Off by one",
 			"  average([3]) is 0.",
 			// The fixture's origin is a local path, which can have no PR.
-			"record skipped: origin is not on GitHub",
+			"record skipped: origin is not on GitHub or Kixel Quest",
 			"next respond: fix each finding or refute it with evidence the reviewer cannot rebut, commit, rerun the checks, then run the next round with --responses, one response per finding by its number",
 			"",
 		].join("\n"),
@@ -1307,7 +1093,8 @@ fakes("a change to the applicable instructions starts a new session that weighs 
  * `upstream/widget`, whose root holds the quest tree, and the PRs are upstream's. Returns the PR bodies
  * each PATCH wrote.
  */
-type FakePull = { number: number; body: string | null };
+/** An open PR from `feature` into `main`, from `acme/widget` unless `head` names another repository. */
+type FakePull = { number: number; body: string | null; head?: string; sha?: string };
 function onGitHub(repo: string, pulls: FakePull[], fork = false): { body: string }[] {
 	const local = git(repo, "remote", "get-url", "origin");
 	git(repo, "remote", "set-url", "origin", "https://github.com/acme/widget.git");
@@ -1333,13 +1120,21 @@ function onGitHub(repo: string, pulls: FakePull[], fork = false): { body: string
 			return url.pathname.endsWith("/contents/quest/README.md") ? json({}) : json({}, 404);
 		if (url.pathname === `/repos/${owner}/widget/pulls`) {
 			expect(url.searchParams.get("state")).toBe("open");
-			expect(url.searchParams.get("base")).toBe("main");
-			const head = url.searchParams.get("head");
-			return json(
-				head === "acme:feature"
-					? pulls.map((p) => ({ ...p, html_url: `https://github.com/${owner}/widget/pull/${p.number}` }))
-					: [],
-			);
+			const row = ({ head, sha, ...p }: FakePull, ref: string, base: string) => ({
+				...p,
+				html_url: `https://github.com/${owner}/widget/pull/${p.number}`,
+				head: { ref, repo: { full_name: head ?? "acme/widget" }, ...(sha === undefined ? {} : { sha }) },
+				base: { ref: base },
+				draft: false,
+				created_at: "2026-10-01T00:00:00Z",
+				updated_at: "2026-10-01T00:00:00Z",
+			});
+			// The record's PR among others: one from another branch, and one from the same branch into another base.
+			return json([
+				...pulls.map((p) => row(p, "feature", "main")),
+				row({ number: 90, body: "other" }, "other", "main"),
+				row({ number: 91, body: "other" }, "feature", "release"),
+			]);
 		}
 		const patched = new RegExp(`^/repos/${owner}/widget/pulls/(\\d+)$`).exec(url.pathname);
 		if (patched && init?.method === "PATCH") {
@@ -1754,7 +1549,7 @@ fakes("a branch with no open PR, or a body without a Review section, is reported
 	try {
 		const none = await quest("--root", s.repo, "review");
 		expect(none.code).toBe(0);
-		expect(none.stdout).toContain("record skipped: no open PR from acme:feature into main\n");
+		expect(none.stdout).toContain("record skipped: no open PR from feature into main\n");
 
 		pulls.push({ number: 8, body: null });
 		vi.stubEnv("FAKE_REPLY", JSON.stringify({ score: 10, rationale: "Lands as is.", findings: [] }));
@@ -1766,6 +1561,58 @@ fakes("a branch with no open PR, or a body without a Review section, is reported
 		);
 		// A round with no findings names its head in full, which the land gate counts.
 		expect(pulls[0]!.body!.match(/\b[0-9a-f]{40}\b/g)).toEqual([git(s.repo, "rev-parse", "HEAD")]);
+	} finally {
+		vi.unstubAllGlobals();
+	}
+});
+
+fakes("a maintainer's checkout records on a contributor's fork PR and reads its size", async () => {
+	const s = setup();
+	const pushed = git(s.repo, "rev-parse", "HEAD~1");
+	const pull = { number: 12, body: "Body.\n\n## Models\n\n- Size: S\n", head: "contributor/widget", sha: pushed };
+	// A stranger's PR from a branch of the same name, whose head this checkout lacks.
+	const stranger = {
+		number: 13,
+		body: "Stranger.\n\n## Models\n\n- Size: XS\n",
+		head: "stranger/widget",
+		sha: "f".repeat(40),
+	};
+	const pulls: FakePull[] = [stranger];
+	onGitHub(s.repo, pulls);
+	vi.stubEnv("FAKE_REPLY", JSON.stringify({ score: 10, rationale: "Lands as is.", findings: [] }));
+	try {
+		const alone = await quest("--root", s.repo, "review");
+		expect(alone.code, alone.stderr).toBe(0);
+		expect(alone.stdout).toContain(
+			"record skipped: no open PR from feature into main from acme or with a head this checkout holds: https://github.com/acme/widget/pull/13\n",
+		);
+		// Its size went unread: no size picks the default.
+		expect(alone.stdout).not.toContain(" low shadow\n");
+		expect(stranger.body).toBe("Stranger.\n\n## Models\n\n- Size: XS\n");
+
+		pulls.push(pull);
+		const result = await quest("--root", s.repo, "review");
+		expect(result.code, result.stderr).toBe(0);
+		expect(result.stdout).toContain("record https://github.com/acme/widget/pull/12\n");
+		// Size S picks the shadow one effort below medium.
+		expect(result.stdout).toContain(" low shadow\n");
+		expect(pull.body).toMatch(/^Body\.\n\n## Models\n\n- Size: S\n\n## Review\n\nRewritten by `quest review`/);
+		expect(stranger.body).toBe("Stranger.\n\n## Models\n\n- Size: XS\n");
+
+		// A second contributor's PR whose head this checkout also holds leaves no way to tell them apart.
+		pulls.push({ number: 15, body: "Other.", head: "someone/widget", sha: pushed });
+		const ambiguous = await quest("--root", s.repo, "review", "--size", "S");
+		expect(ambiguous.code, ambiguous.stderr).toBe(0);
+		expect(ambiguous.stdout).toContain(
+			"record skipped: several open PRs from feature into main with heads this checkout holds, none from acme: https://github.com/acme/widget/pull/12, https://github.com/acme/widget/pull/15\n",
+		);
+		expect(pulls[2]!.body).toBe("Other.");
+
+		// The push repository's own PR wins over any fork's.
+		pulls.push({ number: 14, body: "Own." });
+		const own = await quest("--root", s.repo, "review", "--size", "S");
+		expect(own.stdout).toContain("record https://github.com/acme/widget/pull/14\n");
+		expect(pulls[2]!.body).toBe("Other.");
 	} finally {
 		vi.unstubAllGlobals();
 	}

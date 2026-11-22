@@ -30,6 +30,7 @@ Read `quest status <pr>`'s `review-record` line rather than comparing diffs your
 Otherwise, the changes since the reviewed head need no new review only when they are conflict-free merges from the base branch, a reviewer's suggested patch applied unchanged, the fixes of a round whose findings were all low severity, a land fixer's recorded mechanical fix that changes no behavior, or the pick round's answers recorded in the PR's follow-ups.
 The repository's review policy decides whose record counts and may require more, such as a maintainer's review.
 Where it says nothing, only a record on a PR whose author has write access counts: anyone else writes their own PR body, so their head needs a local review that rewrites the record.
+On a trivial PR that `/quest-run`'s standing pick covers, Pullfrog's approval of the head stands in for that record unless that policy requires more.
 
 Queue the head with `quest merge <pr> --land <full 40-character head SHA>`, adding `--squash` or `--rebase` when the repository's root instructions name that method for the PR's base.
 Run a `quest` the PR cannot modify, such as an installed release rather than a build from the head's checkout: it refuses a head that leaves its quest inaccurate, a check the head's own code could skip.
@@ -39,3 +40,8 @@ Ask instead when it refuses a head `/quest-iterate` left unchanged, and never pa
 Report once it is queued, and do not wait for it to merge.
 A PR that left the queue unmerged shows why under `landing-stopped` in `quest status <pr>`; it needs the user's pick again, except where `/quest-run` says an earlier pick still holds.
 Never close a PR to unstick it, and never work around a refused merge; ask instead.
+
+Ask the user for the pick with your recommended action, one of `/quest-merge`, `/quest-iterate`, skip, or `/quest-delete`, plus `/quest-merge` when you recommend another, "Explain it first", and "Rethink it".
+"Explain it first" walks them through the change and its open choices; ask again without it.
+"Rethink it" starts a fresh background sub-agent, given the PR, its reviews and threads, and its quest's Goal, Plan, and evidence (read the deleted file on the base), not your recommendation, to start from scratch: brainstorm other approaches to the problem, decide whether this PR is the best path forward, and recommend merging it, iterating toward a named alternative, or dropping it.
+Ask again without it, its recommendation beside yours, and where they differ.

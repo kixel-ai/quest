@@ -36,7 +36,6 @@ import {
 	type Owner,
 	owner,
 	processStart,
-	QUICK_MS,
 	RECENT_MS,
 	SETTLE_MS,
 	job,
@@ -44,7 +43,8 @@ import {
 } from "../src/cli/gate";
 import { forwards, foregroundStat, statProcess } from "../src/cli/interrupt";
 import { gateBoundary, main } from "../src/cli/main";
-import { alive as ownerAlive, questScope } from "../src/cli/supervise";
+import { measuredRun, alive as ownerAlive, questScope } from "../src/cli/supervise";
+import { readWaits } from "../src/cli/waits";
 import { created, onTerminal, run, signalled, tempDir } from "./fixture";
 
 // Linux reports a /proc read that races a process's exit as ESRCH rather than ENOENT, so fail
@@ -331,32 +331,6 @@ test("a priority caller waits for memory, never for load, even while a gated com
 	expect(ordinary).toEqual([`sleep ${SETTLE_MS}`]);
 });
 
-test("a quick caller starts after at most QUICK_MS, and its admission is recorded", async () => {
-	const directory = tempDir();
-	const state = { now: 0, load: 99, memory: 0 };
-	const events: string[] = [];
-	const host = testHost(directory, state, events);
-	// A build admitted long ago still runs: the load is the gate's own, and its slot survives.
-	const build = { id: "build", at: -10 * RECENT_MS, ...me };
-	expect(host.publish(host.ledger(), [build])).toBe(true);
-	await admit({ load: 4, memory: GiB }, host, signal, undefined, { quick: true });
-	const sleeps = Array.from({ length: QUICK_MS / SETTLE_MS }, () => `sleep ${SETTLE_MS}`);
-	expect(events).toEqual(sleeps);
-	expect(host.ledger().admissions).toEqual([build, { id: expect.any(String), at: QUICK_MS, ...me }]);
-	// A sleep that overran shortens the last one, which ends at the deadline.
-	const late = { now: 0, load: 99, memory: 0 };
-	const overran: string[] = [];
-	const slow = testHost(tempDir(), late, overran);
-	const sleep = slow.sleep;
-	slow.sleep = async (ms, signal) => {
-		await sleep(ms, signal);
-		if (overran.length === 1) late.now += 3000;
-	};
-	await admit({ load: 4, memory: GiB }, slow, signal, undefined, { quick: true });
-	expect(overran.at(-1)).toBe(`sleep ${SETTLE_MS - 3000}`);
-	expect(slow.ledger().admissions).toEqual([{ id: expect.any(String), at: QUICK_MS, ...me }]);
-});
-
 test("waiting callers start in arrival order, a later one first only while the host has room for both", async () => {
 	const limits = { load: 4, memory: GiB };
 	// A build still runs, and an earlier caller waits for its turn.
@@ -429,7 +403,7 @@ test("a place frees once its gate ends or its caller cancels, or a minute after 
 	expect(queued.ledger().admissions).toEqual([build, fresh]);
 });
 
-test("a priority caller goes ahead of the queue, and a quick one starts at its deadline whatever its place", async () => {
+test("a priority caller goes ahead of the queue", async () => {
 	const limits = { load: 4, memory: GiB };
 	const build = { id: "build", at: -10 * RECENT_MS, ...me };
 	const earlier = { id: "earlier", at: 0, ...me, queued: true };
@@ -440,28 +414,19 @@ test("a priority caller goes ahead of the queue, and a quick one starts at its d
 	const events: string[] = [];
 	await admit(limits, testHost(directory, state, events), signal, undefined, { priority: true });
 	expect(events).toEqual([]);
-	await admit(limits, testHost(directory, state, events), signal, undefined, { quick: true });
-	expect(events).toEqual(Array.from({ length: QUICK_MS / SETTLE_MS }, () => `sleep ${SETTLE_MS}`));
-	expect(host.ledger().admissions).toEqual([
-		build,
-		earlier,
-		{ id: expect.any(String), at: 0, ...me },
-		{ id: expect.any(String), at: QUICK_MS, ...me },
-	]);
+	expect(host.ledger().admissions).toEqual([build, earlier, { id: expect.any(String), at: 0, ...me }]);
 });
 
-test("a lone quick or priority caller starts at once on load from outside the gate", async () => {
-	// No gated command runs, so the load is work the gate cannot wait out, whatever the precedence.
+test("a lone priority caller starts at once on load from outside the gate", async () => {
+	// No gated command runs, so the load is work the gate cannot wait out.
 	const state = { now: 0, load: 12, memory: Infinity };
 	const limits = { load: 3, memory: GiB };
-	for (const precedence of [{ quick: true }, { priority: true }]) {
-		const host = { ...testHost(tempDir(), state), running: () => false };
-		host.sleep = async () => {
-			throw new Error("a lone command waited for load it cannot wait out");
-		};
-		await admit(limits, host, signal, undefined, precedence);
-		expect(host.ledger().admissions).toEqual([{ id: expect.any(String), at: 0, ...me }]);
-	}
+	const host = { ...testHost(tempDir(), state), running: () => false };
+	host.sleep = async () => {
+		throw new Error("a lone command waited for load it cannot wait out");
+	};
+	await admit(limits, host, signal, undefined, { priority: true });
+	expect(host.ledger().admissions).toEqual([{ id: expect.any(String), at: 0, ...me }]);
 });
 
 test("a burst that all read the ledger before any records admits only what the rule allows", async () => {
@@ -1117,17 +1082,53 @@ describe.runIf(process.platform === "linux")("a systemd scope", () => {
 		await until(() => stopped(pid()));
 	});
 
-	test("reports its CPU use to the gate until it ends", async () => {
+	test("reports its CPU use to the gate until it ends, and in all once it ends", async () => {
 		const host = fileHost(tempDir());
 		const unit = `quest-gate-${randomUUID()}.scope`;
 		const done = join(tempDir(), "done");
 		expect(host.usage(unit)).toBeUndefined();
 		const spin = ["/bin/sh", "-c", `while [ ! -e ${quote(done)} ]; do :; done`];
-		const result = scope(unit)(spin, process.env, cancellation().cancel);
-		await until(() => (host.usage(unit) ?? 0) > 0);
+		const owned = scope(unit);
+		const result = owned(spin, process.env, cancellation().cancel);
+		let seen = 0;
+		await until(() => (seen = host.usage(unit) ?? 0) > 0);
 		writeFileSync(done, "");
 		expect(await result).toBe(0);
+		expect(owned.cpu()).toBeGreaterThanOrEqual(Math.floor(seen / 1000));
 		await until(() => host.usage(unit) === undefined);
+	});
+
+	test("keeps a successful command's exit status when its CPU cannot be read", async () => {
+		const warn = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+		try {
+			const result = await measuredRun(
+				`quest-gate-${randomUUID()}.scope`,
+				process.cwd(),
+				["/bin/sh", "-c", "exit 0"],
+				{
+					cancel: cancellation().cancel,
+					within: null,
+					usage: () => {
+						throw Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" });
+					},
+				},
+			);
+			expect(result).toEqual({ status: 0, cpu: null });
+			expect(warn.mock.calls.map(([text]) => String(text)).join("")).toMatch(
+				/cannot read the CPU .* used: .*EACCES/,
+			);
+		} finally {
+			warn.mockRestore();
+		}
+	});
+
+	test("reads a short command's CPU however soon systemd removes its scope", async () => {
+		// systemd removes an empty scope's cgroup as its command exits, sometimes before the gate sees the exit.
+		for (let i = 0; i < 20; i++) {
+			const owned = scope(`quest-gate-${randomUUID()}.scope`);
+			expect(await owned(["/bin/sh", "-c", "exit 4"], process.env, cancellation().cancel)).toBe(4);
+			expect(owned.cpu()).not.toBeNull();
+		}
 	});
 });
 
@@ -1493,24 +1494,8 @@ test("the gated command keeps its own flags, even ones Quest also parses", () =>
 	expect(gateBoundary(["gate", "--root", "r", "ls"])).toEqual(["gate", "--root", "r", "--", "ls"]);
 	expect(gateBoundary(["gate", "--root=r", "ls"])).toEqual(["gate", "--root=r", "--", "ls"]);
 	expect(gateBoundary(["gate", "--version"])).toEqual(["gate", "--version"]);
-	// Gate's own option stays Quest's; the same flag after the executable is the command's.
-	expect(gateBoundary(["gate", "--quick", "ls", "--quick"])).toEqual(["gate", "--quick", "--", "ls", "--quick"]);
+	// A flag after the executable is the command's.
 	expect(gateBoundary(["gate", "ls", "--host"])).toEqual(["gate", "--", "ls", "--host"]);
-	expect(gateBoundary(["gate", "--root", "r", "--quick", "ls"])).toEqual([
-		"gate",
-		"--root",
-		"r",
-		"--quick",
-		"--",
-		"ls",
-	]);
-	expect(gateBoundary(["--quick", "gate", "ls"])).toEqual(["--quick", "gate", "ls"]);
-});
-
-test("gate parses --quick before its command", async () => {
-	vi.stubEnv("QUEST_GATE_ADMITTED", "1");
-	const out = { stdout: () => {}, stderr: () => {} };
-	expect(await main(["gate", "--quick", process.execPath, "-e", "process.exit(4)"], out)).toBe(4);
 });
 
 test("global options after gate keep working", async () => {
@@ -1559,13 +1544,17 @@ describe.skipIf(process.platform === "win32")("the run record", () => {
 		(process.listeners(name).at(-1) as () => void)();
 	}
 
-	test("an outermost run appends one line with its wait, scope, and exit", async () => {
+	test("an outermost run appends one line with its wait, end, CPU, scope, and exit", async () => {
 		const dir = tempDir();
 		const file = join(dir, "record.jsonl");
 		const cgroup = join(dir, "cgroup");
 		outermost(file);
 		const scoped = owner(process.env).unit !== undefined;
-		const command = ["/bin/sh", "-c", `cat /proc/self/cgroup > ${quote(cgroup)} 2>/dev/null; exit 3`];
+		const command = [
+			"/bin/sh",
+			"-c",
+			`cat /proc/self/cgroup > ${quote(cgroup)} 2>/dev/null; i=0; while [ $i -lt 20000 ]; do i=$((i+1)); done; exit 3`,
+		];
 		const before = Date.now();
 		expect(await gate(command, { host: ledger() })).toBe(3);
 		const after = Date.now();
@@ -1573,12 +1562,42 @@ describe.skipIf(process.platform === "win32")("the run record", () => {
 		expect(rest).toEqual([]);
 		expect(statSync(file).mode & 0o777).toBe(0o600);
 		expect(line).toMatchObject({ command, directory: process.cwd(), exit: 3, cancelled: false, error: null });
-		const times = [before, Date.parse(line.started), Date.parse(line.admitted), after];
+		const times = [before, Date.parse(line.started), Date.parse(line.admitted), Date.parse(line.ended), after];
 		expect(times).toEqual([...times].sort((a, b) => a - b));
 		// The unit names the scope the command actually ran in, so a reader can find its journal lines.
-		if (scoped)
+		if (scoped) {
 			expect(readFileSync(cgroup, "utf8").trim()).toMatch(new RegExp(`/${line.unit.replaceAll(".", "\\.")}$`));
-		else expect(line.unit).toBeNull();
+			expect(line.cpu).toBeGreaterThan(0);
+		} else {
+			expect(line.unit).toBeNull();
+			expect(line.cpu).toBeNull();
+		}
+	});
+
+	test("in an agent session, an outermost run logs its command, wait, run, and CPU for the session's record", async () => {
+		const state = tempDir();
+		outermost("");
+		vi.stubEnv("CLAUDE_CODE_SESSION_ID", "s1");
+		vi.stubEnv("XDG_STATE_HOME", state);
+		const scoped = owner(process.env).unit !== undefined;
+		const spin = ["/bin/sh", "-c", "i=0; while [ $i -lt 20000 ]; do i=$((i+1)); done"];
+		const before = Date.now();
+		expect(await gate(spin, { host: ledger() })).toBe(0);
+		const [line, ...rest] = readWaits(before, { XDG_STATE_HOME: state });
+		expect(rest).toEqual([]);
+		expect(line).toMatchObject({
+			kind: "gate",
+			// Its shell script runs no program but the shell's own builtins.
+			command: "?",
+			sessions: [{ harness: "claude", session: "s1" }],
+			directory: process.cwd(),
+		});
+		if (line?.kind !== "gate") throw new Error("expected a gate line");
+		const times = [before, Date.parse(line.start), Date.parse(line.admitted!), Date.parse(line.end)];
+		expect(times).toEqual([...times].sort((a, b) => a - b));
+		// Only a systemd scope counts its command's CPU.
+		if (scoped) expect(line.cpu).toBeGreaterThan(0);
+		else expect(line.cpu).toBeNull();
 	});
 
 	test("a nested gate records nothing, and an empty variable is unset", async () => {
@@ -1593,7 +1612,7 @@ describe.skipIf(process.platform === "win32")("the run record", () => {
 		expect(readdirSync(dir)).toEqual([]);
 	});
 
-	test("a run cancelled while queued is recorded with no admission or scope", async () => {
+	test("a run cancelled while queued is recorded with no admission, CPU, or scope", async () => {
 		const dir = tempDir();
 		const file = join(dir, "record.jsonl");
 		const ran = join(dir, "ran");
@@ -1607,6 +1626,8 @@ describe.skipIf(process.platform === "win32")("the run record", () => {
 		expect(lines(file)).toEqual([
 			expect.objectContaining({
 				admitted: null,
+				ended: expect.any(String),
+				cpu: null,
 				unit: null,
 				exit: 128 + constants.signals.SIGHUP,
 				cancelled: true,

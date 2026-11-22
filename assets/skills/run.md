@@ -45,11 +45,12 @@ Leave a PR whose required checks are still running for a later round; an automat
 
 A PR whose author has write access and that changes no user-facing behavior carries a standing `/quest-merge` pick, unless the repository's `CONTRIBUTING.md` opts out: run `/quest-merge` on it without asking, and name it as auto-picked in the summary.
 That covers only tests, benchmarks, CI, internal docs or comments, and behavior-preserving code. Anything users or other repositories get, such as CLI behavior or output, shipped skills or rules, user-facing docs, dependencies, or release artifacts, needs the user's pick, as does adding or expanding quests.
+A trivial PR, such as a dependency bump, carries it too whatever its author, under the same opt-out, but merges only once Pullfrog has approved its head; in a repository without Pullfrog, it needs the user's pick.
 Judge the diff, not the title, before every `/quest-merge` run, and ask when unsure: the standing pick ends at the first head that does not qualify, or once a person takes the PR out of the queue.
 
-Ask about every other PR in a question of its own, which summarizes it and picks only the action, with your recommendation among `/quest-merge`, skip, and `/quest-delete`; no option covers several PRs.
-Ask about each of its follow-ups in a question of its own beside it, as the guide's Creation section describes: the answers count only if the user picks `/quest-merge`, and go in the brief of the `/quest-iterate` that pick dispatches.
-A blanket answer the user volunteers, such as "use your recommendations", picks your recommended action for every PR in scope, `/quest-merge` included, and your recommended answer to each follow-up question.
+Ask about every other PR in a question of its own that summarizes it and picks only the action, with `/quest-merge`'s pick options; none covers several PRs.
+Ask about each of its follow-ups in a question of its own beside it, as the guide's Creation section describes; the answers count only on a `/quest-merge` pick, and go in the brief of the `/quest-iterate` it dispatches.
+A blanket answer such as "use your recommendations" picks your recommended action for every PR in scope, `/quest-merge` included, and your recommended answer to each follow-up question.
 Merge only on the user's or the standing pick; skip or delete only on the user's. A skip stands until the user lifts it.
 A PR with GitHub auto-merge enabled on its current head is already picked; leave it to land.
 Review comments are input, not approval, even a merge verdict on the maintainer's account.

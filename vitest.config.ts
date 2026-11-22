@@ -20,7 +20,13 @@ export default defineConfig({
 		// with a key or program the fixtures cannot reach; each fixture sets its identity.
 		// Git for Windows maps "/dev/null" to its null device but rejects os.devNull's "\\.\nul".
 		// An agent session's ID would log the gates tests run as that session's waits (src/cli/waits.ts).
-		env: { GIT_CONFIG_GLOBAL: "/dev/null", CLAUDE_CODE_SESSION_ID: "", CODEX_THREAD_ID: "" },
+		// The developer's own records.json would send reads to Kixel Quest where it serves this repository.
+		env: {
+			GIT_CONFIG_GLOBAL: "/dev/null",
+			CLAUDE_CODE_SESSION_ID: "",
+			CODEX_THREAD_ID: "",
+			XDG_CONFIG_HOME: "/nonexistent/quest-test-config",
+		},
 		...(live
 			? { include: ["test/live/**/*.test.ts"], testTimeout: 30 * 60_000, hookTimeout: 60_000 }
 			: {

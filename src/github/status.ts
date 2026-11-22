@@ -3,23 +3,33 @@ import {
 	actor,
 	array,
 	currentChecks,
-	GitHub,
+	GitHubReader,
 	GitHubDeadline,
-	type GitHubDependencies,
+	type GitHubReadDependencies,
 	link,
 	object,
 	type ObjectValue,
-	type PullRequest,
-	type Repository,
 	requirements,
 	string,
 	workflowKey,
 } from "./client";
 import { appOf, checksState, contextOutcome } from "./checks";
 import { EJECTED, LAND_CHECK, pinned } from "./land";
-import { type Tier, recordedRisk, reviewSection } from "../core";
-import { readHoldStatus, type HoldFact, type HoldReport } from "./hold";
-import { readSignals, type Signal } from "./signals";
+import {
+	type Check,
+	type PullRequest,
+	type Reaction,
+	type Repository,
+	type Review,
+	type ReviewRecord,
+	type Status,
+	type Thread,
+	recordedRisk,
+	reviewSection,
+} from "../core";
+import { readHoldStatus } from "./hold";
+import { readSignals } from "./signals";
+import { duplicateQuests } from "./duplicates";
 
 /**
  * One query covers the PR; each connection pages by its own cursor, and a
@@ -70,102 +80,28 @@ const STATUS = `query($owner: String!, $repo: String!, $number: Int!,
 }
 fragment reaction on Reaction { content createdAt user { login } }`;
 
-/** A check run or commit status on the head, as `quest status` prints it. */
-export interface Check {
-	name: string;
-	required: boolean;
-	/** The lowercased check-run conclusion or status, or commit-status state. */
-	result: string;
-	url: string | null;
-}
-
-/** A reviewer's latest submitted review. */
-export interface Review {
-	reviewer: string;
-	/** approved, changes_requested, commented, or dismissed. */
-	state: string;
-	/** Whether the review was submitted against the current head. */
-	current: boolean;
-	commit: string | null;
-	submittedAt: string;
-	url: string;
-}
-
-/** A reaction on the PR or one of its reviews. */
-export interface Reaction {
-	content: string;
-	actor: string;
-	createdAt: string;
-	/** The PR or review reacted to. */
-	url: string;
-}
-
-/** An unresolved review thread. */
-export interface Thread {
-	id: string;
-	path: string;
-	/** The line on the current diff, or the original line once outdated. */
-	line: number | null;
-	outdated: boolean;
-	lastAuthor: string;
-	/** The thread's latest comment. */
-	url: string;
+/** What a repository's base branch requires, as {@link requiredOf} read it for that repository and branch. */
+export interface BaseNeeds extends Repository {
+	branch: string;
+	needs: Needs;
 }
 
 /**
- * The head the PR body's `## Review` section names last, the latest reviewed one: a round's record, or a line after
- * it for low-severity fixes or a skip. `current` is the PR's head; `diff-identical` an earlier head whose diff from
- * the base (`git diff <base>...<sha>`) matches the head's; `unknown` one GitHub cannot compare, such as a diff too
- * large to render.
+ * Read the paged PR state, then the state commands’ ownership snapshot. A caller reading many PRs passes `base`,
+ * what it read of their base once, instead of each read fetching it again; it throws when the PR's repository or base
+ * is another.
  */
-export interface ReviewRecord {
-	state: "current" | "diff-identical" | "stale" | "unknown";
-	head: string;
-}
-
-/** Everything `quest status` reports about a PR. */
-export interface Status {
-	url: string;
-	state: "open" | "closed" | "merged";
-	draft: boolean;
-	head: string;
-	mergeable: string;
-	mergeState: string;
-	reviewDecision: string | null;
-	/** `head` is the head it was enabled on, or null when that cannot be told; see {@link enabledHead}. */
-	autoMerge: { method: string; enabledBy: string; enabledAt: string; head: string | null } | null;
-	mergeQueue: { state: string; position: number; enqueuedAt: string } | null;
-	/**
-	 * The latest exit from the merge queue, auto-merge, or `quest land`'s queue, and the reason for it;
-	 * null once the PR is queued again.
-	 */
-	landingStopped: { reason: string; actor: string; at: string } | null;
-	checks: { state: string | null; passed: number; failing: Check[]; pending: Check[] };
-	/** Each reviewer's latest submitted review, oldest first. */
-	reviews: Review[];
-	/** The design checkpoints online reviewers put on the head, as {@link checkpoints} finds them. */
-	checkpoints: { reviewer: string; round: number; url: string }[];
-	/** Null when the `## Review` section names no full SHA. */
-	reviewRecord: ReviewRecord | null;
-	/**
-	 * The head's risk tier as the `## Review` record names it, and the classifier's own tier, lower when a reviewer
-	 * raised it; null when the record names none. `state` is the review record's, which a line after it carries to a
-	 * later head, else `current` when the record names the head and `stale` when not.
-	 */
-	risk: { tier: Tier; reason: string; classified: Tier; state: ReviewRecord["state"] } | null;
-	reactions: Reaction[];
-	/** Unresolved review threads, oldest first. */
-	threads: Thread[];
-	/** What holds the head from landing: online reviewers' unanswered findings on it and newer maintainer decisions. */
-	signals: Signal[];
-	/** Ownership facts read by the same client as the state commands. */
-	holds: HoldFact[];
-	starterHold: HoldReport["starter"];
-}
-
-/** Read the paged PR state, then the state commands’ ownership snapshot. */
-export async function pullRequestStatus(pr: PullRequest, deps: GitHubDependencies): Promise<Status> {
-	const github = new GitHub(deps);
+export async function pullRequestStatus(
+	pr: PullRequest,
+	deps: GitHubReadDependencies,
+	base?: BaseNeeds,
+): Promise<Status> {
+	// GitHub's owner and repository names are case-insensitive.
+	if (base !== undefined && `${base.owner}/${base.repo}`.toLowerCase() !== `${pr.owner}/${pr.repo}`.toLowerCase())
+		throw new Error(
+			`the requirements passed for ${pr.owner}/${pr.repo}#${pr.number} were read for ${base.owner}/${base.repo}`,
+		);
+	const github = new GitHubReader(deps);
 	const cursors: Record<"checks" | "reviews" | "threads", string | null | undefined> = {
 		checks: null,
 		reviews: null,
@@ -214,6 +150,11 @@ export async function pullRequestStatus(pr: PullRequest, deps: GitHubDependencie
 		if (cursors.reviews !== undefined) page(current.reviews, "reviews", reviewNodes);
 		if (cursors.threads !== undefined) page(current.reviewThreads, "threads", threadNodes);
 	}
+	const baseRef = string(first!.baseRefName);
+	if (base !== undefined && base.branch !== baseRef)
+		throw new Error(
+			`the PR's base is ${baseRef}, not the ${base.branch} whose requirements were read; read them again`,
+		);
 	const ownership = await readHoldStatus(pr, deps);
 	if (ownership.head !== first!.headRefOid)
 		throw new Error("the PR head changed while reading its holds; rerun quest status");
@@ -221,9 +162,9 @@ export async function pullRequestStatus(pr: PullRequest, deps: GitHubDependencie
 	const { checks: current } = await currentChecks(github, pr, head, contexts);
 	// Only an open PR can still merge, and a closed one's base may be gone.
 	const needs: Needs =
-		first!.state === "OPEN"
-			? await requiredOf(github, pr, string(first!.baseRefName))
-			: { checks: [], workflows: [] };
+		first!.state !== "OPEN"
+			? { checks: [], workflows: [] }
+			: (base?.needs ?? (await requiredOf(github, pr, baseRef)));
 	const status = summarize(first!, rollup, current, needs, reviewNodes, threadNodes);
 	status.reviewRecord = await reviewRecord(github, pr, first!, deps.warn);
 	status.risk = risk(typeof first!.body === "string" ? first!.body : "", head, status.reviewRecord);
@@ -232,7 +173,8 @@ export async function pullRequestStatus(pr: PullRequest, deps: GitHubDependencie
 	if (signaled.head !== first!.headRefOid)
 		throw new Error("the PR head changed while reading its signals; rerun quest status");
 	status.signals = signaled.signals;
-	return { ...status, holds: ownership.holds, starterHold: ownership.starter };
+	const duplicates = first!.state === "OPEN" ? await duplicateQuests(github, pr) : [];
+	return { ...status, holds: ownership.holds, starterHold: ownership.starter, duplicates };
 }
 
 /** The risk the PR body records, judged against the head as {@link Status.risk} describes. */
@@ -244,7 +186,7 @@ function risk(body: string, head: string, record: ReviewRecord | null): Status["
 }
 
 async function reviewRecord(
-	github: GitHub,
+	github: GitHubReader,
 	pr: PullRequest,
 	pull: ObjectValue,
 	warn: (message: string) => void,
@@ -298,7 +240,7 @@ export const BRANCH_UPDATES = ["push", "force_push", "branch_creation", "pr_merg
  * `headRefName`, `headRepository { nameWithOwner }`, and `autoMergeRequest { enabledAt commitBody }`.
  */
 export async function enabledHead(
-	github: GitHub,
+	github: GitHubReader,
 	pull: ObjectValue,
 	warn: (message: string) => void,
 ): Promise<string | null> {
@@ -317,7 +259,7 @@ export async function enabledHead(
  * `headRepository { nameWithOwner }`.
  */
 export async function headBefore(
-	github: GitHub,
+	github: GitHubReader,
 	pull: ObjectValue,
 	time: number,
 	what: string,
@@ -360,7 +302,7 @@ export interface Needs {
 }
 
 /** What `branch` requires of a PR head. The gate's own check is never on one, so it is left out. */
-export async function requiredOf(github: GitHub, repository: Repository, branch: string): Promise<Needs> {
+export async function requiredOf(github: GitHubReader, repository: Repository, branch: string): Promise<Needs> {
 	const found = await requirements(github, repository, branch);
 	return { checks: found.checks.filter((check) => check.name !== LAND_CHECK), workflows: found.workflows };
 }
@@ -531,6 +473,7 @@ function summarize(
 		signals: [],
 		holds: [],
 		starterHold: null,
+		duplicates: [],
 	};
 }
 

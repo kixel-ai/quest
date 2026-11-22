@@ -40,7 +40,10 @@ What this project is working toward.
 
 Invoke `/quest-plan` in Claude Code or `$quest-plan` in Codex with an outcome you
 want to work toward. The skill helps settle the scope, then writes the quests,
-grouped into epics and milestones, with what each one requires. See the
+grouped into epics and milestones, with what each one requires. Init already
+planted one quest per [recurring audit](../README.md#run-recurring-audits),
+such as `quest/m1/audit-deps.md`. In a fresh tree they are ready at once; to run
+them after your first milestone, add `Required` on `quest/m0/README.md` to each. See the
 [CSV export example](../examples/export/quest/README.md) for a populated tree.
 
 From your repository root, validate the result and list the ready quests:
@@ -64,7 +67,8 @@ draft locally and marks it ready, and `/quest-merge` (`$quest-merge` in Codex)
 queues it to land once a review covers its head and checks pass.
 `/quest-run` queues a writer's PR that changes no user-facing behavior,
 such as one editing only quests or tests, without asking, unless your
-`CONTRIBUTING.md` opts out.
+`CONTRIBUTING.md` opts out, and the same way any trivial PR, such as a
+dependency bump, once Pullfrog approves its head.
 The quest is complete, its plan leaves the tree, and the quests that required it
 can become ready.
 
@@ -73,7 +77,8 @@ can become ready.
 Upgrade by changing the pin, then rerun `quest init` to add stubs for new
 skills, refresh the unmodified stubs whose description or setup link changed,
 and remove the unmodified stubs of retired ones; a stub you edited stays as it
-is. To remove Quest, ask
+is. It also plants a quest for each new audit in the pack, which never changes
+once planted. To remove Quest, ask
 your agent to follow SETUP.md to remove Quest. It exports active quests to
 GitHub issues, runs `quest uninstall`, and drops the pin. Uninstall never
 deletes your quest tree, and completed plans remain in Git history.

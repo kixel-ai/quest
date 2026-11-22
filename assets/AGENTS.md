@@ -38,6 +38,10 @@ The observable outcome and important boundaries.
 
 Current decisions, open questions, or implementation guidance.
 
+## Audit
+
+- deps
+
 ## Hosts
 
 - macos - the operating systems the work must run on, such as a camera check
@@ -72,6 +76,9 @@ Much code that is mechanical stays small, such as applying one rename the same w
 Little code that is mostly judgment is larger, such as a 30-line rewording of a skill, sized M rather than XS.
 An epic carries no size until its last child is deleted; its README is then the epic's remaining work.
 
+`Audit` names the one audit quest ships that the quest runs; `quest audit` lists them, and `quest audit <name>` prints one with how its run plans the next.
+`quest init` plants a stub for each audit no quest names, unless the root README lists it, optionally followed by ` - why`, under `## Skipped audits`.
+
 `Hosts` lists the operating systems the work must run on: `linux`, `macos`, or `windows`, each optionally followed by ` - why`.
 A quest without it runs anywhere; `quest unblocked --json` reports the list as `hosts` so a dispatcher routes work without reading prose.
 
@@ -100,12 +107,14 @@ End every quest skill with a final summary in sections, such as the PRs and thei
 ## Creation
 
 Quests are created in PRs and reviewed.
-Search the tree and git history before making a new quest.
+Before making a new quest, search the tree, git history, and the quest files each open PR adds or changes, which `quest pr list` lists, a `file <url> <path>` line each, on GitHub and Kixel Quest alike; a search of PR titles and bodies misses a PR that never names the subject.
 
 Split independently completable work into separate quests.
 Group related quests in an epic; its README holds the work no child owns.
 
 Work found along the way that is worth a quest is a follow-up: add it to the PR that found it, as a new quest placed and sized by these rules and the repository's, or an edit to the quest that owns the work; never as an agent-session task or a GitHub issue.
+When another open PR's quest owns the work, add nothing: name that PR and quest in the PR body instead.
+`quest status <pr>` prints a `duplicate` line for each quest the PR adds that another open PR also adds, by path or title; resolve each before marking the PR ready or picking it, unless both PRs need the quest.
 Drop one you would call optional or worth doing only if it matters.
 Answer each of its decisions you can with your recommendation in its Plan, and list each you cannot as a `Maintainer:` decision item under its `Waiting`.
 The PR body's `## Follow-ups` section links each one with its open decisions, which neither keep the PR a draft nor stop its pick.
@@ -157,7 +166,7 @@ it over, saying how long ago it was last active.
 A quest's branch is its path without `.md`.
 For example, `quest/m1/foo/bar.md` is branch `quest/m1/foo/bar`.
 Only claims use that namespace: no other branch is named `quest` or starts with `quest/`, since git cannot hold a branch named after another's directory.
-Branches for `/quest-plan`, `/quest-audit`, and other skill PRs use a prefix of their own, such as `quest-plan/<slug>`.
+Branches for `/quest-plan`, `/quest-recurring`, and other skill PRs use a prefix of their own, such as `quest-plan/<slug>`.
 If `quest start` names a branch in the way, stop and report it; never delete or rename it yourself.
 Never rename an open PR's head branch either: GitHub closes the PR.
 Its warning that the quest's local branch already exists is not that refusal: the claim succeeded, and the branch holds an earlier attempt.

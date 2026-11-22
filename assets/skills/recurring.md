@@ -6,6 +6,9 @@ skills: plan
 Run the plan interview for a quest that recurs: the PR that finishes one run creates the next.
 The argument (if provided) is the work to repeat, or an existing quest to make recurring.
 
+An audit quest ships (`quest audit` lists them) needs no plan: its stub, a quest whose `## Audit` section names it, already recurs.
+If the tree lacks it, remove it from the root README's `## Skipped audits` and run `quest init`; put what this repository needs, such as scope or another trigger, in the stub's Plan.
+
 Agents working the quest never load this skill, so its Plan says, in its own words, where the next run goes and what gates it.
 The next run keeps the Goal and recurrence, and its Plan carries forward what this run learned (baselines, results, what to check first).
 

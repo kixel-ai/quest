@@ -9,6 +9,7 @@ import { Argument, Command, CommanderError, InvalidArgumentError, Option } from 
 
 import { description } from "../../package.json";
 import {
+	AUDITS,
 	type Doc,
 	type RankedQuest,
 	blockers,
@@ -28,6 +29,8 @@ import {
 	unblocked,
 	onMaintainer,
 	waiting,
+	InputError,
+	Refusal,
 } from "../core";
 import {
 	AgentInputError,
@@ -40,17 +43,29 @@ import {
 	stopAgent,
 	stopAll,
 } from "./agent";
-import { held, openDrafts, reach, target, upstream, upstreamRefs } from "./claims";
+import type { ForgeWrites, Hold, Repository } from "../core";
+import { GitHubWrites } from "./writes";
+import { type ClaimDependencies, held, openDrafts, reach, target, upstream, upstreamRefs } from "./claims";
+import {
+	type ForgeDependencies,
+	type Located,
+	forgeFor,
+	liveFor,
+	hostedForge,
+	hostedRepository,
+	locate as locatePull,
+} from "./forge";
 import { PENDING_MS } from "./admission";
-import { gate, QUICK_MS } from "./gate";
-import { gitHubDependencies, GitHubInputError, pullRequest, readRemote, remoteRepository } from "./github";
-import { mergedHolds } from "../github/client";
-import { type Hold, finish, land, release, take } from "./hold";
+import { gate } from "./gate";
+import { gitHubDependencies, pullRequest, readRemote, remoteRepository, requireRemote } from "./github";
+import { type GitHubDependencies, mergedHolds } from "../github/client";
+import { setTimeout as sleep } from "node:timers/promises";
 import { LAND_CHECK } from "../github/land";
+import { audit } from "./audits";
 import { apply, pushCommand } from "./land-apply";
 import { EFFORT_VARIABLE, EFFORTS, fix, FixerAgentError } from "./land-fix";
 import { watch, type WatchOptions } from "./land-watch";
-import { landed, landingCheck } from "./landed";
+import { currentBranch, landed, landingCheck } from "./landed";
 import { type Report, fixHeadings, fixLinks, moveQuest, removeQuest } from "./move";
 import { type ResolveOptions, resolveFile } from "./resolve";
 import {
@@ -68,13 +83,15 @@ import {
 } from "./models";
 import {
 	ReviewInputError,
-	ReviewLimitError,
+	ReviewOutageError,
+	ReviewerUnavailableError,
 	processDependencies as reviewDependencies,
 	ask,
 	review,
 	nextStep,
 	roundLines,
 } from "./review";
+import { EVAL_FILE, addCase, evalLines, evaluate } from "./review-eval";
 import { type Recorded, pullModels, recordRounds } from "./review-record";
 import {
 	BASH_MAX_TIMEOUT_MS,
@@ -89,23 +106,16 @@ import {
 import { CHECKED_CONTEXT, USER_ASKED, questRoot } from "./rules";
 import { messageLines, messages } from "./messages";
 import { logWait, pullWaitKind, readWaits } from "./waits";
-import {
-	CHECKOUT_CONFIG,
-	SEND_INTERVAL,
-	background,
-	parseInstant,
-	reportIncident,
-	runSender,
-	tokensPath,
-} from "./send";
+import { readCalls } from "./calls";
+import { SEND_INTERVAL, background, parseInstant, reportIncident, runSender } from "./send";
 import { installSender, uninstallSender } from "./service";
 import { heal, init, stubFindings, uninstall } from "./setup";
-import { Refusal, describe, notUpstream, releaseQuest, startQuest } from "./start";
+import { describe, notUpstream, releaseQuest, startQuest } from "./start";
+import { KIXEL_QUEST_URL, kixelUrl, tokensPath } from "./tokens";
 import { CONTEXT, GUIDE, GUIDE_SECTIONS, SKILLS, guideSections, sectionHeading, skill } from "./skills";
 import { type Terminal, Theme } from "./theme";
 import { type Snapshot, checkout, collect, load, snapshot, under } from "./tree";
-import { statusLines } from "./status";
-import { pullRequestStatus } from "../github/status";
+import { pullFileLines, statusLines, viewLines } from "./status";
 import { TOKEN_MAX_MISSING, daysBefore, runTokenMax, usage, usageDependencies, usageLines } from "./usage";
 import { waitForActivity, WaitTimeout } from "./wait";
 import { version } from "./version";
@@ -134,7 +144,45 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 	const warn = (line: string): void => {
 		out.stderr(`quest: ${line}\n`);
 	};
+	const forgeDependencies = (quota?: GitHubDependencies["quota"]): ForgeDependencies => ({
+		env: process.env,
+		fetch: globalThis.fetch,
+		now: Date.now,
+		sleep,
+		github: () => gitHubDependencies(warn, quota),
+	});
+	const claimDependencies = (): ClaimDependencies => ({
+		github: () => gitHubDependencies(warn),
+		forge: (repository) => forgeFor(repository, forgeDependencies()),
+		live: (repository) => liveFor(repository, forgeDependencies()),
+		kixel: {
+			hosted: (url) => hostedRepository(kixelUrl(process.env), url),
+			forge: (repository) => hostedForge(repository, forgeDependencies()),
+		},
+		warn,
+	});
+	/** The forge taking writes to the PR `value` names: Kixel Quest for a repository it hosts, else GitHub. */
+	const located = (value: string): Located & { writes: ForgeWrites } => {
+		const at = locatePull(value, root(), process.env);
+		return {
+			...at,
+			writes: at.hosted
+				? hostedForge(at.pull, forgeDependencies())
+				: new GitHubWrites(gitHubDependencies(warn), landingCheck(root())),
+		};
+	};
 	const theme = out.terminal ? new Theme(out.terminal) : null;
+	const PR_ARGUMENT = "GitHub or Kixel Quest PR URL, or a PR number in origin";
+	const FORGE_WRITES =
+		"On GitHub, uses GH_TOKEN, GITHUB_TOKEN, or gh auth token. On a repository Kixel Quest hosts, named by a " +
+		"Kixel Quest PR URL (<url>/<owner>/<repo>/pull/<number>) or an origin remote there (<url>/<owner>/<repo>.git), " +
+		"it writes to Kixel Quest with the token $XDG_CONFIG_HOME/quest/records.json pairs with it, and holds are " +
+		"Kixel Quest's records rather than labels; QUEST_KIXEL_URL names another Kixel Quest. ";
+	const FORGE_READS =
+		"Where Kixel Quest serves the repository and $XDG_CONFIG_HOME/quest/records.json pairs a token with it, " +
+		"these reads go to Kixel Quest's index instead, sparing the GitHub quota, and its failure fails the command; " +
+		"QUEST_FORGE=github reads GitHub, and QUEST_KIXEL_URL names another Kixel Quest. A repository Kixel Quest " +
+		"hosts, named by a Kixel Quest PR URL or origin remote, is read there alone. ";
 
 	const program = new Command("quest")
 		.description(description)
@@ -158,7 +206,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 
 	program
 		.command("gate")
-		.summary("Run an expensive command once the host has room for it")
+		.summary("Run a CPU-heavy command once the host has room for it")
 		.description(
 			"Wait while the 1-minute load average exceeds the host's CPU count or available memory is below " +
 				"min(4 GiB, RAM/4). Each admission in the last minute counts as one more unit of load and one " +
@@ -166,12 +214,11 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"only the raw measures do. The load limit applies only while a gated command still runs. Where a " +
 				"systemd scope owns each running command, the load counts as at least the sum of their peak CPU " +
 				"use in the last minute, and nothing starts while those fill every CPU, so a lull between a " +
-				"command's phases does not free its CPUs. Leave model calls, such as quest review, and long-running " +
-				"servers out of the gate. Nested gate " +
+				"command's phases does not free its CPUs. Gate by CPU, not run time: leave model calls, such as " +
+				"quest review, long-running servers, and quick tools such as formatters out of the gate. Nested gate " +
 				"calls run immediately. Limits come from the host; there is " +
 				"no configuration.\n\n" +
-				`--quick waits at most ${QUICK_MS / 1000} seconds, then starts the command anyway; pass it only for ` +
-				"cheap commands such as formatters. With QUEST_GATE_PRIORITY=1 in the environment, as a check " +
+				"With QUEST_GATE_PRIORITY=1 in the environment, as a check " +
 				"that lands PRs should set, the command waits for memory but never for load, and gets " +
 				"MBX_SCHEDULER_PRIORITY=normal unless it sets its own.\n\n" +
 				"Once the command exits, or is cancelled and exits, its remaining descendants are killed; a second " +
@@ -182,18 +229,18 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"kill-on-close Job Object. Exits with the command's status, or 128 plus the signal's number once " +
 				"cancelled.\n\n" +
 				"With QUEST_GATE_RECORD naming an absolute path, an outermost gate on Linux or macOS appends one JSON " +
-				"line per run to that file, however the run ends: its command, directory, when it started and was " +
-				"admitted, its systemd scope, whose journal holds its CPU time and peak memory, and its exit status. " +
+				"line per run to that file, however the run ends: its command, directory, when it started, was " +
+				"admitted, and ended, its CPU milliseconds (null without a systemd scope), its systemd scope, whose " +
+				"journal holds its peak memory, and its exit status. " +
 				"A file it cannot write fails the gate.\n\n" +
 				"In an agent session, where CLAUDE_CODE_SESSION_ID or CODEX_THREAD_ID is set, an outermost gate also logs " +
 				"its time queued and running under $XDG_STATE_HOME/quest/waits for the session's record; a log it cannot " +
 				"write fails the gate.",
 		)
-		.option("--quick", `Start a cheap command after at most ${QUICK_MS / 1000} seconds of waiting`)
 		.argument("<command>", "Executable to run")
 		.argument("[args...]", "Arguments forwarded verbatim")
-		.action((command: string, args: string[], options: { quick?: boolean }) => {
-			pending = gate([command, ...args], options).catch((error: unknown) => {
+		.action((command: string, args: string[]) => {
+			pending = gate([command, ...args]).catch((error: unknown) => {
 				warn(error instanceof Error ? error.message : String(error));
 				return 1;
 			});
@@ -319,7 +366,8 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 			(result) => done(result) ?? 0,
 			(error: unknown) => {
 				warn(error instanceof Error ? error.message : String(error));
-				return error instanceof FixerAgentError ? error.exitCode : error instanceof Refusal ? 3 : 1;
+				if (error instanceof FixerAgentError) return error.exitCode;
+				return error instanceof Refusal ? 3 : error instanceof InputError ? 2 : 1;
 			},
 		);
 	};
@@ -347,6 +395,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"through parents whose default branch has quest/README.md, so a fork with its own quests is its own " +
 				"upstream. The branches and PRs of the fork the remote pushes to count too. Each skipped quest is listed on stderr with its PR and how long ago that PR was last " +
 				"active, so a stale claim can be offered for takeover. Off GitHub, only branches are checked. " +
+				FORGE_READS +
 				"Outside conditions are never checked.\n\n" +
 				"Given a path, piped output lists its blockers, one per line with nesting indented, with an " +
 				"explanation on stderr; no output means it is ready. On a terminal it prints a quest log instead: a " +
@@ -397,7 +446,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				}
 				// Readiness comes from the upstream default branch, so a stale checkout cannot offer
 				// a deleted quest or one whose prerequisite has since finished.
-				const deps = { github: () => gitHubDependencies(warn), warn };
+				const deps = claimDependencies();
 				settle(
 					(async () => {
 						const up = await reach(root(), options.remote, deps);
@@ -446,8 +495,10 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"Invalid trees fail before printing. Outside conditions are never checked, nor whether another " +
 				"session holds a draft.\n\n" +
 				"Drafts are read from the open PRs of the remote's upstream, found as for quest unblocked " +
-				"--unclaimed, using GH_TOKEN, GITHUB_TOKEN, or gh auth token. Without the remote, off GitHub, or " +
-				"when GitHub cannot be read, it lists the quest tree's items alone and warns that drafts were skipped.",
+				"--unclaimed, using GH_TOKEN, GITHUB_TOKEN, or gh auth token. " +
+				FORGE_READS +
+				"Without the remote, off GitHub, or when the drafts cannot be read, it lists the quest tree's items alone " +
+				"and warns that drafts were skipped.",
 		)
 		.option("--json", "Print a deterministic JSON array")
 		.option("--maintainer", "Only items waiting on the maintainer")
@@ -456,7 +507,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		.action((options: { json?: boolean; maintainer?: boolean; limit?: number; remote: string }) => {
 			const tree = checkout(root(), warn);
 			if (!valid(tree)) return;
-			settle(openDrafts(root(), options.remote, { github: () => gitHubDependencies(warn), warn }), (drafts) => {
+			settle(openDrafts(root(), options.remote, claimDependencies()), (drafts) => {
 				const found = waiting(tree.docs, today(), drafts)
 					.map((quest) =>
 						options.maintainer ? { ...quest, waits: quest.waits.filter(onMaintainer) } : quest,
@@ -501,11 +552,14 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"parents whose default branch has quest/README.md, or the remote's repository when its parent has " +
 				"none, so a fork with its own quests claims on itself. A fork of that upstream pushes the branch to " +
 				"itself and opens the PR on the upstream, and so does a remote that fetches from upstream but pushes " +
-				"to a fork. A failed lookup of a parent's README is an error. Off GitHub, only the branch is pushed, " +
-				"with a warning.\n\n" +
+				"to a fork. A failed lookup of a parent's README is an error. On a remote Kixel Quest hosts " +
+				"(<url>/<owner>/<repo>.git), the claim and its draft PR are Kixel Quest's, which refuses a second " +
+				"open PR on the branch. Elsewhere, only the branch is pushed, with a warning.\n\n" +
 				"--release deletes the quest's branch on the remote, with a lease on its tip, and closes its PR, only " +
 				"while that tip is still an empty commit.\n\n" +
-				"Uses GH_TOKEN, GITHUB_TOKEN, or gh auth token on GitHub. Exits 0 when done, 3 when refused " +
+				"Uses GH_TOKEN, GITHUB_TOKEN, or gh auth token on GitHub. " +
+				FORGE_READS.replace("these reads", "the check for an existing claim") +
+				"Exits 0 when done, 3 when refused " +
 				"(blocked, held, a branch in the way, or work on the branch), 2 for invalid arguments, and 1 for other " +
 				"failures.",
 		)
@@ -513,7 +567,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		.option("--release", "Release the claim instead: delete the empty claim branch and close its PR")
 		.option("--remote <name>", "Remote to push the claim to", "origin")
 		.action((path: string, options: { release?: boolean; remote: string }) => {
-			const deps = { github: () => gitHubDependencies(warn), warn };
+			const deps = claimDependencies();
 			if (options.release) {
 				settle(releaseQuest(root(), find(load(root()), path).path, options.remote, deps), (released) => {
 					print(`deleted ${released.branch}`);
@@ -559,19 +613,22 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"auto-merge:moved prints once per head, with the account that enabled it as the actor and a URL naming the head it " +
 				"was enabled on, which it reads as quest status does. " +
 				"Pass the final field of the last line to --since to resume without replaying events. " +
-				"On timeout, the only line is a resume point for --since (a cursor, or the given --since or head SHA if setup did not finish), so a retry with it still reports activity from the first wait.\n\n" +
+				"On timeout, the only line is a resume point for --since (a cursor, or the given --since, else the head SHA, or through Kixel Quest the time the wait started, if setup did not finish), so a retry with it still reports activity from the first wait.\n\n" +
 				"Uses GH_TOKEN, GITHUB_TOKEN, or gh auth token. Label changes, replies, and reactions by that account are ignored. " +
+				FORGE_READS.replace("these reads", "its polls") +
+				"Through Kixel Quest, that account is the person its token names, and a timeout says how current its " +
+				"index's last answer was. " +
 				"Exits 0 for activity, 3 on timeout, 2 for invalid arguments, and 1 for other failures. " +
 				"Issue-comment edits print as edited, including updates to older bot status comments. The account's own edits are ignored.\n\n" +
 				"In an agent session, where CLAUDE_CODE_SESSION_ID or CODEX_THREAD_ID is set, the wait is logged under " +
 				"$XDG_STATE_HOME/quest/waits for the session's record, named by the first activity's type, or by none on " +
 				"timeout; a log it cannot write exits 1 after printing the activity.",
 		)
-		.argument("<pr>", "GitHub PR URL, or a PR number in origin")
+		.argument("<pr>", PR_ARGUMENT)
 		.option("--since <point>", "ISO timestamp, branch-tip SHA, or resume cursor (default: current head push time)")
 		.option("--timeout <seconds>", "Maximum wait in seconds", positiveSeconds)
 		.action((value: string, options: { since?: string; timeout?: number }) => {
-			const pr = pullRequest(value, root());
+			const { pull: pr, hosted } = locatePull(value, root(), process.env);
 			const started = new Date().toISOString();
 			// An agent session's wait is logged for its record, named by the first activity, or by none on timeout.
 			const logged = (until: string | null): boolean => {
@@ -583,7 +640,11 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 					return false;
 				}
 			};
-			pending = waitForActivity(pr, options, gitHubDependencies(warn)).then(
+			const choice = {
+				choose: (repository: Repository, deadline: number) =>
+					forgeFor(repository, forgeDependencies("wait"), deadline, hosted),
+			};
+			pending = waitForActivity(pr, options, choice, { now: Date.now, sleep }).then(
 				(lines) => {
 					for (const line of lines) print(line);
 					return logged(lines[0]?.split(" ")[1] ?? null) ? 0 : 1;
@@ -592,7 +653,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 					if (error instanceof WaitTimeout && error.cursor) print(error.cursor);
 					warn(error instanceof Error ? error.message : String(error));
 					if (error instanceof WaitTimeout) return logged(null) ? 3 : 1;
-					return error instanceof GitHubInputError ? 2 : 1;
+					return error instanceof InputError ? 2 : 1;
 				},
 			);
 		});
@@ -623,27 +684,33 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"reviewer that approves or requests changes, its round, and its review, when that review is of the " +
 				"head, while its latest verdict on the head is neither an approval nor a dismissal, and ends its third, sixth, ... round (one commit it reviewed), as " +
 				"/quest-review's design checkpoint; a reacted:<content> line per " +
-				"reaction on the PR or a review; a thread line per unresolved review thread, led by its node ID; and a " +
-				"signal line per finding or decision that holds the head from landing (see the README). " +
+				"reaction on the PR or a review; a thread line per unresolved review thread, led by its node ID; a " +
+				"signal line per finding or decision that holds the head from landing (see the README); and last, " +
+				"for an open PR, a duplicate line per quest it adds that another open PR also adds, at the same path or under the same title " +
+				"compared without its size, case, or spacing, giving the quest's path, the other PR's URL, and the other quest's path last. " +
 				"A missing value prints as -. --json prints the same facts as one deterministic object.\n\n" +
-				"Uses GH_TOKEN, GITHUB_TOKEN, or gh auth token. Exits 0 for any PR state, 2 for invalid arguments, " +
+				"Uses GH_TOKEN, GITHUB_TOKEN, or gh auth token. " +
+				FORGE_READS.replace("these reads", "the read") +
+				"Exits 0 for any PR state, 2 for invalid arguments, " +
 				"and 1 for other failures.",
 		)
-		.argument("<pr>", "GitHub PR URL, or a PR number in origin")
+		.argument("<pr>", PR_ARGUMENT)
 		.option("--json", "Print a deterministic JSON object")
 		.action((value: string, options: { json?: boolean }) => {
-			const pr = pullRequest(value, root());
-			pending = pullRequestStatus(pr, gitHubDependencies(warn)).then(
-				(status) => {
-					if (options.json) print(JSON.stringify(status));
-					else for (const line of statusLines(status)) print(line);
-					return 0;
-				},
-				(error: unknown) => {
-					warn(error instanceof Error ? error.message : String(error));
-					return 1;
-				},
-			);
+			const { pull: pr, hosted } = locatePull(value, root(), process.env);
+			pending = forgeFor(pr, forgeDependencies(), Infinity, hosted)
+				.then((forge) => forge.status(pr))
+				.then(
+					({ value: status }) => {
+						if (options.json) print(JSON.stringify(status));
+						else for (const line of statusLines(status)) print(line);
+						return 0;
+					},
+					(error: unknown) => {
+						warn(error instanceof Error ? error.message : String(error));
+						return 1;
+					},
+				);
 		});
 
 	const OWNERSHIP =
@@ -656,9 +723,9 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		"unless the token is still the latest add of its label. When two sessions add the label at once, the " +
 		"first added keeps the PR; GitHub records no event when a label already on the PR is added again, so two " +
 		"takes within the same moment are not told apart.\n\n" +
-		"Uses GH_TOKEN, GITHUB_TOKEN, or gh auth token. Exits 0 when done, 3 when refused, 2 for invalid " +
-		"arguments, and 1 for other failures.";
-	const printToken = (work: Promise<Hold>) => settle(work, (hold) => print(hold.token));
+		FORGE_WRITES +
+		"Exits 0 when done, 3 when refused, 2 for invalid arguments, and 1 for other failures.";
+	const printToken = (work: Promise<Hold | null>) => settle(work, (hold) => (hold ? print(hold.token) : undefined));
 
 	program
 		.command("iterate")
@@ -667,10 +734,11 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 			"Take a PR to work on it, such as to settle its decisions, fix CI and review findings, and push. " +
 				`Given the token of a hold this session already has, it keeps that hold.\n\n${OWNERSHIP}`,
 		)
-		.argument("<pr>", "GitHub PR URL, or a PR number in origin")
+		.argument("<pr>", PR_ARGUMENT)
 		.argument("[token]", "Hold token this session already has")
 		.action((value: string, token: string | undefined) => {
-			printToken(take(pullRequest(value, root()), token, gitHubDependencies(warn)));
+			const { pull, writes } = located(value);
+			printToken(writes.hold(pull, token ?? null));
 		});
 
 	program
@@ -678,12 +746,14 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		.summary("Hand a PR this session holds to reviewers")
 		.description(
 			"Hand a PR this session holds to reviewers: remove the body's Waiting section and mark a " +
-				`draft ready for review. The hold stays; it prints the token again.\n\n${OWNERSHIP}`,
+				"draft ready for review. The hold stays; it prints the token again. Without a token, it only marks " +
+				`a draft ready, refusing while any session holds the PR, and prints nothing.\n\n${OWNERSHIP}`,
 		)
-		.argument("<pr>", "GitHub PR URL, or a PR number in origin")
-		.argument("<token>", "Hold token printed by iterate")
-		.action((value: string, token: string) => {
-			printToken(finish(pullRequest(value, root()), token, gitHubDependencies(warn)));
+		.argument("<pr>", PR_ARGUMENT)
+		.argument("[token]", "Hold token printed by iterate")
+		.action((value: string, token: string | undefined) => {
+			const { pull, writes } = located(value);
+			printToken(writes.ready(pull, token ?? null));
 		});
 
 	program
@@ -712,25 +782,23 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"AGENTS.md; never retry with --direct unless the user asks. GitHub keeps auto-merge across a " +
 				"writer's push, so disable it before pushing to the PR; quest status and quest wait report a head " +
 				"that moved since auto-merge was enabled.\n\n" +
+				"On a repository Kixel Quest hosts, it records a pick of that head instead, which Kixel Quest's queue " +
+				"lands by fast-forwarding the base and drops once the head moves; it takes no --squash, --rebase, or " +
+				"--direct, and refuses what Kixel Quest refuses.\n\n" +
 				OWNERSHIP,
 		)
-		.argument("<pr>", "GitHub PR URL, or a PR number in origin")
+		.argument("<pr>", PR_ARGUMENT)
 		.requiredOption("--land <sha>", "Land this full 40-character head SHA")
 		.addOption(new Option("--squash", "Squash and merge").conflicts("rebase"))
 		.option("--rebase", "Rebase and merge")
 		.option("--direct", "Merge at once when repository auto-merge is disabled; wait for checks to pass first")
 		.action((value: string, options: { land: string; squash?: boolean; rebase?: boolean; direct?: boolean }) => {
-			const pr = pullRequest(value, root());
 			if (!/^[\da-f]{40}$/i.test(options.land)) throw new UsageError("--land needs a full 40-character SHA");
-			const method = options.squash ? "squash" : options.rebase ? "rebase" : undefined;
-			settle(
-				land(
-					pr,
-					{ sha: options.land, method, direct: options.direct, check: landingCheck(root()) },
-					gitHubDependencies(warn),
-				),
-				() => undefined,
-			);
+			const { pull, writes } = located(value);
+			const method = options.squash ? "squash" : options.rebase ? "rebase" : null;
+			// Kixel Quest's wire takes a lowercase SHA; GitHub compares either case.
+			const head = options.land.toLowerCase();
+			settle(writes.pick(pull, { head, method, direct: options.direct ?? false }), () => undefined);
 		});
 
 	const landCommand = program.command("land").summary("Land queued PRs through a host daemon");
@@ -872,11 +940,162 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"released, with a warning. Unlike the other PR state commands, it works on a merged or closed PR.\n\n" +
 				OWNERSHIP,
 		)
-		.argument("<pr>", "GitHub PR URL, or a PR number in origin")
+		.argument("<pr>", PR_ARGUMENT)
 		.argument("<token>", "Hold token printed when the label was taken")
 		.action((value: string, token: string) => {
-			settle(release(pullRequest(value, root()), token, gitHubDependencies(warn)), (label) =>
-				print(`released ${label}`),
+			const { pull, writes } = located(value);
+			settle(writes.release(pull, token), (hold) => print(`released ${hold.label}`));
+		});
+
+	const pr = program
+		.command("pr")
+		.summary("Read, open, edit, and comment on pull requests, and resolve their review threads")
+		.description(
+			"Read, open, edit, and comment on pull requests, and resolve their review threads, on GitHub or on a " +
+				"repository Kixel Quest hosts, where gh cannot reach. Flags follow gh pr's.\n\n" +
+				FORGE_WRITES +
+				"Exits 0 when done, 3 when refused, 2 for invalid arguments, and 1 for other failures.",
+		);
+	pr.command("view")
+		.description(
+			"Print a PR's title, body, comments, reviews, and review threads with their comments, resolved ones " +
+				"included. Plain output prints url, state, draft, author, and title lines; then each post after a -- " +
+				"line, as a header line and its text: the body under a body line, each comment " +
+				"(comment <author> <time> <url>) and review (review <state> <reviewer> <time> <url>) by time, and each " +
+				"review thread (thread <id> current|outdated resolved|unresolved <path>:<line>) followed by its " +
+				"comments. --json prints the same as one deterministic object. It reads the forge itself, never Kixel " +
+				"Quest's index, so a comment just posted shows.",
+		)
+		.argument("<pr>", PR_ARGUMENT)
+		.option("--json", "Print a deterministic JSON object")
+		.action((value: string, options: { json?: boolean }) => {
+			const { pull, hosted } = locatePull(value, root(), process.env);
+			settle(
+				(async () =>
+					(hosted ? hostedForge(pull, forgeDependencies()) : await liveFor(pull, forgeDependencies())).view(
+						pull,
+					))(),
+				({ value: view }) => {
+					if (options.json) print(JSON.stringify(view));
+					else for (const line of viewLines(view)) print(line);
+				},
+			);
+		});
+	pr.command("list")
+		.description(
+			"List the open PRs with the paths each changes, of the upstream that holds origin's claims, on " +
+				"GitHub or Kixel Quest: what gh pr list --json number,url,files gives, without its cap of 100 files " +
+				"a PR; it fails on a PR with 3,000 files or more, which GitHub cuts. Plain output prints a file <url> <path> line per " +
+				"changed path, by PR number, so a grep for a path names the PRs changing it. --json prints a deterministic " +
+				"array of {number, url, files}, listing a PR without files too.",
+		)
+		.option("--json", "Print a deterministic JSON array")
+		.action((options: { json?: boolean }) => {
+			settle(
+				(async () => {
+					const up = await upstream(root(), requireRemote(root(), "origin"), claimDependencies());
+					if (up.hosting === null)
+						throw new InputError("origin names neither a github.com repository nor one on Kixel Quest");
+					// Verifies a search, so it reads GitHub itself, never an index that may lag.
+					return (await up.hosting.live()).files(up.hosting.repository);
+				})(),
+				({ value: pulls }) => {
+					if (options.json) print(JSON.stringify(pulls));
+					else for (const line of pullFileLines(pulls)) print(line);
+				},
+			);
+		});
+	const bodyOptions = (command: Command) =>
+		command
+			.addOption(new Option("-b, --body <text>", "Body text").conflicts("bodyFile"))
+			.option("-F, --body-file <file>", "Read the body from a file, or - for stdin");
+	/** The body the options give, `null` when they give none. */
+	const body = (options: { body?: string; bodyFile?: string }): string | null =>
+		options.body ??
+		(options.bodyFile === undefined ? null : readFileSync(options.bodyFile === "-" ? 0 : options.bodyFile, "utf8"));
+	bodyOptions(
+		pr
+			.command("create")
+			.description(
+				"Open a PR from a branch already pushed to the remote, onto its default branch unless --base names " +
+					"another, and print its URL. The remote's upstream holds it, as quest start finds it: on GitHub, a " +
+					"fork's PR opens on the repository it came from.",
+			)
+			.requiredOption("-t, --title <title>", "Title")
+			.option("-B, --base <branch>", "Branch to merge into (default: the upstream's default branch)")
+			.option("-H, --head <branch>", "Branch to merge from (default: the current branch)")
+			.option("-d, --draft", "Open it as a draft")
+			.option("--remote <name>", "Remote the branch was pushed to", "origin"),
+	).action(
+		(options: {
+			title: string;
+			body?: string;
+			bodyFile?: string;
+			base?: string;
+			head?: string;
+			draft?: boolean;
+			remote: string;
+		}) => {
+			const text = body(options);
+			if (text === null) throw new UsageError("pass --body or --body-file");
+			const branch = options.head ?? currentBranch(root(), "--head");
+			settle(
+				(async () => {
+					const up = await upstream(root(), requireRemote(root(), options.remote), claimDependencies());
+					if (up.hosting === null) throw new Error(`${options.remote} is not on GitHub or Kixel Quest`);
+					const { repository, head, defaultBranch } = up.hosting;
+					return up.hosting.writes().open({
+						repository,
+						head,
+						branch,
+						base: options.base ?? defaultBranch,
+						title: options.title,
+						body: text,
+						draft: options.draft ?? false,
+					});
+				})(),
+				(opened) => print(opened.url),
+			);
+		},
+	);
+	bodyOptions(
+		pr
+			.command("edit")
+			.description("Replace a PR's title, body, or both.")
+			.argument("<pr>", PR_ARGUMENT)
+			.option("-t, --title <title>", "New title"),
+	).action((value: string, options: { title?: string; body?: string; bodyFile?: string }) => {
+		const change = { title: options.title ?? null, body: body(options) };
+		if (change.title === null && change.body === null) throw new UsageError("pass --title, --body, or --body-file");
+		const { pull, writes } = located(value);
+		settle(writes.edit(pull, change), () => undefined);
+	});
+	bodyOptions(
+		pr
+			.command("comment")
+			.description(
+				"Comment on a PR, or reply in a review thread with --thread, naming the thread's ID as quest status " +
+					"prints it, and print the comment's URL.",
+			)
+			.argument("<pr>", PR_ARGUMENT)
+			.option("--thread <id>", "Reply in this review thread"),
+	).action((value: string, options: { thread?: string; body?: string; bodyFile?: string }) => {
+		const text = body(options);
+		if (text === null) throw new UsageError("pass --body or --body-file");
+		const { pull, writes } = located(value);
+		settle(writes.comment(pull, { body: text, thread: options.thread ?? null }), (url) => print(url));
+	});
+	pr.command("resolve")
+		.description("Resolve review threads, each named by its ID as quest status prints it.")
+		.argument("<pr>", PR_ARGUMENT)
+		.argument("<threads...>", "Review thread IDs")
+		.action((value: string, threads: string[]) => {
+			const { pull, writes } = located(value);
+			settle(
+				(async () => {
+					for (const thread of threads) await writes.resolve(pull, thread);
+				})(),
+				() => undefined,
 			);
 		});
 
@@ -967,7 +1186,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 	const merged = async (repository: string, commit: string) => {
 		const origin = readRemote(repository, "origin");
 		if (origin === null) return false; // No forge to ask.
-		const up = await upstream(repository, origin, { github: () => gitHubDependencies(warn), warn });
+		const up = await upstream(repository, origin, claimDependencies());
 		return up.github !== null && mergedHolds(up.github.client, up.github.repository, commit);
 	};
 	worktree
@@ -1190,7 +1409,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"its cost counting equally toward each. Its role is classifying when a PR's ## Review record names it as the risk classifier, reviewing when it names it " +
 				"as a reviewer or Codex marks it a review, else the one the first quest skill it ran gives (planning, implementing, iterating, " +
 				"reviewing, merging, or coordinating), else its parent's unless that is coordinating, else coordinating for a session on its sub-agents' " +
-				"PRs only, planning on a quest-plan, quest-audit, quest-recurring, or quest-import branch, implementing when its " +
+				"PRs only, planning on a quest-plan, quest-recurring, or quest-import branch, implementing when its " +
 				"first request since --since came before the PR opened, and iterating otherwise. Each PR sums its sessions' " +
 				"waits by kind: queued in and running a quest gate, waiting in quest wait for PR activity or the merge queue, " +
 				"each as the tool logged it for its session, and on a person's answer to a blocking question, as its " +
@@ -1198,7 +1417,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"this host's transcripts, no prompt or reply text read out. A session found on several hosts counts once, at its " +
 				"costliest copy, and the report says how many copies it folded from which hosts; a session with a request " +
 				"token-max could not price or a line it could not read is listed, its cost a lower bound. A host that fails fails the report. " +
-				"Each PR also shows its ## Models size, its risk tier from the ## Review record and whether a reviewer raised it, its implementers, and as unread each Implementer line it cannot read, " +
+				"Each PR also shows its ## Models size, its risk tier from the ## Review record and whether a reviewer raised it, its implementers, and as unread each Implementer line and ## Review record it cannot read, " +
 				"each reviewer the ## Review record names, with its latest round and score and its tally of findings across every round and in its first, marked when it is the shadow, " +
 				"where a merged PR whose last round left only low findings open counts them settled, since the author fixes or refutes those before merge, " +
 				"the later merged PRs whose ## Caused by bullets open with its link, and each online reviewer's record from GitHub: whether it " +
@@ -1223,7 +1442,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		)
 		.option("--json", "Print one JSON object")
 		.action((options: { since?: string; quest?: string; pr?: number; ssh?: string[]; json?: boolean }) => {
-			const github = { github: () => gitHubDependencies(warn), warn };
+			const github = claimDependencies();
 			const since = options.since ?? daysBefore(new Date(), 7);
 			settle(
 				usage(
@@ -1239,19 +1458,20 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 			);
 		});
 
-	const recordsCommand = program
-		.command("records")
-		.summary("Send agent sessions' records to the Kixel Code endpoint their checkout names");
+	const recordsCommand = program.command("records").summary("Send agent sessions' records to Kixel Quest");
 	recordsCommand
 		.command("sender")
 		.summary("Run the user's record sender until stopped, as its service does")
 		.description(
-			"Send each session record the stop hook queued, with the records of its sub-agents on this host, to the " +
-				`endpoint its checkout's ${CHECKOUT_CONFIG} names as records, posting {"records": [...], "breakages": [...]}, the breakages the merged PRs among them name under ## Caused by, with the token ` +
-				`${tokensPath()} pairs with that endpoint as a bearer token, one upload per endpoint and repository, ` +
+			"Send each session record the stop hook queued, with the records of its sub-agents on this host, to " +
+				`Kixel Quest's /records (https://kixel.quest, or the one ${KIXEL_QUEST_URL} names), posting {"records": [...], "breakages": [...]}, the breakages the merged PRs among them name under ## Caused by, with the token ` +
+				`${tokensPath()} pairs with its URL as a bearer token, one upload per repository, ` +
 				`then again every ${SEND_INTERVAL / 1000} seconds until stopped, at low priority. A record is built as quest usage ` +
 				"builds it, from token-max's sessions on this host since the earliest queued session's first instant and " +
-				"the PRs updated since then, and replaces its earlier copy, so a resend never doubles. An endpoint that " +
+				"the PRs updated since then, and replaces its earlier copy, so a resend never doubles. A repository Kixel " +
+				"Quest does not serve, as it says on GET /forge, has its sessions dropped, said once. A sent session whose " +
+				"latest branch, or a sub-agent's, heads no PR yet is sent again, with its sub-agents, once a pass for its " +
+				"repository reads a PR opened on that branch, until its transcript is gone. A Kixel Quest that " +
 				"refuses the token (401 or 403) is sent nothing more until the token changes; any other failure keeps the " +
 				"sessions queued, retried after a minute and then twice as long each time up to six hours, and the next " +
 				"stop hook says so once. Before a record is built, a cheap model, " +
@@ -1272,6 +1492,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 						github: () => gitHubDependencies(warn),
 						sessions: (since) => runTokenMax(since, []),
 						waits: (since) => readWaits(since),
+						calls: (since) => readCalls(since),
 						ask,
 						fetch: globalThis.fetch,
 						sleep: (ms) => new Promise((done) => setTimeout(done, ms)),
@@ -1291,13 +1512,13 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 			"A stable ID for the incident, such as the alert's URL; a later report with it replaces this one",
 		)
 		.description(
-			"Post one breakage to the endpoint this checkout's " +
-				`${CHECKOUT_CONFIG} names, with the token ${tokensPath()} pairs with it, as {"records": [], "breakages": [...]}. ` +
+			"Post one breakage to Kixel Quest's /records " +
+				`(https://kixel.quest, or the one ${KIXEL_QUEST_URL} names), with the token ${tokensPath()} pairs with its URL, as {"records": [], "breakages": [...]}. ` +
 				"Without --pr the incident is open, its culprit unknown; report the same ID again with --pr to close it on " +
 				"its culprit, whose tier, size, writers, and local reviewers are read from its PR body, or name it on the " +
 				"culprit's ## Caused by line of the fix, as (incident <id>), whose record then replaces it. It posts at once " +
 				"and retries nothing, for a deploy or alert to call.\n\nUses GH_TOKEN, GITHUB_TOKEN, or gh auth token. " +
-				"Exits 0 when the endpoint took it, 2 for invalid arguments, and 1 for other failures, refusal included.",
+				"Exits 0 when Kixel Quest took it, 2 for invalid arguments, and 1 for other failures, refusal included.",
 		)
 		.addOption(new Option("--found <by>", "Who or what found it").choices(FINDERS).makeOptionMandatory())
 		.option("--pr <number>", "The PR that caused it", positiveInteger("--pr"))
@@ -1363,7 +1584,8 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"its state ($T3CODE_HOME, or ~/.t3), which records whether a person or an agent sent each message. " +
 				"Other Claude Code sessions, from $CLAUDE_CONFIG_DIR (or ~/.config/claude and ~/.claude), count a turn " +
 				"Claude Code marks as a human's; other Codex sessions, from $CODEX_HOME (or ~/.codex), count the " +
-				"content Codex marks as the user's, outside headless and sub-agent sessions. The repository is the " +
+				"content Codex marks as the user's (before 0.162, which marks none, the parts but its environment, shell commands, and " +
+				"AGENTS.md instructions), outside headless and sub-agent sessions. The repository is the " +
 				"checkout's GitHub origin, else the directory. Output goes to stdout only, except a note on stderr " +
 				"naming each Claude Code session whose malformed lines, such as a partial record a crashed write left, " +
 				"were skipped and how many; nothing is stored or posted. Each answer a person gave an agent's blocking question (Claude Code's AskUserQuestion, " +
@@ -1391,13 +1613,28 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		(size) => `${size} ${REVIEWERS[size].map((e) => `${e.harness} ${e.model} ${e.effort}`).join(", then ")}`,
 	).join("; ");
 	const classifiers = CLASSIFIERS.map((e) => `${e.harness} ${e.model} ${e.effort}`).join(", then ");
+	/** quest review's exit code for `error`: 2 for a usage error, 3 when no reviewer could run, else 1. */
+	const reviewFailure = (error: unknown): number => {
+		const outage = error instanceof ReviewerUnavailableError || error instanceof ReviewOutageError;
+		if (error instanceof ReviewInputError || outage) {
+			out.stderr(`error: ${error.message}\n`);
+			return outage ? 3 : 2;
+		}
+		warn(error instanceof Error ? error.message : String(error));
+		return 1;
+	};
 	program
 		.command("review")
 		.summary("Have a model other than the latest writer review the committed branch, read-only")
 		.description(
 			"Review the checkout's committed branch against its base with a reviewer its size picks, never the " +
 				`model that changed it last. Each size ranks its reviewers (harness, model, effort): ${reviewers}. The ` +
-				"first whose model is not avoided reviews, and beside it, on the same head in its own session, the shadow: " +
+				"first whose model is not avoided reviews. One that cannot run, as its CLI or provider reports before any " +
+				"finding is saved, passes the round to the next whose model is not avoided: a CLI that is not installed, " +
+				"logged out, or has its login rejected passes over every model of that CLI, and a model at its usage limit " +
+				"only itself; the run's report and record name each it passed over and why. A reviewer --harness, --model, " +
+				"or --effort names never passes the round on. Beside the reviewer, on the same head in its own session, runs the shadow, " +
+				"which follows the round to the reviewer it passes to: " +
 				"the pick's model one effort lower (low, medium, high, xhigh), skipped when the pick runs at low or an " +
 				"effort off that ladder, so each effort step can be compared with the one below it. The shadow runs on a " +
 				"branch's first run of the pick, then only while it has findings to settle or once the pick changed so it is " +
@@ -1467,7 +1704,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"and can only raise it: the head's tier is the riskiest, with the reason of the first to judge it so.\n\n" +
 				"Prints the size and where it came from, base, and head, its risk tier and reason, the classifier's tier, " +
 				"how it was set (model, paths, or default), and reason, and for a model a classifier line (harness, model, " +
-				"effort, session) and its usage line, then for each reviewer its harness, model, and " +
+				"effort, session) and its usage line, a skipped line (harness, model, effort, reason) for each reviewer passed over, then for each reviewer its harness, model, and " +
 				"effort, followed by shadow for the shadow, session, round, an " +
 				"unchanged line for a repeated round, a usage line per turn (input tokens, the " +
 				"part read from the prompt cache, and output), a score from 0 to 10 for how ready the head is to land with " +
@@ -1477,20 +1714,22 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"`next checkpoint` when a reviewer's every third round reports other findings, to compare the current approach " +
 				"with the best long-term approach worked out from first principles before fixing them, `next respond` to fix or refute the findings, or `next done`. A reply without a valid score " +
 				"fails as any malformed reply does. --json prints " +
-				"one object: `rounds`, one per reviewer, `tallies`, every reviewer's findings across the branch's rounds, `risk`, the head's tier with its classification, `record`, and `next`.\n\n" +
-				"After each round, it rewrites the `## Review` section of the branch's open PR into the base, as the " +
+				"one object: `rounds`, one per reviewer, `tallies`, every reviewer's findings across the branch's rounds, `risk`, the head's tier with its classification, `skipped`, each reviewer passed over with its reason, `record`, and `next`.\n\n" +
+				"After each round, it rewrites the `## Review` section of the branch's open PR into the base, the one from the repository the base's remote pushes to, else the only one from another repository whose pushed head `HEAD` contains, as the " +
 				"user the GitHub token names, keeping the rest of the body, and prints `record <url>`: the reviewed " +
 				"head, named in full only once no reviewer reports a finding, the base, the head's risk tier and reason, " +
-				"the classifier's tier and who set it, and each reviewer, its Reviewer line ending in `, shadow` for the shadow, its " +
+				"the classifier's tier and who set it, a `- Skipped:` line for each reviewer passed over, and each reviewer, its Reviewer line ending in `, shadow` for the shadow, its " +
 				"session and round, score, the tier it raised the risk to and why, its tally of findings across the branch's rounds, and each finding with its disposition. With no " +
-				"such PR, or a remote off GitHub, it prints `record skipped: <why>` and changes nothing.\n\n" +
+				"such PR, several from other repositories that `HEAD` contains, or a remote off GitHub, it prints `record skipped: <why>` and changes nothing.\n\n" +
 				"Exits 0 once the round finishes, whatever it found, 2 for invalid arguments " +
-				"or a checkout or CLI that cannot be reviewed, including a login the API rejects, 3 when a reviewer's " +
-				"account hit its usage limit, and 1 for other failures, including a PR GitHub will not show or a record it " +
+				"or a checkout that cannot be reviewed, 3 when no eligible reviewer could run, each not installed, logged " +
+				"out, its login rejected, or at its usage limit, and 1 for other failures, including a PR GitHub will not show or a record it " +
 				"refuses. A malformed `## Models` field the round reads, such as a Size line naming no size or an " +
-				"Implementer line naming no model it can read, is a usage error, unless --size or --exclude-model replaces it. A usage limit prints one line, " +
+				"Implementer line naming no model it can read, is a usage error, unless --size or --exclude-model replaces it. A usage limit of the only " +
+				"eligible reviewer prints one line, " +
 				"`error: <harness> hit its usage limit; resets <time>`, where <time> is the reset as an ISO 8601 UTC " +
-				"timestamp, or `unknown` when the CLI named none.",
+				"timestamp, or `unknown` when the CLI named none; with several, it prints `error: no eligible <size> " +
+				"reviewer could run: <model> <effort> (<error>), ...`, each error as the only reviewer's would read.",
 		)
 		.option("--base <remote/branch>", "Base branch to review against (default: origin's default branch)")
 		.addOption(
@@ -1540,7 +1779,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 					options.responses === undefined
 						? undefined
 						: readFileSync(options.responses === "-" ? 0 : options.responses, "utf8");
-				const github = { github: () => gitHubDependencies(warn), warn };
+				const github = claimDependencies();
 				const run = review(
 					{ ...options, root: root(), exclude: options.excludeModel, responses, fresh: options.new },
 					{
@@ -1548,52 +1787,158 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 						models: (dir, base, branch) => pullModels(dir, base, branch, github),
 					},
 				);
-				pending = run.then(
-					async (reviewed) => {
-						const { rounds, tallies, risk } = reviewed;
-						// The rounds are saved in their sessions either way, so their report prints before a failed record.
-						let record: Recorded | undefined;
-						let failure: unknown;
-						try {
-							record = await recordRounds(root(), reviewed, github);
-						} catch (error) {
-							failure = error;
-						}
-						if (options.json)
-							print(
-								JSON.stringify({
-									rounds,
-									tallies,
-									risk,
-									record: record ?? null,
-									next: nextStep(rounds),
-								}),
-							);
-						else {
-							for (const line of roundLines(reviewed)) print(line);
-							if (record !== undefined)
-								print("url" in record ? `record ${record.url}` : `record skipped: ${record.skipped}`);
-							print(nextStep(rounds));
-						}
-						if (failure === undefined) return 0;
-						warn(
-							`the round finished, but recording it in the PR body failed: ${failure instanceof Error ? failure.message : String(failure)}`,
+				pending = run.then(async (reviewed) => {
+					const { rounds, tallies, risk, skipped } = reviewed;
+					// The rounds are saved in their sessions either way, so their report prints before a failed record.
+					let record: Recorded | undefined;
+					let failure: unknown;
+					try {
+						record = await recordRounds(root(), reviewed, github);
+					} catch (error) {
+						failure = error;
+					}
+					if (options.json)
+						print(
+							JSON.stringify({
+								rounds,
+								tallies,
+								risk,
+								skipped,
+								record: record ?? null,
+								next: nextStep(rounds),
+							}),
 						);
-						return 1;
+					else {
+						for (const line of roundLines(reviewed)) print(line);
+						if (record !== undefined)
+							print("url" in record ? `record ${record.url}` : `record skipped: ${record.skipped}`);
+						print(nextStep(rounds));
+					}
+					if (failure === undefined) return 0;
+					warn(
+						`the round finished, but recording it in the PR body failed: ${failure instanceof Error ? failure.message : String(failure)}`,
+					);
+					return 1;
+				}, reviewFailure);
+			},
+		);
+
+	const evalCommand = program
+		.command("eval")
+		.summary("Score the reviewer on the repository's past culprits and clean PRs");
+	evalCommand
+		.command("run")
+		.summary("Review every case of the eval set and score the reviewers")
+		.description(
+			`Review each case of the eval set, ${EVAL_FILE} at the checkout's root unless --set names another, at its PR's ` +
+				"last head, fetched from the set's repository (a remote that names it, else its GitHub URL in origin's " +
+				"scheme, so a fork's clone scores its upstream's set), in a detached checkout under the clone's common Git " +
+				"directory that is removed afterwards, and " +
+				"score the reviewers. A culprit is a PR a later fix named under ## Caused by, with each defect's places, a " +
+				"file's lines at its head; a finding on any of them finds it, and one naming no line finds nothing. A clean " +
+				"PR broke nothing, and every finding on it is noise. Each case gets the first round quest review gives a new " +
+				"session: the base's AGENTS.md and CLAUDE.md at the case's merge base, its classified tier, and the prompts of " +
+				"this build, with the review rules of this checkout, its committed REVIEW.md at HEAD, so a change to the " +
+				"reviewer table, the prompts, or REVIEW.md is scored before it lands. The reviewers are the size's pick, " +
+				"avoiding the case's writer, and its shadow, as quest review runs them, or --harness's alone, at its " +
+				"entry's model and effort unless --model and --effort override them. A reviewer that cannot run fails the run " +
+				"rather than passing the case to the next, so the score measures the reviewers it names. Cases run one at a time, their reviewers " +
+				"at once, and the first failure stops the run and fails it.\n\n" +
+				"Prints the set's counts and rules, a line per seat (pick, shadow, and, without --harness, either: what " +
+				"the case's seats found together, as a run of the pick and its shadow finds it) with defects found and clean findings by severity, the same by size and tier, " +
+				"each case's rounds with score, defects found, findings, tokens the CLI reported, and session, and the " +
+				"run's cost at API list price as token-max prices its sessions, or unpriced without token-max. --json prints " +
+				"one object. Exits as quest review does: 2 for invalid arguments or a set that cannot be read, 3 for a " +
+				"reviewer that is not installed, logged out, or at its usage limit, 1 for other failures.",
+		)
+		.option("--set <file>", `The eval set (default: ${EVAL_FILE} at the checkout's root)`)
+		.addOption(
+			new Option("--harness <name>", "The only reviewer, instead of the pick and shadow").choices(HARNESSES),
+		)
+		.option("--model <model>", "Model --harness's reviewer runs instead of its size's")
+		.option("--effort <level>", "Reasoning effort --harness's reviewer runs at instead of its size's", effortLevel)
+		.option("--pr <number>", "Only this case; repeat for each", (value: string, previous: number[] = []) => [
+			...previous,
+			positiveInteger("--pr")(value),
+		])
+		.option("--json", "Print one JSON object")
+		.action(
+			(options: {
+				set?: string;
+				harness?: HarnessName;
+				model?: string;
+				effort?: string;
+				pr?: number[];
+				json?: boolean;
+			}) => {
+				const run = evaluate(
+					{
+						root: root(),
+						set: options.set,
+						harness: options.harness,
+						model: options.model,
+						effort: options.effort,
+						only: options.pr,
+						env: process.env,
+						progress: (index, total, pull) => warn(`case ${index}/${total}: #${pull}`),
 					},
-					(error: unknown) => {
-						if (error instanceof ReviewInputError) {
-							out.stderr(`error: ${error.message}\n`);
-							return 2;
-						}
-						if (error instanceof ReviewLimitError) {
-							out.stderr(`error: ${error.message}\n`);
-							return 3;
-						}
-						warn(error instanceof Error ? error.message : String(error));
-						return 1;
-					},
+					(since) => runTokenMax(since, []),
 				);
+				pending = run.then((report) => {
+					if (options.json) print(JSON.stringify(report));
+					else for (const line of evalLines(report)) print(line);
+					if (report.cost === null) warn(TOKEN_MAX_MISSING);
+					return 0;
+				}, reviewFailure);
+			},
+		);
+	evalCommand
+		.command("add")
+		.summary("Add a culprit's defect or a clean PR to the eval set")
+		.argument("<pr>", "The merged PR", positiveInteger("<pr>"))
+		.description(
+			"Add a merged PR of the set's repository, or for a new set the one origin's fork chain leads to as quest " +
+				"start finds it, to the eval set: --clean for one that broke nothing, or --defect with " +
+				"--fix and --what for a culprit's defect, which a culprit already in the set gains, repeating --defect for each " +
+				"place the one defect is. Locate a defect at the culprit's last head from the diff of the fix that repaired " +
+				"it. The first time, it reads the PR's last head " +
+				"and base from GitHub, fetches them, and records the merge base, the size and latest writer its ## Models " +
+				"record names (the size as quest review picks it), and the tier the classifier sets, which may run a model " +
+				"as quest review's does. Prints the case as JSON.\n\nUses GH_TOKEN, GITHUB_TOKEN, or gh auth token. Exits 2 " +
+				"for invalid arguments, a PR not in or already in the set as asked, or lines past the file's end.",
+		)
+		.option("--set <file>", `The eval set (default: ${EVAL_FILE} at the checkout's root)`)
+		.option("--clean", "Record a PR that broke nothing")
+		.option(
+			"--defect <path:from-to>",
+			"Where a defect is at the PR's last head, as path:from-to or path:line; repeat for each place it is",
+			(value: string, previous: string[] = []) => [...previous, value],
+		)
+		.option("--fix <number>", "The PR whose ## Caused by names it", positiveInteger("--fix"))
+		.option("--what <text>", "One sentence on what was wrong", nonEmpty)
+		.action(
+			(
+				pr: number,
+				options: { set?: string; clean?: boolean; defect?: string[]; fix?: number; what?: string },
+			) => {
+				const given = [options.defect, options.fix, options.what].filter((each) => each !== undefined).length;
+				if (given !== 0 && given !== 3) throw new UsageError("--defect, --fix, and --what go together");
+				const run = addCase(
+					{
+						root: root(),
+						set: options.set,
+						pull: pr,
+						clean: options.clean,
+						defect:
+							given === 3 ? { at: options.defect!, fix: options.fix!, what: options.what! } : undefined,
+						env: process.env,
+					},
+					claimDependencies(),
+				);
+				pending = run.then((entry) => {
+					print(JSON.stringify(entry));
+					return 0;
+				}, reviewFailure);
 			},
 		);
 
@@ -1623,13 +1968,10 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		.argument("<from>", "Quest file or epic directory, as /quest/..., quest/..., or a filesystem path")
 		.argument("<to>", "Its new path, which must not exist")
 		.action((from: string, to: string) => {
-			pending = moveQuest(root(), from, to, { github: () => gitHubDependencies(warn), warn }).then(
-				report,
-				(error: unknown) => {
-					warn(error instanceof Error ? error.message : String(error));
-					return 1;
-				},
-			);
+			pending = moveQuest(root(), from, to, claimDependencies()).then(report, (error: unknown) => {
+				warn(error instanceof Error ? error.message : String(error));
+				return 1;
+			});
 		});
 
 	program
@@ -1662,7 +2004,8 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"place, ours before theirs, and an entry only one side changed takes that change. Entries match by " +
 				"their opening link. Any other conflict, including prose, a heading, an entry both sides changed, or a " +
 				"reordered list, keeps standard conflict markers, showing the base when merge.conflictStyle is diff3 " +
-				"or zdiff3. Exits 1 when a conflict remains.\n\n" +
+				"or zdiff3. Exits 1 when a conflict remains. A binary or non-UTF-8 file fails, leaving <ours> as it " +
+				"was, so the driver falls back to git merge-file.\n\n" +
 				"quest init registers it for quest/** as the merge.quest driver. Any other command registers the driver " +
 				"in the clone's config when .gitattributes names merge=quest and no config sets it, or the one set is a " +
 				"driver an older quest registered; a custom driver stays. Without quest on " +
@@ -1677,7 +2020,13 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		.option("--base-label <label>", "Ancestor conflict label (git's %S; default: base)")
 		.option("--theirs-label <label>", "Their conflict label (git's %Y; default: theirs)")
 		.action((ours: string, base: string, theirs: string, options: ResolveOptions) => {
-			if (resolveFile(ours, base, theirs, options) > 0) code = 1;
+			try {
+				if (resolveFile(ours, base, theirs, options) > 0) code = 1;
+			} catch (error) {
+				// Exit 1 means conflicts remain; above it sends the driver to git merge-file.
+				warn(error instanceof Error ? error.message : String(error));
+				code = 2;
+			}
 		});
 
 	program
@@ -1732,6 +2081,28 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 			out.stdout(found.instructions);
 		});
 
+	program
+		.command("audit")
+		.summary("Print a shipped audit's definition, or list the audits with no name")
+		.description(
+			"Print a shipped audit's definition, or list the audits with no name.\n\n" +
+				"A quest whose ## Audit section names an audit runs it, and the pinned binary decides what the audit checks. " +
+				"It prints what to look for and what each finding becomes, then how the run plans the next one. " +
+				"`quest init` plants a stub for each audit no quest names, unless the root quest/README.md lists it under " +
+				"## Skipped audits.",
+		)
+		.argument("[name]", "Audit to print")
+		.action((name: string | undefined) => {
+			if (name === undefined) {
+				for (const a of AUDITS) print(`${a.name} - ${a.title.replace(/^\[\w+\] /, "")}`);
+				return;
+			}
+			const text = audit(name);
+			if (text === undefined)
+				throw new Error(`no audit named ${name} (have: ${AUDITS.map((a) => a.name).join(", ")})`);
+			out.stdout(text);
+		});
+
 	const listed = (hooks: readonly HookEntry[]) =>
 		hooks.map((h) => (h.matcher ? `${h.event} (${h.matcher})` : h.event)).join(", ");
 	program
@@ -1750,7 +2121,8 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"calls there that break a rule a program can check: em dashes an agent writes, a push without an " +
 				"explicit refspec, a force-push or rebase, a GitHub post without its `(Written by ...)` footer, and " +
 				"scratch files in /tmp. Stop and SubagentStop refuse to end an agent's turn while a `quest gate` " +
-				"command it started runs in the background. Each runs `quest hook`, so `quest` must be on the PATH the agent starts " +
+				"command it started runs in the background. PreToolUse and the PostToolUse hooks also sample each " +
+				"shell call's CPU for the session's record. Each runs `quest hook`, so `quest` must be on the PATH the agent starts " +
 				"with, and Codex asks to trust its hooks once through /hooks.\n\n" +
 				"With --worktrees, also installs Claude Code's " +
 				WORKTREE_HOOKS.map((h) => h.event).join(", ") +
@@ -1785,11 +2157,14 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"or a commit message or new GitHub post that adds an em dash outside a `>` quote line, a `git push` " +
 				"whose refspecs lack a `:`, a force-push, a `git rebase` or `git pull --rebase`, a new GitHub post " +
 				"whose body lacks a `(Written by ...)` line, or a file written under /tmp. A force-push or rebase the " +
-				`user asked for passes with the \`${USER_ASKED}\` prefix. Stop and SubagentStop refuse to end the ` +
+				`user asked for passes with the \`${USER_ASKED}\` prefix. Around each shell call it lets through, ` +
+				"PreToolUse and PostToolUse (or Claude Code's PostToolUseFailure) log the session's cgroup CPU counter " +
+				"under $XDG_STATE_HOME/quest/calls, where that cgroup holds the session alone, for its record. " +
+				"Stop and SubagentStop refuse to end the " +
 				"turn, naming each command, while a `quest gate` command the ending agent started runs in Claude " +
 				"Code's background: one whose background ID its transcript holds. Otherwise Claude Code's and Codex's Stop " +
-				`queue the session's record for the endpoint the checkout's ${CHECKOUT_CONFIG} names, for quest records ` +
-				"sender to send; a checkout naming none, an endpoint the user holds no token for, or a host whose sender " +
+				"queue the session's record for Kixel Quest, for quest records " +
+				"sender to send; a user holding no token for it, or a host whose sender " +
 				"does not run says so once as a system message, as does a sender's failure. Exits 1 on malformed input or an event it " +
 				"does not handle.",
 		)
@@ -1827,7 +2202,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 			// Help and version exit 0; any other parse failure is a usage error.
 			return error.exitCode === 0 ? 0 : 2;
 		}
-		if (error instanceof UsageError || error instanceof GitHubInputError) {
+		if (error instanceof UsageError || error instanceof InputError) {
 			out.stderr(`error: ${error.message}\n`);
 			return 2;
 		}
@@ -1884,19 +2259,19 @@ function positiveSeconds(value: string): number {
 
 /**
  * Stop option parsing before a gated executable, keeping its own flags intact.
- * Quest's global options still apply on either side of `gate`, and its own `--quick` after it.
+ * Quest's global options still apply on either side of `gate`.
  */
 export function gateBoundary(argv: string[]): string[] {
-	const skip = (index: number, own: string[] = []) => {
+	const skip = (index: number) => {
 		for (;;) {
 			if (argv[index] === "--root") index += 2;
-			else if (argv[index]?.startsWith("--root=") || own.includes(argv[index])) index += 1;
+			else if (argv[index]?.startsWith("--root=")) index += 1;
 			else return index;
 		}
 	};
 	const index = skip(0);
 	if (argv[index] !== "gate") return argv;
-	const command = skip(index + 1, ["--quick"]);
+	const command = skip(index + 1);
 	if (!argv[command] || argv[command].startsWith("-")) return argv;
 	return [...argv.slice(0, command), "--", ...argv.slice(command)];
 }

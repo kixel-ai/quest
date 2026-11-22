@@ -6,7 +6,7 @@ import type { GitHubDependencies, ObjectValue } from "../src/github/client";
 import { finish, land, release, take } from "../src/cli/hold";
 import { withoutHandBack } from "../src/core";
 import { type Output, main } from "../src/cli/main";
-import { Refusal } from "../src/cli/start";
+import { Refusal } from "../src/core";
 
 // `quest merge` through main would fetch the PR from GitHub to check it; these PRs exist only in memory.
 vi.mock("../src/cli/landed", async (original) => ({
@@ -91,6 +91,7 @@ class FakePull {
 			now: () => this.clock,
 			sleep: async () => undefined,
 			token: "token",
+			quota: "wait",
 			warn: (message) => warnings.push(message),
 		};
 	}
@@ -250,7 +251,7 @@ async function refused(work: Promise<unknown>): Promise<string> {
 describe("taking a PR", () => {
 	test("labels it quest:active and prints the event that added the label as the token", async () => {
 		const pull = new FakePull();
-		const hold = await take(PR, undefined, pull.deps());
+		const hold = await take(PR, null, pull.deps());
 		expect(hold).toEqual({ label: "quest:active", token: "LabeledEvent_1" });
 		expect(pull.labels).toEqual(["quest:active"]);
 	});
@@ -258,18 +259,18 @@ describe("taking a PR", () => {
 	test("refuses a draft its starter still holds, and takes one handed back", async () => {
 		const pull = new FakePull();
 		pull.draft = true;
-		expect(await refused(take(PR, undefined, pull.deps()))).toContain("its starter still holds");
+		expect(await refused(take(PR, null, pull.deps()))).toContain("its starter still holds");
 		expect(pull.writes).toEqual([]);
 
 		pull.body = "Summary.\r\n\r\n## Waiting\r\n\r\n1. Pick one.\r\n";
-		expect((await take(PR, undefined, pull.deps())).label).toBe("quest:active");
+		expect((await take(PR, null, pull.deps())).label).toBe("quest:active");
 	});
 
 	test("refuses a merged or closed PR", async () => {
 		for (const state of ["MERGED", "CLOSED"]) {
 			const pull = new FakePull();
 			pull.state = state;
-			expect(await refused(take(PR, undefined, pull.deps()))).toContain(
+			expect(await refused(take(PR, null, pull.deps()))).toContain(
 				`is ${state.toLowerCase()}; a push now would bring its branch back`,
 			);
 			expect(pull.writes).toEqual([]);
@@ -278,8 +279,8 @@ describe("taking a PR", () => {
 
 	test("refuses a second session without handing it the holder's token", async () => {
 		const pull = new FakePull();
-		const first = await take(PR, undefined, pull.deps());
-		const message = await refused(take(PR, undefined, pull.deps()));
+		const first = await take(PR, null, pull.deps());
+		const message = await refused(take(PR, null, pull.deps()));
 		expect(message).toContain("held by quest:active, added just now, so stop and report it");
 		expect(message).not.toContain(first.token);
 		expect(pull.labels).toEqual(["quest:active"]);
@@ -288,13 +289,13 @@ describe("taking a PR", () => {
 	test("ignores the quest:merge label older quest versions left on queued PRs", async () => {
 		const pull = new FakePull();
 		pull.label("quest:merge");
-		expect((await take(PR, undefined, pull.deps())).label).toBe("quest:active");
+		expect((await take(PR, null, pull.deps())).label).toBe("quest:active");
 		expect(pull.labels).toEqual(["quest:merge", "quest:active"]);
 	});
 
 	test("keeps the hold its token names", async () => {
 		const pull = new FakePull();
-		const hold = await take(PR, undefined, pull.deps());
+		const hold = await take(PR, null, pull.deps());
 		expect(await take(PR, hold.token, pull.deps())).toEqual(hold);
 		expect(pull.writes).toEqual(["add quest:active"]);
 	});
@@ -308,9 +309,9 @@ describe("taking a PR", () => {
 
 	test("refuses a token once another session holds the label", async () => {
 		const pull = new FakePull();
-		const stale = await take(PR, undefined, pull.deps());
+		const stale = await take(PR, null, pull.deps());
 		pull.labels = [];
-		const current = await take(PR, undefined, pull.deps());
+		const current = await take(PR, null, pull.deps());
 		expect(await refused(take(PR, stale.token, pull.deps()))).toContain(
 			`quest:active was added to ${URL_} again after ${stale.token}`,
 		);
@@ -325,12 +326,32 @@ describe("ready", () => {
 		const pull = new FakePull();
 		pull.draft = true;
 		pull.body = "Summary.\n\n## Waiting\n\n1. Pick one.\n\n## Validation\n\nTests pass.";
-		const hold = await take(PR, undefined, pull.deps());
+		const hold = await take(PR, null, pull.deps());
 		expect(await finish(PR, hold.token, pull.deps())).toEqual(hold);
 		expect(pull.body).toBe("Summary.\n\n## Validation\n\nTests pass.");
 		expect(pull.draft).toBe(false);
 		expect(pull.labels).toEqual(["quest:active"]);
 		expect(pull.writes.slice(-2)).toEqual(["edit body", "markPullRequestReadyForReview"]);
+	});
+
+	test("without a token, marks a draft ready and leaves its body, while no session holds it", async () => {
+		const pull = new FakePull();
+		pull.draft = true;
+		pull.body = "Summary.\n\n## Waiting\n\n1. Pick one.";
+		expect(await finish(PR, null, pull.deps())).toBeNull();
+		expect(pull.draft).toBe(false);
+		expect(pull.body).toBe("Summary.\n\n## Waiting\n\n1. Pick one.");
+		expect(pull.writes).toEqual(["markPullRequestReadyForReview"]);
+	});
+
+	test("without a token, refuses while a session holds it", async () => {
+		const pull = new FakePull();
+		await take(PR, null, pull.deps());
+		pull.draft = true;
+		const writes = pull.writes.length;
+		expect(await refused(finish(PR, null, pull.deps()))).toContain("is held by quest:active");
+		expect(pull.draft).toBe(true);
+		expect(pull.writes).toHaveLength(writes);
 	});
 });
 
@@ -493,7 +514,7 @@ describe("merge --land", () => {
 
 	test("takes no label, and refuses while a session holds the PR", async () => {
 		const pull = new FakePull();
-		const { token } = await take(PR, undefined, pull.deps());
+		const { token } = await take(PR, null, pull.deps());
 		const message = await refused(land(PR, { sha: HEAD, method: "merge", check: clean }, pull.deps()));
 		expect(message).toContain("held by quest:active, added just now");
 		expect(message).not.toContain(token);
@@ -894,20 +915,20 @@ describe("merge --land", () => {
 describe("release", () => {
 	test("removes the label its token holds", async () => {
 		const pull = new FakePull();
-		const { token } = await take(PR, undefined, pull.deps());
-		expect(await release(PR, token, pull.deps())).toBe("quest:active");
+		const { token } = await take(PR, null, pull.deps());
+		expect(await release(PR, token, pull.deps())).toEqual({ label: "quest:active", token });
 		expect(pull.labels).toEqual([]);
 	});
 
 	test("refuses a stale token and treats a label already off as released", async () => {
 		const pull = new FakePull();
-		const stale = await take(PR, undefined, pull.deps());
+		const stale = await take(PR, null, pull.deps());
 		pull.labels = [];
 		const warnings: string[] = [];
-		expect(await release(PR, stale.token, pull.deps(warnings))).toBe("quest:active");
+		expect((await release(PR, stale.token, pull.deps(warnings))).label).toBe("quest:active");
 		expect(warnings).toEqual([`quest:active is already off ${URL_}`]);
 
-		await take(PR, undefined, pull.deps());
+		await take(PR, null, pull.deps());
 		expect(await refused(release(PR, stale.token, pull.deps()))).toContain("another session holds it");
 		expect(pull.labels).toEqual(["quest:active"]);
 	});
@@ -932,7 +953,7 @@ describe("arguments", () => {
 	}
 
 	test.each([
-		[["ready", URL_], "missing required argument 'token'"],
+		[["ready"], "missing required argument 'pr'"],
 		[["merge", URL_], "required option '--land <sha>' not specified"],
 		[["merge", URL_, "--land", "abc"], "--land needs a full 40-character SHA"],
 		[["merge", URL_, "token", "--land", HEAD], "too many arguments"],

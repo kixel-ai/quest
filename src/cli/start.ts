@@ -3,9 +3,10 @@
 // while nothing but the claim commit is on the branch.
 import { randomBytes } from "node:crypto";
 
-import { questBranch } from "../core";
+import { type OpenPull, Refusal, questBranch } from "../core";
 import {
 	type ClaimDependencies,
+	type Hosting,
 	type Target,
 	type Upstream,
 	ensure,
@@ -16,12 +17,8 @@ import {
 } from "./claims";
 import { GitError, git } from "./git";
 import { requireRemote } from "./github";
-import { object, repositoryPath, string } from "../github/client";
 import { ago } from "../github/hold";
-import { type OpenPull, mergedPull, openPullRequests, pullsFrom } from "../github/claims";
-
-/** Someone else holds the quest, or the claim cannot be released; distinct from a failure. */
-export class Refusal extends Error {}
+import { mergedPull, pullsFrom } from "../github/claims";
 
 export interface Started {
 	branch: string;
@@ -80,10 +77,10 @@ export async function startQuest(
 	}
 
 	let url: string | null = null;
-	if (up.github === null) {
-		deps.warn(`${remote} is not on GitHub, so the claim branch was pushed without a PR`);
+	if (up.hosting === null) {
+		deps.warn(`${remote} is not on GitHub or Kixel Quest, so the claim branch was pushed without a PR`);
 	} else {
-		url = await openDraft(root, up, remote, path, title, branch, sha);
+		url = await openDraft(root, up.hosting, remote, path, title, branch, sha);
 	}
 
 	checkout(root, branch, sha, deps.warn);
@@ -167,54 +164,43 @@ function checkout(root: string, branch: string, sha: string, warn: (message: str
 /** Open the draft PR, then keep it only if it is the earliest open PR on the branch. */
 async function openDraft(
 	root: string,
-	up: Upstream,
+	hosting: Hosting,
 	remote: string,
 	path: string,
 	title: string,
 	branch: string,
 	sha: string,
 ): Promise<string> {
-	const github = up.github!;
-	const { owner, repo } = github.repository;
-	const fork = github.head.owner !== owner || github.head.repo !== repo;
-	// The quest's path in the repository, which differs from `path` when the tree sits below the top level.
-	const file = encodeURI(github.prefix + path);
-	const body = `Claims [${path}](https://github.com/${owner}/${repo}/blob/${github.defaultBranch}/${file}).`;
+	const { repository, head, defaultBranch } = hosting;
+	const link = hosting.link(path);
+	const body = link === null ? `Claims \`${path}\`.` : `Claims [${path}](${link}).`;
+	const writes = hosting.writes();
 	let created: OpenPull;
+	let live: Awaited<ReturnType<Hosting["live"]>>;
 	try {
-		const response = await github.client.request(`${repositoryPath(github.repository)}/pulls`, {
-			body: {
-				title: title.replace(/^\[(XS|S|M|L|XL)\] /, ""),
-				head: fork ? `${github.head.owner}:${branch}` : branch,
-				base: github.defaultBranch,
-				draft: true,
-				body,
-			},
-		});
-		const row = object(await response.json());
-		created = {
-			number: Number(row.number),
-			url: string(row.html_url),
+		// Before the PR exists, so a failed mint takes the branch back rather than leaving a PR behind.
+		live = await hosting.live();
+		created = await writes.open({
+			repository,
+			head,
 			branch,
-			head: `${github.head.owner}/${github.head.repo}`,
-			draft: true,
-			created: Date.parse(string(row.created_at)),
-			updated: Date.parse(string(row.created_at)),
-			handedBack: false,
+			base: defaultBranch,
+			title: title.replace(/^\[(XS|S|M|L|XL)\] /, ""),
 			body,
-		};
+			draft: true,
+		});
 	} catch (error) {
-		// Without its PR the claim is invisible on GitHub, so take the branch back.
+		// Without its PR the claim is invisible on the forge, so take the branch back.
 		deleteBranch(root, remote, branch, sha);
 		throw error;
 	}
 
 	// Two claimers on different repositories, such as forks, both push; the earliest PR wins.
-	const open = pullsFrom(await openPullRequests(github.client, github.repository), branch);
+	const open = pullsFrom((await live.pulls(repository)).value, branch);
 	const first = pullsFrom([...open.filter((pull) => pull.number !== created.number), created], branch)[0];
 	if (first.number !== created.number) {
 		deleteBranch(root, remote, branch, sha);
-		await close(up, created.number);
+		await writes.close({ ...repository, number: created.number });
 		throw new Refusal(`${first.url} claimed ${path} first; closed ${created.url}`);
 	}
 	return created.url;
@@ -255,14 +241,15 @@ export async function releaseQuest(
 	}
 
 	const pulls: OpenPull[] = [];
-	if (up.github) {
-		const head = `${up.github.head.owner}/${up.github.head.repo}`.toLowerCase();
-		const open = await openPullRequests(up.github.client, up.github.repository);
+	const hosting = up.hosting;
+	if (hosting) {
+		const head = `${hosting.head.owner}/${hosting.head.repo}`.toLowerCase();
+		const open = (await (await hosting.live()).pulls(hosting.repository)).value;
 		pulls.push(...pullsFrom(open, branch).filter((pull) => pull.head?.toLowerCase() === head));
 	}
 	// Deleting first means the lease decides: a push since the check keeps both the branch and its PR.
 	deleteBranch(root, remote, branch, tip);
-	for (const pull of pulls) await close(up, pull.number);
+	for (const pull of pulls) await hosting!.writes().close({ ...hosting!.repository, number: pull.number });
 	return { branch, closed: pulls.map((pull) => pull.url) };
 }
 
@@ -272,14 +259,6 @@ export function describe(branch: string, pull: OpenPull | null, now: number): st
 	// A draft without the hand-back heading is still its starter's; the others wait on the maintainer.
 	const state = !pull.draft ? "ready for review" : pull.handedBack ? "draft, waiting" : "draft";
 	return `${pull.url} (${state}, last active ${ago(now, pull.updated)})`;
-}
-
-/** Close a PR on the upstream repository. */
-async function close(up: Upstream, number: number): Promise<void> {
-	await up.github!.client.request(`${repositoryPath(up.github!.repository)}/pulls/${number}`, {
-		method: "PATCH",
-		body: { state: "closed" },
-	});
 }
 
 /** Delete `branch` on `remote` only while its tip is still `sha`. */

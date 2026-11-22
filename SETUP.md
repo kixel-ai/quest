@@ -12,8 +12,8 @@ line in its root instructions.
 ## Install and pin
 
 Pin the latest [release](https://github.com/moq-dev/quest/releases) tag.
-Every merge that changes what Quest ships becomes a release, so a release tag
-is never far behind `main`; prefer it to pinning a commit.
+A day's merges that change what Quest ships become one release, cut daily, so a
+release tag is at most about a day behind `main`; prefer it to pinning a commit.
 Releases ship binaries for macOS, Linux, and native Windows on arm64 and x64.
 Never pin v0.1.0: it has no Windows archives and no `quest worktree hook`
 command, which `quest init`'s Claude Code hooks call. Every later release has
@@ -49,14 +49,17 @@ without creating symbolic links. Claude Code's stub inlines `quest skill <name>`
 when the skill is invoked, pre-approving only that command in Bash and
 PowerShell, and follows it with a setup pointer for when `quest` is missing; the
 `.agents/skills/` stub, which a skill both directories read through a link
-gets, asks the agent to run it. Init also creates `quest/README.md` when missing, and appends a line
+gets, asks the agent to run it. Init also creates `quest/README.md` when missing,
+plants a stub for each audit Quest ships that no quest names and the root
+`quest/README.md` does not skip (see `quest audit`), and appends a line
 starting with `Quests: ` to the root `AGENTS.md`, or `CLAUDE.md` when only that
 exists. It also appends `quest/** merge=quest` to `.gitattributes` and sets
 `merge.quest.driver` in the clone's git config, so local merges resolve
 concurrent edits to quest link lists. It writes no Claude Code hooks. It
 prints each path it changed and is safe to rerun. Rerun after an upgrade, it
 also rewrites the unmodified stubs the new version writes differently and
-removes the unmodified stubs of skills the new version no longer ships.
+removes the unmodified stubs of skills the new version no longer ships, and
+plants the stubs of audits the new version adds. It never edits a planted stub.
 
 If init refuses, it names the conflicting path. Report it and ask the user how
 to proceed; never delete or rename their files to get past it.
@@ -77,6 +80,21 @@ it applies in every repository the user opens (the hooks act only in those with
 the `Quests: ` line), and run it with consent. Codex then asks the user to
 trust the hooks once through `/hooks`. It keeps the files' other settings and
 prints what it changed.
+
+## Check agent settings
+
+[token-max](https://github.com/kixel-ai/token-max) reads the user's Claude
+Code and Codex transcripts and recommends cheaper agent settings. Offer it, and
+with consent run it once without installing anything:
+`curl -LsSf https://max.kixel.ai/run.sh | sh`, or on native Windows
+`irm https://max.kixel.ai/run.ps1 | iex`. Each downloads the latest release,
+checks it against the release's checksums, and runs `token-max doctor`. Without
+a terminal, as an agent runs it, it only prints its report and exits 1 when it
+recommends a change; show the user the recommendations and apply none unasked.
+On a terminal, it walks the user through each change and writes settings only
+after a final yes.
+`quest usage` and the records sender also need `token-max` on the `PATH`;
+`cargo install --locked token-max` installs it, globally, so ask first.
 
 ## Opt into worktree hooks
 

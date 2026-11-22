@@ -1,5 +1,6 @@
 // Each session's record, as `quest usage` prints it and the stop hook sends it: its PRs, role, spend, and waits.
-import { type Role, type SessionRecord, type SessionWait, type TimeSplit, branchQuest } from "../core";
+import { type GatedRun, type Role, type SessionRecord, type SessionWait, type TimeSplit, branchQuest } from "../core";
+import { type CallLine, sessionGroup, shellGroups } from "./calls";
 import { type TranscriptFacts, transcriptFacts } from "./transcript";
 import type { Pull, Session } from "./usage";
 import type { LoggedWait } from "./waits";
@@ -7,7 +8,6 @@ import type { LoggedWait } from "./waits";
 /** The role the first quest skill a session ran gives it; a skill not listed gives none. */
 const SKILL_ROLES: Record<string, Role> = {
 	"quest-plan": "planning",
-	"quest-audit": "planning",
 	"quest-recurring": "planning",
 	"quest-import": "planning",
 	"quest-grill": "planning",
@@ -23,7 +23,7 @@ const SKILL_ROLES: Record<string, Role> = {
 };
 
 /** Branch prefixes of the skills whose PRs plan quests. */
-const PLANNING = ["quest-plan/", "quest-audit/", "quest-recurring/", "quest-import/"];
+const PLANNING = ["quest-plan/", "quest-recurring/", "quest-import/"];
 
 /** What the records are built from. */
 export interface RecordInput {
@@ -38,8 +38,10 @@ export interface RecordInput {
 	/** Session IDs a PR's review record names as reviewers, and as its risk classifier. */
 	reviewers: Set<string>;
 	classifiers: Set<string>;
-	/** The waits logged on this host, which only its own sessions (host null) are given. */
+	/** The waits and gate runs logged on this host, which only its own sessions (host null) are given. */
 	waits: LoggedWait[];
+	/** The shell calls sampled on this host, likewise. */
+	calls: CallLine[];
 	/** The sessions to build records for; by default, those on a PR. Every session still counts for lineage. */
 	emit?: Set<Session>;
 	/** The window's start, epoch ms: a person's wait that ended before it, like a logged one, is left out. */
@@ -126,6 +128,7 @@ export function buildRecords(input: RecordInput): Map<Session, SessionRecord> {
 	};
 
 	const waits = assignWaits(named, input.waits, parentOf, input.since);
+	const groups = shellGroups(input.calls).filter((g) => g.start >= input.since);
 	const records = new Map<Session, SessionRecord>();
 	for (const s of input.sessions) {
 		const { pulls, via } = pullsOf(s);
@@ -141,13 +144,18 @@ export function buildRecords(input: RecordInput): Map<Session, SessionRecord> {
 				end: iso(q.end),
 				until: null,
 			}));
+		const logged = waits.get(s) ?? [];
 		const timed: SessionWait[] | null =
 			local === null
 				? null
-				: [
-						...(waits.get(s) ?? []).map(({ kind, start, end, until }) => ({ kind, start, end, until })),
-						...person,
-					].sort((a, b) => a.start.localeCompare(b.start));
+				: [...logged.flatMap(timedWaits).filter((w) => Date.parse(w.end) >= input.since), ...person].sort(
+						(a, b) => a.start.localeCompare(b.start),
+					);
+		const gated: GatedRun[] = logged.flatMap((w) =>
+			w.kind === "gate"
+				? [{ command: w.command, start: w.start, admitted: w.admitted, end: w.end, cpu: w.cpu }]
+				: [],
+		);
 		records.set(s, {
 			harness: s.harness,
 			session: s.id,
@@ -172,10 +180,24 @@ export function buildRecords(input: RecordInput): Map<Session, SessionRecord> {
 			start: iso(s.start),
 			end: iso(s.end),
 			waits: timed,
+			gated: s.host === null ? gated : null,
+			shell:
+				s.host === null && s.id !== null
+					? groups.flatMap((g) => sessionGroup(g, id(s.harness, s.id!)) ?? [])
+					: s.host === null
+						? []
+						: null,
 			split: timed === null || !input.split ? null : input.split(s, timed, input.since),
 		});
 	}
 	return records;
+}
+
+/** The waits a logged line times: a gate run's queue until its admission, and its run from then. */
+function timedWaits(w: LoggedWait): SessionWait[] {
+	if (w.kind !== "gate") return [{ kind: w.kind, start: w.start, end: w.end, until: w.until }];
+	const queued: SessionWait = { kind: "gate-queue", start: w.start, end: w.admitted ?? w.end, until: null };
+	return w.admitted === null ? [queued] : [queued, { kind: "gate-run", start: w.admitted, end: w.end, until: null }];
 }
 
 /**

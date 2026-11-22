@@ -1,16 +1,16 @@
 name: Release
 
-# Every run on `main` (each push, a daily schedule, or a manual run) compares
-# `main` with the latest published release, and cuts the next one when that
-# range changes what ships. It builds and checks every binary first, then
-# uploads them to a draft release and publishes it, which creates the tag, so
-# no tag exists without its complete release. A failed or cancelled run needs
-# no recovery: the next run sees the same unreleased range and replaces any
-# draft it left. Pull requests that change what ships, and manual runs on other
-# branches, only build and check. scripts/release-plan.sh holds both decisions.
+# A run on `main` (the daily schedule, or a manual one) compares `main` with
+# the latest published release, and cuts the next one when that range changes
+# what ships, so a day's merges become one release and an urgent fix ships
+# early with `gh workflow run release.yml --ref main`. A push to `main` cuts
+# nothing. A run builds and checks every binary first, then uploads them to a
+# draft release and publishes it, which creates the tag, so no tag exists
+# without its complete release. A failed or cancelled run needs no recovery:
+# the next run sees the same unreleased range and replaces any draft it left.
+# Pull requests that change what ships, and manual runs on other branches, only
+# build and check. scripts/release-plan.sh holds both decisions.
 on:
-  push:
-    branches: [main]
   pull_request:
   schedule:
     - cron: "17 6 * * *"
@@ -87,9 +87,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: DeterminateSystems/nix-installer-action@1d87d45818068401a10cf16bdc5f00b24994a83f
-        with:
-          determinate: false
+      - uses: cachix/install-nix-action@bb0495a1086c46893eee56f32fd192dfe4a15bb9 # v32.0.0
       - name: Install dependencies
         run: nix develop --command just install
       # The dev shell's Bun is patched for Nix, so compile with the official
