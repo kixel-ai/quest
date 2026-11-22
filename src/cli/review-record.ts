@@ -37,7 +37,7 @@ function code(text: string): string {
 
 const capitalized = (word: string) => word[0]!.toUpperCase() + word.slice(1);
 
-/** A block's Reviewer line, ending in `, shadow` for the shadow, the size's pick one effort lower. */
+/** A block's Reviewer line, ending in `, shadow` for the shadow, the size's pick one effort away. */
 const reviewerLine = (seat: Pick<Tally, "reviewer" | "model" | "effort" | "shadow">) =>
 	`- Reviewer: ${HARNESSES[seat.reviewer]}, ${seat.model}, ${seat.effort} effort${seat.shadow ? ", shadow" : ""}`;
 
@@ -149,7 +149,7 @@ export interface ReviewSummary {
 	harness: string;
 	model: string;
 	effort: string;
-	/** Whether it is the shadow: the size's pick one effort lower, beside it on the same heads. */
+	/** Whether it is the shadow: the size's pick one effort away, beside it on the same heads. */
 	shadow: boolean;
 	/** Its latest session, null when the record names none; its round, null when the latest run left it out. */
 	session: string | null;
