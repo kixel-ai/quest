@@ -45,7 +45,7 @@ Decided 2026-10-30 (user, /quest-plan), replacing "First public release":
 - Where the Worker lived, which kix work left m0, and where kix ranked
   were decided 2026-10-30 and 2026-11-01; kix's deletion on 2026-11-08
   supersedes them. Ranking was already superseded 2026-11-05 (user, /quest-plan, the
-  [token waste](/quest/m0/token-waste/README.md) audit): an epic's children
+  token waste audit): an epic's children
   are its directory, so list order no longer ranks work within m0;
   `quest unblocked` ranks by milestone, then downstream impact, then path.
 - How do moq-dev's repositories land? Decided 2026-11-01 (maintainer,
