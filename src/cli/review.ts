@@ -2259,8 +2259,9 @@ function seatsFor({ routed, second, size, auto, sessions, firsts, responses }: S
 	if (replaced !== undefined) seats[0] = { ...seats[0]!, ...seated(replaced) };
 	// The shadow reviews a branch's first run, then reruns only while it has findings to settle, or once the pick
 	// changed so that the shadow it ran is no longer the size's step from it. Its session carries over to the new
-	// shadow, as a replaced reviewer's does, so its findings stay settled. A pick with no shadow still seats one at
-	// its own effort while the old one has findings, since only a shadow settles them.
+	// shadow, as a replaced reviewer's does, so its findings stay settled. A pick with no shadow, as at XS or on a
+	// high head, still seats the old one as it ran while it has findings, since only a shadow settles them, and a new
+	// session would drop a raise it made.
 	const shadowed = sessions.find((each) => each.shadow);
 	const open = shadowed !== undefined && unsettled([shadowed]).length > 0;
 	const stale =
@@ -2272,7 +2273,15 @@ function seatsFor({ routed, second, size, auto, sessions, firsts, responses }: S
 			shadowed.last.effort === shadow.effort
 		);
 	if (auto && (shadowed === undefined ? shadow !== null : open || stale))
-		seats.push({ reviewer: shadow ?? routed, shadow: true, ...seated(shadowed) });
+		seats.push({
+			reviewer: shadow ?? {
+				harness: shadowed!.reviewer,
+				model: shadowed!.last.model,
+				effort: shadowed!.last.effort,
+			},
+			shadow: true,
+			...seated(shadowed),
+		});
 	// The second reviewer reviews every head while the tier is high, and settles its open findings once it is not.
 	const seconded = sessions.find((each) => each.second);
 	if (auto && (second !== null || (seconded !== undefined && unsettled([seconded]).length > 0))) {

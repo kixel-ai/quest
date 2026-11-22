@@ -1717,7 +1717,7 @@ run catches what those miss.
 |---|---|---|
 | Low | None; the online reviewer only | Its own, once its class is in `RISK.md`'s `## Automatic` list; else the maintainer's pick |
 | Medium | The size's pick | The maintainer's pick |
-| High | Two reviewers on different models from the largest size's list, and no shadow | The maintainer's pick, with the full brief |
+| High | No shadow, but a second reviewer on another model from the largest size's list; the pick comes from that list too when the classifier or an override set the tier | The maintainer's pick, with the full brief |
 
 `/quest-run` carries the picks.
 

@@ -1648,6 +1648,32 @@ fakes("a raise from a reviewer the run leaves out holds while its last round rev
 	}
 });
 
+fakes("a shadow with findings on a head that turned high settles them as it ran", async () => {
+	const s = setup();
+	const pull = {
+		number: 7,
+		body: "Fixes averaging.\n\n## Models\n\n- Size: M\n- Implementer: Claude Code, claude-opus-5-5, high effort\n",
+	};
+	onGitHub(s.repo, [pull]);
+	// Only the shadow, Sol at xhigh effort for an M PR, raises the tier, and every reviewer reports a finding.
+	vi.stubEnv("FAKE_RAISE", "high@xhigh");
+	write(s.repo, ".tmp/responses.md", "1. Fixed.\n2. Fixed.\n3. Fixed.\n");
+	try {
+		const first = await quest("--root", s.repo, "review");
+		expect(first.code, first.stderr).toBe(0);
+		expect(first.stdout).toContain("\nreviewer codex gpt-6.1-sol xhigh shadow\n");
+
+		// The head is now high, which runs no shadow, but the old one resumes at its own effort to settle its
+		// finding, keeping its raise.
+		const settled = await quest("--root", s.repo, "review", "--responses", join(s.repo, ".tmp", "responses.md"));
+		expect(settled.code, settled.stderr).toBe(0);
+		expect(settled.stdout).toContain("\nreviewer codex gpt-6.1-sol xhigh shadow\nsession thread-1\nround 2\n");
+		expect(settled.stdout).toContain("\nrisk high It rewrites the wire format peers read.\n");
+	} finally {
+		vi.unstubAllGlobals();
+	}
+});
+
 fakes(
 	"a low head gets no local review, and the maintainer's override sets the tier until the change grows",
 	async () => {
@@ -2275,13 +2301,13 @@ fakes("no shadow runs for an XS PR, though one settles a shadow's findings the p
 	expect(alone.stderr).toContain(
 		"codex (shadow) still has findings to settle on this branch; settle them in a run of the size's pick, or of that reviewer with --harness, with --responses",
 	);
-	// Resized to XS, which runs no shadow, the pick seats one at its own effort to settle the old shadow's finding.
+	// Resized to XS, which runs no shadow, the old shadow runs as it did to settle its finding.
 	const settled = await quest("--root", t.repo, "review", "--size", "XS", "--responses", responses, "--json");
 	expect(settled.code, settled.stderr).toBe(0);
 	const rounds: Round[] = JSON.parse(settled.stdout).rounds;
 	expect(rounds.map((r) => [r.reviewer, r.effort, r.shadow, r.earlier?.findings.map((f) => f.number)])).toEqual([
 		["codex", "medium", undefined, [1]],
-		["codex", "medium", true, [2]],
+		["codex", "high", true, [2]],
 	]);
 });
 
