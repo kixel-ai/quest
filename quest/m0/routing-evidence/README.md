@@ -11,7 +11,7 @@ to the maintainer as a decision, and the end of the writer A/B.
 
 Non-goal: catching runtime escapes, such as nightly-only lanes, platform
 builds, and races, in each repository's gate. Each repository's quest tree
-owns that work. [The mistake audit](/quest/m0/mistake-audit.md) files it
+owns that work. [The mistake audit](https://github.com/kixel-ai/kixel.quest/blob/main/quest/m0/mistake-audit.md) files it
 there.
 
 ## Plan
@@ -191,5 +191,3 @@ Baseline from the 2026-11-11 audit, at API list price:
 
 - [Model check](/quest/m1/model-check.md) - retunes the tables each
   milestone from these tallies
-- [Mistake audit](/quest/m0/mistake-audit.md) - files runtime escapes in
-  their owning repositories

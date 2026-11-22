@@ -7,7 +7,7 @@ benchmark with several axes. Every change records its risk tier, what it
 cost (tokens, compute, and time split into working and blocked on CI,
 GitHub, git, or a person), who wrote and reviewed it, and what it later
 broke. The tier, set from the change itself, scales its guardrails: review
-depth, CI, and human approval. The maintainer
+depth and human approval, never CI. The maintainer
 steers from a report of all of it without reading code, and adds or removes
 guardrails from that evidence. Every cost is measured so it can be driven
 toward zero.
@@ -67,10 +67,14 @@ maintainer's typed messages since 2026-10-01):
   Rejected: set at planning and re-judged from the diff; a separate score
   per axis.
 - What does the tier scale?
-  - ✅ Review, approval, and CI, as `RISK.md` and the README's Risk tiers
-    section describe since
-    [moq-dev/quest#802](https://github.com/moq-dev/quest/pull/802)
-  - Rejected: review and approval only; approval only
+  - ✅ Review and approval only (maintainer, 2026-11-22, reversing
+    [moq-dev/quest#802](https://github.com/moq-dev/quest/pull/802)'s full
+    suite for high: "we're so CPU starved that we shouldn't waste it on more
+    CI unless it actually catches issues. Running the full suite is dumb
+    because the next commit (or nightly) can catch the issue anyway. We
+    should use RISK to get additional/stronger reviews instead."), as
+    [review, not CI](/quest/m0/benchmark/review-not-ci.md) plans
+  - Rejected: review, approval, and CI; approval only
 - Must a PR state how to undo it? ✅ No (maintainer, 2026-11-22: "I
   definitely don't want Undo to be a gate"). Rejected: an `## Undo`
   section that `quest merge` requires of every PR not tiered low.
@@ -95,11 +99,19 @@ a merge queue, and diff-scoped gates in moq-dev/moq and moq-dev/moq.pro.
 No post describes attributing cost, model, and effort to each change, so
 that part has no precedent to copy.
 
+## Waiting
+
+- Maintainer: install the Kixel Quest App on the repositories the factory
+  works on and pair each host's record sender, as kixel-ai/kixel.quest's
+  `quest/m0/factory-try.md` asks, so the factory page
+  (https://kixel.quest/factory, built in kixel.quest `eec160ae`) has a real
+  PR to show. An agent could click through the installation in Chrome, but
+  granting the App a private repository is the owner's call. Done when the
+  page lists merged PRs; then this epic's end-to-end check can start.
+
 ## Related
 
 - [Routing evidence](/quest/m0/routing-evidence/README.md) - measures what
   each writer and reviewer effort buys; its tallies become records here
-- [Mistake audit](/quest/m0/mistake-audit.md) - groups recurring mistakes
-  weekly, and reads the time split and breakage once they exist
 - [Model check](/quest/m1/model-check.md) - retunes routing each milestone
   from the same records

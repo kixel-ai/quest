@@ -2514,7 +2514,8 @@ than spilling them to a file, through the hook's `additionalContextLimit`.
 [worktree hooks](#claude-code-checkouts).
 
 The rules a program can check are enforced instead of read. A `PreToolUse`
-hook on shell commands and file edits denies, with the rule as the reason:
+hook on shell commands, file edits, and question dialogs denies, with the rule
+as the reason:
 
 - an edit, commit message, or new GitHub post that adds an em dash outside a
   `>` quote line;
@@ -2532,16 +2533,21 @@ hook on shell commands and file edits denies, with the rule as the reason:
   endpoint's `repos/<owner>/<repo>`, or naming that one by its owner and name
   or on Kixel Quest; a URL or host elsewhere, such as github.com, names
   another repository. The reason names the `quest` command to run, such as
-  `quest pr view`.
+  `quest pr view`;
+- a question dialog, Claude Code's `AskUserQuestion` or Codex's
+  `request_user_input`, with a question of two or more options none of which
+  ends with `(Recommended)`.
 
 For Claude Code, `Stop` and `SubagentStop` hooks refuse to end an agent's turn
-while a `quest gate` command it started still runs in the background, naming
-each one and telling the agent to block on it: Claude Code stops a subagent's
-background commands when it ends, and a session that ends its turn on one
-leaves its result unread. A command is the agent's when its transcript holds
-the ID Claude Code gave it on backgrounding it, so a sibling's gate does not
-hold an agent. Claude Code lists a command only while it runs, so the
-refusal ends with the gate. Codex runs no such hook. Once the turn can end,
+while a `quest gate`, `quest agent start` or `resume`, or `quest wait` command
+it started still runs in the background, naming each one and telling the agent
+to block on it or stop it: Claude Code stops a subagent's background commands
+when it ends, and a session that ends its turn on one leaves its result
+unread. A command is the agent's when its transcript holds the ID Claude Code
+gave it on backgrounding it, so a sibling's command does not hold an agent. A
+subagent Claude Code keeps no transcript for is held only by gates, which are
+short, never by another agent's long turn or wait. Claude Code lists a command
+only while it runs, so the refusal ends with the command. Codex runs no such hook. Once the turn can end,
 Claude Code's and Codex's `Stop` hooks queue the session's
 [record](#session-records). For that record, the `PreToolUse` hook and a
 `PostToolUse` hook on shell commands, with Claude Code's `PostToolUseFailure`,

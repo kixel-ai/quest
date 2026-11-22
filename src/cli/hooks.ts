@@ -10,7 +10,7 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
 import { version } from "./version";
-import { type StopInput, broken, questRoot, runningGates, usesQuest } from "./rules";
+import { type StopInput, broken, questRoot, runningTasks, usesQuest } from "./rules";
 import { stubFindings } from "./setup";
 import { CONTEXT } from "./skills";
 import { HOOK_EVENTS } from "./worktree-hook";
@@ -46,15 +46,16 @@ const SESSION = "startup|resume|clear|compact";
  * The entries `quest setup` installs for Claude Code. SessionStart prints the
  * rules; SubagentStart gives each subagent the same rules, since it starts
  * without the session's. PreToolUse blocks the calls that break a rule a
- * program can check. PreToolUse and the PostToolUse events also sample each
- * shell call's CPU (see calls.ts). Stop and SubagentStop refuse to end a turn
- * while a gate the agent started still runs in the background; once a
- * session's turn ends, Stop queues its record to send.
+ * program can check, its question dialogs included. PreToolUse and the
+ * PostToolUse events also sample each shell call's CPU (see calls.ts). Stop and
+ * SubagentStop refuse to end a turn while a gate, agent turn, or wait the agent
+ * started still runs in the background; once a session's turn ends, Stop
+ * queues its record to send.
  */
 export const CLAUDE_HOOKS: readonly HookEntry[] = [
 	{ event: "SessionStart", matcher: SESSION },
 	{ event: "SubagentStart" },
-	{ event: "PreToolUse", matcher: "Bash|Write|Edit|MultiEdit" },
+	{ event: "PreToolUse", matcher: "Bash|Write|Edit|MultiEdit|AskUserQuestion" },
 	{ event: "PostToolUse", matcher: "Bash" },
 	{ event: "PostToolUseFailure", matcher: "Bash" },
 	{ event: "Stop" },
@@ -62,13 +63,14 @@ export const CLAUDE_HOOKS: readonly HookEntry[] = [
 ];
 
 /**
- * The same for Codex, whose shell commands match as Bash and whose file edits
- * are `apply_patch`. Codex spills hook context beyond a token limit, about
+ * The same for Codex, whose shell commands match as Bash, whose file edits
+ * are `apply_patch`, and whose question tools are `request_user_input` and its
+ * asynchronous twin. Codex spills hook context beyond a token limit, about
  * 2,500 by default, to a file; the rules' character cap bounds their tokens.
  */
 export const CODEX_HOOKS: readonly HookEntry[] = [
 	{ event: "SessionStart", matcher: SESSION, settings: { additionalContextLimit: CONTEXT_LIMIT } },
-	{ event: "PreToolUse", matcher: "Bash|apply_patch" },
+	{ event: "PreToolUse", matcher: "Bash|apply_patch|request_user_input|request_user_input_async" },
 	{ event: "PostToolUse", matcher: "Bash" },
 	{ event: "Stop" },
 ];
@@ -302,9 +304,9 @@ export interface HookDependencies {
 	sample?: () => Sample;
 }
 
-/** What a Stop or SubagentStop refusal tells the agent, after the gates it names. */
-const BLOCK_ON_GATES =
-	"Block on each with the harness's wait until it ends, then end your turn. A subagent's background commands stop when it ends, and a session that ends its turn on one leaves its result unread.";
+/** What a Stop or SubagentStop refusal tells the agent, after the commands it names. */
+const BLOCK_ON_TASKS =
+	"Block on each with the harness's wait until it ends, or stop one whose result you no longer need, then end your turn. A subagent's background commands stop when it ends, and a session that ends its turn on one leaves its result unread.";
 
 /**
  * What `quest hook` prints for the Claude Code or Codex hook event in `input`,
@@ -314,7 +316,8 @@ const BLOCK_ON_GATES =
  * PreToolUse denies a tool call that breaks a rule `broken` checks, giving the
  * rule as the reason; it and the PostToolUse events log a shell call they let
  * through (see calls.ts). Stop and SubagentStop refuse to end the turn while a
- * gate the agent started runs in the background (see `runningGates`).
+ * gate, agent turn, or wait the agent started runs in the background (see
+ * `runningTasks`).
  */
 export function hook(input: unknown, deps: HookDependencies = { env: process.env }): string {
 	const value = input as Partial<HookInput> | null;
@@ -375,7 +378,7 @@ export function hook(input: unknown, deps: HookDependencies = { env: process.env
 		}
 		case "Stop":
 		case "SubagentStop": {
-			// Codex runs no background gates, so its Stop only queues the record.
+			// Codex's Stop input lists no background commands, so it only queues the record.
 			if (
 				event === "Stop" &&
 				typeof value.turn_id === "string" &&
@@ -398,12 +401,12 @@ export function hook(input: unknown, deps: HookDependencies = { env: process.env
 					},
 					deps.env,
 				);
-			const gates = runningGates(value as StopInput);
-			if (gates.length === 0) return event === "Stop" ? stopped(value, "claude", deps) : "";
-			const named = gates.map((command) => `- ${command}`).join("\n");
+			const tasks = runningTasks(value as StopInput);
+			if (tasks.length === 0) return event === "Stop" ? stopped(value, "claude", deps) : "";
+			const named = tasks.map((command) => `- ${command}`).join("\n");
 			return JSON.stringify({
 				decision: "block",
-				reason: `\`quest gate\` commands you started still run in the background:\n${named}\n${BLOCK_ON_GATES}`,
+				reason: `Quest commands you started still run in the background:\n${named}\n${BLOCK_ON_TASKS}`,
 			});
 		}
 		default:

@@ -238,9 +238,12 @@ Stop one with `quest agent stop <worktree>`, and each you started that still run
 Open each prompt with the context to answer it without opening the quest or PR: what the work is, the problem it hit, and what each option would change.
 Name and explain anything the agent or its PR introduced, such as a new term, file, check, or credential, since the user may not have followed it.
 Then give your recommendation and ask synchronously with a blocking interactive question tool when available and allowed in the current mode.
-Recommend in every prompt, a multiple-choice list included: mark each option you recommend and give a one-line reason for each you would leave out.
+Recommend in every prompt, a multiple-choice list included, and give a one-line reason for each option you would leave out.
 An answer such as "whatever you recommend" picks your recommendations; act on them without asking again.
 Do not use asynchronous question tools.
+
+A dialog for a decision, plan, or follow-up offers concrete choices and keeps one option for "Explain it first", which walks the user through the problem, current behavior, and each choice's trade-offs, then asks again without it.
+A dialog for a step only the user can take offers, in this order: the agent taking it, such as by driving the browser, when it plausibly can; "Done / I'll do it now"; "Not at my PC (defer)", which keeps the wait and skips it for the session; and "Drop the wait", which a tool holding fewer options leaves to the user's typed answer.
 
 If no blocking tool is available, or it returns without an answer, put the question and numbered choices in your final reply and end the turn.
 Resume when the user answers; do not bury the question in a progress update or wait with sleeps or timed polls.

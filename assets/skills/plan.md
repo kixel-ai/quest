@@ -9,7 +9,7 @@ Search by the code and behavior the work touches, not only its keywords: a quest
 Show any overlap in the first round.
 
 Interview the user with the grill skill.
-The goal is the root of its tree, so the first round asks only it: restate the observable outcome, why it matters, and its boundaries and non-goals in one sentence, and get that confirmed before any other question.
+The goal is the root of its tree, so the first round asks only it: restate the observable outcome, why it matters, and its boundaries and non-goals in one sentence, and get that confirmed before any other question, with "Drop" among its options for work not worth planning.
 
 Choose the structure yourself rather than asking: one quest per independently completable outcome, an epic for related ones, an edit to an existing quest that already owns the work, and the milestone each new quest joins, by its urgency and by any milestone rule the user has stated, such as "CI and flakes join m0".
 Show that structure in the summary, with each quest's size and milestone and the reason for the milestone, so the user can correct it in the PR's review.

@@ -200,6 +200,10 @@ test("a new GitHub post needs the footer and no em dashes; edits and bodies off 
 	expect(bash("gh pr review 5 --approve")).toEqual([]);
 	// quest pr posts the same way, on GitHub or Kixel Quest.
 	expect(bash('quest pr comment 5 --body "Done."')).toEqual([RULES.footer]);
+	expect(bash('bun run --silent quest --root . pr comment 5 --body "Done."')).toEqual([RULES.footer]);
+	expect(bash("quest gate --help && quest --root . gate git push")).toEqual([RULES.refspec]);
+	expect(bash("if git push; then echo ok; fi")).toEqual([RULES.refspec]);
+	expect(bash("/bin/bash -lc 'git push'")).toEqual([RULES.refspec]);
 	expect(bash('quest --root .worktrees/a pr comment 5 --body "Done."')).toEqual([RULES.footer]);
 	expect(bash('quest --root=. pr comment 5 --body "Done."')).toEqual([RULES.footer]);
 	expect(bash(`quest pr comment 5 --thread T -b "Done ${DASH} mostly.\n\n${FOOTER}"`)).toEqual([RULES.emDash]);
@@ -285,6 +289,27 @@ test("a body file is read only for a command alone on its line", () => {
 	expect(bash(`git -C sub commit -F - <<'EOF'\nfix: a ${DASH} b\nEOF`)).toEqual([RULES.emDash]);
 });
 
+test("a question dialog recommends an option in each question offering two or more", () => {
+	const ask = (tool: string, ...questions: unknown[]) => broken({ tool, input: { questions }, cwd });
+	const labeled = (...labels: string[]) => ({ question: "Which?", options: labels.map((label) => ({ label })) });
+	// Claude Code's options are objects; every question with two or more options needs one recommended.
+	expect(ask("AskUserQuestion", labeled("A (Recommended)", "B"), labeled("Yes"))).toEqual([]);
+	expect(ask("AskUserQuestion", labeled("A (Recommended)", "B"), labeled("C", "D"))).toEqual([RULES.recommend]);
+	expect(ask("AskUserQuestion", labeled("A", "b (recommended)  "))).toEqual([]);
+	// The marker ends the label: one naming it elsewhere recommends nothing.
+	expect(ask("AskUserQuestion", labeled("(Recommended) A", "B"))).toEqual([RULES.recommend]);
+	// Codex's options may be absent, null, or empty for a free-form question, or plain strings.
+	for (const tool of ["request_user_input", "request_user_input_async"]) {
+		expect(ask(tool, { question: "Why?" }, { question: "How?", options: null }, { options: [] })).toEqual([]);
+		expect(ask(tool, { options: ["A (Recommended)", "B"] })).toEqual([]);
+		expect(ask(tool, { options: ["A", "B"] })).toEqual([RULES.recommend]);
+	}
+	// Input the tool would refuse anyway passes, as does another tool's.
+	expect(broken({ tool: "AskUserQuestion", input: {}, cwd })).toEqual([]);
+	expect(ask("AskUserQuestion", null, { options: [null, 1] })).toEqual([RULES.recommend]);
+	expect(ask("Agent", labeled("A", "B"))).toEqual([]);
+});
+
 test("docs/context.md is the rules `quest context` prints, for agents without the CLI", () => {
 	expect(readFileSync(join(import.meta.dirname, "../docs/context.md"), "utf8")).toBe(
 		`${CONTEXT}\n${CHECKED_CONTEXT}`,
@@ -360,6 +385,8 @@ test("gh calls reaching for a repository Kixel Quest hosts are denied, naming th
 	expect(run("gh issue list")).toEqual([]);
 	// After a cd, gh may run in another checkout; before it, gh runs in this one.
 	expect(run("cd ../other && gh pr view 3")).toEqual([]);
+	expect(run("if cd ../other; then gh pr view 3; fi")).toEqual([]);
+	expect(run("if true; then gh pr view 3; fi")).toEqual([instead("quest pr view")]);
 	expect(run("gh pr view 3; cd ..")).toEqual([instead("quest pr view")]);
 	// An expanded selector, repository, or host could name any repository.
 	expect(run('gh pr view "$PR_URL"')).toEqual([]);

@@ -8,6 +8,7 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { discoveryEnv } from "./git";
 import { githubRepository } from "./github";
+import { RECOMMENDED } from "./rules";
 
 /**
  * Visit each line of the file at `path`, reading it in bounded chunks since logs reach gigabytes. The last line is
@@ -178,9 +179,6 @@ function logsSince(dir: string, since: number): string[] {
 		return entry.name.endsWith(".jsonl") && statSync(path).mtimeMs >= since ? [path] : [];
 	});
 }
-
-/** Options an agent marks recommended end with this, as the quest skills and harness prompts ask. */
-const RECOMMENDED = /\(recommended\)\s*$/i;
 
 /** The answer entries for one question, given its options and what was picked. */
 function answer(
