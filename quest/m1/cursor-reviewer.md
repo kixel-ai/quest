@@ -50,6 +50,11 @@ Guidance:
 - Keep the harness opt-in (`--harness cursor`) until the eval moves a Cursor model into `REVIEWERS`; contributors without Cursor installed then fall through past it, as `quest review` passes an uninstalled reviewer's round to the next.
 - Update `README.md`'s reviewer list and `quest review --help` to name the new harness.
 
+## Hosts
+
+- linux - the logged-in Cursor CLI the work starts on
+- macos - the isolation test must pass there before merge
+
 ## Related
 
 - [Model check](/quest/m1/model-check.md) - audits each milestone's reviewer ranking
