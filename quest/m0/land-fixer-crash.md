@@ -9,7 +9,7 @@ On kixel-ai/rind, a PR the merge queue drops for `failed_checks` gets a land fix
 Planned 2026-11-15 with the maintainer in rind's `/quest-run` of 2026-11-14 and 2026-11-15:
 
 - Every fixer handback that run saw on rind said `Codex land fixer: fixer crashed (exit 1); run /quest-iterate.` (`src/cli/land-fixer.ts`), on kixel-ai/rind#742, #748 (twice), #758 (twice), #786 and #789. The maintainer's session ran `/quest-iterate` by hand each time.
-- ✅ m0: the fixer is how [the queue watcher](/quest/m0/queue-watcher/README.md) absorbs the quest-file conflicts GitHub cannot resolve, so a crashing fixer leaves those for a human (rejected: m1).
+- ✅ m0: the fixer is how the queue watcher (`quest land watch`) absorbs the quest-file conflicts GitHub cannot resolve, so a crashing fixer leaves those for a human (rejected: m1).
 
 Found 2026-11-17 in this quest's first PR, which also makes a failed fixer's handback quote the tail of its own output after the gate's failure:
 

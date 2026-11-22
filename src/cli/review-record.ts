@@ -38,7 +38,7 @@ function code(text: string): string {
 const capitalized = (word: string) => word[0]!.toUpperCase() + word.slice(1);
 
 /**
- * A block's Reviewer line, ending in `, shadow` for the shadow, the size's pick one effort lower, or `, second` for the
+ * A block's Reviewer line, ending in `, shadow` for the shadow, the size's pick one effort away, or `, second` for the
  * second reviewer a high-risk head gets.
  */
 const reviewerLine = (seat: Pick<Tally, "reviewer" | "model" | "effort" | "shadow" | "second">) =>
@@ -154,7 +154,7 @@ export interface ReviewSummary {
 	harness: string;
 	model: string;
 	effort: string;
-	/** Whether it is the shadow: the size's pick one effort lower, beside it on the same heads. */
+	/** Whether it is the shadow: the size's pick one effort away, beside it on the same heads. */
 	shadow: boolean;
 	/** Whether it is the second reviewer a high-risk head gets, on a model other than the pick's. */
 	second: boolean;

@@ -1,6 +1,6 @@
 // `quest review`: a model other than the latest writer reviews the committed branch, read-only,
 // picked by the PR's size from the lists in `models.ts`, and the shadow, the picked model one effort
-// lower, reviews the same head beside it, each in its own session.
+// away by the size's `SHADOW_STEPS`, reviews the same head beside it, each in its own session.
 //
 // A branch's first round runs the reviewer CLI's own review, given the scope, the
 // base's REVIEW.md, and any responses up front, then resumes that session for one
@@ -146,7 +146,7 @@ export interface Usage {
 /** One reviewer's finished round, as `quest review` prints it. */
 export interface Round {
 	reviewer: HarnessName;
-	/** The round is the shadow's: the size's pick one effort lower, whose findings measure what that step buys. */
+	/** The round is the shadow's: the size's pick one effort away, whose findings measure what that step buys. */
 	shadow?: true;
 	/** The round is the second reviewer's, on a model other than the pick's, which a high-risk head gets too. */
 	second?: true;
@@ -1560,12 +1560,22 @@ export const sameSeat = (a: SeatId, b: SeatId) => seatKey(a) === seatKey(b);
 const EFFORTS = ["low", "medium", "high", "xhigh"];
 
 /**
- * The shadow of `routed`, the size's pick: its model one effort lower, or null when no lower effort is known,
- * as for Opus low or an `--effort` off the ladder, such as Codex's `minimal`.
+ * The effort step each PR size's shadow runs from its pick, or null for none. The 2026-11-22 readout of
+ * quest/m0/routing-evidence/README.md found each step down losing half or more of the pick's findings at XS to M,
+ * so XS runs none, S and M test the step up, and L and XL keep the step down until L has its sample.
  */
-export function shadowOf(routed: Model): Model | null {
+const SHADOW_STEPS: Record<Size, -1 | 1 | null> = { XS: null, S: 1, M: 1, L: -1, XL: -1 };
+
+/**
+ * The shadow of `routed`, the pick for a PR of `size`: its model one effort away by `SHADOW_STEPS`, or null when the
+ * size runs none or no effort is known there, as below Opus low, above xhigh, or off the ladder, such as Codex's
+ * `minimal`.
+ */
+export function shadowOf(size: Size, routed: Model): Model | null {
+	const step = SHADOW_STEPS[size];
 	const at = EFFORTS.indexOf(routed.effort);
-	return at <= 0 ? null : { ...routed, effort: EFFORTS[at - 1]! };
+	const effort = step === null || at < 0 ? undefined : EFFORTS[at + step];
+	return effort === undefined ? null : { ...routed, effort };
 }
 
 /**
@@ -1973,7 +1983,7 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 	}
 	const sessions = all.filter(runs);
 	const plan = (routed: Model, second: Model | null = null) =>
-		seatsFor({ routed, second, auto, sessions, firsts, responses: options.responses });
+		seatsFor({ routed, second, size: sized.size, auto, sessions, firsts, responses: options.responses });
 
 	// The first candidate's seats are checked before the classifier spends a turn.
 	let at = 0;
@@ -2178,6 +2188,8 @@ interface Seating {
 	routed: Model;
 	/** The second reviewer a high-risk head gets, or null. */
 	second: Model | null;
+	/** The PR's size, which sets the shadow's step. */
+	size: Size;
 	auto: boolean;
 	sessions: Session[];
 	/** Each session's first finding number, as the last run printed them. */
@@ -2189,8 +2201,11 @@ interface Seating {
  * The seats a run of `routed` fills, the saved sessions it keeps without a round, and the refusals that stop it
  * before any reviewer runs: a session whose findings no seat settles, or responses missing or given for nothing.
  */
-function seatsFor({ routed, second, auto, sessions, firsts, responses }: Seating): { seats: Seat[]; kept: Session[] } {
-	const shadow = auto ? shadowOf(routed) : null;
+function seatsFor({ routed, second, size, auto, sessions, firsts, responses }: Seating): {
+	seats: Seat[];
+	kept: Session[];
+} {
+	const shadow = auto ? shadowOf(size, routed) : null;
 	const seated = (session: Session | undefined) => ({
 		session,
 		first: session === undefined ? 1 : firsts.get(session)!,
@@ -2212,9 +2227,9 @@ function seatsFor({ routed, second, auto, sessions, firsts, responses }: Seating
 			: undefined;
 	if (replaced !== undefined) seats[0] = { ...seats[0]!, ...seated(replaced) };
 	// The shadow reviews a branch's first run, then reruns only while it has findings to settle, or once the pick
-	// changed so that the shadow it ran is no longer one step below it. Its session carries over to the new
-	// shadow, as a replaced reviewer's does, so its findings stay settled. A pick with no step below it still
-	// seats a shadow at its own effort while the old one has findings, since only a shadow settles them.
+	// changed so that the shadow it ran is no longer the size's step from it. Its session carries over to the new
+	// shadow, as a replaced reviewer's does, so its findings stay settled. A pick with no shadow still seats one at
+	// its own effort while the old one has findings, since only a shadow settles them.
 	const shadowed = sessions.find((each) => each.shadow);
 	const open = shadowed !== undefined && unsettled([shadowed]).length > 0;
 	const stale =

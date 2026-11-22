@@ -42,9 +42,17 @@ Readout, the agent's choices for the implementer to revisit:
 - Start one week after both experiments are live. From `quest usage --json`,
   compute each arm's variance and the number of PRs each arm needs to
   detect a difference worth acting on. If the arms have not reached it,
-  rewrite the `Waiting` item below for the date they will, and stop. XL
+  rewrite the `Scheduled` date below for the date they will, and stop. XL
   quests are rare, so report how many each XL arm got rather than wait for
   a detectable difference there (user, 2026-11-13).
+- Decide the writer arms on first-round findings, the difference worth
+  acting on 0.25 per PR, and report cost beside them (2026-11-22 readout).
+  Per-PR cost is too heavy-tailed to separate the arms: its log has a
+  standard deviation of about 1.5, so a 25% difference in geometric mean
+  needs about 380 merged PRs per arm at XS and 780 at S and M, months away.
+  Leave out a PR whose first `Implementer:` line names an arm but not that
+  arm's model, mostly quests resized after the arm was drawn; 13 did by
+  11-21.
 - `quest usage`'s `arms` rollup counts each sized PR whose every
   `Implementer:` line names the same arm, under its first line's writer,
   with every session's spend on it. Escapes are too rare to separate the
@@ -63,7 +71,8 @@ Readout, the agent's choices for the implementer to revisit:
   `src/cli/models.ts`, with `quest models --arm`, the `arm` field of
   `quest unblocked --json`, and the arm notes in the README, guide, and
   `/quest-run` and `/quest-iterate`. Keep the shadow reviewer only if the maintainer
-  chooses to.
+  chooses to: once L's pairs reach 116 first rounds, about 2026-12-20, end
+  its step down at L and XL, and read the step up at S and M below.
 - Carry the tallies into [the model check](/quest/m1/model-check.md)'s
   baseline.
 - Chart the arms' cost against quality as
@@ -74,6 +83,65 @@ Readout, the agent's choices for the implementer to revisit:
   Only tallies begun after
   [moq-dev/quest#721](https://github.com/moq-dev/quest/pull/721) merged
   record a first round, so count first rounds only over those.
+
+Readout of 2026-11-22, from `quest usage --since 2026-11-14 --json` over
+moq-dev/moq, moq-dev/moq.pro, and moq-dev/quest, with this host's, the CI
+host's, and the Fedora host's sessions (the laptop was offline), and the
+three hosts' saved review rounds:
+
+- Shadow reviewer, Sol each time: first-round findings per PR on the PRs
+  both seats reviewed, then findings matched by location on the first
+  head both reviewed (same file, within 10 lines; 15 of 15 sampled matches
+  were the same defect, and the counts barely move from an exact line to
+  anywhere in the file). The routed seat's cost per PR covers all its
+  rounds, the shadow's only the rounds it reran. The PR records and the
+  saved rounds cover slightly different PRs.
+
+  | Size | Routed / shadow | PRs | First-round findings | Routed only / both / shadow only | Cost per PR |
+  |---|---|---|---|---|---|
+  | XS | medium / low | 73 | 6 / 1 | 3 / 0 / 0 | $0.33 / $0.11 |
+  | S | medium / low | 119 | 31 / 16 | 23 / 10 / 4 | $0.35 / $0.14 |
+  | M | high / medium | 82 | 61 / 30 | 39 / 18 / 10 | $0.70 / $0.24 |
+  | L | xhigh / high | 25 | 41 / 31 | 19 / 23 / 12 | $1.47 / $0.65 |
+  | XL | xhigh / high | 1 | 3 / 2 | 1 / 2 / 0 | $2.22 / $1.06 |
+
+  Each paired measure needs 9 PRs at XS, 23 at S, 65 at M, and 116 at L to
+  detect 0.25 first-round findings per PR, so XS, S, and M have their
+  answer and L is about 2026-12-20 away. The shadow found more of what the
+  routed seat missed at L (0.46 per PR) than at M (0.11) or S (0.03), and
+  on high-tier PRs more than medium. The shadow cost about $52 over the
+  week. Both seats' findings were mostly fixed: refuted 9 of 103 routed and
+  5 of 36 shadow at M, 5 of 78 and 2 of 47 at L.
+- Decided 2026-11-22 (maintainer, `/quest-run`,
+  [moq-dev/quest#801](https://github.com/moq-dev/quest/pull/801#issuecomment-7073966129)):
+  - Review table? ✅ Keep every cell, Sol medium, medium, high, xhigh,
+    xhigh for XS to XL (rejected: lower XS to low).
+  - Shadow reviewer? ✅ Retarget it: none at XS, one effort above the
+    routed pick at S and M, to measure whether raising them pays, and one
+    below at L until L reaches its sample (rejected: unchanged until
+    12-20, then end it; end it now; a permanent second reviewer at L and
+    XL, left to [the guardrails](/quest/m0/benchmark/guardrails.md)). XL
+    keeps its step down with L. Compare the step up's pairs as the step
+    down's were, counting only rounds after the retarget merged.
+- Writer A/B, PRs per arm, first-round findings over the PRs counted in
+  parentheses, cost as the median merged PR with any attributed spend (5
+  to 27% of each arm's merged PRs had none):
+
+  | Size | Arm | PRs | First-round findings per PR | Rounds | Handed back | Caused by | Median cost |
+  |---|---|---|---|---|---|---|---|
+  | XS | A, Sonnet high | 26 | 0.05 (22) | 1.26 | 5 | 0 | $0.22 |
+  | XS | B, Opus medium | 19 | 0.18 (17) | 1.65 | 2 | 0 | $0.41 |
+  | S | A, Opus medium | 67 | 0.28 (54) | 2.25 | 7 | 3 | $0.53 |
+  | S | B, Sonnet high | 59 | 0.38 (52) | 2.42 | 4 | 5 | $0.59 |
+  | M | A, Opus medium | 65 | 0.77 (57) | 4.04 | 19 | 5 | $1.23 |
+  | M | B, Opus high | 51 | 0.54 (46) | 2.76 | 15 | 4 | $4.10 |
+  | XL | A, Opus xhigh | 1 | 3 | 4 | 1 | 0 | $2.85 |
+  | XL | B, Fable medium | 2 | 2.5 | 6 | 2 | 1 | $20.66 |
+
+  Detecting 0.25 first-round findings per PR needs 26 PRs per arm at XS,
+  115 at S, and 292 at M. At the week's rate XS reaches it about 11-26, S
+  about 12-01, and M about 2027-01-03, so the 12-01 readout decides XS and
+  S and asks the maintainer whether M runs to January.
 
 Baseline from the 2026-11-11 audit, at API list price:
 
@@ -112,15 +180,11 @@ Baseline from the 2026-11-11 audit, at API list price:
 
   The table predates Pullfrog's move to Claude (2026-11-12) and its review
   replacing the DeepSeek one in `quest review`
-  ([token waste](/quest/m0/token-waste/README.md), 2026-11-13).
+  (the token waste epic, 2026-11-13).
 
-## Waiting
+## Scheduled
 
-- moq-dev/quest: one week of PRs since both the shadow reviewer
-  (`quest review`'s, PR titled "quest: run a shadow reviewer one effort
-  below the routed one") and
-  the writer A/B ([moq-dev/quest#720](https://github.com/moq-dev/quest/pull/720)) merged; check
-  their merge dates with `gh pr list --state merged` and the day with `date`
+- 2026-12-01 - the XS and S writer arms reach 26 and 115 first-round PRs each
 
 ## Related
 

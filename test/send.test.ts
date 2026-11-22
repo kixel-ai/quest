@@ -1029,3 +1029,96 @@ test("a remembered session is forgotten once its transcript is gone, unreadable,
 	expect(remembered(env)).toEqual(["s2"]);
 	expect(queue(stopped(root), env).notices).toEqual([]);
 });
+
+/** Two more Kixel Quests, which a user's tokens file pairs with tokens of their own. */
+const OTHER = "https://other.example";
+const GONE = "https://gone.example";
+
+/** Route a sender's requests for `OTHER` and `GONE` to the one fake store, recording each request's host and token. */
+function viaHosts(deps: SendDependencies, refuse: string[] = []) {
+	const hosts: { host: string; path: string; token: string }[] = [];
+	const fetch = deps.fetch;
+	deps.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+		const url = new URL(String(input));
+		const headers = init?.headers as Record<string, string>;
+		hosts.push({ host: url.origin, path: url.pathname, token: headers.authorization ?? headers.Authorization! });
+		if (refuse.includes(url.origin) && url.pathname === "/forge") return new Response("", { status: 401 });
+		return fetch(`${URL_}${url.pathname}`, init);
+	}) as typeof globalThis.fetch;
+	return hosts;
+}
+
+test.each([
+	["names a third Kixel Quest", "https://elsewhere.example"],
+	["names none", undefined],
+])("a record is sent to the Kixel Quest its hook queued it for when the sender's environment %s", async (_, named) => {
+	const env = home();
+	writeFileSync(tokensPath(env), JSON.stringify({ [URL_]: "one", [OTHER]: "two", [GONE]: "three" }));
+	const root = checkout();
+	queue({ ...stopped(root), session: "s1" }, env);
+	queue({ ...stopped(root), session: "s2" }, { ...env, QUEST_KIXEL_URL: OTHER });
+	queue({ ...stopped(root), session: "s3" }, { ...env, QUEST_KIXEL_URL: GONE });
+	// The person removed one token after its record was queued.
+	writeFileSync(tokensPath(env), JSON.stringify({ [URL_]: "one", [OTHER]: "two" }));
+	const sessions = [session("s1", "quest/m0/a"), session("s2", "quest/m0/a"), session("s3", "quest/m0/a")];
+	const { deps, uploads } = sender({ ...env, QUEST_KIXEL_URL: named }, 200, sessions);
+	const hosts = viaHosts(deps);
+	expect(await sendPass(deps)).toHaveLength(2);
+	// Queue files are named by random IDs, so the Kixel Quests are reached in no fixed order.
+	const reached = hosts.filter((h) => h.path === "/records").map((h) => [h.host, h.token]);
+	expect(reached.sort()).toEqual([
+		[URL_, "Bearer one"],
+		[OTHER, "Bearer two"],
+	]);
+	expect(uploads.map((u) => parseUpload(u.body).records.map((r) => r.session)).sort()).toEqual([["s1"], ["s2"]]);
+	expect(pending(env)).toEqual([]);
+});
+
+test("a Kixel Quest that refuses its token drops only its own records", async () => {
+	const env = home();
+	writeFileSync(tokensPath(env), JSON.stringify({ [URL_]: "one", [OTHER]: "two" }));
+	const root = checkout();
+	queue({ ...stopped(root), session: "s1" }, env);
+	queue({ ...stopped(root), session: "s2" }, { ...env, QUEST_KIXEL_URL: OTHER });
+	const { deps, uploads } = sender(env, 200, [session("s1", "quest/m0/a"), session("s2", "quest/m0/a")]);
+	viaHosts(deps, [OTHER]);
+	const sent = await sendPass(deps);
+	expect(sent.map((s) => [s.endpoint, s.refused]).sort()).toEqual([
+		[ENDPOINT, false],
+		[`${OTHER}/records`, true],
+	]);
+	expect(uploads.map((u) => parseUpload(u.body).records.map((r) => r.session))).toEqual([["s1"]]);
+	expect(pending(env)).toEqual([]);
+});
+
+test("a failing Kixel Quest keeps its records without holding back another's", async () => {
+	const env = home();
+	writeFileSync(tokensPath(env), JSON.stringify({ [URL_]: "one", [OTHER]: "two" }));
+	const root = checkout();
+	queue({ ...stopped(root), session: "s1" }, env);
+	queue({ ...stopped(root), session: "s2" }, { ...env, QUEST_KIXEL_URL: OTHER });
+	const { deps, uploads } = sender(env, 200, [session("s1", "quest/m0/a"), session("s2", "quest/m0/a")]);
+	const fetch = deps.fetch;
+	deps.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
+		String(input).startsWith(OTHER)
+			? new Response("down", { status: 503 })
+			: fetch(input, init)) as typeof globalThis.fetch;
+	await expect(sendPass(deps)).rejects.toThrow(OTHER);
+	expect(uploads).toHaveLength(1);
+	expect(pending(env)).toHaveLength(1);
+});
+
+test("each Kixel Quest that does not serve a repository says so once, whichever said it first", async () => {
+	const env = home();
+	writeFileSync(tokensPath(env), JSON.stringify({ [URL_]: "one", [OTHER]: "two" }));
+	const root = checkout();
+	queue({ ...stopped(root), session: "s1" }, env);
+	queue({ ...stopped(root), session: "s2" }, { ...env, QUEST_KIXEL_URL: OTHER });
+	const { deps } = sender(env, 200, [session("s1", "quest/m0/a"), session("s2", "quest/m0/a")], undefined, [], []);
+	viaHosts(deps);
+	expect(await sendPass(deps)).toEqual([]);
+	expect(pending(env)).toEqual([]);
+	const [notice] = queue({ ...stopped(root), session: "s3" }, env).notices;
+	expect(notice).toContain(`${URL_} does not serve acme/proj`);
+	expect(notice).toContain(`${OTHER} does not serve acme/proj`);
+});
