@@ -1573,39 +1573,42 @@ base gained since, which a diff against its tip shows as reverted.
 The first round explores the change once. It runs the reviewer's own review,
 `codex exec review` with custom instructions or Claude Code's `/code-review
 <effort> <merge-base>...HEAD` with text after the target, given the range, the
-base's `REVIEW.md`, if any, and any earlier findings and responses up front.
-Neither returns a JSON schema itself, so the round resumes that session for one
-turn that reads nothing and reports the review in one schema, with a score from
-0 to 10 for how ready the head is to land and one sentence on why: 10 lands as
-is, 7 to 9 lands after the findings are fixed, 4 to 6 needs rework, and 0 to 3
-is the wrong approach. A head with no findings can still score below 10. A
-reply without a valid score fails like any malformed reply. Each finding is
-high, medium, or low severity; low is anything that would not block landing.
-The score informs; the findings and their refutations still decide when the
-loop ends. Later rounds take `--responses`, the author's free-text fixes and
-refutations, which a round that reported findings requires. A later round
-resumes the session and checks only what changed since the last round's head
-and its findings when nothing but the head changed: the same model, effort, and
-base, a merge base the last round's covers, as when the base moved on, and the
-same applicable `AGENTS.md`, `CLAUDE.md`, and `REVIEW.md`. Otherwise it starts a
-new session that reviews the whole change and still weighs the responses. A
-round that would resume on the head the last round reviewed, when that round
-found nothing, runs no reviewer and repeats that round, marked `unchanged`. A refutation stands only when it cites evidence the
-reviewer can check. Findings are numbered across the reviewers, in the order
-the round printed them. The prompt numbers the last round's findings, and the reply
-settles each by its number as fixed, refuted, or still open, with a one-sentence
-reason; a reply that skips or repeats one, or keeps more open than it reports,
-fails like any malformed reply. A first round's schema has no such list. Each
-reviewer settles only its own findings, and gets `--responses` only when it has
-some, so on the same head only a reviewer with findings runs. Resuming keeps the
-reviewer's prompt cache; Claude Code is asked for its 1-hour cache, and Codex
-keeps its default. Each reviewer's session is kept per branch in the clone's
-common Git directory, so any worktree of the clone resumes it;
-`--new` starts new sessions, but continues each reviewer's tally of its findings
-on the branch, less those it drops unsettled, unless the saved state is one
-this quest cannot read. `--branch` names the branch instead of the checked-out one, which a
-detached `HEAD` requires, such as a checkout of a branch another worktree
-holds, so its rounds continue that branch's session.
+base's `REVIEW.md`, if any, and any earlier findings and responses up front. It
+also asks the reviewer to name each contract the change alters and search past
+the diff for the dependents left on the old one. Neither returns a JSON schema
+itself, so the round resumes that session for one turn that reads nothing and
+reports the review in one schema, with a score from 0 to 10 for how ready the
+head is to land and one sentence on why: 10 lands as is, 7 to 9 lands after the
+findings are fixed, 4 to 6 needs rework, and 0 to 3 is the wrong approach. A
+head with no findings can still score below 10. A reply without a valid score
+fails like any malformed reply. Each finding is high, medium, or low severity;
+low is anything that would not block landing. The score informs; the findings
+and their refutations still decide when the loop ends. Later rounds take
+`--responses`, the author's free-text fixes and refutations, which a round that
+reported findings requires. A later round resumes the session and checks only
+what changed since the last round's head and its findings when nothing but the
+head changed: the same model, effort, and base, a merge base the last round's
+covers, as when the base moved on, and the same applicable `AGENTS.md`,
+`CLAUDE.md`, and `REVIEW.md`. Otherwise it starts a new session that reviews
+the whole change and still weighs the responses. A round that would resume on
+the head the last round reviewed, when that round found nothing, runs no
+reviewer and repeats that round, marked `unchanged`. A refutation stands only
+when it cites evidence the reviewer can check. Findings are numbered across the
+reviewers, in the order the round printed them. The prompt numbers the last
+round's findings, and the reply settles each by its number as fixed, refuted,
+or still open, with a one-sentence reason; a reply that skips or repeats one,
+or keeps more open than it reports, fails like any malformed reply. A first
+round's schema has no such list. Each reviewer settles only its own findings,
+and gets `--responses` only when it has some, so on the same head only a
+reviewer with findings runs. Resuming keeps the reviewer's prompt cache; Claude
+Code is asked for its 1-hour cache, and Codex keeps its default. Each
+reviewer's session is kept per branch in the clone's common Git directory, so
+any worktree of the clone resumes it; `--new` starts new sessions, but
+continues each reviewer's tally of its findings on the branch, less those it
+drops unsettled, unless the saved state is one this quest cannot read.
+`--branch` names the branch instead of the checked-out one, which a detached
+`HEAD` requires, such as a checkout of a branch another worktree holds, so its
+rounds continue that branch's session.
 
 The reviewer is read-only: Codex in its `read-only` sandbox, ignoring
 execpolicy rules, and Claude Code with only read tools and the Bash commands it

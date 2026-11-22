@@ -5,9 +5,8 @@
 `quest eval add` writes a case to Kixel Quest and `quest eval run` reads the
 repository's set from it; `review-eval.json` and `EVAL_FILE` are gone, and so
 are the audits' baselines in this tree, which move to Kixel Quest too. The
-[mistake audit](/quest/m0/mistake-audit.md) and
-[review-dependents](/quest/m0/review-dependents.md) add their cases there,
-for every repository, instead of to a repository's own set.
+[mistake audit](/quest/m0/mistake-audit.md) adds its cases there, for every
+repository, instead of to a repository's own set.
 
 Non-goals: changing how a case is found, located, or scored.
 
@@ -26,8 +25,8 @@ follow-up). Confirmed 2026-11-20 (maintainer, `/quest-plan` after a
 - Key each set by the repository whose escape a case records, and tag each
   defect, not its case, with what added it: the audit's name and run date, or
   `manual` for a plain `quest eval add`. A defect `quest eval add` appends to
-  an existing culprit's case carries its own tag. The mistake audit and
-  review-dependents add each case to its own repository's set, so "for every
+  an existing culprit's case carries its own tag. The mistake audit
+  adds each case to its own repository's set, so "for every
   repository" means each repository's set, not one shared pool. `quest eval
   run` runs the current repository's set, every tag included; `--repo
   <owner/repo>` runs another that the token can read, and `--source <tag>`
@@ -41,8 +40,10 @@ follow-up). Confirmed 2026-11-20 (maintainer, `/quest-plan` after a
 - Move each audit's baseline (such as the mistake audit's "Baseline from the
   2026-11-18 run") into Kixel Quest's records the same way, and have each
   audit read its baseline from there.
-- [review-dependents](/quest/m0/review-dependents.md) keeps its 14-case set
-  in a clone until this lands, then adds it here.
+- Import the 20-case moq-dev/moq set (11 culprits, 9 clean PRs) that
+  [moq-dev/quest#799](https://github.com/moq-dev/quest/pull/799) built in a
+  clone, from the JSON in that PR's body, tagging its defects
+  `review-dependents 2026-11-21`.
 
 ## Waiting
 
