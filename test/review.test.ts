@@ -1612,6 +1612,18 @@ fakes(
 			expect((await quest("--root", s.repo, "review", "--override", "low")).stderr).toContain(
 				"--override and --reason go together",
 			);
+
+			// A second reviewer that cannot run is the one the outage names, never the pick it ran beside.
+			// On a new head Codex runs until the failure stops it, so its seats fail with that same error.
+			write(s.repo, "src/lib.ts", "export const x = 5;\n");
+			git(s.repo, "commit", "-qam", "a constant for the outage");
+			vi.stubEnv("FAKE_HANG", join(s.bin, "..", "codex.pid"));
+			vi.stubEnv("FAKE_LIMITED", "reset");
+			vi.stubEnv("FAKE_FAILS", "claude-sonnet-5-5");
+			const out = await quest("--root", s.repo, "review", "--override", "high", "--reason", "It ships tonight.");
+			expect(out.code).toBe(3);
+			expect(out.stderr).toContain("no eligible S reviewer could run: claude-sonnet-5-5 medium (");
+			expect(out.stderr).not.toContain("gpt-6.1-sol");
 		} finally {
 			vi.unstubAllGlobals();
 		}

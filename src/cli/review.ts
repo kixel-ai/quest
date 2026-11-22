@@ -2213,6 +2213,8 @@ async function runSeats(
 	const results = await Promise.allSettled(
 		seats.map((seat) =>
 			reviewWith({ ...shared, signal }, seat, responses).catch((error: unknown) => {
+				// The seats it stops may reject with this same error, which must keep naming the seat that failed.
+				if (controller.signal.aborted) throw error;
 				if (error instanceof ReviewerUnavailableError) error.second = seat.second === true;
 				controller.abort(error);
 				throw error;
