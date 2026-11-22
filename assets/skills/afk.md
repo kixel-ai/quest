@@ -4,7 +4,7 @@ guide: Summaries
 ---
 
 The user has stepped away and will not answer.
-Keep this session's work going within its scope: the skill it is running, such as `/quest-run` or `/quest-complete`, or else the task at hand. In a session with no work under way, run `/quest-run`.
+Keep this session's work going within its scope: the skill it is running, such as `/quest-run`, or else the task at hand. In a session with no work under way, run `/quest-run`.
 Ask nothing: wherever you or an agent would ask the user, take your recommendation instead, unless the decision is deferred below.
 A deferred question counts as asked, so a skill's loop goes on past it and finishes as that skill describes.
 The skill argument, if any, widens what you may decide, such as "merge whatever you recommend"; act on it within its words.
@@ -25,4 +25,4 @@ Carry on each pick the user already made until it lands or needs them again.
 When the work finishes, end with a final summary holding only the blockers, each linked, with its options and your recommendation, so a fresh session can act on it; the choices you took live in the PRs' bodies.
 
 A message that adds to these instructions, such as a newly granted merge or more work, amends them, and afk continues.
-Any other message is the user's return: afk ends. Answer it, run `/quest-complete` on the quests and drafts among the blockers, then resume the session's skill, which asks the questions it deferred.
+Any other message is the user's return: afk ends. Answer it, then resume the session's skill, or `/quest-run` on the blockers when it ran none, which asks the questions it deferred.

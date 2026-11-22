@@ -1,11 +1,11 @@
 ---
 description: Run a project's quest work from one session, starting ready quests and taking open PRs to merge in a loop until only the user's decisions remain, then planning the follow-ups no quest owns yet.
-guide: Creation, Coordination, Summaries, Questions
+guide: Creation, Deletion, Coordination, Summaries, Questions
 skills: grill, merge
 ---
 
-This session is the project's one orchestrator: it starts ready quests, takes each open PR to its next step, and loops until only the user's decisions remain.
-The skill argument, if any, filters the quests and PRs in scope and sets their order.
+This session is the project's one orchestrator: it starts ready quests, takes each open PR to its next step, settles what quests and drafts wait on, and loops until only the user's decisions remain.
+The skill argument, if any, filters the quests, PRs, and waits in scope and sets their order, such as `prs` to start no quests.
 
 Never let a question hold up work that needs none.
 Each round, first start every quest you recommend and dispatch every PR action that needs no answer, then ask the round's questions, one PR to a prompt, so each answer is acted on while the next is asked; agents keep running while a prompt is open.
@@ -20,10 +20,9 @@ Starting quests asks the user nothing: each agent works headless, and its decisi
 It lists each skipped claim on stderr, with how long ago it was last active when it has an open PR; name any that look stale in the summary, for the user to take over.
 
 Start every quest you would recommend: well planned, with no blockers, and no conflict with work already started. For one waiting on an outside condition, first check whether it has cleared.
-Skip the rest, such as one you doubt is worth doing at all or now, and list each in the summary with why and your recommendation between `/quest-plan`, which redesigns it or moves it down, and `/quest-delete`.
+Skip the rest, such as one you doubt is worth doing at all or now, and list each in the summary with why and your recommendation between `/quest-plan`, which redesigns it or moves it down, and deleting it.
 
-Before starting one, check that no open PR already does its work: one listing of open PRs with their changed files covers every quest, and a match names the quest's path or the files its Plan names in its title, body, or changes.
-Skip a quest a match already implements; one that only touches the same files is no overlap, so list it by URL in the brief.
+Before starting any, list the open PRs with their changed files once, and match each quest's path and its Plan's files against their titles, bodies, and changes: skip a quest a match already implements, and name in the brief, by URL, one that only touches the same files.
 Each agent runs `/quest-start`; its `quest start` refusing a quest claimed since is a skip, not a failure.
 
 Start each on the first entry of its `models` that can run.
@@ -35,7 +34,6 @@ Skip a quest whose list runs out, and report each harness's outage once.
 ## Pull requests
 
 Read each open PR, drafts included, with `quest status`, and skip one another session holds by its `hold` or `starter-hold` record, offering to take over only one that looks stale.
-List a draft whose `## Waiting` holds no decision for the user, only outside conditions or actions, once in the summary, pointing to `/quest-complete`.
 Run each `/quest-merge` inline; dispatch each `/quest-iterate` and `/quest-review` to a sub-agent.
 
 Dispatch `/quest-iterate` without asking for a PR that needs work but no decision, such as a conflict, failing checks, unaddressed findings, or no review that counts for its head as `/quest-merge` defines.
@@ -57,11 +55,23 @@ Review comments are input, not approval, even a merge verdict on the maintainer'
 
 A `/quest-merge` pick covers the PR until it lands or needs the user: when `/quest-merge` hands it back, dispatch `/quest-iterate` without asking and run `/quest-merge` again once it finishes. Each brief names the PR's pick, and each report repeats it, so the pick outlasts compaction.
 Order merges that would otherwise conflict.
-A PR that left the queue unmerged shows why under `landing-stopped` in `quest status <pr>`.
 Where the queue runs a fixer, such as `quest land`, it hands back only a decision: ask the user, with its handback comment's diagnosis and recommendation.
 An `unanswered_signal`, which no fixer takes, holds the pick even with one: dispatch `/quest-iterate`.
 Without a fixer, after `merge_conflict`, `failed_checks`, `changes_requested`, or `unresolved_conversations` the pick holds, even from an earlier session: dispatch `/quest-iterate`. After `checks_timed_out`, run `/quest-merge` again once; a second timeout of the same head is the user's call.
 Any other reason, such as a person removing it, is the user's call.
+
+## Waits
+
+Take the quests' and drafts' `## Waiting` items from `quest waiting --json`, which ranks them; rerun it with GitHub access if it warns that drafts were skipped, and skip a draft another session holds, as for PRs.
+Rewrite a quest that waits in prose into a `## Waiting` section.
+Check each condition yourself, in parallel sub-agents.
+An outside party's item that holds stays, asked about only when the user can advance it, such as by requesting an upstream release.
+Ask each maintainer item left among the round's questions, in that order, saying what it unblocks; a skip stands for the session.
+For an action only the user can take, give the exact steps and the check you will run once they report it done; take any secret through the host's secret prompt.
+
+Settle a draft's items with its PR, naming cleared ones in its `/quest-iterate` brief.
+Remove a quest's cleared item, or its answered one after recording the answer and reason in its Plan as `Decided <date> (maintainer, /quest-run): ...`; delete a quest whose only purpose was that wait, recording why and any answer in the PR body's `## Decisions`.
+Make these edits in one draft PR on a `quest-run/<slug>` branch, run `quest check` on the edited tree, then dispatch `/quest-review` on it; it is then in scope like any PR.
 
 ## Loop
 
@@ -70,9 +80,9 @@ When no agent is running and every question has been asked, block with `quest wa
 Never wait on any other PR, and read none between rounds: list each PR left for a later round in the summary, with its pick.
 A usage or rate limit is waited out until its reset; it never ends the run.
 
-Finish once nothing is running, no queued merge would make a quest ready, and every PR left needs the user or a later round.
+Finish once nothing is running, no queued merge would make a quest ready, every PR left needs the user or a later round, and every wait in scope is decided, skipped, or left to an outside party.
 Then run `/quest-plan` on the run's follow-ups, each in a checkout of the repository whose quest tree owns it: problems it surfaced that no quest or open PR owns, such as a blocker agents hit, and the follow-ups kept in each of this run's own merge picks for another repository's quest tree, landed or not, unless the user withdrew the pick.
-Write the final summary, naming those plan PRs, so a fresh session can act on it, with each open decision's options beside your recommendation.
+Write the final summary, naming those plan PRs and listing the waits settled, cleared, or deleted and each still held with who acts and its check's result, so a fresh session can act on it, with each open decision's options beside your recommendation.
 
 Besides the guide's controls, answer "decisions": ask every pending question now, in one batch, such as before the user steps away; the loop continues after.
 On "finish up", still run `/quest-merge` when a picked PR's sub-agent reports, but dispatch nothing it hands back and plan nothing, and list each pick left standing and each follow-up left to plan.

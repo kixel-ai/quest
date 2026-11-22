@@ -4,7 +4,7 @@
 
 A `/quest-start` session costs less per merged PR, because it carries less context through its later requests, with no loss in review quality or in what the PR validates. `quest usage` over a week of sessions shows the cut against the baseline below; no fixed target is set.
 
-Non-goals: the writer's model and effort (owned by [Routing evidence](/quest/m0/routing-evidence/README.md)), and trimming the always-loaded rules and skills ([PR 796](https://github.com/moq-dev/quest/pull/796)'s `quest/m0/trim-skills.md`), which the baseline shows is not where start sessions spend.
+Non-goals: the writer's model and effort (owned by [Routing evidence](/quest/m0/routing-evidence/README.md)), and trimming the always-loaded rules and skills, done in [moq-dev/quest#807](https://github.com/moq-dev/quest/pull/807), which the baseline shows is not where start sessions spend.
 
 ## Plan
 

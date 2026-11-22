@@ -15,7 +15,7 @@ It grew out of [MoQ](https://github.com/moq-dev/moq). This is the standalone
 version, being built for use in other repositories.
 
 **Early days:** validation, readiness, init/uninstall, and the planning,
-execution, merge, and export skills are here. Release binaries are still being
+execution, and merge skills are here. Release binaries are still being
 built.
 
 ## Every plan is a file
@@ -266,7 +266,7 @@ the item; `--maintainer` keeps only the maintainer's, and `--json` prints
 party is the maintainer's. Drafts come from
 the upstream's open PRs, found as for `unblocked --unclaimed`; without the
 remote, off GitHub, or when GitHub cannot be read, it lists the tree's items
-and warns that drafts were skipped. `/quest-complete` walks you through them.
+and warns that drafts were skipped. `/quest-run` walks you through them.
 
 ## Claim a quest
 
@@ -2171,7 +2171,7 @@ for a periodic audit of what agents keep getting wrong:
 ```console
 $ quest messages --since 2026-11-10
 2026-11-10T17:39:10.552Z claude moq-dev/quest 5f0c2a7e-9d3b-4c1a-8e6f-2b7d4a9c1e03
-  quest-spawn
+  quest-run
 ```
 
 Each message shows its time, harness, repository (the checkout's GitHub
@@ -2458,20 +2458,14 @@ arrives with the guide sections and other skills it builds on, in one call:
 
 | Skill | What it does |
 | --- | --- |
-| `quest-plan` | Ask the questions that turn an idea into scoped quests. |
-| `quest-grill` | Settle open decisions through rounds of questions, each with a recommendation. |
-| `quest-recurring` | Plan a quest whose finishing PR creates its next occurrence, and what gates it. |
+| `quest-plan` | Ask the questions that turn an idea into scoped quests, including recurring ones whose finishing PR creates the next run. |
 | `quest-import` | Bring open GitHub issues into the planning conversation. |
-| `quest-export` | Turn active quests into GitHub issues before leaving Quest. |
 | `quest-start` | Claim a ready quest, complete it, and open a PR. |
-| `quest-spawn` | Run only `quest-run`'s quest starts: triage ready quests and send agents out in parallel, asking nothing. |
 | `quest-iterate` | Iterate on an open PR to settle its open decisions, fix CI and review findings, and push. |
 | `quest-review` | Review a PR's branch locally with a model other than its latest writer, then mark it ready for review. |
 | `quest-merge` | Queue a PR to land, running `quest-iterate` first when it needs work. |
-| `quest-complete` | Run only `quest-run`'s PR decisions and settle what quests and draft PRs wait on you: decide which open PRs to merge, clear resolved waits, queue the merges, then plan the follow-ups no quest owns yet. |
-| `quest-run` | Orchestrate a project from one session: start ready quests and take PRs to merge in a loop, until only your decisions remain, then plan the follow-ups no quest owns yet. |
+| `quest-run` | Orchestrate a project from one session: start ready quests, take PRs to merge, and settle what quests and drafts wait on you, in a loop until only your decisions remain, then plan the follow-ups no quest owns yet. Pass a filter such as `prs` to start no quests. |
 | `quest-afk` | Keep a session such as `quest-run` going while you are away: it acts on its recommendations, defers merges, and walks you through the rest when you return. |
-| `quest-delete` | Abandon a quest, deleting it in its own PR. |
 
 Use `/quest-plan` in Claude Code or `$quest-plan` in Codex. Skills coordinate
 within your agent session. A started quest stops at a pull request; merging is

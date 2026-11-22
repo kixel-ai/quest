@@ -5,7 +5,7 @@ import { type TranscriptFacts, transcriptFacts } from "./transcript";
 import type { Pull, Session } from "./usage";
 import type { LoggedWait } from "./waits";
 
-/** The role the first quest skill a session ran gives it; a skill not listed gives none. */
+/** The role the first quest skill a session ran gives it; a skill not listed gives none. Retired skills stay while transcripts still run them. */
 const SKILL_ROLES: Record<string, Role> = {
 	"quest-plan": "planning",
 	"quest-recurring": "planning",

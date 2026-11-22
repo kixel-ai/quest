@@ -58,14 +58,14 @@ test("a skill prints its own instructions first, then what it builds on, each on
 	const plan = skill("plan")!;
 	const text = skill("import")!.instructions;
 	expect(text.startsWith(skill("import")!.body.trim())).toBe(true);
-	// import builds on plan, which builds on grill: each appears once, in that order.
+	// import builds on plan, which builds on the internal grill skill: each appears once, in that order.
 	const planAt = text.indexOf(`# /quest-plan\n\n${plan.body.trim()}`);
-	const grillAt = text.indexOf(`# /quest-grill\n\n${skill("grill")!.body.trim()}`);
+	const grillAt = text.indexOf("# The grill skill\n\nInterview the user");
 	expect(planAt).toBeGreaterThan(0);
 	expect(grillAt).toBeGreaterThan(planAt);
-	expect(text.split("# /quest-grill").length).toBe(2);
+	expect(text.split("# The grill skill").length).toBe(2);
 	// The guide follows with every section any of them names, once and in the guide's order.
-	const sections = [...new Set([...skill("import")!.guide, ...plan.guide, ...skill("grill")!.guide])];
+	const sections = [...new Set([...skill("import")!.guide, ...plan.guide, "Questions"])];
 	expect(text.endsWith(`# Quest guide\n\n${guideSections(sections)}\n`)).toBe(true);
 	expect(text.split("\n## Questions\n").length).toBe(2);
 });
@@ -77,9 +77,16 @@ test.each(SKILLS.map((skill) => [skill.name, skill] as const))("%s fits inline i
 });
 
 test("a skill that builds on nothing prints only its own instructions and guide sections", () => {
-	const del = skill("delete")!;
-	expect(del.skills).toEqual([]);
-	expect(del.instructions).toBe(`${del.body.trim()}\n\n# Quest guide\n\n${guideSections(del.guide)}\n`);
+	const start = skill("start")!;
+	expect(start.skills).toEqual([]);
+	expect(start.instructions).toBe(`${start.body.trim()}\n\n# Quest guide\n\n${guideSections(start.guide)}\n`);
+});
+
+/** Grill only composes into the skills that interview the user, so no stub or listing offers it alone. */
+test("an internal skill composes into others but is neither installed nor listed", () => {
+	expect(skill("grill")).toBeUndefined();
+	expect(SKILLS.map((s) => s.name)).toEqual(["afk", "import", "iterate", "merge", "plan", "review", "run", "start"]);
+	for (const name of ["plan", "iterate", "run"]) expect(skill(name)!.instructions).toContain("# The grill skill\n\n");
 });
 
 test("the guide splits at its own headings, not the format example's", () => {

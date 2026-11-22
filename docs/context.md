@@ -1,18 +1,18 @@
 # Context
 
-Engineering rules for every task, as `quest context` prints them. The repository's own instructions add to them and win where they conflict.
+Engineering rules for every task. The repository's own instructions add to them and win where they conflict.
 
 ## Required
 
 - Before editing a file, read every `AGENTS.md` on its path from the root, since not every agent loads nested ones. Read the repository's `CONTRIBUTING.md` before a PR, and its `REVIEW.md`, if any, before a review.
 - Reproduce a bug before fixing it, and fix it at the root cause, flaky tests included. Never work around one with a retry, sleep, timeout, or looser assertion.
 - Fail loud and early: error on unsupported or malformed input instead of warning and continuing, and decide a supported path at setup from known capabilities instead of trying one at runtime and silently falling back. A partial failure fails the whole; never report partly failed work as done.
-- Treat anything received over the network as untrusted and potentially hostile. Bound what a peer can make you hold by design, not with a constant. Run no code from a PR whose author lacks write access: it runs with your credentials.
+- Treat anything received over the network as hostile. Bound what a peer can make you hold by design, not with a constant. Run no code from a PR whose author lacks write access: it runs with your credentials.
 - For core functionality, build the comprehensive solution: handle every case, land it whole instead of a part plus follow-ups, and refactor whatever stands in the way. Keep everything outside the core minimal.
 - Be brave and try new things: argue for what would stand out among countless near-identical approaches, not the average or the first that works. Attack your own work as hard as anyone else's.
 - Passing checks don't show a change works. Before review, exercise it on its real surface, such as the built binary, the running app, or the endpoint, and verify core functionality a second independent way, such as a property or differential check, a model, or a measurement. Measure performance claims. Put what you ran and saw in the PR body's `## Validation`; a change with no behavior to exercise says so.
 - Keep CI fast, so bold changes can be tried and thrown away cheaply: every test runs in CI, but the merge gate holds only fast, high-signal ones, and slow or expensive ones, such as other platforms, run nightly. A PR that slows the gate says by how much and why it is worth it.
-- Unit tests mock time instead of depending on wall-clock timing or sleeps, and cover edge cases, not old bugs or trivial values.
+- Unit tests mock time instead of sleeping or reading the clock, and cover edge cases, not old bugs or trivial values.
 - A lasting fact or instruction about a project belongs in its repository, not agent memory. Propose checking it in, to the nearest `AGENTS.md` or its quest; change no rule until the user agrees, then follow `quest guide prompting`.
 - In a public repository, never mention customers, partners, or prospects, or link to a private repository its maintainer doesn't own. Justify work on its merits.
 
@@ -38,7 +38,6 @@ Engineering rules for every task, as `quest context` prints them. The repository
 ## Workspace
 
 Work in your own worktree, reusing a suitable one you already own; read-only discovery needs no new checkout when your context or own checkout answers it.
-Put scratch, such as PR bodies, review drafts, logs, patches, helper scripts, and temporary clones, in its `.tmp/`, never `/tmp` or a directory other agents share, so it disappears with the worktree.
 
 Before ending a task, pausing for a decision, or handing off, commit a checkpoint and report what remains and which checks passed or did not run.
 Finish with a clean checkout: intended changes committed and pushed, incidental generated changes restored, and pre-existing or unrelated changes preserved.
@@ -47,14 +46,13 @@ Run commands that may use significant CPU, such as builds, tests, and model chec
 Never work around the queue by polling the load or capping agents, `quest agent admit`'s job; cancel a gated command only once its result is unneeded.
 Run it in the foreground and read its exit code directly, not through a pipe.
 Never end a turn or report while your background work runs, and never poll it with `sleep`, status checks, or busy loops: block on the harness's own wait for that task, at its longest interval, saying nothing between waits.
-To wait on a PR's CI or reviews, use `quest wait`, re-running one that times out with the `--since` it printed, so activity during the first wait is still reported.
+To wait on a PR's CI or reviews, use `quest wait`, re-running one that times out with the `--since` it printed.
 A sub-agent ends its turn only with a final result or a question. Its final report holds only what its caller acts on, such as its PR's URL, state, and head, and each decision it needs with a recommendation; details go in the PR body.
 Back out when progress stalls rather than burn tokens; a gate's queue or a long command still running is not a stall.
 
 ## Questions
 
-Make every reference you show the user clickable: link issues, PRs, and commits by full URL, as `[owner/repo#123](https://github.com/owner/repo/pull/123)`, never a bare `#123`.
-Sub-agents report those URLs for the parent to link.
+Link every issue, PR, and commit you show the user by full URL, as `[owner/repo#123](https://github.com/owner/repo/pull/123)`, never a bare `#123`; sub-agents report the URLs for the parent to link.
 
 Block on user decisions: ask with the context to answer and your recommendation, as `quest guide questions` details.
 An agent that cannot prompt never picks an answer the user owns: it puts each decision, with context and a recommendation, in its report and under `## Waiting` in its PR.
@@ -64,7 +62,7 @@ A decision about an open PR never authorizes closing it. Confirm a close as its 
 
 ## Pull requests
 
-Merge the base only when the branch conflicts with it or a landing step, such as `quest merge` or a merge queue, refuses the head, and resolve the conflicts in that merge; a branch only behind needs none: landing tests it on the current base.
+Merge the base only when the branch conflicts with it or a landing step, such as `quest merge` or a merge queue, refuses the head; a branch only behind needs none, since landing tests it on the current base.
 Before each push to a PR's branch, confirm it is still open: a push after it merges restores the deleted branch.
 
 Before a PR is marked ready for review, a model other than its latest writer reviews the committed branch locally, as `/quest-review` describes; a later push needs a new review unless `/quest-merge` exempts its changes.
@@ -76,15 +74,13 @@ The PR body's `## Models` section records its size as `Size: M` (its quest's, or
 
 Keep pull request CI read-only (a read-only `GITHUB_TOKEN`, write credentials only in environments for protected branches): quest branches live in the repository, so their workflows get its secrets. Flag a workflow that breaks this.
 
-A PR fixing a bug, or redoing an earlier PR's bad work, lists it under `## Caused by` as `- [owner/repo#N](url) - what it got wrong (found by check|reviewer|queue|canary|person|customer; incident <id>)`, each part when known. Find it by blaming the fixed lines, or in its quest's Plan, and confirm its diff introduced the defect, not merely touched those lines, deferred work, or kept older behavior, else trace further back; or say in one line why no single PR did, such as an upstream change or a bug as old as the code.
+A PR fixing a bug, or redoing an earlier PR's bad work, lists it under `## Caused by` as `- [owner/repo#N](url) - what it got wrong (found by check|reviewer|queue|canary|person|customer; incident <id>)`, each part when known. Find it by blame or its quest's Plan, and confirm its diff introduced the defect rather than touching those lines, deferring work, or keeping older behavior, else trace further back; or say in one line why no single PR did, such as an upstream change or a bug as old as the code.
 Review findings fixed in the same PR are not culprits.
 
 ## Quests
 
-When the repository has a `quest/` directory, it plans work as quests: Markdown files there, each completed in one PR.
-
-- Before creating, editing, claiming, or finishing a quest outside a `/quest-*` skill, run `quest guide` and follow it; skills carry the sections they need.
-- Add follow-ups worth a quest to your PR as `quest guide` describes, never as GitHub issues or agent-session tasks.
+A repository with a `quest/` directory plans work as quests, Markdown files each completed in one PR.
+Before creating, editing, claiming, or finishing one outside a `/quest-*` skill, which carries what it needs, run `quest guide` and follow it, adding follow-ups worth a quest to your PR as it describes, never as GitHub issues or agent-session tasks.
 
 ## Checked
 
