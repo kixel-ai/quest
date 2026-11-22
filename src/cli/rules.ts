@@ -398,11 +398,11 @@ function shell(
 	const commands = parse(line);
 	alone &&= commands.length === 1 && !commands[0]!.runs;
 	for (const simple of commands) {
-		// From a `cd` on, gh may run in another checkout than the one the hook reads.
-		elsewhere ||= ["cd", "pushd", "popd"].includes(simple.argv[0] ?? "");
 		const env = new Set(inherited);
 		const words = simple.argv.map((word, i) => (simple.expanded?.includes(i) ? `${word}${OPAQUE}` : word));
 		const argv = ungate(unwrap([...words], env), env);
+		// From a `cd` on, gh may run in another checkout than the one the hook reads.
+		elsewhere ||= ["cd", "pushd", "popd"].includes(argv?.[0] ?? "");
 		for (const { op, target } of simple.redirects)
 			if ([">", ">>", ">|", "&>", "&>>"].includes(op) && scratch(target)) found.add("tmp");
 		if (argv === null) continue;

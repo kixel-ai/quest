@@ -385,6 +385,8 @@ test("gh calls reaching for a repository Kixel Quest hosts are denied, naming th
 	expect(run("gh issue list")).toEqual([]);
 	// After a cd, gh may run in another checkout; before it, gh runs in this one.
 	expect(run("cd ../other && gh pr view 3")).toEqual([]);
+	expect(run("if cd ../other; then gh pr view 3; fi")).toEqual([]);
+	expect(run("if true; then gh pr view 3; fi")).toEqual([instead("quest pr view")]);
 	expect(run("gh pr view 3; cd ..")).toEqual([instead("quest pr view")]);
 	// An expanded selector, repository, or host could name any repository.
 	expect(run('gh pr view "$PR_URL"')).toEqual([]);
