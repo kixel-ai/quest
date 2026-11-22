@@ -553,7 +553,7 @@ fakes.each(["", "1"])(
 		expect(result.stderr).toContain(
 			"claude would send its stored login to the gateway ANTHROPIC_BASE_URL names, which has no credential; " +
 				"set ANTHROPIC_API_KEY, ANTHROPIC_AUTH_TOKEN, or an Authorization header in ANTHROPIC_CUSTOM_HEADERS " +
-				"for the gateway, or unset ANTHROPIC_BASE_URL",
+				"for the gateway (any value, for one that needs none), or unset ANTHROPIC_BASE_URL",
 		);
 		// Refused before Claude runs at all, not even its status check.
 		expect(s.calls()).toEqual([]);
@@ -617,6 +617,7 @@ fakes("a host-managed provider with no stored login fails as logged out", async 
 		"claude is not logged in to its default profile (CLAUDE_CONFIG_DIR is unset), ignoring the host-managed " +
 			"provider's route; run `claude auth login`",
 	);
+	expect(s.calls().length).toBeGreaterThanOrEqual(1);
 	for (const call of s.calls()) expect(call.argv).toEqual(["auth", "status"]);
 });
 

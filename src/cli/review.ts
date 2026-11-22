@@ -679,7 +679,7 @@ const claude: Reviewer = {
 		!authorizes(env.ANTHROPIC_CUSTOM_HEADERS)
 			? "claude would send its stored login to the gateway ANTHROPIC_BASE_URL names, which has no credential; " +
 				"set ANTHROPIC_API_KEY, ANTHROPIC_AUTH_TOKEN, or an Authorization header in ANTHROPIC_CUSTOM_HEADERS " +
-				"for the gateway, or unset ANTHROPIC_BASE_URL"
+				"for the gateway (any value, for one that needs none), or unset ANTHROPIC_BASE_URL"
 			: undefined,
 	unauthorized: LOGINS.claude.unauthorized,
 	// The command's level sets its own effort, overriding `--effort`, so it is given the same one. It takes
