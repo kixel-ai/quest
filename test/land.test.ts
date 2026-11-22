@@ -1693,7 +1693,7 @@ ${requeueScript}
 		const agent = join(dir, "codex");
 		writeFileSync(
 			agent,
-			`#!/bin/sh\ncat >/dev/null\nprintf 'model: header-model\\nreasoning effort: high\\n' >&2\n${requeueScript}\n`,
+			`#!/bin/sh\ncat >/dev/null\nprintf 'OpenAI Codex v0.1\\n--------\\nmodel: header-model\\nreasoning effort: high\\n' >&2\n${requeueScript}\n`,
 			{ mode: 0o755 },
 		);
 		vi.stubEnv("OPENAI_BASE_URL", "http://proxy.test/v1");
@@ -1702,6 +1702,30 @@ ${requeueScript}
 		const [result] = parseFixResult(readFileSync(join(dir, "quest-land-result.json"), "utf8"), [1], []);
 		expect(result).toMatchObject({ agent: "codex", model: "header-model", effort: "high" });
 		expect(author(result)).toBe("codex, header-model, high effort");
+	});
+
+	test("finds Codex's banner after any amount of wrapper output, and trusts nothing after it", async () => {
+		// As on kixel-ai/rind#967: the host's Nix shell printed 5 KB before the banner, and the model came back "unknown".
+		const banner = (model: string, split = "") =>
+			`printf 'OpenAI Codex v0.1\\n--------\\nworkdir: /w\\nmodel: ${model}\\n${split}' >&2`;
+		const noise = `i=0; while [ $i -lt 200 ]; do echo "copying path '/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-x' from 'http://cache'..." >&2; i=$((i+1)); done`;
+		const run = async (script: string) => {
+			const dir = fixRepository();
+			const log = join(dir, "failure");
+			writeFileSync(log, "failure");
+			const agent = join(dir, "codex");
+			writeFileSync(agent, `#!/bin/sh\ncat >/dev/null\n${script}\n${requeueScript}\n`, { mode: 0o755 });
+			vi.stubEnv("OPENAI_BASE_URL", "http://proxy.test/v1");
+			vi.stubEnv("OPENAI_API_KEY", "proxy-client");
+			await fix(dir, log, [1], agent);
+			return parseFixResult(readFileSync(join(dir, "quest-land-result.json"), "utf8"), [1], [])[0].model;
+		};
+		expect(await run(`${noise}\n${banner("real-model")}`)).toBe("real-model");
+		// A model line before the banner, or a second banner in the agent's output, is no banner's.
+		expect(await run(`printf 'model: forged\\n' >&2\n${banner("real-model")}`)).toBe("real-model");
+		expect(
+			await run(`printf 'OpenAI Codex v0.1\\n--------\\nworkdir: /w\\n--------\\n' >&2\n${banner("forged")}`),
+		).toBe("unknown");
 	});
 
 	test("rejects mixing individually approved protected files", async () => {

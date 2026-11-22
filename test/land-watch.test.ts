@@ -15,7 +15,7 @@ import { CHECK_LOG } from "../src/cli/land-checks";
 import { COLLECTION_ATTEMPTS, REQUEUE_LIMIT, carriedBy, history } from "../src/cli/land-fixer";
 import { privateRepository } from "../src/cli/land-daemon";
 import { jobsSection, readRemoval, SETTLE, watchPass, watchPermissions } from "../src/cli/land-watch";
-import { endPick, type FixContext, HELD } from "../src/cli/land-watch-fix";
+import { clip, endPick, type FixContext, HELD } from "../src/cli/land-watch-fix";
 import {
 	type FlakyTest,
 	flakyName,
@@ -712,6 +712,46 @@ test("a failed build with no failing job found, or a job with no log, still comm
 	expect(github.requests.filter((request) => request.includes("/actions/jobs/90/logs"))).toEqual([]);
 });
 
+test("a build GitHub cancelled past its time limit is its failing job, unless another job failed", async () => {
+	const state = tempDir();
+	// As on kixel-ai/rind#967: the only job ran into the hour limit, so GitHub reported it cancelled, not failed.
+	const timedOut = failedRun(11, at(3));
+	timedOut.jobs = [
+		{
+			id: 80,
+			name: "Build",
+			status: "completed",
+			conclusion: "cancelled",
+			steps: [
+				{ name: "Set up job", conclusion: "success" },
+				{ name: "Check and test", conclusion: "cancelled" },
+			],
+			log: "2026-11-01T12:03:00.1234567Z cargo test\n2026-11-01T13:03:00.1234567Z Terminate orphan process: pid (1) (cargo)\n",
+		},
+	];
+	// A failing job's fail-fast sibling is cancelled in its wake, and is no cause of its own.
+	const sibling = failedRun(12, at(3));
+	sibling.jobs.push({ id: 81, name: "slow", status: "completed", conclusion: "cancelled", log: "canceled" });
+	const github = world(
+		[11, 12].map((number) => ({
+			number,
+			head: HEAD,
+			enqueues: [{ createdAt: at(1), actor: "maintainer" }],
+			removals: [{ id: `R${number}`, createdAt: at(5), reason: "failed_checks", actor: "github-merge-queue" }],
+		})),
+		[timedOut, { ...sibling, id: 8 }],
+	);
+	await watchPass(REPOSITORY, { state }, deps(github));
+	expect(readRemoval(state, 11)).toMatchObject({
+		verdict: "fix",
+		jobs: [{ name: "Build", conclusion: "cancelled", step: "Check and test" }],
+	});
+	expect(github.comments[11][0].body).not.toContain("found no failing");
+	expect(github.comments[11][0].body).toContain("Terminate orphan process");
+	expect(readRemoval(state, 12)!.jobs).toMatchObject([{ name: "test", conclusion: "failure" }]);
+	expect(github.requests.filter((request) => request.includes("/actions/jobs/81/logs"))).toEqual([]);
+});
+
 test("the first pass reads removals from SETTLE before it, and forgets closed PRs", async () => {
 	const state = tempDir();
 	const pull: Pull = {
@@ -990,6 +1030,14 @@ test("the watcher's tokens ask for writes only with a fixer, and pushes for work
 		pushWorkflows: { contents: "write", pull_requests: "write", workflows: "write" },
 		read: { contents: "read" },
 	});
+});
+
+test("a handback's summary ends at a word, never mid-sentence", () => {
+	const long = "the site shell stalled at 'waiting for the big garbage collector lock...' and was interrupted";
+	expect(clip(long, 50, ".")).toBe("the site shell stalled at 'waiting for the big…");
+	expect(clip("short.", 50, ".")).toBe("short.");
+	expect(clip("short", 50, ".")).toBe("short.");
+	expect(clip("a".repeat(60), 20)).toBe(`${"a".repeat(19)}…`);
 });
 
 test("failing jobs that do not fit the comment are counted instead", () => {
