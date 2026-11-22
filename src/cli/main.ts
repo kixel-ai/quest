@@ -498,7 +498,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"quest, the quest a draft carries, or null; an item opened Maintainer (PC): has party Maintainer and pc " +
 				"true. " +
 				"--maintainer keeps only the items the maintainer settles, and --no-pc drops the Maintainer (PC): ones, " +
-				"for a session away from the maintainer's computers. " +
+				"for a session away from the maintainer's computers; both filter before ranking, so order follows the items kept. " +
 				"Invalid trees fail before printing. Outside conditions are never checked, nor whether another " +
 				"session holds a draft.\n\n" +
 				"Drafts are read from the open PRs of the remote's upstream, found as for quest unblocked " +
