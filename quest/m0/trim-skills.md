@@ -37,4 +37,4 @@ Agent's choices, for the implementer to revisit:
 
 ## Related
 
-- [Cut agent token waste](/quest/m0/token-waste/README.md) - broader token and context reduction baseline
+- Cut agent token waste - broader token and context reduction baseline
