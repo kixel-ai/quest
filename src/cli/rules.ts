@@ -81,11 +81,14 @@ export interface StopInput {
 	background_tasks?: { id: string; type: string; command?: string }[];
 }
 
-/** A shell command line that runs `quest gate`, directly or through `bun run quest` and the like. */
-const GATE = /(^|[^\w-])quest\s+gate(\s|$)/;
+/** `quest` on a shell command line, directly or through `bun run quest` and the like, then its global `--root`, if any. */
+const QUEST = String.raw`(^|[^\w-])quest(\s+--root(=|\s+)("[^"]*"|'[^']*'|\S+))*\s+`;
+
+/** A shell command line that runs `quest gate`. */
+const GATE = new RegExp(String.raw`${QUEST}gate(\s|$)`);
 
 /** A shell command line that runs a turn of `quest agent`, or `quest wait`, which an agent blocks on. */
-const BLOCKING = /(^|[^\w-])quest\s+(agent\s+(start|resume)|wait)(\s|$)/;
+const BLOCKING = new RegExp(String.raw`${QUEST}(agent\s+(start|resume)|wait)(\s|$)`);
 
 /**
  * The `quest gate`, `quest agent start` or `resume`, and `quest wait` commands

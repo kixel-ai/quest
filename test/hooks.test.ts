@@ -368,13 +368,15 @@ test.each([
 	const transcript = join(tempDir(), "agent.jsonl");
 	writeFileSync(
 		transcript,
-		["b1", "b4", "b5", "b7", "b8"]
+		["b1", "b4", "b5", "b7", "b8", "b9"]
 			.map((id) => `{"content":"Command running in background with ID: ${id}. Output is being written to: x"}\n`)
 			.join(""),
 	);
 	const gate = shell("b1", "cd repo && quest gate just test > .tmp/test.log 2>&1");
 	const agent = shell("b4", "quest agent start .worktrees/a --prompt 'go' > .tmp/a.log");
 	const wait = shell("b5", "bun run --silent quest wait 806 --since 2026-11-21T00:00:00Z");
+	// The global --root, in each spelling, still names the command.
+	const rooted = shell("b9", "quest --root .worktrees/a --root='a b' wait 807");
 	const stop = {
 		hook_event_name: event,
 		cwd,
@@ -385,7 +387,7 @@ test.each([
 		background_tasks: [
 			gate,
 			// Another agent's gate and agent turn.
-			shell("b2", "bun run --silent quest gate just check"),
+			shell("b2", 'quest --root "a b" gate just check'),
 			shell("b6", "quest agent resume .worktrees/b --prompt 'more'"),
 			// This agent's commands that it need not block on.
 			shell("b3", "npm run dev"),
@@ -393,6 +395,7 @@ test.each([
 			wait,
 			shell("b7", "quest agent stop .worktrees/a"),
 			shell("b8", "quest waiting"),
+			rooted,
 			{ id: "a1", type: "subagent", status: "running", description: "review" },
 		],
 	};
@@ -405,12 +408,13 @@ test.each([
 		kind: "stop",
 		harness: "claude",
 		session: "s1",
-		running: ["b1", "b2", "b6", "b3", "b4", "b5", "b7", "b8"],
+		running: ["b1", "b2", "b6", "b3", "b4", "b5", "b7", "b8", "b9"],
 	});
 	expect(output.reason.split("\n").filter((line: string) => line.startsWith("- "))).toEqual([
 		`- ${gate.command}`,
 		`- ${agent.command}`,
 		`- ${wait.command}`,
+		`- ${rooted.command}`,
 	]);
 	// Without a transcript, every running gate counts as the agent's, but no agent turn or wait does.
 	const unowned = JSON.parse(hook({ ...stop, [key]: "" }, deps)).reason;
@@ -423,7 +427,7 @@ test.each([
 	// A running agent turn or wait alone still holds the agent that started it.
 	expect(JSON.parse(hook(ungated, deps)).reason).toContain(wait.command);
 	// It lets the turn end once they end, and outside a repository that uses Quest.
-	const owned = new Set(["b1", "b4", "b5"]);
+	const owned = new Set(["b1", "b4", "b5", "b9"]);
 	expect(hook({ ...stop, background_tasks: stop.background_tasks.filter((task) => !owned.has(task.id)) }, deps)).toBe(
 		"",
 	);
