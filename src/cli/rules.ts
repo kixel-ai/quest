@@ -5,7 +5,7 @@
 // tell apart.
 
 import { existsSync, readFileSync, statSync } from "node:fs";
-import { dirname, isAbsolute, join, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 
 import { REFERENCE_MARKER, type Repository, lines } from "../core";
 import { hostedRepository } from "./forge";
@@ -27,6 +27,8 @@ export const RULES = {
 	rewrite:
 		"Never rebase or force-push, even a branch only you hold; merge the base instead, when the branch conflicts with it or a landing step refuses the head.",
 	tmp: "Put scratch files, such as PR bodies, logs, patches, helper scripts, and temporary clones, in the checkout's `.tmp/`, never `/tmp`, so they disappear with the worktree.",
+	recommend:
+		"In a question dialog, end each option you recommend with `(Recommended)`, and recommend one in every question with two or more options.",
 	kixel: "On a repository Kixel Quest hosts, `gh` cannot reach its PRs: use `quest pr view`, `list`, `create`, `edit`, `comment`, and `resolve`, and `quest status`, `ready`, and `merge`.",
 } as const;
 
@@ -67,7 +69,7 @@ export function questRoot(cwd: string): string | null {
 	}
 }
 
-/** The fields of a Claude Code `Stop` or `SubagentStop` hook's JSON input that `runningGates` reads. */
+/** The fields of a Claude Code `Stop` or `SubagentStop` hook's JSON input that `runningTasks` reads. */
 export interface StopInput {
 	hook_event_name: string;
 	cwd: string;
@@ -79,25 +81,30 @@ export interface StopInput {
 	background_tasks?: { id: string; type: string; command?: string }[];
 }
 
-/** A shell command line that runs `quest gate`, directly or through `bun run quest` and the like. */
-const GATE = /(^|[^\w-])quest\s+gate(\s|$)/;
-
 /**
- * The `quest gate` commands still running in the background that the agent
- * ending its turn started, in a repository that uses Quest. Claude Code lists
- * the whole session's background work, subagents' included, so a command
- * counts as this agent's when its transcript holds the ID Claude Code gave the
- * command on backgrounding it (`ID: <id>`); without a transcript, every one
- * counts. Claude Code stops a subagent's background commands when it ends, so
- * ending on one loses its result, and it lists a command only while it runs,
- * so a refusal lasts no longer than the gate. Input without the list, from a
- * Claude Code older than it, has none.
+ * The `quest gate`, `quest agent start` or `resume`, and `quest wait` commands
+ * still running in the background that the agent ending its turn started, in
+ * a repository that uses Quest. Claude Code lists the whole session's
+ * background work, subagents' included, so a command counts as this agent's
+ * when its transcript holds the ID Claude Code gave the command on
+ * backgrounding it (`ID: <id>`). Without a transcript, every gate counts, since
+ * a gate is short, but no agent turn or wait does, since another agent's could
+ * hold this one for hours. Claude Code stops a subagent's background commands
+ * when it ends, so ending on one loses its result, and it lists a command only
+ * while it runs, so a refusal lasts no longer than the command. Input without
+ * the list, from a Claude Code older than it, has none.
  */
-export function runningGates(input: StopInput): string[] {
-	const gates = (input.background_tasks ?? []).filter(
-		(task) => task.type === "shell" && typeof task.command === "string" && GATE.test(task.command),
-	);
-	if (gates.length === 0 || !usesQuest(input.cwd)) return [];
+export function runningTasks(input: StopInput): string[] {
+	const held = (input.background_tasks ?? []).flatMap((task) => {
+		if (task.type !== "shell" || typeof task.command !== "string") return [];
+		const calls = questCalls(task.command);
+		const gate = calls.some((call) => call[0] === "gate");
+		const blocking = calls.some(
+			(call) => call[0] === "wait" || (call[0] === "agent" && ["start", "resume"].includes(call[1] ?? "")),
+		);
+		return gate || blocking ? [{ id: task.id, command: task.command, gate }] : [];
+	});
+	if (held.length === 0 || !usesQuest(input.cwd)) return [];
 	const path = input.hook_event_name === "SubagentStop" ? input.agent_transcript_path : input.transcript_path;
 	let transcript: string | undefined;
 	try {
@@ -105,9 +112,51 @@ export function runningGates(input: StopInput): string[] {
 	} catch (error) {
 		if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
 	}
-	return gates
-		.filter((task) => transcript === undefined || transcript.includes(`ID: ${task.id}`))
-		.map((task) => task.command!);
+	return held
+		.filter((task) => (transcript === undefined ? task.gate : transcript.includes(`ID: ${task.id}`)))
+		.map((task) => task.command);
+}
+
+/**
+ * The arguments, past its global options, of each `quest` a shell command line
+ * runs, through wrappers, `bun run`, and `sh -c`, and the command a `quest gate`
+ * runs in turn. Words are matched once the shell's quoting is removed, so a
+ * quoted argument, such as a `grep` pattern, runs nothing.
+ */
+function questCalls(line: string): string[][] {
+	const calls: string[][] = [];
+	for (const simple of parse(line)) {
+		let argv = unwrap([...simple.argv], new Set());
+		while (argv !== null) {
+			const [name, ...args] = argv;
+			if (SHELLS.has(basename(name!))) {
+				const flag = args.findIndex((arg) => /^-[a-z]*c[a-z]*$/.test(arg));
+				if (flag !== -1 && args[flag + 1] !== undefined) calls.push(...questCalls(args[flag + 1]!));
+				break;
+			}
+			if (basename(name!) !== "quest") break;
+			const command = questCommand(args);
+			calls.push(command);
+			argv = command[0] === "gate" ? unwrap(command.slice(1), new Set()) : null;
+		}
+	}
+	return calls;
+}
+
+/** Options an agent marks recommended end with this, as `RULES.recommend` asks. */
+export const RECOMMENDED = /\(recommended\)\s*$/i;
+
+/** Whether a question tool's input asks a question of two or more options without marking one recommended. */
+function unrecommended(input: Record<string, unknown>): boolean {
+	if (!Array.isArray(input.questions)) return false;
+	return input.questions.some((question: unknown) => {
+		const options = (question as { options?: unknown } | null)?.options;
+		if (!Array.isArray(options) || options.length < 2) return false;
+		return !options.some((option: unknown) => {
+			const label = typeof option === "string" ? option : (option as { label?: unknown } | null)?.label;
+			return typeof label === "string" && RECOMMENDED.test(label);
+		});
+	});
 }
 
 /** What a denial adds to `rewrite`: the way through for a rebase or force-push the user asked for. */
@@ -151,6 +200,12 @@ export function broken(call: ToolCall, env: NodeJS.ProcessEnv = process.env): st
 			if (patch !== undefined) applyPatch(patch, state);
 			break;
 		}
+		// Claude Code's question dialog, and Codex's.
+		case "AskUserQuestion":
+		case "request_user_input":
+		case "request_user_input_async":
+			if (unrecommended(call.input)) found.add("recommend");
+			break;
 	}
 	return (Object.keys(RULES) as Rule[])
 		.filter((key) => found.has(key))
@@ -268,26 +323,44 @@ function applyPatch(patch: string, check: Check) {
 }
 
 /**
- * The command `argv` runs once wrappers such as `env`, `timeout`, `direnv
- * exec`, `nix develop --command`, and `quest gate` are peeled off, with the
+ * The command `argv` runs once reserved words such as `do` and wrappers such
+ * as `env`, `timeout`, `direnv exec`, `nix develop --command`, and `bun run`'s
+ * `quest` script are peeled off, each wrapper by its name or path, with the
  * variable assignments in front of it added to `env`; `null` for none.
  */
 function unwrap(argv: string[], env: Set<string>): string[] | null {
 	let rest = argv;
 	for (;;) {
 		while (rest.length > 0 && /^[A-Za-z_][A-Za-z0-9_]*=/.test(rest[0]!)) env.add(rest.shift()!);
-		const [name, ...args] = rest;
-		if (name === undefined) return null;
-		if (["command", "exec", "nohup", "time", "builtin", "env", "nice"].includes(name)) rest = dropOptions(args);
+		const [path, ...args] = rest;
+		if (path === undefined) return null;
+		const name = basename(path);
+		if (KEYWORDS.has(path)) rest = args;
+		else if (["command", "exec", "nohup", "time", "builtin", "env", "nice"].includes(name))
+			rest = dropOptions(args);
 		else if (name === "timeout") rest = dropOptions(args).slice(1);
 		else if (name === "direnv" && args[0] === "exec") rest = args.slice(2);
-		else if (name === "quest" && args[0] === "gate") rest = args.slice(1);
+		else if (name === "bun" && args[0] === "run" && basename(dropOptions(args.slice(1))[0] ?? "") === "quest")
+			rest = dropOptions(args.slice(1));
 		else if (name === "nix" && ["develop", "shell"].includes(args[0] ?? "")) {
 			const at = args.findIndex((arg) => arg === "--command" || arg === "-c");
 			if (at === -1) return rest;
 			rest = args.slice(at + 1);
 		} else return rest;
 	}
+}
+
+/** The shell's reserved words that may come before a command, as `do` in a loop. */
+const KEYWORDS = new Set(["!", "{", "if", "then", "elif", "else", "while", "until", "do"]);
+
+/** The shells whose `-c` script runs as a command line of its own. */
+const SHELLS = new Set(["bash", "sh", "zsh", "dash"]);
+
+/** The command `argv` runs, as `unwrap` finds it, once each `quest gate` in front of it is peeled off too. */
+function ungate(argv: string[] | null, env: Set<string>): string[] | null {
+	while (argv !== null && basename(argv[0]!) === "quest" && questCommand(argv.slice(1))[0] === "gate")
+		argv = unwrap(questCommand(argv.slice(1)).slice(1), env);
+	return argv;
 }
 
 /** `args` past its leading options, where `-n`, `-s`, `-k`, `-u`, and `-C` take a value. */
@@ -325,18 +398,18 @@ function shell(
 	const commands = parse(line);
 	alone &&= commands.length === 1 && !commands[0]!.runs;
 	for (const simple of commands) {
-		// From a `cd` on, gh may run in another checkout than the one the hook reads.
-		elsewhere ||= ["cd", "pushd", "popd"].includes(simple.argv[0] ?? "");
 		const env = new Set(inherited);
 		const words = simple.argv.map((word, i) => (simple.expanded?.includes(i) ? `${word}${OPAQUE}` : word));
-		const argv = unwrap([...words], env);
+		const argv = ungate(unwrap([...words], env), env);
+		// From a `cd` on, gh may run in another checkout than the one the hook reads.
+		elsewhere ||= ["cd", "pushd", "popd"].includes(argv?.[0] ?? "");
 		for (const { op, target } of simple.redirects)
 			if ([">", ">>", ">|", "&>", "&>>"].includes(op) && scratch(target)) found.add("tmp");
 		if (argv === null) continue;
 		const [name, ...args] = argv;
 		// A wrapper such as `env --chdir` moves where the command reads a relative path from.
 		const moved = words.slice(0, words.length - argv.length).some((word) => /^(-C|--chdir)/.test(word));
-		if (["bash", "sh", "zsh", "dash"].includes(name!)) {
+		if (SHELLS.has(basename(name!))) {
 			const flag = args.findIndex((arg) => /^-[a-z]*c[a-z]*$/.test(arg));
 			// The script's own parse finds its expansions.
 			if (flag !== -1 && args[flag + 1] !== undefined)
