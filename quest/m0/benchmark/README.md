@@ -109,7 +109,5 @@ that part has no precedent to copy.
 
 - [Routing evidence](/quest/m0/routing-evidence/README.md) - measures what
   each writer and reviewer effort buys; its tallies become records here
-- [Mistake audit](/quest/m0/mistake-audit.md) - groups recurring mistakes
-  weekly, and reads the time split and breakage once they exist
 - [Model check](/quest/m1/model-check.md) - retunes routing each milestone
   from the same records

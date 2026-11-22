@@ -5,7 +5,7 @@
 `quest eval add` writes a case to Kixel Quest and `quest eval run` reads the
 repository's set from it; `review-eval.json` and `EVAL_FILE` are gone, and so
 are the audits' baselines in this tree, which move to Kixel Quest too. The
-[mistake audit](/quest/m0/mistake-audit.md) adds its cases there, for every
+[mistake audit](https://github.com/kixel-ai/kixel.quest/blob/main/quest/m0/mistake-audit.md) adds its cases there, for every
 repository, instead of to a repository's own set.
 
 Non-goals: changing how a case is found, located, or scored.
