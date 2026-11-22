@@ -94,8 +94,11 @@ test("the pick avoids the case's writer, and --harness runs alone at its size's 
 	const entry = { pull: 3, ...base, size: "S", clean: true } as EvalCase;
 	const names = (seats: ReturnType<typeof evalSeats>) =>
 		seats.map(({ reviewer, shadow }) => `${reviewer.model} ${reviewer.effort}${shadow ? " shadow" : ""}`);
-	expect(names(evalSeats(entry, {}))).toEqual(["gpt-6.1-sol medium", "gpt-6.1-sol low shadow"]);
-	expect(names(evalSeats({ ...entry, writer: "gpt-6.1-sol" }, {}))).toEqual(["claude-opus-5-5 low"]);
+	expect(names(evalSeats(entry, {}))).toEqual(["gpt-6.1-sol medium", "gpt-6.1-sol high shadow"]);
+	expect(names(evalSeats({ ...entry, writer: "gpt-6.1-sol" }, {}))).toEqual([
+		"claude-opus-5-5 low",
+		"claude-opus-5-5 medium shadow",
+	]);
 	expect(names(evalSeats({ ...entry, writer: "gpt-6.1-sol" }, { harness: "codex" }))).toEqual(["gpt-6.1-sol medium"]);
 	expect(names(evalSeats(entry, { harness: "claude", effort: "high" }))).toEqual(["claude-opus-5-5 high"]);
 });
@@ -355,10 +358,10 @@ fakes(
 		// Two seats, each a review turn and a findings turn, at each case's head in a checkout since removed.
 		const turns = s.calls().filter((call: Call) => effortOf(call) !== null);
 		expect(turns.map(effortOf).sort()).toEqual([
-			"low",
-			"low",
-			"low",
-			"low",
+			"high",
+			"high",
+			"high",
+			"high",
 			"medium",
 			"medium",
 			"medium",

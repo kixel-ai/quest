@@ -306,9 +306,9 @@ fakes("a reviewer at its usage limit passes the round to the next eligible one, 
 	const plain = await quest("--root", s.repo, "review", ...OPUS_WROTE);
 	expect(plain.code, plain.stderr).toBe(0);
 	expect(plain.stdout).toContain(`\nskipped codex gpt-6.1-sol high usage limit, resets ${codexReset}\n`);
-	// Sonnet's shadow follows it, one effort lower.
+	// Sonnet's shadow follows it, one effort higher for an M PR.
 	expect(plain.stdout).toContain("\nreviewer claude claude-sonnet-5-5 medium\nsession ");
-	expect(plain.stdout).toContain("\nreviewer claude claude-sonnet-5-5 low shadow\nsession ");
+	expect(plain.stdout).toContain("\nreviewer claude claude-sonnet-5-5 high shadow\nsession ");
 	// Only Sonnet and its shadow ran turns after Sol's limit, and Opus, the writer, never ran.
 	const turns = s.calls().filter((c) => effortOf(c) !== null);
 	expect(turns.filter((c) => c.argv.includes("claude-opus-5-5"))).toEqual([]);
@@ -326,7 +326,7 @@ fakes("a reviewer at its usage limit passes the round to the next eligible one, 
 	expect(skipped).toEqual([]);
 	expect(rounds.map((r: Round) => `${r.reviewer} ${r.model} ${r.effort}${r.shadow ? " shadow" : ""}`)).toEqual([
 		"codex gpt-6.1-sol high",
-		"codex gpt-6.1-sol medium shadow",
+		"codex gpt-6.1-sol xhigh shadow",
 	]);
 	// Sol settles Sonnet's finding, and Sol's shadow Sonnet's shadow's.
 	expect(rounds.map((r: Round) => r.earlier?.findings.map((f) => f.disposition))).toEqual([["fixed"], ["fixed"]]);
@@ -518,7 +518,7 @@ fakes.each([
 	const calls = s.calls();
 	// The shadow found nothing in round 1, so only the size's pick reruns.
 	expect(at(calls, "medium").map((c) => c.argv[0])).toEqual(["-p", "-p", "-p"]);
-	expect(at(calls, "low").map((c) => c.argv[0])).toEqual(["-p", "-p"]);
+	expect(at(calls, "high").map((c) => c.argv[0])).toEqual(["-p", "-p"]);
 	expect(calls.filter((c) => effortOf(c) === null)).toHaveLength(3);
 	for (const call of calls) {
 		expect(call.env).toMatchObject({
@@ -810,8 +810,8 @@ fakes("codex reviews read-only with the base's instructions, then reports in the
 			"1. high src/lib.ts:2 Off by one",
 			"  average([3]) is 0.",
 			"",
-			// The shadow, the pick one effort lower, reviews it too, in its own session.
-			"reviewer codex gpt-6.1-sol medium shadow",
+			// The shadow, the pick one effort higher for an M PR, reviews it too, in its own session.
+			"reviewer codex gpt-6.1-sol xhigh shadow",
 			"session thread-1",
 			"round 1",
 			"usage findings input 100 cached 80 output 7",
@@ -828,7 +828,7 @@ fakes("codex reviews read-only with the base's instructions, then reports in the
 	);
 
 	const [first, second] = at(s.calls(), "high");
-	expect(at(s.calls(), "medium")).toHaveLength(2);
+	expect(at(s.calls(), "xhigh")).toHaveLength(2);
 	// The base has not moved, so its tip is the merge base, which the review turn's prompt names with the rules.
 	expect(first.argv.slice(0, 3)).toEqual(["exec", "review", "--json"]);
 	expect(first.argv.at(-1)).toBe("-");
@@ -908,7 +908,9 @@ fakes("claude reviews read-only with the base's instructions, then reports in th
 	const s = setup("CODEX_THREAD_ID");
 	// The rules travel inside the command's one double-quoted argument.
 	moveBase(s.repo, (dir) => write(dir, "REVIEW.md", 'Flag "magic" numbers \\ constants.\n'));
-	const result = await quest("--root", s.repo, "review", "--model", "opus", "--effort", "low", "--json");
+	// An XS PR runs no shadow, so the pick's turns are the only ones.
+	const args = ["--model", "opus", "--effort", "low", "--size", "XS", "--json"];
+	const result = await quest("--root", s.repo, "review", ...args);
 	expect(result.code).toBe(0);
 	const [round] = JSON.parse(result.stdout).rounds;
 	expect(round.reviewer).toBe("claude");
@@ -972,7 +974,7 @@ fakes("a later round resumes the session with the new head and the author's resp
 	expect(later.stdout).toContain(
 		`earlier 1 ${first}\n\n2. fixed high src/lib.ts:2 Off by one\n  Checked against the head.\n`,
 	);
-	const shadow = at(s.calls(), "medium").at(-1)!;
+	const shadow = at(s.calls(), "xhigh").at(-1)!;
 	expect(shadow.argv.slice(0, 2)).toEqual(["exec", "resume"]);
 	expect(shadow.stdin).toContain("<earlier-findings>\n2. high src/lib.ts:2 Off by one\n</earlier-findings>");
 
@@ -1025,7 +1027,7 @@ function moveNext(repo: string, edit: () => void): string[] {
 }
 
 fakes.each([
-	["another effort", (_: string) => ["--effort", "xhigh"]],
+	["another effort", (_: string) => ["--effort", "medium"]],
 	["a changed REVIEW.md", (repo: string) => moveNext(repo, () => write(repo, "REVIEW.md", "NEW rule\n"))],
 	["a removed REVIEW.md", (repo: string) => moveNext(repo, () => git(repo, "rm", "-q", "REVIEW.md"))],
 	["an older base", (_: string) => ["--base", "origin/main"]],
@@ -1050,9 +1052,9 @@ fakes.each([
 		expect(round.code, round.stderr).toBe(0);
 		expect(round.stdout).toContain("round 1\n");
 		expect(round.stdout).not.toContain("unchanged");
-		const effort = flags.includes("--effort") ? "xhigh" : "high";
+		const effort = flags.includes("--effort") ? "medium" : "high";
 		expect(at(s.calls(), effort).at(-2)!.argv[1]).toBe("review");
-		// A pick at another effort leaves the shadow two steps below it, so the shadow at one step reruns.
+		// A pick at another effort leaves the shadow two steps above it, so the shadow at one step reruns.
 		expect(round.stdout.includes("gpt-6.1-sol high shadow\n")).toBe(flags.includes("--effort"));
 	},
 );
@@ -1194,8 +1196,8 @@ fakes("each round rewrites the Review section of the branch's open PR, keeping t
 				"- Findings, open until the next round settles them:",
 				"  - High, `src/lib.ts:2`: `Off by one`",
 				"",
-				// The shadow runs the pick one effort lower, and its findings count apart from the pick's.
-				"- Reviewer: Codex, gpt-6.1-sol, low effort, shadow",
+				// The shadow runs the pick one effort higher for an S PR, and its findings count apart from the pick's.
+				"- Reviewer: Codex, gpt-6.1-sol, high effort, shadow",
 				"- Session: `thread-1`, round 1",
 				"- Score: 8/10, `Lands once the off-by-one is fixed.`",
 				"- Rounds: 1; first round 1 (high 1); findings 1 (high 1): fixed 0, refuted 0, open 1",
@@ -1494,11 +1496,11 @@ fakes("a raise from a reviewer the run leaves out holds while its last round rev
 	const pull = { number: 7, body: "Fixes averaging.\n\n## Models\n\n- Size: S\n" };
 	onGitHub(s.repo, [pull]);
 	vi.stubEnv("FAKE_REPLY", JSON.stringify({ score: 10, rationale: "Lands as is.", findings: [] }));
-	// Only the shadow, Sol at low effort for an S PR, raises the tier.
-	vi.stubEnv("FAKE_RAISE", "high@low");
+	// Only the shadow, Sol at high effort for an S PR, raises the tier.
+	vi.stubEnv("FAKE_RAISE", "high@high");
 	const raised = "\nrisk high It rewrites the wire format peers read.\n";
 	const block = [
-		"- Reviewer: Codex, gpt-6.1-sol, low effort, shadow",
+		"- Reviewer: Codex, gpt-6.1-sol, high effort, shadow",
 		"- Session: `thread-1`",
 		"- Raised the risk to high: `It rewrites the wire format peers read.`",
 		"- Rounds: 1;",
@@ -1507,7 +1509,7 @@ fakes("a raise from a reviewer the run leaves out holds while its last round rev
 		const first = await quest("--root", s.repo, "review");
 		expect(first.code, first.stderr).toBe(0);
 		expect(first.stdout).toContain(raised);
-		expect(first.stdout).toContain(" low shadow\n");
+		expect(first.stdout).toContain(" high shadow\n");
 
 		// The same head repeats the pick's clean round and leaves out the shadow, whose raise still covers it.
 		vi.stubEnv("FAKE_RAISE", undefined);
@@ -1586,16 +1588,16 @@ fakes("a maintainer's checkout records on a contributor's fork PR and reads its 
 		expect(alone.stdout).toContain(
 			"record skipped: no open PR from feature into main from acme or with a head this checkout holds: https://github.com/acme/widget/pull/13\n",
 		);
-		// Its size went unread: no size picks the default.
-		expect(alone.stdout).not.toContain(" low shadow\n");
+		// Its size went unread: no size picks the default, M, whose shadow XS would not run.
+		expect(alone.stdout).toContain(" xhigh shadow\n");
 		expect(stranger.body).toBe("Stranger.\n\n## Models\n\n- Size: XS\n");
 
 		pulls.push(pull);
 		const result = await quest("--root", s.repo, "review");
 		expect(result.code, result.stderr).toBe(0);
 		expect(result.stdout).toContain("record https://github.com/acme/widget/pull/12\n");
-		// Size S picks the shadow one effort below medium.
-		expect(result.stdout).toContain(" low shadow\n");
+		// Size S picks the shadow one effort above medium.
+		expect(result.stdout).toContain(" high shadow\n");
 		expect(pull.body).toMatch(/^Body\.\n\n## Models\n\n- Size: S\n\n## Review\n\nRewritten by `quest review`/);
 		expect(stranger.body).toBe("Stranger.\n\n## Models\n\n- Size: XS\n");
 
@@ -1645,7 +1647,7 @@ fakes("a round on the head the last round passed runs no reviewer and repeats th
 	const all: Round[] = JSON.parse(first.stdout).rounds;
 	expect(all.map((round) => [round.effort, round.shadow])).toEqual([
 		["medium", undefined],
-		["low", true],
+		["high", true],
 	]);
 	const rounds = all.slice(0, 1);
 	expect(JSON.parse(again.stdout).rounds).toEqual(
@@ -2001,40 +2003,41 @@ test("the next step stops for the design checkpoint when a reviewer's every thir
 	expect(nextStep([round(3, 0), round(1, 0)])).toMatch(/^next done: /);
 });
 
-test("the shadow is the size's pick one effort lower, and none below low", () => {
+test("the shadow steps up from the pick at S and M, down at L and XL, and not at all at XS", () => {
 	const shadows = (wrote: ReturnType<typeof authored>) =>
 		SIZES.map((size) => {
-			const shadow = shadowOf(pickReviewer(size, {}, wrote));
+			const shadow = shadowOf(size, pickReviewer(size, {}, wrote));
 			return shadow && `${shadow.harness} ${shadow.model} ${shadow.effort}`;
 		});
 	expect(shadows(authored({}, { CLAUDECODE: "1" }))).toEqual([
-		"codex gpt-6.1-sol low",
-		"codex gpt-6.1-sol low",
-		"codex gpt-6.1-sol medium",
+		null,
+		"codex gpt-6.1-sol high",
+		"codex gpt-6.1-sol xhigh",
 		"codex gpt-6.1-sol high",
 		"codex gpt-6.1-sol high",
 	]);
 	expect(shadows(authored({}, { CODEX_THREAD_ID: "t" }))).toEqual([
 		null,
-		null,
-		"claude claude-opus-5-5 low",
+		"claude claude-opus-5-5 medium",
+		"claude claude-opus-5-5 high",
 		"claude claude-opus-5-5 medium",
 		"claude claude-opus-5-5 high",
 	]);
-	expect(shadowOf({ harness: "claude", model: "m", effort: "xhigh" })!.effort).toBe("high");
-	// No step below an effort off the ladder is known, so an --effort such as Codex's minimal runs no shadow.
-	expect(shadowOf({ harness: "codex", model: "m", effort: "minimal" })).toBeNull();
+	// No effort is known above xhigh, below low, or beside one off the ladder, such as Codex's minimal.
+	expect(shadowOf("M", { harness: "claude", model: "m", effort: "xhigh" })).toBeNull();
+	expect(shadowOf("L", { harness: "claude", model: "m", effort: "low" })).toBeNull();
+	expect(shadowOf("S", { harness: "codex", model: "m", effort: "minimal" })).toBeNull();
 });
 
-fakes("no shadow runs below low, though one settles a shadow's findings the pick left behind", async () => {
+fakes("no shadow runs for an XS PR, though one settles a shadow's findings the pick left behind", async () => {
 	const s = setup("CODEX_THREAD_ID");
-	const opusLow = await quest("--root", s.repo, "review", "--size", "S", "--json");
+	const opusLow = await quest("--root", s.repo, "review", "--size", "XS", "--json");
 	expect(opusLow.code, opusLow.stderr).toBe(0);
 	expect(JSON.parse(opusLow.stdout).rounds.map((r: Round) => [r.reviewer, r.effort, r.shadow])).toEqual([
 		["claude", "low", undefined],
 	]);
 
-	// Sol medium's shadow, Sol low, leaves a finding open, and a --harness run leaves it to the size's pick.
+	// Sol medium's shadow, Sol high, leaves a finding open, and a --harness run leaves it to the size's pick.
 	const t = setup();
 	expect((await quest("--root", t.repo, "review", "--size", "S")).code).toBe(0);
 	write(t.repo, ".tmp/responses.md", "1. Fixed.\n2. Fixed.\n");
@@ -2054,14 +2057,13 @@ fakes("no shadow runs below low, though one settles a shadow's findings the pick
 	expect(alone.stderr).toContain(
 		"codex (shadow) still has findings to settle on this branch; settle them in a run of the size's pick, or of that reviewer with --harness, with --responses",
 	);
-	// Opus low then replaces Sol, with no step below it, so a shadow at Opus low settles the old shadow's finding.
-	const sol = ["--size", "S", "--exclude-model", "gpt-6.1-sol"];
-	const settled = await quest("--root", t.repo, "review", ...sol, "--responses", responses, "--json");
+	// Resized to XS, which runs no shadow, the pick seats one at its own effort to settle the old shadow's finding.
+	const settled = await quest("--root", t.repo, "review", "--size", "XS", "--responses", responses, "--json");
 	expect(settled.code, settled.stderr).toBe(0);
 	const rounds: Round[] = JSON.parse(settled.stdout).rounds;
 	expect(rounds.map((r) => [r.reviewer, r.effort, r.shadow, r.earlier?.findings.map((f) => f.number)])).toEqual([
-		["claude", "low", undefined, [1]],
-		["claude", "low", true, [2]],
+		["codex", "medium", undefined, [1]],
+		["codex", "medium", true, [2]],
 	]);
 });
 
@@ -2160,7 +2162,7 @@ fakes("a retired reviewer's open findings are dropped, keeping the numbers of th
 	const later = await quest("--root", s.repo, "review", "--responses", join(s.repo, ".tmp", "responses.md"));
 	expect(later.code, later.stderr).toBe(0);
 	// The shadow settles its finding by the number the author answered, not by #2, the dropped one's.
-	expect(at(s.calls(), "medium").at(-1)!.stdin).toContain(
+	expect(at(s.calls(), "xhigh").at(-1)!.stdin).toContain(
 		"<earlier-findings>\n3. high src/lib.ts:2 Off by one\n</earlier-findings>",
 	);
 	expect(later.stdout).not.toContain("opencode");
@@ -2220,11 +2222,11 @@ fakes("a new size pick, and its shadow, settle the open findings of the reviewer
 	const [opus, shadow] = JSON.parse(round.stdout).rounds;
 	const settled = (r: Round) => [r.reviewer, r.effort, r.shadow, r.round, r.earlier!.findings.map((f) => f.number)];
 	expect(settled(opus)).toEqual(["claude", "medium", undefined, 1, [1]]);
-	// Sol's shadow had a finding open, so Opus's shadow, one effort below Opus medium, settles it.
-	expect(settled(shadow)).toEqual(["claude", "low", true, 1, [2]]);
+	// Sol's shadow had a finding open, so Opus's shadow, one effort above Opus medium for an M PR, settles it.
+	expect(settled(shadow)).toEqual(["claude", "high", true, 1, [2]]);
 	const review = at(s.calls(), "medium").find((call) => call.argv.includes("--session-id"))!;
 	expect(review.stdin).toContain("Fixed at src/lib.ts:1.");
-	expect(at(s.calls(), "low").find((call) => call.argv.includes("--session-id"))!.stdin).toContain(
+	expect(at(s.calls(), "high").find((call) => call.argv.includes("--session-id"))!.stdin).toContain(
 		"2. high src/lib.ts:2 Off by one",
 	);
 	// Sol's findings stay Sol's, fixed, while the picks that replaced them count their own.

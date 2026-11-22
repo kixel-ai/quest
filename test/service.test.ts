@@ -30,7 +30,7 @@ function deps(platform: NodeJS.Platform, env: NodeJS.ProcessEnv) {
 }
 
 test("on Linux, the sender is a systemd user service running quest from PATH, escaped", () => {
-	const env = user();
+	const env: NodeJS.ProcessEnv = { ...user(), QUEST_KIXEL_URL: "http://localhost:8787" };
 	const { deps: linux, ran } = deps("linux", env);
 	const path = installSender(linux);
 	expect(path).toBe(join(env.XDG_CONFIG_HOME!, "systemd", "user", "quest-records.service"));
@@ -41,6 +41,8 @@ test("on Linux, the sender is a systemd user service running quest from PATH, es
 	expect(unit).toContain(`Environment="XDG_STATE_HOME=${env.XDG_STATE_HOME}"`);
 	expect(unit).toContain(`Environment="XDG_CONFIG_HOME=${env.XDG_CONFIG_HOME}"`);
 	expect(unit).not.toContain("CODEX_HOME");
+	// Each queued record names its own Kixel Quest, so the service needs none.
+	expect(unit).not.toContain("QUEST_KIXEL_URL");
 	expect(unit).toContain("Restart=always");
 	expect(ran).toEqual([
 		"systemctl --user daemon-reload",

@@ -339,7 +339,7 @@ export interface Seated {
 	reviewer: HarnessName;
 	model: string;
 	effort: string;
-	/** The size's pick one effort lower, beside the pick as `quest review` runs it. */
+	/** The size's pick one effort away, beside the pick as `quest review` runs it. */
 	shadow?: true;
 	session: string;
 	usage: Usage[];
@@ -387,7 +387,7 @@ export function evalSeats(entry: EvalCase, options: Pick<EvalOptions, "harness" 
 	if (options.harness !== undefined)
 		return [{ reviewer: pickReviewer(entry.size, options, () => false), shadow: undefined }];
 	const pick = pickReviewer(entry.size, {}, (model: Model) => model.model === entry.writer);
-	const shadow = shadowOf(pick);
+	const shadow = shadowOf(entry.size, pick);
 	return [{ reviewer: pick, shadow: undefined }, ...(shadow ? [{ reviewer: shadow, shadow: true as const }] : [])];
 }
 

@@ -1489,15 +1489,17 @@ size. Each size ranks its reviewers, the same for every repository:
 | L | Codex `gpt-6.1-sol` xhigh | Claude Code `claude-opus-5-5` high | Claude Code `claude-sonnet-5-5` high |
 | XL | Codex `gpt-6.1-sol` xhigh | Claude Code `claude-opus-5-5` xhigh | Claude Code `claude-sonnet-5-5` high |
 
-Beside it, the shadow, the pick's model one effort lower (Sol low for an XS
-PR), reviews the same head in its own session, so the routing can be retuned
-from what each effort step finds over the one below it. It is skipped when the
-pick runs at low or at an `--effort` off the ladder (low, medium, high, xhigh).
+Beside it, the shadow, the pick's model one effort away on the ladder (low,
+medium, high, xhigh), reviews the same head in its own session, so the routing
+can be retuned from what each effort step finds over its neighbor. It runs one
+effort above the pick for an S or M PR (Sol high for S), one below for an L or
+XL PR, and not at all for an XS PR, and is skipped when no such effort is on
+the ladder, as above xhigh or for an `--effort` off it.
 
 It runs on the branch's first run of the pick, then reruns only while it has findings to settle, or once the pick
-changed so that it is no longer one step below; its findings are numbered,
-answered, and settled like any reviewer's. A pick with no step below it seats
-a shadow at its own effort while the old shadow still has findings, so none
+changed so that it is no longer that step away; its findings are numbered,
+answered, and settled like any reviewer's. A pick with no shadow seats one
+at its own effort while the old shadow still has findings, so none
 is left unanswered. The reviewers run at once;
 the first to fail, such as on a usage limit, stops the others, and the round
 saves none.
@@ -2001,8 +2003,11 @@ repository commits a config file: a record names its repository by `owner/repo`
 from its checkout's `origin` (the repository its PRs open on, for a fork), and
 the token is sent only to the URL the user's own file pairs it with. The URL is
 `https://kixel.quest`, or HTTPS (HTTP to `localhost`) `QUEST_KIXEL_URL` for
-another Kixel Quest, such as one running locally. A user holding no token for
-it sends nothing, and the hook says so once as a system message.
+another Kixel Quest, such as one running locally, as the stop hook's environment names it.
+A user holding no token for it sends nothing, and the hook says so once as a system message.
+The hook queues each record with that URL, and the sender sends it there with that URL's token whatever
+its own environment names, so one queue can serve several Kixel Quests; it drops a record only when the
+person removed that token or its Kixel Quest refused it.
 
 Kixel Quest refuses a whole upload naming a repository it does not index or
 the sender cannot read, so the sender asks `GET /forge` which repositories it
