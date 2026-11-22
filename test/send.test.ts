@@ -1107,3 +1107,18 @@ test("a failing Kixel Quest keeps its records without holding back another's", a
 	expect(uploads).toHaveLength(1);
 	expect(pending(env)).toHaveLength(1);
 });
+
+test("each Kixel Quest that does not serve a repository says so once, whichever said it first", async () => {
+	const env = home();
+	writeFileSync(tokensPath(env), JSON.stringify({ [URL_]: "one", [OTHER]: "two" }));
+	const root = checkout();
+	queue({ ...stopped(root), session: "s1" }, env);
+	queue({ ...stopped(root), session: "s2" }, { ...env, QUEST_KIXEL_URL: OTHER });
+	const { deps } = sender(env, 200, [session("s1", "quest/m0/a"), session("s2", "quest/m0/a")], undefined, [], []);
+	viaHosts(deps);
+	expect(await sendPass(deps)).toEqual([]);
+	expect(pending(env)).toEqual([]);
+	const [notice] = queue({ ...stopped(root), session: "s3" }, env).notices;
+	expect(notice).toContain(`${URL_} does not serve acme/proj`);
+	expect(notice).toContain(`${OTHER} does not serve acme/proj`);
+});

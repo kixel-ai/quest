@@ -390,7 +390,7 @@ async function sendTo(
 			clearBackoff(deps.env, id);
 			const unserved = once(
 				deps.env,
-				`unserved:${key(repository)}`,
+				`unserved:${url}:${key(repository)}`,
 				`${url} does not serve ${key(repository)}, so its sessions' records are dropped on this host.`,
 			);
 			if (unserved !== null) notes.push(unserved);
