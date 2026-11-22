@@ -134,8 +134,11 @@ Check first next run:
   [moq-dev/quest#799](https://github.com/moq-dev/quest/pull/799) the review
   prompt asks reviewers to trace each changed contract to its dependents:
   count how many of this class still escape.
-- Gating mistakes, after [the gate's cheap commands](/quest/m1/gate-cheap-commands.md)
-  lands, if kept: 887 of 3,048 gated runs (29%) used under 5 CPU-seconds,
+- Gating mistakes. The gate stays as it is and agents decide what to gate
+  (maintainer, 2026-11-22: "Let the agent try to predict instead"), after a
+  replay showed a run-history rule would save only 8% of cheap runs' queued
+  time ([moq-dev/quest#800](https://github.com/moq-dev/quest/pull/800)), so
+  this count is the only check on that rule: 887 of 3,048 gated runs (29%) used under 5 CPU-seconds,
   together 0.16% of gated CPU, against 20% to 22% before the 2026-11-15
   rule. They queued 46,000 agent-seconds, a median 5 each. `bun test` in
   moq-dev/moq made 347 of the gated runs at a median 0.5 CPU-seconds.
