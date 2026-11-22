@@ -1520,6 +1520,10 @@ fakes(
 			expect(out.code).toBe(3);
 			expect(out.stderr).toContain("no eligible S reviewer could run: claude-sonnet-5-5 medium (");
 			expect(out.stderr).not.toContain("gpt-6.1-sol");
+			// The rounds that ran are saved and printed, so their findings can be answered.
+			expect(out.stdout).toContain("\nreviewer codex gpt-6.1-sol medium\n");
+			expect(out.stdout).toContain("\nrisk high It rewrites the wire format peers read.\n");
+			expect(out.stdout).toContain("\nfindings 1\n");
 
 			// The pick's raising round was saved, so the next run resumes it and seats the second reviewer at once.
 			vi.stubEnv("FAKE_LIMITED", undefined);
@@ -1539,6 +1543,14 @@ fakes(
 			expect(again.code, again.stderr).toBe(0);
 			expect(again.stdout).toContain("\nrisk high It rewrites the wire format peers read.\n");
 			expect(seconds(again.stdout)).toEqual(["reviewer claude claude-sonnet-5-5 medium second"]);
+
+			// A run naming the pick's effort still seats the second reviewer to settle its findings, from the
+			// size's whole list rather than the one reviewer --effort narrows the pick to.
+			write(s.repo, "src/lib.ts", "export const x = 4;\n");
+			git(s.repo, "commit", "-qam", "a third constant");
+			const named = await quest("--root", s.repo, "review", "--effort", "high", "--responses", responses);
+			expect(named.code, named.stderr).toBe(0);
+			expect(seconds(named.stdout)).toEqual(["reviewer claude claude-sonnet-5-5 medium second"]);
 		} finally {
 			vi.unstubAllGlobals();
 		}

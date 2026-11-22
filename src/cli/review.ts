@@ -89,6 +89,8 @@ export interface Skip extends Model {
 
 /** Every eligible reviewer of the size was unavailable, each for the reason `skipped` names. */
 export class ReviewOutageError extends Error {
+	/** The rounds a run finished and saved before the second review a raise called for could not run. */
+	reviewed?: Reviewed;
 	constructor(
 		size: Size,
 		readonly skipped: Skip[],
@@ -2044,8 +2046,10 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 	const secondOut = new Set<string>();
 	// The second reviewer: the first of the size's list on a model other than the pick's that can run. A list with no
 	// other model, as when every other one is avoided, cannot review a high head; one whose others cannot run is out.
+	// It comes from the size's whole list, since --model or --effort narrows only the pick.
+	const pool = auto ? REVIEWERS[sized.size].filter((each) => !avoided(each)) : candidates;
 	const secondTo = (routed: Model): Model => {
-		const others = candidates.filter((each) => each.model !== routed.model);
+		const others = pool.filter((each) => each.model !== routed.model);
 		if (others.length === 0)
 			throw new ReviewInputError(
 				`a high-risk head needs a second reviewer on a model other than ${routed.model}, and every other model of the size's list is avoided; name the latest writer in the PR's ## Models record or with --exclude-model`,
@@ -2062,7 +2066,7 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 	const secondFor = (routed: Model): Model | null => {
 		if (!high(before) && !unsettledSecond) return null;
 		if (!high(before)) {
-			const own = candidates.find(
+			const own = pool.find(
 				(each) =>
 					each.harness === seconded!.reviewer &&
 					each.model === seconded!.last.model &&
@@ -2125,7 +2129,25 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 	if (!seats.some((seat) => seat.second) && high(judged())) {
 		const seated = kept.find((session) => session.second);
 		for (;;) {
-			const seat: Seat = { reviewer: secondTo(candidates[at]!), second: true, session: seated, first: 1 };
+			let reviewer: Model;
+			try {
+				reviewer = secondTo(candidates[at]!);
+			} catch (error) {
+				// The saved rounds still need their findings answered, so the outage carries them to the report.
+				if (error instanceof ReviewOutageError)
+					error.reviewed = {
+						rounds: done.map((each) => each.round),
+						tallies: after,
+						risk,
+						skipped,
+						branch,
+						head,
+						base,
+						sized,
+					};
+				throw error;
+			}
+			const seat: Seat = { reviewer, second: true, session: seated, first: 1 };
 			try {
 				const [extra] = await runSeats(shared, [seat], undefined, options.signal);
 				done = [...done, extra!];
