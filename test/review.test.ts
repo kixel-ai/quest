@@ -1271,11 +1271,15 @@ fakes(
 	async () => {
 		const s = setup();
 		moveBase(s.repo, (dir) => write(dir, "RISK.md", riskFile(["- `src/` - customers' averages run on it"])));
-		// A high head gets a second reviewer on a model other than the pick's and the writer's.
+		// A high head is reviewed from the largest size's list, whatever its size: its pick, and a second reviewer on a
+		// model other than the pick's and the writer's.
 		const listed = await quest("--root", s.repo, "review", "--exclude-model", "claude-opus-5-5");
 		expect(listed.code, listed.stderr).toBe(0);
 		const reason = "it changes src/lib.ts, which is always high: customers' averages run on it";
-		expect(listed.stdout).toContain(`\nrisk high ${reason}\nclassified high paths ${reason}\n\nreviewer codex`);
+		expect(listed.stdout).toContain(
+			`\nrisk high ${reason}\nclassified high paths ${reason}\n\nreviewer codex gpt-6.1-sol xhigh\n`,
+		);
+		expect(listed.stdout).toContain("\nreviewer claude claude-sonnet-5-5 high second\n");
 		expect(classifying(s.calls())).toEqual([]);
 
 		// Workflows are high in every repository, whatever its risk file lists, and a rename out of them counts.
@@ -1474,9 +1478,9 @@ fakes("a reviewer raises the tier, and the record keeps the classifier's beside 
 				"- Raised the risk to high: `It rewrites the wire format peers read.`",
 			].join("\n"),
 		);
-		// The raise to high gets the second review the medium tier skipped, in the same run.
-		expect(result.stdout).toContain("\nreviewer claude claude-sonnet-5-5 medium second\n");
-		expect(pull.body).toContain("- Reviewer: Claude Code, claude-sonnet-5-5, medium effort, second\n");
+		// The raise to high gets the second review the medium tier skipped, in the same run, from the largest size's list.
+		expect(result.stdout).toContain("\nreviewer claude claude-sonnet-5-5 high second\n");
+		expect(pull.body).toContain("- Reviewer: Claude Code, claude-sonnet-5-5, high effort, second\n");
 		expect(recordedRisk(pull.body)).toEqual({
 			tier: "high",
 			reason: "It rewrites the wire format peers read.",
@@ -1520,22 +1524,21 @@ fakes(
 			vi.stubEnv("FAKE_FAILS", "claude-sonnet-5-5");
 			const out = await quest("--root", s.repo, "review");
 			expect(out.code).toBe(3);
-			expect(out.stderr).toContain("no eligible S reviewer could run: claude-sonnet-5-5 medium (");
+			expect(out.stderr).toContain("no eligible XL reviewer could run: claude-sonnet-5-5 high (");
 			expect(out.stderr).not.toContain("gpt-6.1-sol");
 			// The rounds that ran are saved and printed, so their findings can be answered.
 			expect(out.stdout).toContain("\nreviewer codex gpt-6.1-sol medium\n");
 			expect(out.stdout).toContain("\nrisk high It rewrites the wire format peers read.\n");
 			expect(out.stdout).toContain("\nfindings 1\n");
 
-			// The pick's raising round was saved, so the next run resumes it and seats the second reviewer at once.
+			// The pick's raising round was saved, so the next run, high from the start, moves the pick to the largest
+			// size's entry, whose new session settles the old one's findings, and seats the second reviewer at once.
 			vi.stubEnv("FAKE_LIMITED", undefined);
 			vi.stubEnv("FAKE_FAILS", undefined);
 			const resumed = await quest("--root", s.repo, "review", "--responses", responses);
 			expect(resumed.code, resumed.stderr).toBe(0);
-			expect(seconds(resumed.stdout)).toEqual(["reviewer claude claude-sonnet-5-5 medium second"]);
-			expect(pull.body).toContain(
-				"- Reviewer: Codex, gpt-6.1-sol, medium effort\n- Session: `thread-1`, round 2",
-			);
+			expect(seconds(resumed.stdout)).toEqual(["reviewer claude claude-sonnet-5-5 high second"]);
+			expect(pull.body).toContain("- Reviewer: Codex, gpt-6.1-sol, xhigh effort\n- Session: `thread-1`, round 1");
 
 			// On a new head the tier starts at medium, and the second reviewer settles its findings; when the
 			// round raises the tier again, that same seat is its second review, not another.
@@ -1544,7 +1547,7 @@ fakes(
 			const again = await quest("--root", s.repo, "review", "--responses", responses);
 			expect(again.code, again.stderr).toBe(0);
 			expect(again.stdout).toContain("\nrisk high It rewrites the wire format peers read.\n");
-			expect(seconds(again.stdout)).toEqual(["reviewer claude claude-sonnet-5-5 medium second"]);
+			expect(seconds(again.stdout)).toEqual(["reviewer claude claude-sonnet-5-5 high second"]);
 
 			// A run naming the pick's effort still seats the second reviewer to settle its findings, from the
 			// size's whole list rather than the one reviewer --effort narrows the pick to.
@@ -1552,7 +1555,7 @@ fakes(
 			git(s.repo, "commit", "-qam", "a third constant");
 			const named = await quest("--root", s.repo, "review", "--effort", "high", "--responses", responses);
 			expect(named.code, named.stderr).toBe(0);
-			expect(seconds(named.stdout)).toEqual(["reviewer claude claude-sonnet-5-5 medium second"]);
+			expect(seconds(named.stdout)).toEqual(["reviewer claude claude-sonnet-5-5 high second"]);
 		} finally {
 			vi.unstubAllGlobals();
 		}
@@ -1576,7 +1579,7 @@ fakes("a raise to high with no other model left prints its saved rounds before t
 			"claude-sonnet-5-5",
 		);
 		expect(out.code).toBe(2);
-		expect(out.stderr).toContain("every other model of the size's list is avoided");
+		expect(out.stderr).toContain("every other model of the XL list is avoided");
 		expect(out.stdout).toContain("\nrisk high It rewrites the wire format peers read.\n");
 		expect(out.stdout).toContain("\nreviewer codex gpt-6.1-sol medium\n");
 		expect(out.stdout).toContain("\nfindings 1\n");
@@ -1589,15 +1592,15 @@ fakes("a raise from a reviewer the run leaves out holds while its last round rev
 	const s = setup();
 	const pull = {
 		number: 7,
-		body: "Fixes averaging.\n\n## Models\n\n- Size: S\n- Implementer: Claude Code, claude-opus-5-5, high effort\n",
+		body: "Fixes averaging.\n\n## Models\n\n- Size: M\n- Implementer: Claude Code, claude-opus-5-5, high effort\n",
 	};
 	onGitHub(s.repo, [pull]);
 	vi.stubEnv("FAKE_REPLY", JSON.stringify({ score: 10, rationale: "Lands as is.", findings: [] }));
-	// Only the shadow, Sol at high effort for an S PR, raises the tier.
-	vi.stubEnv("FAKE_RAISE", "high@high");
+	// Only the shadow, Sol at xhigh effort for an M PR, raises the tier; the second reviewer it calls for does not.
+	vi.stubEnv("FAKE_RAISE", "high@xhigh");
 	const raised = "\nrisk high It rewrites the wire format peers read.\n";
 	const block = [
-		"- Reviewer: Codex, gpt-6.1-sol, high effort, shadow",
+		"- Reviewer: Codex, gpt-6.1-sol, xhigh effort, shadow",
 		"- Session: `thread-1`",
 		"- Raised the risk to high: `It rewrites the wire format peers read.`",
 		"- Rounds: 1;",
@@ -1606,7 +1609,7 @@ fakes("a raise from a reviewer the run leaves out holds while its last round rev
 		const first = await quest("--root", s.repo, "review");
 		expect(first.code, first.stderr).toBe(0);
 		expect(first.stdout).toContain(raised);
-		expect(first.stdout).toContain(" high shadow\n");
+		expect(first.stdout).toContain(" xhigh shadow\n");
 
 		// The same head repeats the pick's clean round and leaves out the shadow, whose raise still covers it.
 		vi.stubEnv("FAKE_RAISE", undefined);
@@ -1671,12 +1674,12 @@ fakes(
 			);
 			expect(recordedRisk(pull.body)).toMatchObject({ tier: "low", class: "constants", overridden: null });
 
-			// The maintainer holds it high: the pick and a second reviewer on another model review it.
+			// The maintainer holds it high: the largest size's pick and a second reviewer on another model review it.
 			const held = await quest("--root", s.repo, "review", "--override", "high", "--reason", "It ships tonight.");
 			expect(held.code, held.stderr).toBe(0);
 			expect(held.stdout).toContain("\nrisk high It ships tonight.\noverridden low by the maintainer\n");
-			expect(held.stdout).toContain("\nreviewer codex gpt-6.1-sol medium\n");
-			expect(held.stdout).toContain("\nreviewer claude claude-sonnet-5-5 medium second\n");
+			expect(held.stdout).toContain("\nreviewer codex gpt-6.1-sol xhigh\n");
+			expect(held.stdout).toContain("\nreviewer claude claude-sonnet-5-5 high second\n");
 			expect(recordedRisk(pull.body)).toMatchObject({
 				tier: "high",
 				overridden: "low",
@@ -1693,7 +1696,7 @@ fakes(
 			const effort = await quest("--root", s.repo, "review", "--effort", "high");
 			expect(effort.code, effort.stderr).toBe(0);
 			expect(effort.stdout).toContain("\nreviewer codex gpt-6.1-sol high\n");
-			expect(effort.stdout).toContain("\nreviewer claude claude-sonnet-5-5 medium second\n");
+			expect(effort.stdout).toContain("\nreviewer claude claude-sonnet-5-5 high second\n");
 			// A riskier change than the one overridden ends it.
 			vi.stubEnv("FAKE_RISK", JSON.stringify({ tier: "medium", reason: "It changes the output.", class: null }));
 			write(s.repo, "src/lib.ts", "export const x = 4;\n");
@@ -1723,7 +1726,7 @@ fakes(
 			vi.stubEnv("FAKE_FAILS", "claude-sonnet-5-5");
 			const out = await quest("--root", s.repo, "review", "--override", "high", "--reason", "It ships tonight.");
 			expect(out.code).toBe(3);
-			expect(out.stderr).toContain("no eligible S reviewer could run: claude-sonnet-5-5 medium (");
+			expect(out.stderr).toContain("no eligible XL reviewer could run: claude-sonnet-5-5 high (");
 			expect(out.stderr).not.toContain("gpt-6.1-sol");
 		} finally {
 			vi.unstubAllGlobals();

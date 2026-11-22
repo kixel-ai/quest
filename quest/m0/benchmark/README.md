@@ -72,8 +72,8 @@ maintainer's typed messages since 2026-10-01):
     suite for high: "we're so CPU starved that we shouldn't waste it on more
     CI unless it actually catches issues. Running the full suite is dumb
     because the next commit (or nightly) can catch the issue anyway. We
-    should use RISK to get additional/stronger reviews instead."), as
-    [review, not CI](/quest/m0/benchmark/review-not-ci.md) plans
+    should use RISK to get additional/stronger reviews instead."): a high
+    PR gets two reviewers on different models from the largest size's list
   - Rejected: review, approval, and CI; approval only
 - Must a PR state how to undo it? ✅ No (maintainer, 2026-11-22: "I
   definitely don't want Undo to be a gate"). Rejected: an `## Undo`

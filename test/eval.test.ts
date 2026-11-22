@@ -93,7 +93,10 @@ test("a finding finds a defect only on one of its places' lines in its file", ()
 test("the pick avoids the case's writer, and --harness runs alone at its size's entry", () => {
 	const entry = { pull: 3, ...base, size: "S", clean: true } as EvalCase;
 	const names = (seats: ReturnType<typeof evalSeats>) =>
-		seats.map(({ reviewer, shadow }) => `${reviewer.model} ${reviewer.effort}${shadow ? " shadow" : ""}`);
+		seats.map(
+			({ reviewer, shadow, second }) =>
+				`${reviewer.model} ${reviewer.effort}${shadow ? " shadow" : second ? " second" : ""}`,
+		);
 	expect(names(evalSeats(entry, {}))).toEqual(["gpt-6.1-sol medium", "gpt-6.1-sol high shadow"]);
 	expect(names(evalSeats({ ...entry, writer: "gpt-6.1-sol" }, {}))).toEqual([
 		"claude-opus-5-5 low",
@@ -101,6 +104,16 @@ test("the pick avoids the case's writer, and --harness runs alone at its size's 
 	]);
 	expect(names(evalSeats({ ...entry, writer: "gpt-6.1-sol" }, { harness: "codex" }))).toEqual(["gpt-6.1-sol medium"]);
 	expect(names(evalSeats(entry, { harness: "claude", effort: "high" }))).toEqual(["claude-opus-5-5 high"]);
+
+	// A high case gets the largest size's pick and a second reviewer on another model, as quest review seats them.
+	const high = { ...entry, tier: "high", writer: "claude-opus-5-5" } as EvalCase;
+	expect(names(evalSeats(high, {}))).toEqual(["gpt-6.1-sol xhigh", "claude-sonnet-5-5 high second"]);
+	expect(names(evalSeats({ ...high, size: "L" }, {}))).toEqual([
+		"gpt-6.1-sol xhigh",
+		"gpt-6.1-sol high shadow",
+		"claude-sonnet-5-5 high second",
+	]);
+	expect(names(evalSeats(high, { harness: "claude" }))).toEqual(["claude-opus-5-5 xhigh"]);
 });
 
 const seat = (found: number[], findings: Finding[], shadow = false): Seated => ({

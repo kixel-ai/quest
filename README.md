@@ -1702,13 +1702,15 @@ own retries, which also counts as the limit there.
 
 Each head also gets a risk tier, `low`, `medium`, or `high`: what could break,
 for whom, and how hard it is to undo, set from the change and never from who
-wrote it. The tier scales the PR's guardrails:
+wrote it. The tier scales the PR's review and approval, never its CI: every
+tier runs the checks its diff reaches, and the next commit's CI or the nightly
+run catches what those miss.
 
-| Tier | Local review | CI | Lands on |
-|---|---|---|---|
-| Low | None; the online reviewer only | The checks its diff reaches | Its own, once its class is in `RISK.md`'s `## Automatic` list; else the maintainer's pick |
-| Medium | The size's pick | The checks its diff reaches | The maintainer's pick |
-| High | The size's pick and a second reviewer on another model | The full suite [`quest suite`](#run-the-full-suite) names | The maintainer's pick, with the full brief |
+| Tier | Local review | Lands on |
+|---|---|---|
+| Low | None; the online reviewer only | Its own, once its class is in `RISK.md`'s `## Automatic` list; else the maintainer's pick |
+| Medium | The size's pick | The maintainer's pick |
+| High | Two reviewers on different models from the largest size's list | The maintainer's pick, with the full brief |
 
 `/quest-run` carries the picks.
 
@@ -1730,12 +1732,6 @@ Customers run the relay and the player; the CLI is for contributors.
 
 - `src/billing/` - charges customers, and refunds are manual
 - `**/*.proto` - peers on older releases read the wire format
-
-## Full suite
-
-```sh
-just gate --all
-```
 ````
 
 Each item is a backticked path from the root, where `*` and `?` stay within one
@@ -1744,9 +1740,7 @@ everything under it, then ` - ` and why changing it is high. The rest of the
 file is prose for the classifier, such as what is customer-facing, except
 `## Automatic`, whose items are each a backticked class name of lowercase
 words joined by hyphens, ` - `, and the rule over the diff a change meets to
-fall in it, and `## Full suite`, one fenced block holding the command that
-runs the whole test suite. Each section appears at most once. `quest
-review` reads the file from the base's tip, so a change cannot lower its own
+fall in it. Each section appears at most once. `quest review` reads the file from the base's tip, so a change cannot lower its own
 tier, and fails on one it cannot read, which the repository's own `quest check`
 reports first. A base with no `RISK.md` makes every change no path holds high
 `medium`.
@@ -1776,13 +1770,15 @@ to its block. A `- Class:` line follows when the classifier named a class.
 A low head with no finding left to settle runs no local reviewer, unless
 `--harness`, `--model`, or `--effort` names one: the record names the head in
 full, adds `- Local review: none, since a low-risk head needs only the online
-reviewer`, and `next done` says so. A high head also gets a second reviewer:
-the first of the size's list on a model other than the pick's that can run,
-marked `second`, in a session of its own that reviews every head while the
-tier is high and settles its findings after. `--model` and `--effort` change
-only the pick, so the second reviewer still runs; the one reviewer `--harness`
-names runs alone, with none. A round that raises the tier to
-high saves its rounds and runs the second reviewer at once; when that review
+reviewer`, and `next done` says so. A high head is reviewed from the largest
+size's list, XL's, whatever the PR's size: its pick, and a second reviewer,
+the first of that list on a model other than the pick's that can run, marked
+`second`, in a session of its own that reviews every head while the tier is
+high and settles its findings after. `--model` and `--effort` change only the
+pick, so the second reviewer still runs; the one reviewer `--harness` names
+runs alone, at its entry in that list, with none. A round that raises the
+tier to high saves its rounds and runs the second reviewer at once, and the
+next run moves the pick to the largest size's entry; when that review
 fails, as when none can run, it prints those rounds before the error, so their
 findings can be answered. When every other model is avoided, as
 with no `## Models` record under a harness the list has one model of, the run
@@ -1793,16 +1789,6 @@ branch in place of the reviewed one, as `- Risk: <tier>, <reason>` and
 `- Overridden: from <tier> by the maintainer`. It holds across heads until
 the reviewed tier grows riskier than the one overridden, and `quest usage`
 counts overrides as a reading of the tier's accuracy.
-
-### Run the full suite
-
-`quest suite <pr>` prints the base's `## Full suite` command when the PR's
-head needs it: its record names it high, or names no tier that covers the
-head. It prints nothing otherwise, so a repository's gate runs the command it
-prints beside its scoped checks. The tier is the PR body's, which its author
-writes, so a gate runs the full suite itself for an author without write
-access. `--base` names the branch whose `RISK.md` it reads, fetched first,
-by default origin's default branch.
 
 ### Score the reviewer
 
@@ -1816,7 +1802,7 @@ before it lands, and put the score and its cost in its PR.
 quest eval add 570 --fix 704 --what "It counts every link as a culprit." \
   --defect src/cli/usage.ts:395-399 --defect src/cli/usage.ts:408-410
 quest eval add 503 --clean
-quest eval run                          # the size's pick and its shadow on every case
+quest eval run                          # each case's reviewers as its tier seats them
 quest eval run --harness claude --effort high --pr 570
 ```
 
@@ -1827,8 +1813,10 @@ clone scores its upstream's set, and reviews it at its head in a detached checko
 giving the reviewers the first round `quest review` gives, with the base's
 `AGENTS.md` and `CLAUDE.md` and this checkout's committed `REVIEW.md`. A
 finding on any line of a defect's places finds it; every finding on a clean PR
-is noise. It prints defects found and clean findings by severity for the pick,
-its shadow, and either, by size and by tier, each case's rounds, and the cost
+is noise. Each case gets the reviewers `quest review` seats for its tier: the
+pick and its shadow, and a high case's second reviewer. It prints defects
+found and clean findings by severity for the pick, its shadow, the second
+reviewer, and either, by size and by tier, each case's rounds, and the cost
 token-max prices for the run's sessions.
 
 ## Audit cost and accuracy

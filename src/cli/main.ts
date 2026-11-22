@@ -118,7 +118,6 @@ import { KIXEL_QUEST_URL, kixelUrl, tokensPath } from "./tokens";
 import { CONTEXT, GUIDE, GUIDE_SECTIONS, SKILLS, guideSections, sectionHeading, skill } from "./skills";
 import { type Terminal, Theme } from "./theme";
 import { type Snapshot, checkout, collect, load, snapshot, under } from "./tree";
-import { baseRiskFile, suiteFor } from "./suite";
 import { pullFileLines, statusLines, viewLines } from "./status";
 import { TOKEN_MAX_MISSING, daysBefore, runTokenMax, usage, usageDependencies, usageLines } from "./usage";
 import { waitForActivity, WaitTimeout } from "./wait";
@@ -715,42 +714,6 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 						return 1;
 					},
 				);
-		});
-
-	program
-		.command("suite")
-		.summary("Print the full-suite command a PR's risk tier calls for")
-		.description(
-			"Print the command in the ## Full suite section of the base's RISK.md when the PR's head needs the " +
-				"repository's whole test suite beyond the checks its diff reaches: its ## Review record names it high " +
-				"risk, or names no tier that covers the head, as when it is missing, stale, or cannot be compared. " +
-				"Prints nothing for a low or medium head, or when RISK.md names no full suite, so a repository's gate " +
-				"runs `cmd=$(quest suite <pr>)` and then the command when one printed. The tier is the PR body's, which " +
-				"its author writes, so a gate gives a PR from an author without write access the full suite itself. " +
-				"RISK.md is read from --base, fetched first, by default origin's default branch.\n\n" +
-				"Uses GH_TOKEN, GITHUB_TOKEN, or gh auth token. " +
-				FORGE_READS.replace("these reads", "the read") +
-				"Exits 0 whatever it prints, 2 for invalid arguments, and 1 for other failures, such as a RISK.md it " +
-				"cannot read.",
-		)
-		.argument("<pr>", PR_ARGUMENT)
-		.option("--base <remote/branch>", "Base branch whose RISK.md to read (default: origin's default branch)")
-		.action((value: string, options: { base?: string }) => {
-			const { pull: pr, hosted } = locatePull(value, root(), process.env);
-			pending = Promise.all([
-				forgeFor(pr, forgeDependencies(), Infinity, hosted).then((forge) => forge.status(pr)),
-				baseRiskFile(root(), options.base),
-			]).then(
-				([{ value: status }, file]) => {
-					const command = suiteFor(status.risk, file);
-					if (command !== null) print(command);
-					return 0;
-				},
-				(error: unknown) => {
-					warn(error instanceof Error ? error.message : String(error));
-					return 1;
-				},
-			);
 		});
 
 	const OWNERSHIP =
@@ -1923,12 +1886,13 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"session: the base's AGENTS.md and CLAUDE.md at the case's merge base, its classified tier, and the prompts of " +
 				"this build, with the review rules of this checkout, its committed REVIEW.md at HEAD, so a change to the " +
 				"reviewer table, the prompts, or REVIEW.md is scored before it lands. The reviewers are the size's pick, " +
-				"avoiding the case's writer, and its shadow, as quest review runs them, or --harness's alone, at its " +
+				"avoiding the case's writer, and its shadow, and for a high case a second reviewer on another model, " +
+				"both from the largest size's list, as quest review runs them, or --harness's alone, at its tier's " +
 				"entry's model and effort unless --model and --effort override them. A reviewer that cannot run fails the run " +
 				"rather than passing the case to the next, so the score measures the reviewers it names. Cases run one at a time, their reviewers " +
 				"at once, and the first failure stops the run and fails it.\n\n" +
-				"Prints the set's counts and rules, a line per seat (pick, shadow, and, without --harness, either: what " +
-				"the case's seats found together, as a run of the pick and its shadow finds it) with defects found and clean findings by severity, the same by size and tier, " +
+				"Prints the set's counts and rules, a line per seat (pick, shadow, second, and, without --harness, " +
+				"either: what the case's seats found together, as a run of them all finds it) with defects found and clean findings by severity, the same by size and tier, " +
 				"each case's rounds with score, defects found, findings, tokens the CLI reported, and session, and the " +
 				"run's cost at API list price as token-max prices its sessions, or unpriced without token-max. --json prints " +
 				"one object. Exits as quest review does: 2 for invalid arguments or a set that cannot be read, 3 for a " +
