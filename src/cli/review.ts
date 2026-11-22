@@ -1269,6 +1269,16 @@ function scope({ base, mergeBase, head }: Change): string {
 }
 
 /**
+ * Looking past the diff for what relied on what it changed: the largest class of escapes a type check misses,
+ * since what remains once the compiler has checked the callers is semantic.
+ */
+const DEPENDENTS =
+	"Name each contract the change alters, such as a signature, a key's meaning, a default, a format, a guard, or " +
+	"documented behavior, and search the repository beyond the diff for what depends on it: callers, consumers, " +
+	"sibling implementations and paths, parallel lists, tests, and docs. Report each dependent the change left on " +
+	"the old contract, at the dependent's line.";
+
+/**
  * A session's review turn, which the CLI's own review runs with everything the round needs up front: the
  * change, the base's REVIEW.md, and the findings and responses of an earlier session it answers.
  */
@@ -1291,6 +1301,7 @@ export function reviewPrompt(
 				]),
 		...(earlier.length > 0 ? [earlierList(earlier, first), settling("in your review")] : []),
 		...responseParts(responses),
+		DEPENDENTS,
 		`${SEVERITY} End with a score from 0 to 10 for how ready the head is to land, and one sentence on why.`,
 	].join("\n\n");
 }
