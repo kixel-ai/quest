@@ -1570,7 +1570,8 @@ The first round explores the change once. It runs the reviewer's own review,
 `codex exec review` with custom instructions or Claude Code's `/code-review
 <effort> <merge-base>...HEAD` with text after the target, given the range, the
 base's `REVIEW.md`, if any, and any earlier findings and responses up front.
-Neither returns a JSON schema itself, so the round resumes that session for one
+It also asks the reviewer to name each contract the change alters and search
+past the diff for the dependents left on the old one. Neither returns a JSON schema itself, so the round resumes that session for one
 turn that reads nothing and reports the review in one schema, with a score from
 0 to 10 for how ready the head is to land and one sentence on why: 10 lands as
 is, 7 to 9 lands after the findings are fixed, 4 to 6 needs rework, and 0 to 3
