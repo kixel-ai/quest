@@ -5,7 +5,7 @@
 Update `assets/AGENTS.md` (`## Questions`) and `assets/skills/` so blocking question dialogs reflect the maintainer's most common free-text answers and stop offering contradictory or unused options:
 
 1. Every non-trivial decision, plan, or follow-up dialog reserves an option for `"Explain it first"` (preferring 2 to 3 concrete choices plus `"Explain it first"` within the 4-option limit), and `/quest-plan` Goal prompts include a `"Drop"` option.
-2. `Maintainer:` wait and manual-action dialogs standardize on: Agent handles or drives the browser (when plausible), Done / I'll do it now, `"Not at my PC (defer)"`, and Drop wait.
+2. `Maintainer:` wait and manual-action dialogs (a step only the maintainer can do, with no choice to make) standardize on: Agent handles or drives the browser (when plausible), Done / I'll do it now, `"Not at my PC (defer)"`, and Drop wait.
 3. `assets/skills/review.md` removes its stale option list (`- /quest-iterate`, `- skip`, `- /quest-delete`) so merge picks follow `#768`'s option set in `assets/skills/merge.md` everywhere.
 
 Non-goal: enforcing `(Recommended)` in a `PreToolUse` hook (tracked in [Block agent stalls in Stop hook and missing recommendations in PreToolUse](/quest/m0/agent-and-question-hooks.md)), or changing follow-ups from one question per follow-up (`#636`).
@@ -29,6 +29,7 @@ This quest edits `assets/AGENTS.md` and `assets/skills/`, which the maintainer a
 
 Agent's choices, for the implementer to revisit:
 
+- `"Explain it first"` does not apply to those wait and manual-action dialogs: their four fixed options already fill the 4-option limit, and a manual step needs no explanation of trade-offs. A `Maintainer:` item that is a decision (it gives options and a recommendation) is a decision dialog and follows rule 1 instead: 2 to 3 concrete choices plus `"Explain it first"`.
 - Keep the additions in `assets/AGENTS.md` (`## Questions`) and `assets/skills/plan.md` concise per `quest guide prompting`, and define `"Explain it first"` once in `## Questions` (walk through the problem, current behavior, and concrete trade-offs, then re-ask without it) so `merge.md` does not repeat it.
 - Keep `"Rethink it"` on merge picks in `assets/skills/merge.md`, and update `assets/skills/review.md` so it delegates its pick options wholly to `/quest-merge` without restating a conflicting bullet list.
 - For `Maintainer:` wait dialogs, note that `"Not at my PC (defer)"` leaves the `## Waiting` item in place and skips it for the current session without re-asking.
