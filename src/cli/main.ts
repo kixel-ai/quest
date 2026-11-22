@@ -723,7 +723,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		.description(
 			"Print the command in the ## Full suite section of the base's RISK.md when the PR's head needs the " +
 				"repository's whole test suite beyond the checks its diff reaches: its ## Review record names it high " +
-				"risk, or names no tier that covers the head, as when it is missing, stale, or cannot be compared. " +
+				"risk, or names no tier that covers the head, as when it is missing, malformed, stale, or cannot be compared. " +
 				"Prints nothing for a low or medium head, or when RISK.md names no full suite, so a repository's gate " +
 				"runs `cmd=$(quest suite <pr>)` and then the command when one printed. The tier is the PR body's, which " +
 				"its author writes, so a gate gives a PR from an author without write access the full suite itself. " +

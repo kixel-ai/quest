@@ -894,7 +894,7 @@ describe("merge --land", () => {
 		},
 	);
 
-	test.each(["head", "hold", "base", "gate", "queue"])(
+	test.each(["head", "hold", "base", "gate", "queue", "risk"])(
 		"does not merge after the clean refusal changes its %s",
 		async (change) => {
 			const pull = new FakePull();
@@ -906,6 +906,7 @@ describe("merge --land", () => {
 				if (change === "base") pull.baseRef = "release";
 				if (change === "gate") pull.required = ["quest land"];
 				if (change === "queue") pull.queue = true;
+				if (change === "risk") pull.body = `## Review\n\n- Head: ${HEAD}\n- Risk:dire`;
 				return "Pull request is in clean status";
 			};
 			await expect(land(PR, { sha: HEAD, method: "merge", check: clean }, pull.deps())).rejects.toThrow();

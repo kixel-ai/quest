@@ -261,6 +261,7 @@ export async function land(pr: PullRequest, request: LandRequest, deps: GitHubDe
 		const fresh = await labels.read();
 		current(fresh);
 		unheld(fresh, undefined, deps.now());
+		readableRisk(fresh);
 		if (
 			fresh.state !== "OPEN" ||
 			fresh.draft ||
