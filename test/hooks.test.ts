@@ -368,7 +368,7 @@ test.each([
 	const transcript = join(tempDir(), "agent.jsonl");
 	writeFileSync(
 		transcript,
-		["b1", "b4", "b5", "b7", "b8", "b9", "c1", "c2"]
+		["b1", "b4", "b5", "b7", "b8", "b9", "c1", "c2", "c3", "c4"]
 			.map((id) => `{"content":"Command running in background with ID: ${id}. Output is being written to: x"}\n`)
 			.join(""),
 	);
@@ -378,6 +378,8 @@ test.each([
 	// The global --root, in each spelling, still names the command.
 	const rooted = shell("b9", "quest --root .worktrees/a --root='a b' --root a\\ b wait 807");
 	const nested = shell("c2", "cd x && bash -c '/nix/store/q/bin/quest gate quest wait 808'");
+	const loop = shell("c3", 'for target in check test; do quest gate just "$target"; done');
+	const login = shell("c4", "/bin/bash -lc 'quest agent resume .worktrees/a'");
 	const stop = {
 		hook_event_name: event,
 		cwd,
@@ -400,6 +402,8 @@ test.each([
 			// A quoted argument runs nothing.
 			shell("c1", "tail -F .tmp/a.log | grep 'quest wait 806'"),
 			nested,
+			loop,
+			login,
 			{ id: "a1", type: "subagent", status: "running", description: "review" },
 		],
 	};
@@ -412,7 +416,7 @@ test.each([
 		kind: "stop",
 		harness: "claude",
 		session: "s1",
-		running: ["b1", "b2", "b6", "b3", "b4", "b5", "b7", "b8", "b9", "c1", "c2"],
+		running: ["b1", "b2", "b6", "b3", "b4", "b5", "b7", "b8", "b9", "c1", "c2", "c3", "c4"],
 	});
 	expect(output.reason.split("\n").filter((line: string) => line.startsWith("- "))).toEqual([
 		`- ${gate.command}`,
@@ -420,19 +424,22 @@ test.each([
 		`- ${wait.command}`,
 		`- ${rooted.command}`,
 		`- ${nested.command}`,
+		`- ${loop.command}`,
+		`- ${login.command}`,
 	]);
 	// Without a transcript, every running gate counts as the agent's, but no agent turn or wait does.
 	const unowned = JSON.parse(hook({ ...stop, [key]: "" }, deps)).reason;
 	expect(unowned).toContain("just check");
 	expect(unowned).toContain(nested.command);
-	for (const task of [agent, wait, rooted]) expect(unowned).not.toContain(task.command);
-	const gates = new Set(["b1", "b2", "c2"]);
+	expect(unowned).toContain(loop.command);
+	for (const task of [agent, wait, rooted, login]) expect(unowned).not.toContain(task.command);
+	const gates = new Set(["b1", "b2", "c2", "c3"]);
 	const ungated = { ...stop, background_tasks: stop.background_tasks.filter((task) => !gates.has(task.id)) };
 	expect(hook({ ...ungated, [key]: "" }, deps)).toBe("");
 	// A running agent turn or wait alone still holds the agent that started it.
 	expect(JSON.parse(hook(ungated, deps)).reason).toContain(wait.command);
 	// It lets the turn end once they end, and outside a repository that uses Quest.
-	const owned = new Set(["b1", "b4", "b5", "b9", "c2"]);
+	const owned = new Set(["b1", "b4", "b5", "b9", "c2", "c3", "c4"]);
 	expect(hook({ ...stop, background_tasks: stop.background_tasks.filter((task) => !owned.has(task.id)) }, deps)).toBe(
 		"",
 	);

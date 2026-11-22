@@ -129,7 +129,7 @@ function questCalls(line: string): string[][] {
 		let argv = unwrap([...simple.argv], new Set());
 		while (argv !== null) {
 			const [name, ...args] = argv;
-			if (SHELLS.has(name!)) {
+			if (SHELLS.has(basename(name!))) {
 				const flag = args.findIndex((arg) => /^-[a-z]*c[a-z]*$/.test(arg));
 				if (flag !== -1 && args[flag + 1] !== undefined) calls.push(...questCalls(args[flag + 1]!));
 				break;
@@ -323,17 +323,21 @@ function applyPatch(patch: string, check: Check) {
 }
 
 /**
- * The command `argv` runs once wrappers such as `env`, `timeout`, `direnv
- * exec`, `nix develop --command`, and `bun run`'s `quest` script are peeled off, with the
+ * The command `argv` runs once reserved words such as `do` and wrappers such
+ * as `env`, `timeout`, `direnv exec`, `nix develop --command`, and `bun run`'s
+ * `quest` script are peeled off, each wrapper by its name or path, with the
  * variable assignments in front of it added to `env`; `null` for none.
  */
 function unwrap(argv: string[], env: Set<string>): string[] | null {
 	let rest = argv;
 	for (;;) {
 		while (rest.length > 0 && /^[A-Za-z_][A-Za-z0-9_]*=/.test(rest[0]!)) env.add(rest.shift()!);
-		const [name, ...args] = rest;
-		if (name === undefined) return null;
-		if (["command", "exec", "nohup", "time", "builtin", "env", "nice"].includes(name)) rest = dropOptions(args);
+		const [path, ...args] = rest;
+		if (path === undefined) return null;
+		const name = basename(path);
+		if (KEYWORDS.has(path)) rest = args;
+		else if (["command", "exec", "nohup", "time", "builtin", "env", "nice"].includes(name))
+			rest = dropOptions(args);
 		else if (name === "timeout") rest = dropOptions(args).slice(1);
 		else if (name === "direnv" && args[0] === "exec") rest = args.slice(2);
 		else if (name === "bun" && args[0] === "run" && basename(dropOptions(args.slice(1))[0] ?? "") === "quest")
@@ -345,6 +349,9 @@ function unwrap(argv: string[], env: Set<string>): string[] | null {
 		} else return rest;
 	}
 }
+
+/** The shell's reserved words that may come before a command, as `do` in a loop. */
+const KEYWORDS = new Set(["!", "{", "if", "then", "elif", "else", "while", "until", "do"]);
 
 /** The shells whose `-c` script runs as a command line of its own. */
 const SHELLS = new Set(["bash", "sh", "zsh", "dash"]);
@@ -402,7 +409,7 @@ function shell(
 		const [name, ...args] = argv;
 		// A wrapper such as `env --chdir` moves where the command reads a relative path from.
 		const moved = words.slice(0, words.length - argv.length).some((word) => /^(-C|--chdir)/.test(word));
-		if (SHELLS.has(name!)) {
+		if (SHELLS.has(basename(name!))) {
 			const flag = args.findIndex((arg) => /^-[a-z]*c[a-z]*$/.test(arg));
 			// The script's own parse finds its expansions.
 			if (flag !== -1 && args[flag + 1] !== undefined)
