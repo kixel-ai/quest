@@ -46,7 +46,7 @@ Record each design change, including a rethink the user picks, in a PR comment t
 
 `quest review` passes a round from a reviewer that is out of quota, logged out, or not installed to the size's next eligible one, and records the skip.
 Once it exits 3, every eligible reviewer is out, an outage rather than a skip: stop reviewing, keep the PR a draft, hand it back, and report the outage.
-Its `## Waiting` item names each reviewer, its error, and the check, such as `Codex: out of quota until 2026-11-03 15:00 UTC; check that quest review runs`, with the reset time `quest review` prints; a logged-out or missing reviewer waits on `Maintainer:`, with the login command `quest review` prints.
+Its `## Waiting` item names each reviewer, its error, and the check, such as `Codex: out of quota until 2026-11-03 15:00 UTC; check that quest review runs`, with the reset time `quest review` prints; a logged-out or missing reviewer waits on `Maintainer (PC):`, with the login command `quest review` prints, since the login runs on the reviewer's host.
 Once the reset passes or the login is restored, the item has cleared: whoever finds it runs `/quest-review` on the PR.
 
 Push, resolve each `duplicate` line `quest status <pr>` then prints as the guide's Creation describes, then mark the PR ready for review: with `quest ready <pr> <token>`, which also drops its `## Waiting` section, or with `gh pr ready <pr>` for a draft you reviewed without a hold.
