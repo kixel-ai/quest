@@ -7,7 +7,7 @@ benchmark with several axes. Every change records its risk tier, what it
 cost (tokens, compute, and time split into working and blocked on CI,
 GitHub, git, or a person), who wrote and reviewed it, and what it later
 broke. The tier, set from the change itself, scales its guardrails: review
-depth, CI, and human approval. The maintainer
+depth and human approval, never CI. The maintainer
 steers from a report of all of it without reading code, and adds or removes
 guardrails from that evidence. Every cost is measured so it can be driven
 toward zero.
