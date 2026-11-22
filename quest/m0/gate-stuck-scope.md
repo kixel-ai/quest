@@ -33,6 +33,11 @@ Non-goals: fixing or restarting the user manager, and retrying the run.
   the scope, rather than leave the agent to read `systemd-run`'s own message.
   Confirm which exit status or message `systemd-run` gives for a timed-out job
   before keying on it.
+- No client-side deadline beside it. The incident's manager kept dispatching
+  its event loop (it answered daemon-reloads in ~80 ms and started some scopes
+  late), so `JobTimeoutSec=` fires there. A manager that dispatches nothing never
+  answers `systemd-run`'s StartTransientUnit call, which sd-bus's default call
+  timeout already fails.
 - Unit tests mock `systemd-run`'s outcome rather than waiting 60 seconds.
 
 ## Hosts
