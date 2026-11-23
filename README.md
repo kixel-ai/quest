@@ -1478,7 +1478,9 @@ claude	claude-opus-5-5	medium
 nearest size that lists it, the larger on a tie; a model no list names is an
 error. An iterate on a PR whose first `Implementer:` line names an arm runs
 that arm's entry at the PR's size instead, as `quest models L --arm B`
-prints, and records it as `(iterate, XS, arm B)`. `--json` prints an array of `{harness, model, effort}` objects. The
+prints, and records it as `(iterate, XS, arm B)`. For an arm its size no
+longer runs, which `--arm` refuses, it runs the model and effort that line
+records. `--json` prints an array of `{harness, model, effort}` objects. The
 iterate records the size it was given in its `Implementer:` line, as
 `Implementer: Claude Code, claude-opus-5-5, medium effort (iterate, XS)`, so
 the model check can audit the routing. `quest review` still reviews the

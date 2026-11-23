@@ -1428,7 +1428,10 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 			if (options.arm !== undefined) {
 				if (options.writer !== undefined) throw new UsageError("give --writer or --arm, not both");
 				const arms = ARMS[size];
-				if (!arms) throw new UsageError(`${size} runs no writer arms`);
+				if (!arms)
+					throw new UsageError(
+						`${size} runs no writer arms; an iterate on a PR an earlier arm wrote runs the model and effort its Implementer line records`,
+					);
 				entries = [arms[options.arm]];
 			} else if (options.writer !== undefined) {
 				const entry = writerAt(size, options.writer);
