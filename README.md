@@ -1346,7 +1346,9 @@ on the host:
   and owns every descendant, including ones that start their own process group
   or session. Only a process that asks another service manager to start it
   escapes.
-  A cancelled gate waits until the scope is empty.
+  A cancelled gate waits until the scope is empty. A gate whose scope the user
+  manager has not started within 60 seconds fails, naming the scope, and
+  cancels its start job; a healthy manager starts one in well under that.
 - macOS, and Linux without such a user manager (as in most containers and on
   Ubuntu 22.04), run the command as the leader of a new session and own its
   process group. A descendant that moves to another process group or session,
@@ -2318,7 +2320,8 @@ one run, since the next run starts without scratch.
 
 `run` owns processes through a systemd user scope per run, so it needs Linux
 5.14+ with a systemd 254+ user manager and unified cgroup v2; it fails on other
-hosts. It handles signals as the gate does on such a host: SIGINT, SIGTERM, or
+hosts, and fails a run whose scope its user manager has not started within 60
+seconds. It handles signals as the gate does on such a host: SIGINT, SIGTERM, or
 SIGHUP reaches every process in the run's scope, the run waits until the scope
 is empty, and a second signal kills everything at once. A run inside another
 Quest scope, such as a gate's, binds its own scope to that one, so the
