@@ -2,7 +2,7 @@
 
 ## Goal
 
-moq-dev plans and runs its own work through Quest: moq-dev/moq,
+moq-dev and kixel-ai plan and run their own work through Quest: moq-dev/moq,
 kixel-ai/quest, and moq-dev/moq.pro plan in quests, maintainers' own agent
 sessions implement them through the skills, and PRs land through GitHub's
 merge queue, with the host's watcher fixing what it drops. moq-bot is the one

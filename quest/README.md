@@ -60,6 +60,6 @@ work... with a reversible adoption path" until then. m1's public-release
 quests predate this, so [this tree's first `tree` audit](/quest/m1/audit-tree.md)
 checks them first.
 
-`m0` is adoption on moq-dev's own repositories, `m1` the public release,
+`m0` is adoption on moq-dev's and kixel-ai's own repositories, `m1` the public release,
 and `m2` later work. Add later horizons when concrete work warrants them,
 keeping milestone numbers stable as earlier milestones complete.
