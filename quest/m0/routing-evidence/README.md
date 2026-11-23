@@ -16,6 +16,8 @@ there.
 
 ## Plan
 
+Decided 2026-11-22 (maintainer, `/quest-plan` in [kixel-ai/kixel.quest#104](https://github.com/kixel-ai/kixel.quest/pull/104)): ✅ Kixel Quest reads experiments out itself, putting a decision prompt in the inbox when one reaches its sample, with the tally and its routing chart (rejected: a recurring agent quest; the view only). Delete this quest once its [readouts](https://github.com/kixel-ai/kixel.quest/blob/main/quest/m0/insight/readouts.md) land; until then, run as below.
+
 Decided 2026-11-11 (user, /quest-plan, from an audit of PRs merged
 2026-11-01 to 11-11 in moq-dev/moq, moq-dev/moq.pro and moq-dev/quest):
 
