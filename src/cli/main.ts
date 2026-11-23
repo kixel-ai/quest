@@ -1725,7 +1725,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"ANTHROPIC_API_KEY, ANTHROPIC_AUTH_TOKEN, or an Authorization header in ANTHROPIC_CUSTOM_HEADERS, else it cannot run. " +
 				"Nor does Codex: with OPENAI_BASE_URL set, it needs CODEX_API_KEY or CODEX_ACCESS_TOKEN, and skips its login check, " +
 				"which never asks the gateway. " +
-				"Under CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST, as in a T3 Code session, it drops every Claude Code gateway, provider, and " +
+				"Under CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST, as in a T3 Code session, quest review drops every Claude Code gateway, provider, and " +
 				"credential in the environment, since the host set them, and reviews on the stored login. A logged-out error names the profile it checked, " +
 				"CLAUDE_CONFIG_DIR or CODEX_HOME, or the default when unset, and any gateway or provider.\n\n" +
 				"Every turn reviews only the branch's own change, from the merge base of HEAD with the base's tip, so " +

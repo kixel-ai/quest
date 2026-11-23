@@ -616,6 +616,9 @@ const text = (value: unknown) => (typeof value === "string" ? value : undefined)
 const CLAUDE_PROVIDERS = ["BEDROCK", "VERTEX", "FOUNDRY", "MANTLE", "ANTHROPIC_AWS", "ANTHROPIC_GOOGLE_CLOUD"];
 
 /** Claude Code turns a switch on only for `1`, `true`, `yes`, or `on`, so `0` or `false` sets nothing. */
+/** Whether a credential is set: the CLIs trim one and read a blank one as unset, falling back to the stored login. */
+const set = (value: string | undefined) => Boolean(value?.trim());
+
 const enabled = (value: string | undefined) => /^\s*(1|true|yes|on)\s*$/i.test(value ?? "");
 
 /** The `CLAUDE_CODE_USE_` switches `env` turns on. */
@@ -679,8 +682,8 @@ const claude: Reviewer = {
 	bareGateway: (env) =>
 		env.ANTHROPIC_BASE_URL &&
 		claudeProviders(env).length === 0 &&
-		!env.ANTHROPIC_API_KEY &&
-		!env.ANTHROPIC_AUTH_TOKEN &&
+		!set(env.ANTHROPIC_API_KEY) &&
+		!set(env.ANTHROPIC_AUTH_TOKEN) &&
 		!authorizes(env.ANTHROPIC_CUSTOM_HEADERS)
 			? "claude would send its stored login to the gateway ANTHROPIC_BASE_URL names, which has no credential; " +
 				"set ANTHROPIC_API_KEY, ANTHROPIC_AUTH_TOKEN, or an Authorization header in ANTHROPIC_CUSTOM_HEADERS " +
@@ -819,7 +822,7 @@ const codex: Reviewer = {
 	// Codex sends its stored ChatGPT login, with its account ID, to `openai_base_url` unless CODEX_API_KEY or
 	// CODEX_ACCESS_TOKEN replaces it.
 	bareGateway: (env) =>
-		env.OPENAI_BASE_URL && !env.CODEX_API_KEY && !env.CODEX_ACCESS_TOKEN
+		env.OPENAI_BASE_URL && !set(env.CODEX_API_KEY) && !set(env.CODEX_ACCESS_TOKEN)
 			? "codex would send its stored login to the gateway OPENAI_BASE_URL names, which has no credential; " +
 				"set CODEX_API_KEY (any value, for a gateway that needs none) or CODEX_ACCESS_TOKEN for the gateway, " +
 				"or unset OPENAI_BASE_URL"
@@ -1076,7 +1079,7 @@ async function prepare(
 	const loggedIn = async (env: NodeJS.ProcessEnv) =>
 		(await run(reviewer.status, cwd, env, "", undefined, signal)).code === 0;
 	const credentials = [...reviewer.credentials, ...(routes.length > 0 ? reviewer.routeCredentials : [])].filter(
-		(name) => env[name],
+		(name) => set(env[name]),
 	);
 	const withCredentials = { ...connected, ...pick(env, credentials) };
 	const rejected = `${harness} rejected ${names(credentials)}${through}; replace it, or run \`${reviewer.login}\``;

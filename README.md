@@ -1579,7 +1579,7 @@ gateway: with `ANTHROPIC_BASE_URL` set and no cloud provider, it needs
 `ANTHROPIC_CUSTOM_HEADERS`, else it cannot run. Nor does Codex: with
 `OPENAI_BASE_URL` set, it needs `CODEX_API_KEY` or `CODEX_ACCESS_TOKEN`, and
 skips its login check, which never asks the gateway. Under
-`CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST`, as in a T3 Code session, it drops every
+`CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST`, as in a T3 Code session, `quest review` drops every
 Claude Code gateway, provider, and credential in the environment, since the
 host set them, and reviews on the stored login.
 Variables that would change the reviewer's plugins,
