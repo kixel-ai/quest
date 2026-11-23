@@ -43,7 +43,7 @@ import {
 } from "../src/cli/gate";
 import { forwards, foregroundStat, statProcess } from "../src/cli/interrupt";
 import { gateBoundary, main } from "../src/cli/main";
-import { measuredRun, alive as ownerAlive, questScope } from "../src/cli/supervise";
+import { measuredRun, alive as ownerAlive, questScope, START_LIMIT } from "../src/cli/supervise";
 import { readWaits } from "../src/cli/waits";
 import { created, onTerminal, run, signalled, tempDir } from "./fixture";
 
@@ -1120,6 +1120,73 @@ describe.runIf(process.platform === "linux")("a systemd scope", () => {
 		} finally {
 			warn.mockRestore();
 		}
+	});
+
+	/**
+	 * Run through a `systemd-run` that never starts the scope, as a stuck user manager leaves it,
+	 * and a `systemctl` that records its arguments and, when `cancels`, ends that `systemd-run` as
+	 * cancelling its start job would.
+	 */
+	async function neverStarted(cancels: boolean, interrupt = false) {
+		const dir = tempDir();
+		const bin = join(dir, "bin");
+		mkdirSync(bin);
+		writeFileSync(join(bin, "systemd-run"), `#!/bin/sh\necho $$ > ${quote(join(dir, "pid"))}\nexec sleep 1000\n`);
+		writeFileSync(
+			join(bin, "systemctl"),
+			`#!/bin/sh\necho "$@" > ${quote(join(dir, "args"))}\n${cancels ? `kill "$(cat ${quote(join(dir, "pid"))})"` : "exit 1"}\n`,
+		);
+		chmodSync(join(bin, "systemd-run"), 0o755);
+		chmodSync(join(bin, "systemctl"), 0o755);
+		const unit = `quest-gate-${randomUUID()}.scope`;
+		const { stop, cancel } = cancellation();
+		vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+		try {
+			const result = measuredRun(unit, process.cwd(), ["/bin/sh", "-c", "exit 0"], {
+				cancel,
+				within: null,
+				env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
+			}).then(
+				(measured) => measured,
+				(error: Error) => error,
+			);
+			while (!existsSync(join(dir, "pid"))) await new Promise((resolve) => setImmediate(resolve));
+			if (interrupt) stop.abort("SIGINT");
+			vi.advanceTimersByTime(START_LIMIT - 1);
+			expect(existsSync(join(dir, "args"))).toBe(false);
+			vi.advanceTimersByTime(1);
+			return { unit, result: await result, args: readFileSync(join(dir, "args"), "utf8").trim() };
+		} finally {
+			vi.useRealTimers();
+		}
+	}
+
+	test("fails a run whose scope never starts, cancelling its start job", async () => {
+		const { unit, result, args } = await neverStarted(true);
+		expect(args).toBe(`--user stop --no-block ${unit}`);
+		expect(result).toBeInstanceOf(Error);
+		expect((result as Error).message).toBe(
+			`the systemd user manager did not start ${unit} within 60 seconds; see \`systemctl --user list-jobs\``,
+		);
+	});
+
+	test("kills systemd-run when its scope's start job cannot be cancelled", async () => {
+		const warn = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+		try {
+			const { unit, result } = await neverStarted(false);
+			expect((result as Error).message).toMatch(/did not start .* within 60 seconds/);
+			expect(warn.mock.calls.map(([text]) => String(text)).join("")).toContain(
+				`quest: cannot cancel the start of ${unit}:`,
+			);
+		} finally {
+			warn.mockRestore();
+		}
+	});
+
+	test("ends a run interrupted before its scope started once the start limit passes", async () => {
+		const { result, args } = await neverStarted(true, true);
+		expect(args).toMatch(/^--user stop --no-block /);
+		expect(result).toEqual({ status: 130, cpu: null });
 	});
 
 	test("reads a short command's CPU however soon systemd removes its scope", async () => {
