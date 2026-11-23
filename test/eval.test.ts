@@ -204,7 +204,8 @@ test("agy seats are priced from their reported tokens at Google's list price on 
 		{ turn: "findings", input: 500_000, cached: 0, output: 400_000 },
 	];
 	const clean = { pull: 4, ...base, clean: true } as EvalCase;
-	const run = (model: string, at: string) => priced(null, [{ case: clean, seats: [agy(model, usage)] }], new Date(at));
+	const run = (model: string, at: string) =>
+		priced(null, [{ case: clean, seats: [agy(model, usage)] }], new Date(at));
 	expect(agyCost("gemini-4-carbon", usage, new Date("2026-11-30T23:00:00Z"))).toBeCloseTo(2 + 0.1 + 10);
 	expect(run("gemini-4-carbon", "2026-12-01T00:00:00Z")).toEqual({
 		usd: expect.closeTo(4 + 0.2 + 20),

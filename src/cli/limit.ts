@@ -77,6 +77,7 @@ export function agyReset(message: string, now: Date): number | null {
 	const delay = /\b(?:quotaResetDelay|retryDelay):([^\s\]]+)/.exec(message)?.[1];
 	if (delay === undefined || !GO_DURATION.test(delay)) return null;
 	let ms = 0;
-	for (const [, amount, unit] of delay.matchAll(/(\d+(?:\.\d+)?)(ns|us|µs|ms|h|m|s)/g)) ms += Number(amount) * GO_UNITS[unit!]!;
+	for (const [, amount, unit] of delay.matchAll(/(\d+(?:\.\d+)?)(ns|us|µs|ms|h|m|s)/g))
+		ms += Number(amount) * GO_UNITS[unit!]!;
 	return now.getTime() + ms;
 }

@@ -1968,7 +1968,9 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		)
 		.option("--set <file>", `The eval set (default: ${EVAL_FILE} at the checkout's root)`)
 		.addOption(
-			new Option("--harness <name>", "The only reviewer, instead of the pick and shadow").choices(REVIEW_HARNESSES),
+			new Option("--harness <name>", "The only reviewer, instead of the pick and shadow").choices(
+				REVIEW_HARNESSES,
+			),
 		)
 		.option("--model <model>", "Model --harness's reviewer runs instead of its size's")
 		.option("--effort <level>", "Reasoning effort --harness's reviewer runs at instead of its size's", effortLevel)

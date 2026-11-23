@@ -1047,7 +1047,9 @@ export function agyTurn(context: Context, prompt: string, flags: string[]): Turn
 	const content =
 		`You have no shell, so run no command. The repository's checkout is ${context.root}: read its files by ` +
 		`absolute path. \`${dir}/files.txt\` lists its tracked files` +
-		context.ranges.map((range, index) => `, and \`${dir}/diff-${index + 1}.diff\` holds \`git diff ${range}\``).join("") +
+		context.ranges
+			.map((range, index) => `, and \`${dir}/diff-${index + 1}.diff\` holds \`git diff ${range}\``)
+			.join("") +
 		`.\n\n${prompt}`;
 	return {
 		argv: [
@@ -1245,7 +1247,9 @@ const names = (list: string[]) => list.join(" and ");
 function profile(reviewer: Reviewer, env: NodeJS.ProcessEnv): string {
 	if (reviewer.profile === undefined) return "";
 	const dir = env[reviewer.profile];
-	return dir ? ` to the profile ${reviewer.profile}=${dir}` : ` to its default profile (${reviewer.profile} is unset)`;
+	return dir
+		? ` to the profile ${reviewer.profile}=${dir}`
+		: ` to its default profile (${reviewer.profile} is unset)`;
 }
 
 /**
@@ -2783,10 +2787,7 @@ async function reviewWith(shared: Shared, seat: Seat, responses: string | undefi
 		mergeBase: change.mergeBase,
 		root,
 		// As the prompts name them: the change, and for a later round what changed since the last.
-		ranges: [
-			`${change.mergeBase}..${change.head}`,
-			...(resume ? [`${previous!.head} ${change.head}`] : []),
-		],
+		ranges: [`${change.mergeBase}..${change.head}`, ...(resume ? [`${previous!.head} ${change.head}`] : [])],
 		instructions: instructionsPrompt(shared.base.sha, shared.files),
 		model: picked.model,
 		effort: picked.effort,
