@@ -1556,7 +1556,8 @@ names it, since each session moves its line last whenever it pushes, or
 `--exclude-model` names each model to avoid instead. Earlier writers may review.
 Without a record, or when its last line names an `unknown` model, the harness
 running the command, usually the session that
-just pushed, is taken to be the latest writer, so Codex reviews from Claude Code
+just pushed, detected from the variables Claude Code, Codex, and Antigravity
+each set, is taken to be the latest writer, so Codex reviews from Claude Code
 and Claude Code from Codex. `--harness` names the only reviewer instead of
 the pick and the shadow, at its entry's model and effort, and `--model` and `--effort`
 override the size pick's or that reviewer's, as a repository whose `AGENTS.md`
@@ -1664,6 +1665,29 @@ the sandbox has no network. The reviewer follows the base's `AGENTS.md` and `CLA
 root and in each directory holding a changed path, never the checkout's, so a
 change cannot instruct its own reviewer. The base's `REVIEW.md` is optional,
 given at the start of each session, and chooses the review's stance, such as adversarial.
+
+`--harness agy` reviews with Google's Antigravity CLI, `agy`, which only
+reviews: name its
+model and effort, as `--model gemini-4-carbon --effort high`. It runs `agy -p`
+on your own Antigravity login, wherever `agy` keeps it: the OS keyring, or over
+ssh its configuration directory, `~/.gemini/antigravity-cli`. Run `agy` to sign
+in. No `ANTIGRAVITY_*` or `AGY_*` variable reaches it, so no gateway either,
+and `GEMINI_API_KEY` and `GOOGLE_API_KEY` never replace the login. `agy` loads
+the `.agents/`, `AGENTS.md`, and `GEMINI.md` of every directory from where it
+runs up to the repository's root, so each turn, and its status check, `agy
+models`, runs in a new private directory under quest's agent directory instead,
+and an agent directory inside a repository is a usage error naming
+`XDG_RUNTIME_DIR` and `TMPDIR`. There it runs as an agent quest writes, whose
+only tools are `view_file` and `finish` and which inherits none of your hooks,
+rules, plugins, or MCP tools. Print mode cannot approve a read outside that
+directory, so permissions are skipped, and deny rules on commands, writes, web
+requests, and MCP calls back up the tool list. With no shell, the directory
+holds what `git` would show, `files.txt` with the checkout's tracked files and
+each reviewed range's diff, and the reviewer reads the checkout's files by
+absolute path; `agy` 1.5.14 gives an agent no search tool. Your skills' text
+still reaches it, and your MCP servers start, with no tool it can call. A
+`RESOURCE_EXHAUSTED` quota error counts as its usage limit, resetting at the
+time it names.
 
 It prints the size and its source, base, and head; the head's `risk` tier and
 reason, then `classified` with the classifier's tier, how it was set (`model`,
@@ -1785,10 +1809,11 @@ reports first. A base with no `RISK.md` makes every change no path holds high
 Otherwise a classifier reads the diff and the base's `RISK.md` in one read-only
 turn and replies with a tier, one sentence on why, and the `## Automatic`
 class every changed file falls in, or none: Claude Code
-`claude-haiku-5-5` at low effort, or Codex `gpt-6.1-sol` at low when Claude
-Code is missing, logged out, has its login rejected, or hit its usage limit.
-When neither can run, the review fails on the limit that resets first if both
-hit theirs, and otherwise as a usage error naming why each failed. A diff past 200,000 characters gives it only the
+`claude-haiku-5-5` at low effort, then Codex `gpt-6.1-sol` at low, then
+Antigravity `gemini-3.8-flash` at low, each when those before it are missing,
+logged out, have their login rejected, or hit their usage limit. When none can
+run, the review fails on the limit that resets first if every one whose CLI is
+installed hit its own, and otherwise as a usage error naming why each failed. A diff past 200,000 characters gives it only the
 stat, and it reads the parts it needs. The tier is kept with the reviewers'
 sessions, so a later round on the same head and base `RISK.md` reuses it, and
 `--new` classifies again. Each reviewer judges the tier too, told the
@@ -1860,7 +1885,8 @@ giving the reviewers the first round `quest review` gives, with the base's
 finding on any line of a defect's places finds it; every finding on a clean PR
 is noise. It prints defects found and clean findings by severity for the pick,
 its shadow, and either, by size and by tier, each case's rounds, and the cost
-token-max prices for the run's sessions.
+token-max prices for the run's sessions, with an Antigravity reviewer's tokens at
+Google's API list price on the run's day.
 
 ## Audit cost and accuracy
 

@@ -1122,7 +1122,14 @@ fakes("agy reviews from a workspace of its own, reading the change from files, t
 		expect(call.argv).toContain("--dangerously-skip-permissions");
 		expect(call.argv).toContain("--disable-slash-commands");
 		expect(JSON.parse(flag("--settings")).permissions.deny).toEqual(
-			expect.arrayContaining(["command(*)", "write_file(*)", "read_url(*)", "mcp(*)"]),
+			expect.arrayContaining([
+				"command(*)",
+				"write_file(*)",
+				"read_url(*)",
+				"mcp(*)",
+				// Antigravity's own store, where it keeps the login over ssh.
+				expect.stringMatching(/^read_file\(\/.*\/\.gemini\)$/),
+			]),
 		);
 		expect(flag("--model")).toBe("gemini-4-carbon");
 		expect(flag("--effort")).toBe("high");

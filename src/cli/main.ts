@@ -1706,7 +1706,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"latest writer is avoided: the model the last Implementer line names in the `## Models` record of the body of the branch's open PR. " +
 				"When it names none or an `unknown` model, " +
 				"it is any model of the harness running this command, usually the session that just pushed, detected from the " +
-				"variables each sets, so Codex reviews from Claude Code and Claude Code from Codex; with --harness it is " +
+				"variables Claude Code, Codex, and Antigravity each set, so Codex reviews from Claude Code and Claude Code from Codex; with --harness it is " +
 				"none. " +
 				"--harness names the only reviewer instead of the pick and the shadow, at its entry's model and effort, and --model and " +
 				"--effort override that reviewer's, or without --harness, the size pick's; a repository whose AGENTS.md names other reviewers " +
@@ -1756,6 +1756,18 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"each directory holding a changed path, never the checkout's, so a change cannot instruct its own " +
 				"reviewer, and is told to disregard other instructions and run no builds, tests, or quest commands. " +
 				"The base is fetched first, since the sandbox has no network.\n\n" +
+				"--harness agy reviews with Google's Antigravity CLI, which only reviews; name its --model and --effort, as " +
+				"gemini-4-carbon and high. It runs `agy -p` on the user's own Antigravity login, in the keyring or, over ssh, " +
+				"its configuration directory, with no ANTIGRAVITY_* or AGY_* variable, so no gateway, and GEMINI_API_KEY and " +
+				"GOOGLE_API_KEY never replace the login. Each turn and the status check, `agy models`, run in a new private " +
+				"directory outside any repository, since agy loads the agent configuration of each directory up to the " +
+				"repository's root, which makes an agent directory inside one a usage error. Each turn runs as quest's own " +
+				"agent, whose only tools are view_file and finish and which inherits none of the user's hooks, rules, plugins, or " +
+				"MCP tools, with permissions skipped, since print mode cannot approve a read outside its directory, and deny " +
+				"rules on commands, writes, web requests, and MCP calls. With no shell, its directory holds files.txt, the " +
+				"checkout's tracked files, and the diff of each range it reviews, and it reads the checkout's files by absolute " +
+				"path. The user's skills' text still reaches it, and their MCP servers start, with no tool it can call. A " +
+				"RESOURCE_EXHAUSTED quota error is its usage limit.\n\n" +
 				"Before the reviewers run, the head gets a risk tier, low, medium, or high, from its change alone, never " +
 				"from who wrote it. A changed path, either side of a rename, that a pattern holds makes it high: RISK.md, " +
 				"everything under .github/workflows/ and .github/actions/, and each pattern the `## High` list of the base's " +
@@ -1766,7 +1778,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				`${classifiers}, reads the diff and the base's RISK.md, which says what is customer-facing, ` +
 				"in one read-only turn and replies with a tier and its reason. One that is logged out, whose login the " +
 				"API rejects, or at its usage limit passes the turn to the next; when none is left, the run fails on the " +
-				"limit that resets first if every one hit its own, else as a usage error naming why each failed. A later round on the same head and base " +
+				"limit that resets first if every one whose CLI is installed hit its own, else as a usage error naming why each failed. A later round on the same head and base " +
 				"RISK.md reuses the tier unless --new. Each reviewer's reply judges the tier too, told the classified one, " +
 				"and can only raise it: the head's tier is the riskiest, with the reason of the first to judge it so. " +
 				"The classifier also names the class of RISK.md's ## Automatic list every changed file falls in, or none. " +
@@ -1949,7 +1961,8 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"Prints the set's counts and rules, a line per seat (pick, shadow, and, without --harness, either: what " +
 				"the case's seats found together, as a run of the pick and its shadow finds it) with defects found and clean findings by severity, the same by size and tier, " +
 				"each case's rounds with score, defects found, findings, tokens the CLI reported, and session, and the " +
-				"run's cost at API list price as token-max prices its sessions, or unpriced without token-max. --json prints " +
+				"run's cost at API list price as token-max prices its sessions, and an agy reviewer's from the tokens it " +
+				"reported at Google's price on the run's day, or unpriced when a reviewer needs token-max and it is not installed. --json prints " +
 				"one object. Exits as quest review does: 2 for invalid arguments or a set that cannot be read, 3 for a " +
 				"reviewer that is not installed, logged out, or at its usage limit, 1 for other failures.",
 		)

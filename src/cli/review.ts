@@ -12,6 +12,7 @@
 import { execFile, spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { dirname, join, posix } from "node:path";
 import { promisify } from "node:util";
 
@@ -963,14 +964,35 @@ export function codexFlags(context: Context): string[] {
 const AGY_AGENT = "quest-reviewer";
 
 /**
- * A backstop should a release hand the reviewer agent a tool beyond its list: deny rules hold in every mode, past
- * `--dangerously-skip-permissions`, so no command, write, web request, or MCP call runs.
+ * The directories that hold the login a review runs on, and so other credentials beside it: Antigravity's own, which
+ * keeps the login when no keyring does, as over ssh, and every conversation, and the OS keyrings' files.
  */
-const AGY_SETTINGS = JSON.stringify({
-	permissions: {
-		deny: ["command(*)", "write_file(*)", "read_url(*)", "execute_url(*)", "download_url(*)", "mcp(*)"],
-	},
-});
+const AGY_STORES = [".gemini", ".local/share/keyrings", "Library/Keychains"];
+
+/**
+ * Deny rules, which hold in every mode, past `--dangerously-skip-permissions`: no command, write, web request, or MCP
+ * call runs, should a release hand the reviewer agent a tool beyond its list, and no read reaches a credential store,
+ * which a hostile change could ask the reviewer to quote in a finding. A read rule names a directory, matched against
+ * the path a read resolves to past symlinks and `..`, so each store is resolved too.
+ */
+function agySettings(): string {
+	const stores = AGY_STORES.map((store) => join(homedir(), store)).map((dir) =>
+		existsSync(dir) ? realpathSync(dir) : dir,
+	);
+	return JSON.stringify({
+		permissions: {
+			deny: [
+				"command(*)",
+				"write_file(*)",
+				"read_url(*)",
+				"execute_url(*)",
+				"download_url(*)",
+				"mcp(*)",
+				...stores.map((dir) => `read_file(${dir})`),
+			],
+		},
+	});
+}
 
 /** What an Antigravity review turn asks for, which has no built-in review command to run. */
 const AGY_REVIEW =
@@ -1004,12 +1026,12 @@ function agyAgent(context: Context): string {
 /**
  * One Antigravity turn, run from a workspace of its own outside the checkout, whose agent configuration Antigravity
  * would otherwise load, and whose files its permission checks would refuse to read without approval, which print mode
- * cannot give, so permissions are skipped and the agent's tool list and `AGY_SETTINGS` bound it. With no shell, the
+ * cannot give, so permissions are skipped and the agent's tool list and `agySettings` bound it. With no shell, the
  * workspace holds what `git` would show: the checkout's tracked files, and the diff of each range the prompt names,
  * each named by absolute path, since a resumed conversation still sees the earlier turn's workspace, now removed. The
  * prompt arrives on stdin, since an argument holds no more than 128 KiB on Linux.
  */
-function agyTurn(context: Context, prompt: string, flags: string[]): Turn {
+export function agyTurn(context: Context, prompt: string, flags: string[]): Turn {
 	const files: Record<string, string> = { [`.agents/agents/${AGY_AGENT}.md`]: agyAgent(context) };
 	files["files.txt"] = git(context.root, ["ls-files"]);
 	for (const [index, range] of context.ranges.entries())
@@ -1045,7 +1067,7 @@ function agyTurn(context: Context, prompt: string, flags: string[]): Turn {
 			"--dangerously-skip-permissions",
 			"--disable-slash-commands",
 			"--settings",
-			AGY_SETTINGS,
+			agySettings(),
 			...flags,
 		],
 		stdin: `${JSON.stringify({ event: "user", message: { role: "user", content } })}\n`,
