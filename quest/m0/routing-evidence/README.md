@@ -73,6 +73,11 @@ Readout, the agent's choices for the implementer to revisit:
   `/quest-run` and `/quest-iterate`. Keep the shadow reviewer only if the maintainer
   chooses to: once L's pairs reach 116 first rounds, about 2026-12-20, end
   its step down at L and XL, and read the step up at S and M below.
+- Read the candidate seat, Fable 5.2 medium beside L's pick since
+  [moq-dev/quest#831](https://github.com/moq-dev/quest/pull/831), as the
+  shadow pairs are, its rows marked `candidate` in `quest usage`, and
+  recommend promoting it to the pick, keeping it, or ending it by deleting
+  its entry from `CANDIDATES` in `src/cli/models.ts`.
 - Carry the tallies into [the model check](/quest/m1/model-check.md)'s
   baseline.
 - Chart the arms' cost against quality as
@@ -158,8 +163,9 @@ three hosts' saved review rounds:
     what the port strips; all in kixel.quest, waiting weeks for the port).
   - M ends its arm on Opus high, L gains a Fable arm, and XL writes on
     Fable: [writer table](/quest/m0/writer-table.md).
-  - Fable reviews L beside the pick, and Astra picks for XL:
-    [reviewer table](/quest/m0/reviewer-table.md).
+  - Fable reviews L beside the pick as `quest review`'s candidate seat,
+    and Astra picks for XL:
+    [moq-dev/quest#831](https://github.com/moq-dev/quest/pull/831).
   - Cost metric? ✅ Mean spend per merged PR, every session's, plus the
     spend of later PRs that name it under `## Caused by`, with a bootstrap
     95% interval, the median reported beside it (rejected: the median

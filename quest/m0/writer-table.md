@@ -8,7 +8,8 @@ every XL quest on Fable 5.2 high with Opus 5.5 xhigh as its fallback and no
 arm. `quest models`, `quest unblocked --json`, the README's routing section,
 and the arm notes in the guide and skills say the same.
 
-Non-goal: the reviewer table, which [reviewer table](/quest/m0/reviewer-table.md) owns.
+Non-goal: the reviewer table, which
+[moq-dev/quest#831](https://github.com/moq-dev/quest/pull/831) changes.
 
 ## Plan
 

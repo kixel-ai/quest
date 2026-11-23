@@ -1,7 +1,7 @@
 // A pull request body's `## Models` record, which names the PR's size and each session that implemented it.
 
 import { SIZES } from "../core";
-import { ARMS, ARM_NAMES, type Arm, REVIEWERS, WRITERS } from "./models";
+import { ARMS, ARM_NAMES, type Arm, CANDIDATES, REVIEWERS, WRITERS } from "./models";
 
 const SECTION = /^## Models[ \t]*\r?$/m;
 
@@ -49,7 +49,7 @@ export function recorded(body: string): {
 }
 
 // Display names and IDs compare alike: `Opus 5.5`, `Claude Opus 5.5`, and `claude-opus-5-5` share a key, as do
-// `GPT 6.1 Sol` and `openai/gpt-6.1-sol`.
+// `GPT 6.2 Sol` and `openai/gpt-6.2-sol`.
 const key = (name: string) =>
 	name
 		.toLowerCase()
@@ -57,7 +57,12 @@ const key = (name: string) =>
 		.replace(/[\s.]+/g, "-")
 		.replace(/^claude-/, "");
 const KNOWN = new Map(
-	[...Object.values(WRITERS), ...Object.values(REVIEWERS), ...Object.values(ARMS).flatMap(Object.values)]
+	[
+		...Object.values(WRITERS),
+		...Object.values(REVIEWERS),
+		...Object.values(CANDIDATES),
+		...Object.values(ARMS).flatMap(Object.values),
+	]
 		.flat()
 		.map(({ model }) => [key(model), model]),
 );

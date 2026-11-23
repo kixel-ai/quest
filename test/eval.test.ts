@@ -14,7 +14,7 @@ import {
 	priced,
 	tallies,
 } from "../src/cli/review-eval";
-import type { Finding } from "../src/cli/review";
+import { type Finding, seatRole } from "../src/cli/review";
 import type { Session } from "../src/cli/usage";
 import { type Call, effortOf, fakes, git, quest, setup, write } from "./review-fakes";
 
@@ -93,14 +93,28 @@ test("a finding finds a defect only on one of its places' lines in its file", ()
 test("the pick avoids the case's writer, and --harness runs alone at its size's entry", () => {
 	const entry = { pull: 3, ...base, size: "S", clean: true } as EvalCase;
 	const names = (seats: ReturnType<typeof evalSeats>) =>
-		seats.map(({ reviewer, shadow }) => `${reviewer.model} ${reviewer.effort}${shadow ? " shadow" : ""}`);
-	expect(names(evalSeats(entry, {}))).toEqual(["gpt-6.1-sol medium", "gpt-6.1-sol high shadow"]);
-	expect(names(evalSeats({ ...entry, writer: "gpt-6.1-sol" }, {}))).toEqual([
+		seats.map(
+			(seat) => `${seat.reviewer.model} ${seat.reviewer.effort}${seatRole(seat) ? ` ${seatRole(seat)}` : ""}`,
+		);
+	expect(names(evalSeats(entry, {}))).toEqual(["gpt-6.2-sol medium", "gpt-6.2-sol high shadow"]);
+	expect(names(evalSeats({ ...entry, writer: "gpt-6.2-sol" }, {}))).toEqual([
 		"claude-opus-5-5 low",
 		"claude-opus-5-5 medium shadow",
 	]);
-	expect(names(evalSeats({ ...entry, writer: "gpt-6.1-sol" }, { harness: "codex" }))).toEqual(["gpt-6.1-sol medium"]);
+	expect(names(evalSeats({ ...entry, writer: "gpt-6.2-sol" }, { harness: "codex" }))).toEqual(["gpt-6.2-sol medium"]);
 	expect(names(evalSeats(entry, { harness: "claude", effort: "high" }))).toEqual(["claude-opus-5-5 high"]);
+	// An L case seats the candidate too, unless its model wrote the case.
+	const large = { ...entry, size: "L", writer: "claude-opus-5-5" } as EvalCase;
+	expect(names(evalSeats(large, {}))).toEqual([
+		"gpt-6.2-sol xhigh",
+		"gpt-6.2-sol high shadow",
+		"claude-fable-5-2 medium candidate",
+	]);
+	expect(names(evalSeats({ ...large, writer: "claude-fable-5-2" }, {}))).toEqual([
+		"gpt-6.2-sol xhigh",
+		"gpt-6.2-sol high shadow",
+	]);
+	expect(names(evalSeats(large, { harness: "codex" }))).toEqual(["gpt-6.2-sol xhigh"]);
 });
 
 const seat = (found: number[], findings: Finding[], shadow = false): Seated => ({

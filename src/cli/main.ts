@@ -74,6 +74,7 @@ import {
 	ARM_NAMES,
 	type Arm,
 	CLASSIFIERS,
+	CANDIDATES,
 	DEFAULT_SIZE,
 	SPLITTERS,
 	SPLIT_CHECKERS,
@@ -1461,15 +1462,15 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"costliest copy, and the report says how many copies it folded from which hosts; a session with a request " +
 				"token-max could not price or a line it could not read is listed, its cost a lower bound. A host that fails fails the report. " +
 				"Each PR also shows its ## Models size, its risk tier from the ## Review record and whether a reviewer raised it, its implementers, and as unread each Implementer line and ## Review record it cannot read, " +
-				"each reviewer the ## Review record names, with its latest round and score and its tally of findings across every round and in its first, marked when it is the shadow, " +
+				"each reviewer the ## Review record names, with its latest round and score and its tally of findings across every round and in its first, marked when it is the shadow, second, or candidate, " +
 				"where a merged PR whose last round left only low findings open counts them settled, since the author fixes or refutes those before merge, " +
 				"the later merged PRs whose ## Caused by bullets open with its link, and each online reviewer's record from GitHub: whether it " +
 				"reviewed the last head, and its findings accepted, declined, unclassified, or unanswered. An online reviewer " +
 				"is a bot whose review has a body or opens a thread, or a review whose body opens with Automated review by <name>; a finding is a " +
 				"review thread it opens or a [P<n>] line in its review body, and its first answer's first word takes or " +
 				"declines it. Rollups follow: spend by size, role, harness, model, and " +
-				"effort, accuracy by size and implementer, summing each branch's tallies but the shadow's once, where an Implementer line's own size, as (iterate, XS), wins " +
-				"over the PR's, with its writing cost over the merged PRs it was found on, the writer A/B by size and arm, counting a sized PR whose every Implementer line names the same arm, as (arm B), under its first line's writer with the spend of every session on it, local reviewers by size, harness, model, effort, and shadow or second, with their " +
+				"effort, accuracy by size and implementer, summing each branch's tallies but the shadow's and candidate's once, where an Implementer line's own size, as (iterate, XS), wins " +
+				"over the PR's, with its writing cost over the merged PRs it was found on, the writer A/B by size and arm, counting a sized PR whose every Implementer line names the same arm, as (arm B), under its first line's writer with the spend of every session on it, local reviewers by size, harness, model, effort, and shadow, second, or candidate, with their " +
 				"tallies and reviewing cost per PR, each risk tier's PRs, merged PRs, tiers a reviewer raised, tiers the maintainer overrode, PRs a later one fixed, and time waited on a person, the same for each RISK.md ## Automatic class the classifiers named, with how many were low, each online reviewer's coverage and findings over the merged PRs, and each breakage a merged PR in the window names under ## Caused by: its culprit's tier, size, writers, and local reviewers, read from GitHub when older than the window, who found it and the incident it closes when the line ends with (found by check|reviewer|queue|canary|person|customer; incident <id>), either part alone allowed, and how long after the culprit merged the fix opened. Without token-max on PATH, it says how to install it and reports the PRs' records alone. " +
 				"--json prints the same report as one object.\n\n" +
 				"Uses GH_TOKEN, GITHUB_TOKEN, or gh auth token. Exits 0 when done, 2 for invalid arguments, and 1 for " +
@@ -1656,6 +1657,10 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		(size) => `${size} ${REVIEWERS[size].map((e) => `${e.harness} ${e.model} ${e.effort}`).join(", then ")}`,
 	).join("; ");
 	const classifiers = CLASSIFIERS.map((e) => `${e.harness} ${e.model} ${e.effort}`).join(", then ");
+	const candidates = SIZES.flatMap((size) => {
+		const e = CANDIDATES[size];
+		return e ? [`${size} ${e.harness} ${e.model} ${e.effort}`] : [];
+	}).join("; ");
 	/** quest review's exit code for `error`: 2 for a usage error, 3 when no reviewer could run, else 1. */
 	const reviewFailure = (error: unknown, json = false): number => {
 		// A failure after a raise saved the rounds that ran, so they print for their findings to be answered.
@@ -1692,13 +1697,17 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"no longer that step away; its findings are numbered and settled like any reviewer's, its session carries " +
 				"over to the new shadow, and a pick with no shadow seats one at its own effort while the old " +
 				"shadow still has findings. " +
+				`Beside them runs the size's candidate, a model on trial whose findings pair with the pick's: ${candidates}. ` +
+				"It runs as the shadow does, on the branch's first run and then while it has findings to settle or once the " +
+				"size's candidate changed, but none runs when its model is avoided; one that cannot run is passed over and " +
+				"named as skipped, never passing the round, and the pick's model settles its findings in its seat. " +
 				"--exclude-model names each model to avoid; without it, the " +
 				"latest writer is avoided: the model the last Implementer line names in the `## Models` record of the body of the branch's open PR. " +
 				"When it names none or an `unknown` model, " +
 				"it is any model of the harness running this command, usually the session that just pushed, detected from the " +
 				"variables each sets, so Codex reviews from Claude Code and Claude Code from Codex; with --harness it is " +
 				"none. " +
-				"--harness names the only reviewer instead of the pick and the shadow, at its entry's model and effort, and --model and " +
+				"--harness names the only reviewer instead of the pick, the shadow, and the candidate, at its entry's model and effort, and --model and " +
 				"--effort override that reviewer's, or without --harness, the size pick's; a repository whose AGENTS.md names other reviewers " +
 				"passes them. A --harness run keeps the other reviewers' sessions for the next run of the pick, and refuses while one has findings to settle, as a run of the pick does while a reviewer only --harness runs has some. When the latest writer changes the size's pick to one with no session on the branch, its first session settles the open findings of the reviewer it replaces. The reviewers run at once, and the first to fail stops the others and fails the " +
 				"run, saving no round. The " +
@@ -1766,7 +1775,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"an overridden line with the tier the maintainer overrode, " +
 				"how it was set (model, paths, or default), and reason, a class line naming the class, and for a model a classifier line (harness, model, " +
 				"effort, session) and its usage line, a skipped line (harness, model, effort, reason) for each reviewer passed over, then for each reviewer its harness, model, and " +
-				"effort, followed by shadow for the shadow or second for the second reviewer, session, round, an " +
+				"effort, followed by shadow for the shadow, second for the second reviewer, or candidate for the candidate, session, round, an " +
 				"unchanged line for a repeated round, a usage line per turn (input tokens, the " +
 				"part read from the prompt cache, and output), a score from 0 to 10 for how ready the head is to land with " +
 				"its one-sentence rationale, a raised line with the tier and reason when it raised the classifier's, the finding count, each finding by its number, then the last round's findings with " +
@@ -1779,7 +1788,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"After each round, it rewrites the `## Review` section of the branch's open PR into the base, the one from the repository the base's remote pushes to, else the only one from another repository whose pushed head `HEAD` contains, as the " +
 				"user the GitHub token names, keeping the rest of the body, and prints `record <url>`: the reviewed " +
 				"head, named in full only once no reviewer reports a finding, the base, the head's risk tier and reason, " +
-				"an `- Overridden:` line, the classifier's tier and who set it, a `- Class:` line, a `- Local review: none` line for a low head no reviewer ran on, a `- Skipped:` line for each reviewer passed over, and each reviewer, its Reviewer line ending in `, shadow` for the shadow or `, second` for the second reviewer, its " +
+				"an `- Overridden:` line, the classifier's tier and who set it, a `- Class:` line, a `- Local review: none` line for a low head no reviewer ran on, a `- Skipped:` line for each reviewer passed over, and each reviewer, its Reviewer line ending in `, shadow` for the shadow, `, second` for the second reviewer, or `, candidate` for the candidate, its " +
 				"session and round, score, the tier it raised the risk to and why, its tally of findings across the branch's rounds, and each finding with its disposition. With no " +
 				"such PR, several from other repositories that `HEAD` contains, or a remote off GitHub, it prints `record skipped: <why>` and changes nothing.\n\n" +
 				"Exits 0 once the round finishes, whatever it found, 2 for invalid arguments " +
@@ -1796,7 +1805,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		.addOption(
 			new Option(
 				"--harness <name>",
-				"The only reviewer to run, instead of the size's pick and the shadow",
+				"The only reviewer to run, instead of the size's pick, the shadow, and the candidate",
 			).choices(HARNESSES),
 		)
 		.option("--model <model>", "Model the size's pick, or --harness's reviewer, runs instead")
@@ -1926,12 +1935,12 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"session: the base's AGENTS.md and CLAUDE.md at the case's merge base, its classified tier, and the prompts of " +
 				"this build, with the review rules of this checkout, its committed REVIEW.md at HEAD, so a change to the " +
 				"reviewer table, the prompts, or REVIEW.md is scored before it lands. The reviewers are the size's pick, " +
-				"avoiding the case's writer, and its shadow, as quest review runs them, or --harness's alone, at its " +
+				"avoiding the case's writer, its shadow, and the size's candidate unless its model wrote the case, as quest review runs them, or --harness's alone, at its " +
 				"entry's model and effort unless --model and --effort override them. A reviewer that cannot run fails the run " +
 				"rather than passing the case to the next, so the score measures the reviewers it names. Cases run one at a time, their reviewers " +
 				"at once, and the first failure stops the run and fails it.\n\n" +
-				"Prints the set's counts and rules, a line per seat (pick, shadow, and, without --harness, either: what " +
-				"the case's seats found together, as a run of the pick and its shadow finds it) with defects found and clean findings by severity, the same by size and tier, " +
+				"Prints the set's counts and rules, a line per seat (pick, shadow, candidate, and, without --harness, either: what " +
+				"the case's seats found together, as a run of them all finds it) with defects found and clean findings by severity, the same by size and tier, " +
 				"each case's rounds with score, defects found, findings, tokens the CLI reported, and session, and the " +
 				"run's cost at API list price as token-max prices its sessions, or unpriced without token-max. --json prints " +
 				"one object. Exits as quest review does: 2 for invalid arguments or a set that cannot be read, 3 for a " +
@@ -1939,7 +1948,9 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		)
 		.option("--set <file>", `The eval set (default: ${EVAL_FILE} at the checkout's root)`)
 		.addOption(
-			new Option("--harness <name>", "The only reviewer, instead of the pick and shadow").choices(HARNESSES),
+			new Option("--harness <name>", "The only reviewer, instead of the pick, shadow, and candidate").choices(
+				HARNESSES,
+			),
 		)
 		.option("--model <model>", "Model --harness's reviewer runs instead of its size's")
 		.option("--effort <level>", "Reasoning effort --harness's reviewer runs at instead of its size's", effortLevel)

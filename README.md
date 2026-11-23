@@ -132,7 +132,7 @@ $ quest --root examples/export unblocked
 1	quest/m0/export.md
 
 $ quest --root examples/export unblocked --json --limit 1
-[{"path":"quest/m0/export.md","dependents":1,"hosts":[],"arm":"B","models":[{"harness":"claude","model":"claude-sonnet-5-5","effort":"high"},{"harness":"claude","model":"claude-opus-5-5","effort":"medium"},{"harness":"codex","model":"gpt-6.1-sol","effort":"medium"}]}]
+[{"path":"quest/m0/export.md","dependents":1,"hosts":[],"arm":"B","models":[{"harness":"claude","model":"claude-sonnet-5-5","effort":"high"},{"harness":"claude","model":"claude-opus-5-5","effort":"medium"},{"harness":"codex","model":"gpt-6.2-sol","effort":"medium"}]}]
 ```
 
 Each plain output line contains the count, a tab, and the path. On a terminal,
@@ -1432,10 +1432,10 @@ the same for every repository unless its `AGENTS.md` names others:
 
 | Size | Writer | Fallback |
 |---|---|---|
-| XS | Claude Code `claude-sonnet-5-5` high | Codex `gpt-6.1-sol` low |
-| S | Claude Code `claude-opus-5-5` medium | Codex `gpt-6.1-sol` medium |
-| M | Claude Code `claude-opus-5-5` medium | Codex `gpt-6.1-sol` high |
-| L | Claude Code `claude-opus-5-5` high | Codex `gpt-6.1-sol` xhigh |
+| XS | Claude Code `claude-sonnet-5-5` high | Codex `gpt-6.2-sol` low |
+| S | Claude Code `claude-opus-5-5` medium | Codex `gpt-6.2-sol` medium |
+| M | Claude Code `claude-opus-5-5` medium | Codex `gpt-6.2-sol` high |
+| L | Claude Code `claude-opus-5-5` high | Codex `gpt-6.2-sol` xhigh |
 | XL | Claude Code `claude-opus-5-5` xhigh | none |
 
 `quest unblocked --json` lists each ready quest's ranked `models`: its size's
@@ -1468,7 +1468,7 @@ XS, and `quest models` prints the entry to run:
 ```console
 $ quest models XS
 claude	claude-sonnet-5-5	high
-codex	gpt-6.1-sol	low
+codex	gpt-6.2-sol	low
 
 $ quest models XS --writer claude-opus-5-5
 claude	claude-opus-5-5	medium
@@ -1492,11 +1492,11 @@ size. Each size ranks its reviewers, the same for every repository:
 
 | PR size | Reviewer | When Sol changed it last | Last |
 |---|---|---|---|
-| XS | Codex `gpt-6.1-sol` medium | Claude Code `claude-opus-5-5` low | Claude Code `claude-sonnet-5-5` medium |
-| S | Codex `gpt-6.1-sol` medium | Claude Code `claude-opus-5-5` low | Claude Code `claude-sonnet-5-5` medium |
-| M, or none | Codex `gpt-6.1-sol` high | Claude Code `claude-opus-5-5` medium | Claude Code `claude-sonnet-5-5` medium |
-| L | Codex `gpt-6.1-sol` xhigh | Claude Code `claude-opus-5-5` high | Claude Code `claude-sonnet-5-5` high |
-| XL | Codex `gpt-6.1-sol` xhigh | Claude Code `claude-opus-5-5` xhigh | Claude Code `claude-sonnet-5-5` high |
+| XS | Codex `gpt-6.2-sol` medium | Claude Code `claude-opus-5-5` low | Claude Code `claude-sonnet-5-5` medium |
+| S | Codex `gpt-6.2-sol` medium | Claude Code `claude-opus-5-5` low | Claude Code `claude-sonnet-5-5` medium |
+| M, or none | Codex `gpt-6.2-sol` high | Claude Code `claude-opus-5-5` medium | Claude Code `claude-sonnet-5-5` medium |
+| L | Codex `gpt-6.2-sol` xhigh | Claude Code `claude-opus-5-5` high | Claude Code `claude-sonnet-5-5` high |
+| XL | Codex `gpt-6.2-astra` high | Claude Code `claude-opus-5-5` xhigh | Claude Code `claude-sonnet-5-5` high |
 
 Beside it, the shadow, the pick's model one effort away on the ladder (low,
 medium, high, xhigh), reviews the same head in its own session, so the routing
@@ -1513,6 +1513,13 @@ is left unanswered. The reviewers run at once;
 the first to fail, such as on a usage limit, stops the others, and the round
 saves none.
 
+Beside them, the size's candidate, a model on trial, reviews the same heads,
+so its findings pair with the pick's on every PR: Claude Code
+`claude-fable-5-2` medium for an L PR, and none at other sizes. It reruns as
+the shadow does, and none runs on a branch its model wrote last or in a
+`--harness` run. A candidate that cannot run is passed over alone, named as
+skipped, and the pick's model settles any findings it left in its seat.
+
 A reviewer that cannot run passes the round to the next whose model is not
 the latest writer's, so Sonnet reviews what Opus changed last while Sol is
 out. That is a failure the CLI or provider reports before any finding is
@@ -1523,7 +1530,7 @@ line for each reviewer it passed over, and the record names it in its
 header:
 
 ```markdown
-- Skipped: Codex, gpt-6.1-sol, high effort: usage limit, resets 2026-11-18T03:00:00Z
+- Skipped: Codex, gpt-6.2-sol, high effort: usage limit, resets 2026-11-18T03:00:00Z
 ```
 
 The new reviewer settles the open findings of the one it replaces, and the
@@ -1543,7 +1550,7 @@ Without a record, or when its last line names an `unknown` model, the harness
 running the command, usually the session that
 just pushed, is taken to be the latest writer, so Codex reviews from Claude Code
 and Claude Code from Codex. `--harness` names the only reviewer instead of
-the pick and the shadow, at its entry's model and effort, and `--model` and `--effort`
+the pick, the shadow, and the candidate, at its entry's model and effort, and `--model` and `--effort`
 override the size pick's or that reviewer's, as a repository whose `AGENTS.md`
 names other reviewers needs. A `--harness` run keeps the other
 reviewers' sessions for the pick's next run, and refuses while one has
@@ -1570,7 +1577,7 @@ A logged-out error names the profile the CLI checked, `CLAUDE_CONFIG_DIR` or
 quest review                                  # round 1 against origin's default branch
 quest review --responses .tmp/responses.md    # round 2: the new head, with fixes and refutations
 quest review --base origin/release --new      # a new session against another base
-quest review --size S --exclude-model gpt-6.1-sol  # an S PR that Sol wrote, with no record in its body
+quest review --size S --exclude-model gpt-6.2-sol  # an S PR that Sol wrote, with no record in its body
 quest review --branch quest/m1/foo --responses .tmp/responses.md  # a detached checkout of that branch's head
 ```
 
@@ -1665,7 +1672,8 @@ prints `record <url>`. The record
 names the reviewed head and the base's short SHA, the head's risk tier and who
 classified it, then for each reviewer its
 harness, model, and effort, its Reviewer line ending in `, shadow` for the
-shadow, the session and round, the score and rationale, the tier it raised the
+shadow, `, second` for the second reviewer, or `, candidate` for the
+candidate, the session and round, the score and rationale, the tier it raised the
 risk to and why, its tally, each finding with
 its location, and the last round's findings with their dispositions. The
 tally, as `- Rounds: 3; first round 2 (medium 2); findings 4 (high 1, medium 3): fixed 3, refuted 1, open 0`,
@@ -1761,7 +1769,7 @@ reports first. A base with no `RISK.md` makes every change no path holds high
 Otherwise a classifier reads the diff and the base's `RISK.md` in one read-only
 turn and replies with a tier, one sentence on why, and the `## Automatic`
 class every changed file falls in, or none: Claude Code
-`claude-haiku-5-5` at low effort, or Codex `gpt-6.1-sol` at low when Claude
+`claude-haiku-5-5` at low effort, or Codex `gpt-6.2-sol` at low when Claude
 Code is missing, logged out, has its login rejected, or hit its usage limit.
 When neither can run, the review fails on the limit that resets first if both
 hit theirs, and otherwise as a usage error naming why each failed. A diff past 200,000 characters gives it only the
@@ -1823,7 +1831,7 @@ before it lands, and put the score and its cost in its PR.
 quest eval add 570 --fix 704 --what "It counts every link as a culprit." \
   --defect src/cli/usage.ts:395-399 --defect src/cli/usage.ts:408-410
 quest eval add 503 --clean
-quest eval run                          # the size's pick and its shadow on every case
+quest eval run                          # the size's pick, its shadow, and its candidate on every case
 quest eval run --harness claude --effort high --pr 570
 ```
 
@@ -1835,7 +1843,7 @@ giving the reviewers the first round `quest review` gives, with the base's
 `AGENTS.md` and `CLAUDE.md` and this checkout's committed `REVIEW.md`. A
 finding on any line of a defect's places finds it; every finding on a clean PR
 is noise. It prints defects found and clean findings by severity for the pick,
-its shadow, and either, by size and by tier, each case's rounds, and the cost
+its shadow, the candidate, which sits out a case its model wrote, and either, by size and by tier, each case's rounds, and the cost
 token-max prices for the run's sessions.
 
 ## Audit cost and accuracy
@@ -1852,12 +1860,12 @@ moq-dev/quest, PRs updated and sessions active since 2026-11-06; costs (~$) esti
 #569 S medium merged: quest: finish model routing (quest/m0/model-routing/README)
   risk: medium, It changes which model reviews each PR size.
   implementer: Claude Code, claude-opus-5-5, unknown effort
-  review: Codex, gpt-6.1-sol, medium effort; round 1, score 10/10; rounds 1, findings 0: fixed 0, refuted 0, open 0
+  review: Codex, gpt-6.2-sol, medium effort; round 1, score 10/10; rounds 1, findings 0: fixed 0, refuted 0, open 0
   online review: review (OpenAI), not at the final head; 0 findings: 0 accepted, 0 declined, 0 unclassified, 0 unanswered
-  land fixes: codex, gpt-6.1-sol, medium effort
+  land fixes: codex, gpt-6.2-sol, medium effort
   sessions:
      implementing  local  claude  claude-opus-5-5   low     in 50, cache 36.2k written 1.1M read, out 6.1k, ~$0.63
-     reviewing     local  codex   gpt-6.1-sol       medium  in 14.7k, cache 0 written 39.8k read, out 421, ~$0.04
+     reviewing     local  codex   gpt-6.2-sol       medium  in 14.7k, cache 0 written 39.8k read, out 421, ~$0.04
      classifying   local  claude  claude-haiku-5-5  low     in 9.2k, cache 0 written 0 read, out 38, ~$0.00
   waits: gate-run 4m, pull 12m
   time: writing 9m (41%), understanding 6m (27%), testing 4m (18%), reporting 3m (14%), idle 2m
@@ -1885,7 +1893,7 @@ whole cost. Each session gets the record
 it, so a review's sub-agents count as reviewing. Each PR shows its `## Models` size, its risk tier and
 whether a reviewer raised it, and its implementers, and as `unread:` each Implementer line it cannot read; each reviewer the
 `quest review` record names, with its latest round and score and its tally of
-findings across every round, marked `shadow` for the shadow, where a merged PR whose last round left only low
+findings across every round, marked `shadow`, `second`, or `candidate` for those seats, where a merged PR whose last round left only low
 findings open counts them settled, since `/quest-review` fixes or refutes those
 before merge without another round; the land fixer's fixes; the later merged PRs
 whose `## Caused by` names it on a bullet that opens with its link, as
@@ -1909,10 +1917,11 @@ a bot resolving its own thread or a later review leaving it out, and as
 unanswered otherwise.
 
 Rollups follow: spend by size, role, harness, model, and effort; accuracy
-by size and implementer, which sums the tallies but the shadow's, and their
+by size and implementer, which sums the tallies but the shadow's and the
+candidate's, and their
 first rounds over the PRs whose every such tally records one, so it counts
 every finding the routed reviewers caught before merge, while the shadow's
-findings measure an effort step rather than the writer. Since a branch's tallies span every PR from it, only the
+and candidate's findings measure a reviewer rather than the writer. Since a branch's tallies span every PR from it, only the
 PR whose record holds its latest tally, by the most rounds and then the newest,
 counts them, and a record written before tallies
 counts as unreviewed. An `Implementer:` line's own size, as
@@ -1926,7 +1935,7 @@ and spend on a model no line names, such as a sub-agent on a smaller model,
 to the line that took the most. Spend that fits several lines goes to the
 first line when an implementing session spent it and to the later ones when an
 iterating one did. Local reviewers roll up the same way, by the
-PR's size and each reviewer's harness, model, effort, and shadow mark: PRs
+PR's size and each reviewer's harness, model, effort, and seat mark: PRs
 reviewed, tallies, first rounds, and reviewing cost per PR, where a session
 the record names, or its sub-agent, goes to that reviewer. Spend still left
 fitting several, such as a routed and a shadow reviewer at one effort whose
@@ -2144,7 +2153,7 @@ store reads them from GitHub itself.
 ### Time splits
 
 Before the sender builds a record, a cheap model, Claude Haiku at low effort,
-else Codex's `gpt-6.1-sol` at low, labels each step of the session's
+else Codex's `gpt-6.2-sol` at low, labels each step of the session's
 transcript it has not labeled yet: each tool call or message, with its time
 and a trimmed result, sorted into a fixed list of categories: `understanding`,
 `researching`, `writing`, `testing`, `environment`, `git`, `forge`,
@@ -2157,7 +2166,7 @@ whatever the model judges. Each part also gets one line on what went wrong,
 if anything did, cut to 300 characters. A reply that is not labels covering
 every step of its part passes the part to the next model. About one part in
 ten is labeled again by a stronger model, Claude Sonnet at medium else
-`gpt-6.1-sol` at medium, and the split reports the time the two labeled
+`gpt-6.2-sol` at medium, and the split reports the time the two labeled
 differently, so the classifier has a known error; a check no model could give
 leaves its part unchecked. The split's `usage` is what labeling took, by model,
 unusable replies included.

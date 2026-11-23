@@ -17,6 +17,7 @@ import {
 	located,
 	parseBase,
 	sameSeat,
+	seatRole,
 } from "./review";
 
 const HARNESSES: Record<Round["reviewer"], string> = { claude: "Claude Code", codex: "Codex" };
@@ -38,11 +39,11 @@ function code(text: string): string {
 const capitalized = (word: string) => word[0]!.toUpperCase() + word.slice(1);
 
 /**
- * A block's Reviewer line, ending in `, shadow` for the shadow, the size's pick one effort away, or `, second` for the
- * second reviewer a high-risk head gets.
+ * A block's Reviewer line, ending in `, shadow` for the shadow, the size's pick one effort away, `, second` for the
+ * second reviewer a high-risk head gets, or `, candidate` for the size's candidate.
  */
-const reviewerLine = (seat: Pick<Tally, "reviewer" | "model" | "effort" | "shadow" | "second">) =>
-	`- Reviewer: ${HARNESSES[seat.reviewer]}, ${seat.model}, ${seat.effort} effort${seat.shadow ? ", shadow" : seat.second ? ", second" : ""}`;
+const reviewerLine = (seat: Pick<Tally, "reviewer" | "model" | "effort" | "shadow" | "second" | "candidate">) =>
+	`- Reviewer: ${HARNESSES[seat.reviewer]}, ${seat.model}, ${seat.effort} effort${seatRole(seat) === null ? "" : `, ${seatRole(seat)}`}`;
 
 /** A tally's counts, as the record's `Rounds:` line and `quest usage` write them. */
 export interface Counts {
@@ -158,6 +159,8 @@ export interface ReviewSummary {
 	shadow: boolean;
 	/** Whether it is the second reviewer a high-risk head gets, on a model other than the pick's. */
 	second: boolean;
+	/** Whether it is the size's candidate, beside the pick on the same heads. */
+	candidate: boolean;
 	/** Its latest session, null when the record names none; its round, null when the latest run left it out. */
 	session: string | null;
 	round: number | null;
@@ -216,7 +219,7 @@ export function parseReview(body: string): ReviewSummary[] {
 			if (!found) throw new Error(`the ## Review record has no line matching ${pattern.source}`);
 			return found;
 		};
-		const reviewer = match(/^- Reviewer: (.+?), (\S+), (\S+) effort(?:(, shadow)|(, second))?\r?$/m);
+		const reviewer = match(/^- Reviewer: (.+?), (\S+), (\S+) effort(?:, (shadow|second|candidate))?\r?$/m);
 		const tally = parseCounts(text);
 		// A reviewer the latest run left out has its tally, and its session with no round once tallies name it.
 		const session =
@@ -235,8 +238,9 @@ export function parseReview(body: string): ReviewSummary[] {
 			harness: reviewer[1]!,
 			model: reviewer[2]!,
 			effort: reviewer[3]!,
-			shadow: reviewer[4] !== undefined,
-			second: reviewer[5] !== undefined,
+			shadow: reviewer[4] === "shadow",
+			second: reviewer[4] === "second",
+			candidate: reviewer[4] === "candidate",
 			session: session && session[2]!,
 			round: session?.[3] === undefined ? null : Number(session[3]),
 			score: score ? Number(score[1]) : null,

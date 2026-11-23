@@ -16,7 +16,8 @@ export interface Model {
 /** The size of a PR with neither a quest nor `--size`. */
 export const DEFAULT_SIZE: Size = "M";
 
-const sol = (effort: string): Model => ({ harness: "codex", model: "gpt-6.1-sol", effort });
+const sol = (effort: string): Model => ({ harness: "codex", model: "gpt-6.2-sol", effort });
+const astra = (effort: string): Model => ({ harness: "codex", model: "gpt-6.2-astra", effort });
 const opus = (effort: string): Model => ({ harness: "claude", model: "claude-opus-5-5", effort });
 const sonnet = (effort: string): Model => ({ harness: "claude", model: "claude-sonnet-5-5", effort });
 const fable = (effort: string): Model => ({ harness: "claude", model: "claude-fable-5-2", effort });
@@ -44,15 +45,24 @@ export const WRITERS: Record<Size, readonly Model[]> = {
  * writer's reviews it, so Claude reviews what Sol changed last, and one that
  * cannot run passes the review to the next. Sonnet comes last so Opus-written
  * work still has a reviewer when Sol is out; at low it found none of the eval
- * set's M defects, so it runs no lower than medium.
+ * set's M defects, so it runs no lower than medium. XL starts on Astra, the
+ * vendor's frontier model, at high rather than xhigh.
  */
 export const REVIEWERS: Record<Size, readonly Model[]> = {
 	XS: [sol("medium"), opus("low"), sonnet("medium")],
 	S: [sol("medium"), opus("low"), sonnet("medium")],
 	M: [sol("high"), opus("medium"), sonnet("medium")],
 	L: [sol("xhigh"), opus("high"), sonnet("high")],
-	XL: [sol("xhigh"), opus("xhigh"), sonnet("high")],
+	XL: [astra("high"), opus("xhigh"), sonnet("high")],
 };
+
+/**
+ * Each size's candidate reviewer: beside the pick and its shadow on the same
+ * heads, so its findings pair with theirs on every PR, until the readout in
+ * quest/m0/routing-evidence/README.md settles it. A branch whose latest writer
+ * is its model gets none. XL has none, since Fable would write its quests.
+ */
+export const CANDIDATES: Partial<Record<Size, Model>> = { L: fable("medium") };
 
 /** One side of the writer A/B: A runs the size's own first writer, B the alternative. */
 export type Arm = "A" | "B";
