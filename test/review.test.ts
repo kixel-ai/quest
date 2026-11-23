@@ -1069,6 +1069,8 @@ fakes("claude reviews read-only with the base's instructions, then reports in th
 		// No settings file, so not even the user's own allow rules apply.
 		expect(at("--setting-sources")).toBe("");
 		expect(at("--tools")).toBe("Read,Grep,Glob,Bash,Agent");
+		// No other session steers a round, though no settings file loads.
+		expect(at("--settings")).toBe('{"crossSessionInbound":"refuse"}');
 		expect(at("--model")).toBe("opus");
 		expect(at("--effort")).toBe("low");
 		expect(at("--append-system-prompt")).toContain("BASE-ROOT rule");
