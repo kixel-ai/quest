@@ -143,6 +143,58 @@ three hosts' saved review rounds:
   115 at S, and 292 at M. At the week's rate XS reaches it about 11-26, S
   about 12-01, and M about 2027-01-03, so the 12-01 readout decides XS and
   S and asks the maintainer whether M runs to January.
+- Decided 2026-11-22 (maintainer, `/quest-plan`, from an audit of the
+  1,082 PRs merged 11-14 to 11-22 in the three repositories, every cell
+  charted by size, tier, writer, and arm), superseding the M question
+  above:
+  - Goal? ✅ Every writer and reviewer choice, Fable included, is set from
+    measured quality per dollar, with reviewer and risk-tier spend in scope
+    too (rejected: Fable only; without the reviewer seats).
+  - Where? ✅ Table changes land in `src/cli/models.ts` now, since agents
+    route through it until kixel.quest's
+    [runner CLI tools](https://github.com/kixel-ai/kixel.quest/blob/main/quest/m1/runner-cli.md)
+    port it; record fixes are planned in kixel.quest, where records and
+    eval move under its 2026-11-21 decision (rejected: all here, building
+    what the port strips; all in kixel.quest, waiting weeks for the port).
+  - M ends its arm on Opus high, L gains a Fable arm, and XL writes on
+    Fable: [writer table](/quest/m0/writer-table.md).
+  - Fable reviews L beside the pick, and Astra picks for XL:
+    [reviewer table](/quest/m0/reviewer-table.md).
+  - Cost metric? ✅ Mean spend per merged PR, every session's, plus the
+    spend of later PRs that name it under `## Caused by`, with a bootstrap
+    95% interval, the median reported beside it (rejected: the median
+    alone). At M the median ranked Opus medium cheaper ($1.55 against
+    $5.41) while the mean ranked it dearer ($8.45 against $7.00, plus $1.89
+    against $0.15 of fixes), since medium's long tail of rounds is the
+    rework these experiments measure. Use it from the 12-01 readout on.
+  - Pullfrog? ✅ Replace it with an inline seat once one matches it per
+    dollar (rejected: replace it now; keep it as a permanent seat). It
+    runs Opus 5.5 at the effort its router picks per PR on the
+    maintainer's Claude login, and each run's log prints its model,
+    effort, and a token and cost table. Behind local review it still
+    found something on 147 of 272 high-tier and 148 of 549 medium-tier
+    merged PRs, 93% of its findings accepted, most likely for its model
+    differing from the mostly-Sol pick. Once moq-dev/quest#819's second
+    seat runs on high heads (Opus xhigh, or Sonnet high when Opus wrote
+    the branch, never the writer's model), compare what Pullfrog still
+    finds behind it per dollar, and recommend retiring it once
+    [review seats](/quest/m0/review-seats.md)' one, two, or three vendor
+    seats match it, with its tally.
+  - Replay bench? ✅ Not yet (rejected: build it in kixel.quest now). It
+    would rerun merged L and XL quests from their base with each writer,
+    paired, deciding in days for about $6k a comparison what a live arm
+    needs about 100 PRs an arm for.
+  - XL? ✅ No splitting rule: the maintainer judged XL quests harder, not
+    bigger (rejected: split XL at plan time; measure XL against split
+    work first). Tally XL under Fable against this audit's baseline: 11
+    merged, 82% later culprits, 7.5 rounds. That baseline is not all Opus:
+    the maintainer has implemented and reviewed XL quests by hand with
+    Fable, and those sessions' `Implementer:` lines may say Opus or
+    `unknown`, so read each XL PR's sessions for its model before crediting
+    either.
+  - Pace: report each Fable arm's fall-throughs, quests that started on
+    Fable but fell to Opus at its usage limit. When they exceed a fifth of
+    the L arm's quests, recommend running a quarter of L on Fable instead.
 
 Baseline from the 2026-11-11 audit, at API list price:
 

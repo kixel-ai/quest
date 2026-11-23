@@ -82,7 +82,7 @@ Wait on no other PR, such as a draft or a skipped one, and read none between rou
 A usage or rate limit is waited out until its reset; it never ends the run.
 
 Finish once nothing is running, no queued merge would make a quest ready, no PR waited on above still has checks running, every PR left needs the user or a later round, and every wait in scope is decided, skipped, or left to an outside party.
-Then run `/quest-plan` on the run's follow-ups, each in a checkout of the repository whose quest tree owns it: problems it surfaced that no quest or open PR owns, such as a blocker agents hit, and the follow-ups kept in each of this run's own merge picks for another repository's quest tree, landed or not, unless the user withdrew the pick.
+Then plan the run's follow-ups as `quest context` describes, such as a blocker agents hit, including those kept in each of this run's own merge picks for another repository's quest tree, landed or not, unless the user withdrew the pick.
 Write the final summary, naming those plan PRs and listing the waits settled, cleared, or deleted and each still held with who acts and its check's result, so a fresh session can act on it, with each open decision's options beside your recommendation.
 
 Besides the guide's controls, answer "decisions": ask every pending question now, in one batch, such as before the user steps away; the loop continues after.

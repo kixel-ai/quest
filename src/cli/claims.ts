@@ -139,7 +139,7 @@ export async function upstream(root: string, remote: Remote, deps: ClaimDependen
 }
 
 /** The branch `remote`'s HEAD names, as `git ls-remote --symref` reports it. */
-function defaultBranch(root: string, remote: string): string {
+export function defaultBranch(root: string, remote: string): string {
 	const match = /^ref: refs\/heads\/(\S+)\tHEAD$/m.exec(git(root, ["ls-remote", "--symref", remote, "HEAD"]));
 	if (match === null) throw new Error(`${remote} names no default branch`);
 	return match[1]!;
