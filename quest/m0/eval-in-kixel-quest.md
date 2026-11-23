@@ -19,8 +19,8 @@ too, once Kixel Quest stores eval sets (rejected: moq only; drop the
 follow-up). Confirmed 2026-11-20 (maintainer, `/quest-plan` after a
 `/quest-run` in moq-dev/moq).
 
-- Talk to Kixel Quest as `quest records` does, with its record token; a
-  missing token fails `eval` with how to get one. No local-file fallback: this
+- Talk to Kixel Quest with the [`quest login`](/quest/m0/telemetry/login.md)
+  token; a missing token fails `eval` naming `quest login`. No local-file fallback: this
   tree's Goal allows depending on Kixel Quest.
 - Key each set by the repository whose escape a case records, and tag each
   defect, not its case, with what added it: the audit's name and run date, or

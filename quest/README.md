@@ -2,13 +2,33 @@
 
 ## Goal
 
-Make Quest a generic way for any repository and user to plan and
-coordinate work through versioned Markdown, with a standalone CLI.
+Make Quest the public binary through which any repository and user plan and
+coordinate work through versioned Markdown, posting every session's
+telemetry to kixel.quest.
 
-Non-goal: the server-coupled factory tooling and personal workflow, which
-kixel-ai/kixel.quest and kixel-ai/dotfiles take over.
+Non-goals: storage, dashboards, and the merge queue, which
+kixel-ai/kixel.quest owns; repository- or user-level model settings.
 
 ## Plan
+
+Decided 2026-11-22 (maintainer, `/quest-plan` in
+[kixel-ai/kixel.quest#104](https://github.com/kixel-ai/kixel.quest/pull/104)),
+reversing both decisions below on where tooling lives: ✅ "`quest` is public.
+… quest is the public binary that contributors and maintainers run that
+posts metrics to kixel.quest, which is a public website and dashboard. We're
+focusing on metrics first but the idea is to move spawning/workers/etc to
+kixel.quest eventually" (rejected: a `kixel-quest` binary; a generic Quest
+with no kixel.quest references). `records`, `eval`, `agent`, `worktree`,
+`gate`, and model routing stay here, and [telemetry](/quest/m0/telemetry/README.md)
+plans the posts. ✅ "Leave quest public and don't make it too extensible.
+Like we should just ship the allowed models per effort level; don't fuck
+around with letting repos configure any special settings": Quest ships one
+order of models and efforts per quest size and nobody configures it. Claude,
+Codex, then Gemini write; Codex, Gemini, then Claude review; "T-shirt size
+determines model/effort, while risk determines number of reviewers"
+(rejected: a user ranking within shipped lists, which deletes
+`quest/m1/model-config.md`; lists per reasoning effort; Claude-only
+writers).
 
 Decided 2026-11-21 (maintainer, `/quest-plan` in
 [kixel-ai/kixel.quest#85](https://github.com/kixel-ai/kixel.quest/pull/85)),
