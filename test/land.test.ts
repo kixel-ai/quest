@@ -1560,6 +1560,9 @@ ${requeueScript}
 `,
 			{ mode: 0o755 },
 		);
+		// A session's own proxy settings are not the wrapper's.
+		vi.stubEnv("ANTHROPIC_BASE_URL", undefined);
+		vi.stubEnv("ANTHROPIC_API_KEY", undefined);
 		await expect(fix(dir, log, [1], agent)).rejects.toThrow("fix needs ANTHROPIC_BASE_URL and ANTHROPIC_API_KEY");
 		vi.stubEnv("ANTHROPIC_BASE_URL", "http://proxy.test");
 		vi.stubEnv("ANTHROPIC_API_KEY", "proxy-client");
@@ -1568,6 +1571,12 @@ ${requeueScript}
 		const flags = argv();
 		expect(flags.slice(0, 4)).toEqual(["-p", "--bare", "--setting-sources", ""]);
 		expect(flags).toContain("--strict-mcp-config");
+		expect(JSON.parse(flags[flags.indexOf("--settings") + 1]!)).toEqual({
+			enabledPlugins: { "cc-plugin-agents-md@builtin": false },
+		});
+		// The prompt ranks above the data as the system prompt, and stdin holds only the data.
+		expect(readFileSync(join(dir, "argv.txt"), "utf8")).toContain(`--append-system-prompt\n${fixerPrompt}`);
+		expect(readFileSync(join(dir, "prompt.txt"), "utf8")).toMatch(/^Failure log: /);
 		expect(flags).not.toContain("--model");
 		expect(flags[flags.indexOf("--effort") + 1]).toBe("medium");
 		// A daemon's --fixer-effort reaches it as --effort, and --model passes through.
@@ -1721,6 +1730,12 @@ ${requeueScript}
 		expect((await run(forged)).model).toBe("unknown");
 		expect((await run(forged, "named-model")).model).toBe("named-model");
 		expect((await run(`echo '${init("bad model\\n")}'`)).model).toBe("unknown");
+		// A plugin that would feed the agent the checkout's AGENTS.md stops the run.
+		await expect(
+			run(
+				`echo '{"type":"system","subtype":"init","model":"m","plugins":[{"source":"cc-plugin-agents-md@builtin"}]}'`,
+			),
+		).rejects.toThrow("injects the checkout's AGENTS.md");
 	});
 
 	test("rejects mixing individually approved protected files", async () => {

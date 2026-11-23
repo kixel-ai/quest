@@ -1486,9 +1486,10 @@ claude	claude-opus-5-5	medium
 ```
 
 `--writer` prints the size's entry for that model, or else its entry at the
-nearest size that lists it, the larger on a tie; a model no list names, such
-as Codex's, is an error, and the iterate takes its size's first entry. An iterate on a PR whose first `Implementer:` line names an arm runs
-that arm's entry at the PR's size instead, as `quest models L --arm B`
+nearest size that lists it, the larger on a tie. A model no list names, such
+as Codex's, is an error, and the coordinator then starts the iterate on its
+size's first entry that can run. An iterate on a PR whose first
+`Implementer:` line names an arm runs that arm's entry at the PR's size instead, as `quest models L --arm B`
 prints, and records it as `(iterate, XS, arm B)`. For an arm its size no
 longer runs, which `--arm` refuses, it runs the model and effort that line
 records. `--json` prints an array of `{harness, model, effort}` objects. The

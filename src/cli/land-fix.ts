@@ -3,6 +3,7 @@
 import { spawn, spawnSync } from "node:child_process";
 import { constants, closeSync, existsSync, fstatSync, openSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
+import { StringDecoder } from "node:string_decoder";
 import prompt from "../../assets/land-fix.md";
 import { discoveryEnv } from "./git";
 import { programEnvironment, requireProgram } from "./program";
@@ -13,20 +14,26 @@ export class FixerAgentError extends Error {
 	}
 }
 
+/** Claude Code's built-in plugin that injects the checkout's AGENTS.md as instructions, which the fixer must not load. */
+const AGENTS_PLUGIN = "cc-plugin-agents-md@builtin";
+
 /**
- * The model Claude Code's `init` event names, read from its `stream-json` stdout. Only system events
- * before the first conversation event count: anything the PRs' code prints arrives inside those.
+ * The model and plugins Claude Code's `init` event names, read from its `stream-json` stdout. Only system
+ * events before the first conversation event count: anything the PRs' code prints arrives inside those.
  */
 class Init {
 	model?: string;
+	plugins: string[] = [];
+	private decoder = new StringDecoder("utf8");
 	private carry = "";
 	private done = false;
 
-	read(text: string): void {
+	read(chunk: Buffer): void {
 		if (this.done) return;
-		const lines = (this.carry + text).split("\n");
-		// A line that never ends is no event; keep only enough of it to finish an init line.
-		this.carry = lines.pop()!.slice(-100_000);
+		const lines = (this.carry + this.decoder.write(chunk)).split("\n");
+		this.carry = lines.pop()!;
+		// An init line runs to a few kilobytes; one this long is no event, and a truncated one would not parse.
+		if (this.carry.length > 1_000_000) this.done = true;
 		for (const line of lines) {
 			let event: unknown;
 			try {
@@ -38,9 +45,13 @@ class Init {
 				this.done = true;
 				return;
 			}
-			const { subtype, model } = event as { subtype?: unknown; model?: unknown };
+			const { subtype, model, plugins } = event as { subtype?: unknown; model?: unknown; plugins?: unknown };
 			if (subtype !== "init") continue;
 			if (typeof model === "string" && /^[a-zA-Z0-9._/-]{1,100}$/.test(model)) this.model = model;
+			if (Array.isArray(plugins))
+				this.plugins = plugins.flatMap((plugin) =>
+					plugin && typeof plugin.source === "string" ? [plugin.source as string] : [],
+				);
 			this.done = true;
 			return;
 		}
@@ -307,12 +318,17 @@ export async function fix(
 		GIT_TERMINAL_PROMPT: "0",
 	};
 	// --bare and no setting sources load no CLAUDE.md, hook, plugin, or settings from HOME or the checkout,
-	// and --strict-mcp-config no MCP server, so the base's tree reaches the agent only as files it reads.
+	// --strict-mcp-config no MCP server, and the disabled built-in no AGENTS.md, so the base's tree reaches
+	// the agent only as files it reads. The prompt goes in the system prompt, above the data in rank.
 	const argv = args ?? [
 		"-p",
 		"--bare",
 		"--setting-sources",
 		"",
+		"--settings",
+		JSON.stringify({ enabledPlugins: { [AGENTS_PLUGIN]: false } }),
+		"--append-system-prompt",
+		prompt,
 		"--strict-mcp-config",
 		"--disable-slash-commands",
 		"--no-session-persistence",
@@ -335,15 +351,23 @@ export async function fix(
 		const child = spawn(program, argv, { cwd: root, env, stdio: ["pipe", "pipe", "pipe"] });
 		child.stdout.pipe(process.stdout, { end: false });
 		child.stderr.pipe(process.stderr, { end: false });
+		let refused: Error | undefined;
 		child.stdout.on("data", (chunk: Buffer) => {
-			init.read(chunk.toString("utf8"));
+			init.read(chunk);
+			// Fail loud rather than let a renamed or re-enabled built-in feed the agent the checkout's instructions.
+			if (!refused && init.plugins.some((plugin) => /agents-md/i.test(plugin))) {
+				refused = new Error("fixer agent loaded a plugin that injects the checkout's AGENTS.md");
+				child.kill("SIGTERM");
+			}
 		});
 		child.once("error", reject);
 		child.stdin.on("error", () => {});
-		child.stdin.end(
-			`${prompt}\n\nFailure log: ${JSON.stringify(log)}\nPRs:\n${prs.join("\n")}\n${flaky.length ? `Known flaky tests: ${JSON.stringify(flaky)}\n` : ""}`,
+		const data = `Failure log: ${JSON.stringify(log)}\nPRs:\n${prs.join("\n")}\n${flaky.length ? `Known flaky tests: ${JSON.stringify(flaky)}\n` : ""}`;
+		// A replaced command has no system prompt of its own, so it reads the prompt first.
+		child.stdin.end(args ? `${prompt}\n\n${data}` : data);
+		child.once("close", (code) =>
+			refused ? reject(refused) : code === 0 ? done() : reject(new FixerAgentError(code ?? 1)),
 		);
-		child.once("close", (code) => (code === 0 ? done() : reject(new FixerAgentError(code ?? 1))));
 	});
 	const results = parseFixResult(readFixResult(root), numbers, flaky);
 	const index = argv.findIndex((arg) => arg === "-m" || arg === "--model");
