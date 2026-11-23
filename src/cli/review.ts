@@ -1079,7 +1079,8 @@ async function prepare(
 	const withCredentials = { ...connected, ...pick(env, credentials) };
 	const rejected = `${harness} rejected ${names(credentials)}${through}; replace it, or run \`${reviewer.login}\``;
 	if (routes.length > 0) {
-		if (!reviewer.routeUnchecked && !(await loggedIn(withCredentials))) throw new ReviewerUnavailableError(harness, "logged out", loggedOut);
+		if (!reviewer.routeUnchecked && !(await loggedIn(withCredentials)))
+			throw new ReviewerUnavailableError(harness, "logged out", loggedOut);
 		return {
 			harness,
 			reviewer,
