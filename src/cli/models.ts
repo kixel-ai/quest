@@ -59,10 +59,11 @@ export const REVIEWERS: Record<Size, readonly Model[]> = {
 };
 
 /**
- * Each size's candidate reviewer: beside the pick and its shadow on the same
- * heads, so its findings pair with theirs on every PR, until the readout in
- * quest/m0/routing-evidence/README.md settles it. A branch whose latest writer
- * is its model gets none. XL has none, since Fable would write its quests.
+ * Each size's candidate reviewer, an observer on trial: it reviews a branch's
+ * first run beside the pick, and its findings are recorded for the readout in
+ * quest/m0/routing-evidence/README.md, never answered, counted, or used to raise
+ * the risk. A branch whose latest writer is its model gets none. XL has none,
+ * since Fable writes its quests.
  */
 export const CANDIDATES: Partial<Record<Size, Model>> = { L: fable("medium") };
 

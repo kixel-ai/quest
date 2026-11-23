@@ -378,12 +378,23 @@ describe("PR records", () => {
 		]);
 		// An open finding keeps the head short; once no reviewer reports one, it is named in full.
 		expect(body).not.toContain("b".repeat(40));
-		// Claude's left-out tally still holds an open finding, which keeps it short too.
+		// Codex's tally still holds an open finding, which keeps it short too.
 		const clean = [{ ...round, findings: [] }, second];
 		expect(reviewRecord({ ...at, rounds: clean, tallies, risk, skipped: [] })).not.toContain("b".repeat(40));
-		const settledAll = [tally("codex", 3, { high: 1, medium: 1, low: 2 }, 3, 1), tallies[1]!];
-		expect(reviewRecord({ ...at, rounds: clean, tallies: settledAll, risk, skipped: [] })).toContain(
-			`- Head: ${"b".repeat(40)}\n`,
+		// The candidate's findings are never answered, so its open ones do not, and its failure's detail stays out.
+		const settledAll = [tally("codex", 3, { high: 1, medium: 1, low: 2 }, 3, 1), tallies[1]!, tallies[2]!];
+		const passed = reviewRecord({
+			...at,
+			rounds: clean,
+			tallies: settledAll,
+			risk,
+			skipped: [{ ...SKIP, detail: "provider said: secret" }],
+		});
+		expect(passed).toContain(`- Head: ${"b".repeat(40)}\n`);
+		expect(passed).not.toContain("secret");
+		const observed = { ...round, reviewer: "claude" as const, candidate: true as const };
+		expect(reviewRecord({ ...at, rounds: [observed], tallies, risk, skipped: [] })).toContain(
+			"\n- Findings, recorded for comparison and never answered:\n",
 		);
 		expect(fixes(body)).toEqual(["codex, gpt-6.2-sol, medium effort"]);
 		// The reviewer sessions read even from a record whose other lines this version cannot parse.

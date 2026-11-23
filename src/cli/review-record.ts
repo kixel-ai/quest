@@ -94,8 +94,11 @@ function classifiedBy({ by }: Risk["classified"]): string {
  */
 export function reviewRecord({ rounds, tallies, risk, skipped, head, base }: Reviewed): string {
 	// A reviewer the run left out may still hold open findings, which keep the head from passing too.
+	// The candidate's findings are recorded, never answered, so they hold back nothing.
+	const answered = (seat: { candidate?: true }) => !seat.candidate;
 	const clean =
-		rounds.every((round) => round.findings.length === 0) && tallies.every((tally) => counted(tally).open === 0);
+		rounds.filter(answered).every((round) => round.findings.length === 0) &&
+		tallies.filter(answered).every((tally) => counted(tally).open === 0);
 	const lines = [
 		MARK,
 		"",
@@ -124,6 +127,7 @@ export function reviewRecord({ rounds, tallies, risk, skipped, head, base }: Rev
 		if (tally === undefined) throw new Error(`no tally for ${round.reviewer}'s round`);
 		lines.push(`- Rounds: ${tally.rounds}; ${findingsText(counted(tally))}`);
 		if (round.findings.length === 0) lines.push("- Findings: none");
+		else if (round.candidate) lines.push("- Findings, recorded for comparison and never answered:");
 		else lines.push("- Findings, open until the next round settles them:");
 		for (const finding of round.findings)
 			lines.push(`  - ${capitalized(finding.severity)}, ${code(located(finding))}: ${code(finding.title)}`);
@@ -159,7 +163,7 @@ export interface ReviewSummary {
 	shadow: boolean;
 	/** Whether it is the second reviewer a high-risk head gets, on a model other than the pick's. */
 	second: boolean;
-	/** Whether it is the size's candidate, beside the pick on the same heads. */
+	/** Whether it is the size's candidate, which observed the branch's first run. */
 	candidate: boolean;
 	/** Its latest session, null when the record names none; its round, null when the latest run left it out. */
 	session: string | null;

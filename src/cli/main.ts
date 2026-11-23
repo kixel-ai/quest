@@ -1706,12 +1706,11 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"no longer that step away; its findings are numbered and settled like any reviewer's, its session carries " +
 				"over to the new shadow, and a pick with no shadow seats one at its own effort while the old " +
 				"shadow still has findings. " +
-				`Beside them runs the size's candidate, a model on trial whose findings pair with the pick's: ${candidates}. ` +
-				"It runs as the shadow does, on the branch's first run and then while it has findings to settle or once the " +
-				"size's candidate changed, but none runs when its model is avoided. One that fails for any reason is passed over " +
-				"while the others finish, named as skipped, never passing the round; when it fails or is avoided, its open " +
-				"findings are dropped, as --new drops them, since no other model may settle them, and it never runs on that " +
-				"branch again. " +
+				`On the branch's first run, the size's candidate, a model on trial, observes beside them: ${candidates}. ` +
+				"It runs once, in a new session, unless its model is avoided or is the pick's; its findings are listed " +
+				"unnumbered and recorded for comparison, never answered with --responses, counted toward `next`, or used to " +
+				"raise the risk. One that fails for any reason is passed over while the others finish, named as skipped, and " +
+				"never retried. " +
 				"--exclude-model names each model to avoid; without it, the " +
 				"latest writer is avoided: the model the last Implementer line names in the `## Models` record of the body of the branch's open PR. " +
 				"When it names none or an `unknown` model, " +
@@ -1795,7 +1794,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"effort, followed by shadow for the shadow, second for the second reviewer, or candidate for the candidate, session, round, an " +
 				"unchanged line for a repeated round, a usage line per turn (input tokens, the " +
 				"part read from the prompt cache, and output), a score from 0 to 10 for how ready the head is to land with " +
-				"its one-sentence rationale, a raised line with the tier and reason when it raised the classifier's, the finding count, each finding by its number, then the last round's findings with " +
+				"its one-sentence rationale, a raised line with the tier and reason when it raised the classifier's, the finding count, each finding by its number, or after `-` for the candidate, then the last round's findings with " +
 				"their numbers and dispositions; then the `record` line below and a last `next` line naming the author's next step: " +
 				"`next finish` when every finding is low severity, to fix or refute them without another round, " +
 				"`next checkpoint` when a reviewer's every third round reports other findings, to compare the current approach " +
@@ -1957,7 +1956,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"rather than passing the case to the next, so the score measures the reviewers it names. Cases run one at a time, their reviewers " +
 				"at once, and the first failure stops the run and fails it.\n\n" +
 				"Prints the set's counts and rules, a line per seat (pick, shadow, candidate, and, without --harness, either: what " +
-				"the case's seats found together, as a run of them all finds it) with defects found and clean findings by severity, the same by size and tier, " +
+				"the case's seats but the candidate found together, as a run of them all finds it) with defects found and clean findings by severity, the same by size and tier, " +
 				"each case's rounds with score, defects found, findings, tokens the CLI reported, and session, and the " +
 				"run's cost at API list price as token-max prices its sessions, or unpriced without token-max. --json prints " +
 				"one object. Exits as quest review does: 2 for invalid arguments or a set that cannot be read, 3 for a " +

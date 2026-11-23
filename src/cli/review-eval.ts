@@ -529,8 +529,9 @@ function count(tally: Tally, entry: EvalCase, found: number[], findings: Finding
 }
 
 /**
- * The run's tallies: each seat in all, and by size and tier, with `either` for what a run of the case's seats found
- * together when `combined`, every case counting, as one whose pick has no shadow.
+ * The run's tallies: each seat in all, and by size and tier, with `either` for what a run of the case's seats but the
+ * candidate, an observer whose findings no one acts on, found together when `combined`, every case counting, as one
+ * whose pick has no shadow.
  */
 export function tallies(scored: Scored[], combined: boolean): Pick<EvalReport, "totals" | "by"> {
 	const totals: Record<string, Tally> = {};
@@ -547,9 +548,10 @@ export function tallies(scored: Scored[], combined: boolean): Pick<EvalReport, "
 		for (const seat of seats) add(seatRole(seat) ?? "pick", entry, seat.found, seat.findings);
 		// A case whose pick has no shadow, as one at low effort, still counts toward what the run found.
 		if (combined) {
-			const found = [...new Set(seats.flatMap((seat) => seat.found))];
+			const acted = seats.filter((seat) => !seat.candidate);
+			const found = [...new Set(acted.flatMap((seat) => seat.found))];
 			// Every seat's findings on a clean PR, as a run of them all raises them; the same defect twice is still one.
-			add("either", entry, found, entry.clean ? seats.flatMap((seat) => seat.findings) : []);
+			add("either", entry, found, entry.clean ? acted.flatMap((seat) => seat.findings) : []);
 		}
 	}
 	return { totals, by };

@@ -182,7 +182,7 @@ export interface ReviewerRow {
 	shadow: boolean;
 	/** The second reviewer a high-risk head gets, whose findings show what the second review catches. */
 	second: boolean;
-	/** The size's candidate, whose findings pair with the pick's on the same heads. */
+	/** The size's candidate, whose findings on a branch's first run are recorded beside the pick's. */
 	candidate: boolean;
 	/** PRs whose record tallies this reviewer, each branch counted once, and its findings across every round. */
 	reviewed: number;
@@ -540,16 +540,18 @@ const sized = (value: string | null | undefined): Size | null =>
 /**
  * A merged PR's reviews with its last round's open findings settled when all of them are low, since the review
  * rule fixes or refutes those before merge without another round; nothing records which, so they count as settled.
+ * The candidate's findings are never answered, so they neither stop this nor settle.
  */
 function settledOnMerge(reviews: ReviewSummary[], merged: boolean): ReviewSummary[] {
 	const settles =
 		merged &&
 		reviews.every(
-			({ tally, open }) => open.high === 0 && open.medium === 0 && (tally === null || tally.open === open.low),
+			({ tally, open, candidate }) =>
+				candidate || (open.high === 0 && open.medium === 0 && (tally === null || tally.open === open.low)),
 		);
 	if (!settles) return reviews;
 	return reviews.map((review) =>
-		review.tally === null
+		review.tally === null || review.candidate
 			? review
 			: { ...review, tally: { ...review.tally, settled: review.tally.settled + review.tally.open, open: 0 } },
 	);

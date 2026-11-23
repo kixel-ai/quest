@@ -359,65 +359,54 @@ fakes("a model at its usage limit passes the round to its CLI's next model, whos
 });
 
 fakes(
-	"an L PR seats the candidate beside the pick, unless it wrote the branch, and passes over one that cannot run",
+	"an L PR's candidate observes the first run once, unnumbered and never answered, unless it wrote the branch",
 	async () => {
 		const s = setup(null);
 		const label = (r: Round) => `${r.model} ${r.effort}${seatRole(r) ? ` ${seatRole(r)}` : ""}`;
-		const first = await quest("--root", s.repo, "review", ...OPUS_WROTE, "--size", "L", "--json");
+		// Only Fable, at medium, would raise the tier, and an observer raises nothing.
+		vi.stubEnv("FAKE_RAISE", "high@medium");
+		const first = await quest("--root", s.repo, "review", ...OPUS_WROTE, "--size", "L");
 		expect(first.code, first.stderr).toBe(0);
-		expect(JSON.parse(first.stdout).rounds.map(label)).toEqual([
-			"gpt-6.2-sol xhigh",
-			"gpt-6.2-sol high shadow",
-			"claude-fable-5-2 medium candidate",
-		]);
+		expect(first.stdout).toContain("\nreviewer claude claude-fable-5-2 medium candidate\n");
+		// The pick's and shadow's findings are numbered; the candidate's is listed without a number.
+		expect(first.stdout).toMatch(/\n1\. high .*\n[\s\S]*\n2\. high [\s\S]*\n- high /);
+		expect(first.stdout).not.toContain("\n3. ");
+		expect(first.stdout).not.toContain("\nraised ");
+		expect(first.stdout).toMatch(/\nnext respond: /);
+		vi.stubEnv("FAKE_RAISE", undefined);
 
-		// Fable at its limit is passed over alone: the others' rounds stand without a rerun, and its open finding is
-		// dropped, as no other model's round may settle it.
-		vi.stubEnv("FAKE_FAILS", "claude-fable-5-2");
-		vi.stubEnv("FAKE_LIMITED", "reset");
-		write(s.repo, ".tmp/responses.md", "1. Fixed.\n2. Fixed.\n3. Fixed.\n");
+		// The next run answers only the numbered findings, and the candidate never runs again.
+		write(s.repo, ".tmp/responses.md", "1. Fixed.\n2. Fixed.\n");
 		const responses = join(s.repo, ".tmp", "responses.md");
 		write(s.repo, "src/lib.ts", "export const x = 3;\n");
 		git(s.repo, "commit", "-qam", "fix");
-		const before = s.calls().length;
 		const args = [...OPUS_WROTE, "--size", "L", "--responses", responses, "--json"];
-		const limited = await quest("--root", s.repo, "review", ...args);
-		expect(limited.code, limited.stderr).toBe(0);
-		const { rounds, skipped, tallies } = JSON.parse(limited.stdout);
-		expect(skipped.map((each: Skip) => `${each.model} ${each.effort}`)).toEqual(["claude-fable-5-2 medium"]);
+		const next = await quest("--root", s.repo, "review", ...args);
+		expect(next.code, next.stderr).toBe(0);
+		const { rounds, tallies, risk } = JSON.parse(next.stdout);
 		expect(rounds.map(label)).toEqual(["gpt-6.2-sol xhigh", "gpt-6.2-sol high shadow"]);
 		expect(rounds.map((r: Round) => r.earlier?.findings.map((f) => f.number))).toEqual([[1], [2]]);
-		const sol = s
-			.calls()
-			.slice(before)
-			.filter((c) => c.argv.includes("gpt-6.2-sol") && effortOf(c) !== null);
-		expect(sol).toHaveLength(2);
+		expect(risk.tier).not.toBe("high");
+		// Its finding stays recorded, never settled.
 		const tried = tallies.find((each: Tally) => each.candidate);
-		expect([tried.model, tried.findings.high, tried.rounds]).toEqual(["claude-fable-5-2", 0, 1]);
-		vi.stubEnv("FAKE_FAILS", undefined);
-		vi.stubEnv("FAKE_LIMITED", undefined);
+		expect([tried.model, tried.rounds, tried.findings.high, tried.fixed]).toEqual(["claude-fable-5-2", 1, 1, 0]);
 
-		// Once back, Fable stays out: its dropped session keeps its rounds, and owes nothing.
-		write(s.repo, ".tmp/responses.md", "1. Fixed.\n2. Fixed.\n");
-		write(s.repo, "src/lib.ts", "export const x = 4;\n");
-		git(s.repo, "commit", "-qam", "again");
-		const back = await quest("--root", s.repo, "review", ...args);
-		expect(back.code, back.stderr).toBe(0);
-		expect(JSON.parse(back.stdout).rounds.map(label)).toEqual(["gpt-6.2-sol xhigh", "gpt-6.2-sol high shadow"]);
-		const state = JSON.parse(readFileSync(sessionFile(join(s.repo, ".git"), "feature"), "utf8"));
-		expect(state.sessions.filter((each: { dropped?: true }) => each.dropped)).toHaveLength(1);
-
-		// A candidate's raise of the head's tier stands on that head even once it is passed over.
+		// A candidate that fails for any reason is a skip that never retries, its error kept out of the record.
 		const w = setup(null);
-		vi.stubEnv("FAKE_RAISE", "high@medium");
-		const raised = await quest("--root", w.repo, "review", ...OPUS_WROTE, "--size", "L", "--json");
-		expect(raised.code, raised.stderr).toBe(0);
-		expect(JSON.parse(raised.stdout).risk.tier).toBe("high");
-		vi.stubEnv("FAKE_RAISE", undefined);
+		vi.stubEnv("FAKE_QUOTED", "1");
 		vi.stubEnv("FAKE_FAILS", "claude-fable-5-2");
-		vi.stubEnv("FAKE_LIMITED", "reset");
-		write(w.repo, ".tmp/responses.md", "1. Refuted.\n2. Refuted.\n3. Refuted.\n4. Refuted.\n");
-		const retry = await quest(
+		const failed = await quest("--root", w.repo, "review", ...OPUS_WROTE, "--size", "L", "--json");
+		expect(failed.code, failed.stderr).toBe(0);
+		const out = JSON.parse(failed.stdout);
+		expect(out.skipped.map((each: Skip) => `${each.model} ${each.reason}`)).toEqual(["claude-fable-5-2 failed"]);
+		expect(out.skipped[0].detail).toBe("claude failed with exit status 1");
+		expect(out.rounds.map(label)).toEqual(["gpt-6.2-sol xhigh", "gpt-6.2-sol high shadow"]);
+		vi.stubEnv("FAKE_QUOTED", undefined);
+		vi.stubEnv("FAKE_FAILS", undefined);
+		write(w.repo, ".tmp/responses.md", "1. Fixed.\n2. Fixed.\n");
+		write(w.repo, "src/lib.ts", "export const x = 3;\n");
+		git(w.repo, "commit", "-qam", "fix");
+		const after = await quest(
 			"--root",
 			w.repo,
 			"review",
@@ -428,42 +417,13 @@ fakes(
 			join(w.repo, ".tmp", "responses.md"),
 			"--json",
 		);
-		expect(retry.code, retry.stderr).toBe(0);
-		expect(JSON.parse(retry.stdout).risk.tier).toBe("high");
-		vi.stubEnv("FAKE_FAILS", undefined);
-		vi.stubEnv("FAKE_LIMITED", undefined);
-
-		// Once Fable writes the branch, its candidate's open finding is dropped rather than held or settled by the pick.
-		const v = setup(null);
-		expect((await quest("--root", v.repo, "review", ...OPUS_WROTE, "--size", "L")).code).toBe(0);
-		write(v.repo, ".tmp/responses.md", "1. Fixed.\n2. Fixed.\n");
-		write(v.repo, "src/lib.ts", "export const x = 3;\n");
-		git(v.repo, "commit", "-qam", "fix");
-		const byFable = ["--exclude-model", "claude-fable-5-2", "--size", "L", "--json"];
-		const wrote = await quest(
-			"--root",
-			v.repo,
-			"review",
-			...byFable,
-			"--responses",
-			join(v.repo, ".tmp", "responses.md"),
-		);
-		expect(wrote.code, wrote.stderr).toBe(0);
-		expect(JSON.parse(wrote.stdout).rounds.map(label)).toEqual(["gpt-6.2-sol xhigh", "gpt-6.2-sol high shadow"]);
-		expect(JSON.parse(wrote.stdout).tallies.find((each: Tally) => each.candidate).findings.high).toBe(0);
+		expect(after.code, after.stderr).toBe(0);
+		expect(JSON.parse(after.stdout).rounds.map(label)).toEqual(["gpt-6.2-sol xhigh", "gpt-6.2-sol high shadow"]);
 
 		// A branch Fable wrote last gets no candidate, nor does a run that names its reviewer.
 		const t = setup(null);
-		const fable = await quest(
-			"--root",
-			t.repo,
-			"review",
-			"--exclude-model",
-			"claude-fable-5-2",
-			"--size",
-			"L",
-			"--json",
-		);
+		const byFable = ["--exclude-model", "claude-fable-5-2", "--size", "L", "--json"];
+		const fable = await quest("--root", t.repo, "review", ...byFable);
 		expect(fable.code, fable.stderr).toBe(0);
 		expect(JSON.parse(fable.stdout).rounds.map(label)).toEqual(["gpt-6.2-sol xhigh", "gpt-6.2-sol high shadow"]);
 		const u = setup(null);
@@ -2454,6 +2414,8 @@ test("the next step stops for the design checkpoint when a reviewer's every thir
 	expect(nextStep([round(4, 1)])).toMatch(/^next respond: /);
 	expect(nextStep([round(3, 0)])).toMatch(/^next done: /);
 	expect(nextStep([round(3, 2, "low")])).toMatch(/^next finish: /);
+	// The candidate's findings are never answered, so they leave nothing to do.
+	expect(nextStep([round(3, 0), { ...round(1, 2), candidate: true }])).toMatch(/^next done: /);
 	expect(nextStep([round(4, 1, "low")])).toMatch(/^next finish: /);
 	// Across reviewers: any finding not low needs another round, and a clean third round is no checkpoint.
 	expect(nextStep([round(1, 1, "low"), round(1, 1)])).toMatch(/^next respond: /);
@@ -2600,7 +2562,6 @@ test("saved sessions are read only in the current format, or refused naming --ne
 		// A shadow session no shadow tally counts, a malformed mark, or two shadows.
 		{ branch: "feature", sessions: [{ ...session, shadow: true }], tallies: [tally] },
 		{ branch: "feature", sessions: [{ ...session, shadow: false }], tallies: [tally] },
-		{ branch: "feature", sessions: [{ ...session, dropped: false }], tallies: [tally] },
 		{ ...shadowed, sessions: [...shadowed.sessions, { ...session, shadow: true }] },
 		// Two candidates, or one seat in two roles.
 		{ ...candidate, sessions: [...candidate.sessions, { ...session, candidate: true }] },
