@@ -414,6 +414,55 @@ fakes("Codex reaches a gateway at OPENAI_BASE_URL, whose persistent 429 is the p
 		expect(call.argv.join(" ")).toContain('-c openai_base_url="http://127.0.0.1:4000/v1"');
 });
 
+fakes.each(["", "1"])(
+	"Codex sent to a gateway with no credential never gets the stored login (logged out: %j)",
+	async (loggedOut) => {
+		const s = setup();
+		vi.stubEnv("FAKE_LOGGED_OUT", loggedOut);
+		vi.stubEnv("OPENAI_BASE_URL", "http://127.0.0.1:4000/v1");
+		// OpenAI's own key is no credential Codex reads.
+		vi.stubEnv("OPENAI_API_KEY", "openai-key");
+		const result = await quest("--root", s.repo, "review");
+		expect(result.code).toBe(3);
+		expect(result.stderr).toContain(
+			"codex would send its stored login to the gateway OPENAI_BASE_URL names, which has no credential; " +
+				"set CODEX_API_KEY (any value, for a gateway that needs none) or CODEX_ACCESS_TOKEN for the gateway, " +
+				"or unset OPENAI_BASE_URL",
+		);
+		// Refused before Codex runs at all, not even its status check.
+		expect(s.calls()).toEqual([]);
+	},
+);
+
+fakes.each([
+	["CODEX_API_KEY", "gateway-key"],
+	["CODEX_ACCESS_TOKEN", "gateway-token"],
+])("a gateway's %s wins over Codex's stored login, which its status check never needs", async (name, value) => {
+	const s = setup();
+	vi.stubEnv("OPENAI_BASE_URL", "http://127.0.0.1:4000/v1");
+	vi.stubEnv(name, value);
+	const result = await quest("--root", s.repo, "review");
+	expect(result.code, result.stderr).toBe(0);
+	const calls = s.calls();
+	expect(calls.length).toBeGreaterThan(1);
+	for (const call of calls) {
+		expect(call.argv[0]).toBe("exec");
+		expect(call.env[name]).toBe(value);
+	}
+});
+
+fakes("a gateway that rejects Codex's key names the key and the gateway", async () => {
+	const s = setup();
+	vi.stubEnv("OPENAI_BASE_URL", "http://127.0.0.1:4000/v1");
+	vi.stubEnv("CODEX_API_KEY", "gateway-key");
+	vi.stubEnv("FAKE_REJECTED", "turn");
+	const result = await quest("--root", s.repo, "review");
+	expect(result.code).toBe(3);
+	expect(result.stderr).toContain(
+		"codex rejected CODEX_API_KEY through OPENAI_BASE_URL; replace it, or run `codex login`",
+	);
+});
+
 fakes("a reviewer with no stored login reviews with the credential its CLI reads from the environment", async () => {
 	const s = setup();
 	vi.stubEnv("FAKE_LOGGED_OUT", "1");

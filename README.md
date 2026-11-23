@@ -1527,8 +1527,8 @@ A reviewer that cannot run passes the round to the next whose model is not
 the latest writer's, so Sonnet reviews what Opus changed last while Sol is
 out. That is a failure the CLI or provider reports before any finding is
 saved, never text in the diff or a reply: a CLI that is not installed, logged
-out, or has its login rejected, or Claude Code sent to a gateway with no
-credential, passes over every model of that CLI, and a
+out, or has its login rejected, or sent to a gateway with no credential,
+passes over every model of that CLI, and a
 model at its usage limit passes over only itself. The run prints a `skipped`
 line for each reviewer it passed over, and the record names it in its
 header:
@@ -1576,7 +1576,9 @@ a gateway or provider is set. A provider's own keys (`ANTHROPIC_AWS_API_KEY`,
 gateway or provider is set. Claude Code never sends its stored login to a
 gateway: with `ANTHROPIC_BASE_URL` set and no cloud provider, it needs
 `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, or an `Authorization` header in
-`ANTHROPIC_CUSTOM_HEADERS`, else it cannot run. Under
+`ANTHROPIC_CUSTOM_HEADERS`, else it cannot run. Nor does Codex: with
+`OPENAI_BASE_URL` set, it needs `CODEX_API_KEY` or `CODEX_ACCESS_TOKEN`, and
+skips its login check, which never asks the gateway. Under
 `CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST`, as in a T3 Code session, it drops every
 Claude Code gateway, provider, and credential in the environment, since the
 host set them, and reviews on the stored login.

@@ -583,6 +583,11 @@ interface Reviewer {
 	managed?(env: NodeJS.ProcessEnv): boolean;
 	/** The error for a gateway in `env` with no credential of its own, to which the CLI would send its stored login. */
 	bareGateway?(env: NodeJS.ProcessEnv): string | undefined;
+	/**
+	 * Whether the status check says nothing about a run through a route, which then skips it: the route's
+	 * credential, which `bareGateway` requires, replaces the stored login, and a turn reports its rejection.
+	 */
+	routeUnchecked?: boolean;
 	/** Matches the CLI's error for a login or credential the API rejected: expired, revoked, or invalid. */
 	unauthorized: RegExp;
 	/** The CLI's own review, given `prompt`'s scope, rules, and responses. */
@@ -806,10 +811,19 @@ const codex: Reviewer = {
 	credentials: ["CODEX_API_KEY", "CODEX_ACCESS_TOKEN"],
 	routeCredentials: [],
 	// A gateway that intercepts TLS needs its CA. OPENAI_BASE_URL is never stripped, and reaches Codex as
-	// `openai_base_url`. It is no route: `codex login status` ignores CODEX_API_KEY, so a gateway's key
-	// passes as any key does, while Codex has no stored login.
+	// `openai_base_url`.
 	connection: ["CODEX_CA_CERTIFICATE"],
-	routes: () => [],
+	routes: (env) => (env.OPENAI_BASE_URL ? ["OPENAI_BASE_URL"] : []),
+	// `codex login status` ignores CODEX_API_KEY and checks CODEX_ACCESS_TOKEN with OpenAI, never the gateway.
+	routeUnchecked: true,
+	// Codex sends its stored ChatGPT login, with its account ID, to `openai_base_url` unless CODEX_API_KEY or
+	// CODEX_ACCESS_TOKEN replaces it.
+	bareGateway: (env) =>
+		env.OPENAI_BASE_URL && !env.CODEX_API_KEY && !env.CODEX_ACCESS_TOKEN
+			? "codex would send its stored login to the gateway OPENAI_BASE_URL names, which has no credential; " +
+				"set CODEX_API_KEY (any value, for a gateway that needs none) or CODEX_ACCESS_TOKEN for the gateway, " +
+				"or unset OPENAI_BASE_URL"
+			: undefined,
 	unauthorized: LOGINS.codex.unauthorized,
 	// Custom instructions replace `--base`, so the prompt names the range. Review mode ignores
 	// `--output-schema`, so the schema waits for the next turn.
@@ -1065,7 +1079,7 @@ async function prepare(
 	const withCredentials = { ...connected, ...pick(env, credentials) };
 	const rejected = `${harness} rejected ${names(credentials)}${through}; replace it, or run \`${reviewer.login}\``;
 	if (routes.length > 0) {
-		if (!(await loggedIn(withCredentials))) throw new ReviewerUnavailableError(harness, "logged out", loggedOut);
+		if (!reviewer.routeUnchecked && !(await loggedIn(withCredentials))) throw new ReviewerUnavailableError(harness, "logged out", loggedOut);
 		return {
 			harness,
 			reviewer,
