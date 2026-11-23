@@ -36,6 +36,6 @@ Guidance:
   which model reviews it.
 - Land this after [writer table](https://github.com/moq-dev/quest/pull/829),
   [reviewer table](/quest/m0/reviewer-table.md),
-  [Claude writers](/quest/m0/claude-writers.md), and
+  [Claude writers](https://github.com/moq-dev/quest/pull/832), and
   [review seats](/quest/m0/review-seats.md), whose tables become the
   maintainer's first config.

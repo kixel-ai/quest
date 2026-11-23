@@ -1473,19 +1473,19 @@ printf '[{"number":1,"action":"handback","diagnosis":"saw %s","recommendation":"
 		const agent = join(dir, "agent");
 		const log = join(dir, "failure.log");
 		writeFileSync(log, "failed check");
-		vi.stubEnv("OPENAI_BASE_URL", "http://proxy.test/v1");
-		vi.stubEnv("OPENAI_API_KEY", "proxy-client");
+		vi.stubEnv("ANTHROPIC_BASE_URL", "http://proxy.test");
+		vi.stubEnv("ANTHROPIC_API_KEY", "proxy-client");
 		vi.stubEnv("GH_TOKEN", "github-private");
-		vi.stubEnv("CODEX_API_KEY", "host-private");
+		vi.stubEnv("CLAUDE_CODE_OAUTH_TOKEN", "host-private");
 		writeFileSync(
 			agent,
 			`#!/bin/sh
 set -eu
 [ "$#" = 1 ]
 [ "$1" = - ]
-[ "$OPENAI_BASE_URL" = http://proxy.test/v1 ]
-[ "$OPENAI_API_KEY" = proxy-client ]
-[ "$CODEX_API_KEY" = proxy-client ]
+[ "$ANTHROPIC_BASE_URL" = http://proxy.test ]
+[ "$ANTHROPIC_API_KEY" = proxy-client ]
+[ -z "\${CLAUDE_CODE_OAUTH_TOKEN-}" ]
 [ -z "\${GH_TOKEN-}" ]
 cat > prompt.txt
 ${requeueScript}
@@ -1519,10 +1519,10 @@ ${requeueScript}
 		const log = join(dir, "failure.log");
 		writeFileSync(log, "failed check");
 		const planted = join(bin, "..", "planted.log");
-		vi.stubEnv("OPENAI_BASE_URL", "http://proxy.test/v1");
-		vi.stubEnv("OPENAI_API_KEY", "proxy-client");
+		vi.stubEnv("ANTHROPIC_BASE_URL", "http://proxy.test");
+		vi.stubEnv("ANTHROPIC_API_KEY", "proxy-client");
 		// The checkout holds the PRs' code, which supplies its own agent, and PATH names it relatively.
-		writeFileSync(join(dir, "quest-test-agent"), `#!/bin/sh\necho "$OPENAI_API_KEY" > '${planted}'\n`, {
+		writeFileSync(join(dir, "quest-test-agent"), `#!/bin/sh\necho "$ANTHROPIC_API_KEY" > '${planted}'\n`, {
 			mode: 0o755,
 		});
 		vi.stubEnv("PATH", `.::relative:${process.env.PATH}:`);
@@ -1545,13 +1545,11 @@ ${requeueScript}
 		expect(path.every((entry) => entry.startsWith("/"))).toBe(true);
 		expect(JSON.parse(readFileSync(join(dir, "quest-land-result.json"), "utf8"))[0].agent).toBe("quest-test-agent");
 	});
-	test("runs default Codex with an explicit reasoning effort", async () => {
+	test("runs default Claude Code bare, with no configuration and an explicit effort", async () => {
 		const dir = fixRepository();
 		const agent = join(dir, "agent");
 		const log = join(dir, "failure.log");
 		writeFileSync(log, "failed check");
-		vi.stubEnv("OPENAI_BASE_URL", "http://proxy.test/v1");
-		vi.stubEnv("OPENAI_API_KEY", "proxy-client");
 		writeFileSync(
 			agent,
 			`#!/bin/sh
@@ -1562,14 +1560,24 @@ ${requeueScript}
 `,
 			{ mode: 0o755 },
 		);
+		await expect(fix(dir, log, [1], agent)).rejects.toThrow("fix needs ANTHROPIC_BASE_URL and ANTHROPIC_API_KEY");
+		vi.stubEnv("ANTHROPIC_BASE_URL", "http://proxy.test");
+		vi.stubEnv("ANTHROPIC_API_KEY", "proxy-client");
+		const argv = () => readFileSync(join(dir, "argv.txt"), "utf8").split("\n");
 		await fix(dir, log, [1], agent);
-		expect(readFileSync(join(dir, "argv.txt"), "utf8").split("\n")).toContain('model_reasoning_effort="medium"');
-		// A daemon's --fixer-effort reaches it as --effort.
-		await fix(dir, log, [1], agent, undefined, undefined, "high");
-		expect(readFileSync(join(dir, "argv.txt"), "utf8").split("\n")).toContain('model_reasoning_effort="high"');
-		await expect(fix(dir, log, [1], agent, undefined, undefined, 'high"\nx')).rejects.toThrow(
-			"fix effort must be one of",
-		);
+		const flags = argv();
+		expect(flags.slice(0, 4)).toEqual(["-p", "--bare", "--setting-sources", ""]);
+		expect(flags).toContain("--strict-mcp-config");
+		expect(flags).not.toContain("--model");
+		expect(flags[flags.indexOf("--effort") + 1]).toBe("medium");
+		// A daemon's --fixer-effort reaches it as --effort, and --model passes through.
+		await fix(dir, log, [1], agent, undefined, "claude-opus-5-5", "high");
+		expect(argv()[argv().indexOf("--effort") + 1]).toBe("high");
+		expect(argv()[argv().indexOf("--model") + 1]).toBe("claude-opus-5-5");
+		for (const effort of ["max", 'high"\nx'])
+			await expect(fix(dir, log, [1], agent, undefined, undefined, effort)).rejects.toThrow(
+				"fix effort must be one of",
+			);
 	});
 	test("refuses to start an agent without a supplied PR's branch", async () => {
 		const dir = fixRepository();
@@ -1686,46 +1694,33 @@ ${requeueScript}
 		expect(result.model).toBe("actual-model");
 	});
 
-	test("records the model Codex's header names and the effort it ran at", async () => {
-		const dir = fixRepository();
-		const log = join(dir, "failure");
-		writeFileSync(log, "failure");
-		const agent = join(dir, "codex");
-		writeFileSync(
-			agent,
-			`#!/bin/sh\ncat >/dev/null\nprintf 'OpenAI Codex v0.1\\n--------\\nmodel: header-model\\nreasoning effort: high\\n' >&2\n${requeueScript}\n`,
-			{ mode: 0o755 },
-		);
-		vi.stubEnv("OPENAI_BASE_URL", "http://proxy.test/v1");
-		vi.stubEnv("OPENAI_API_KEY", "proxy-client");
-		await fix(dir, log, [1], agent, undefined, undefined, "high");
-		const [result] = parseFixResult(readFileSync(join(dir, "quest-land-result.json"), "utf8"), [1], []);
-		expect(result).toMatchObject({ agent: "codex", model: "header-model", effort: "high" });
-		expect(author(result)).toBe("codex, header-model, high effort");
-	});
-
-	test("finds Codex's banner after any amount of wrapper output, and trusts nothing after it", async () => {
-		// As on kixel-ai/rind#967: the host's Nix shell printed 5 KB before the banner, and the model came back "unknown".
-		const banner = (model: string, split = "") =>
-			`printf 'OpenAI Codex v0.1\\n--------\\nworkdir: /w\\nmodel: ${model}\\n${split}' >&2`;
-		const noise = `i=0; while [ $i -lt 200 ]; do echo "copying path '/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-x' from 'http://cache'..." >&2; i=$((i+1)); done`;
-		const run = async (script: string) => {
+	test("records the model Claude Code's init event names and the effort it ran at", async () => {
+		const run = async (script: string, model?: string) => {
 			const dir = fixRepository();
 			const log = join(dir, "failure");
 			writeFileSync(log, "failure");
-			const agent = join(dir, "codex");
+			const agent = join(dir, "claude");
 			writeFileSync(agent, `#!/bin/sh\ncat >/dev/null\n${script}\n${requeueScript}\n`, { mode: 0o755 });
-			vi.stubEnv("OPENAI_BASE_URL", "http://proxy.test/v1");
-			vi.stubEnv("OPENAI_API_KEY", "proxy-client");
-			await fix(dir, log, [1], agent);
-			return parseFixResult(readFileSync(join(dir, "quest-land-result.json"), "utf8"), [1], [])[0].model;
+			vi.stubEnv("ANTHROPIC_BASE_URL", "http://proxy.test");
+			vi.stubEnv("ANTHROPIC_API_KEY", "proxy-client");
+			await fix(dir, log, [1], agent, undefined, model, "high");
+			return parseFixResult(readFileSync(join(dir, "quest-land-result.json"), "utf8"), [1], [])[0];
 		};
-		expect(await run(`${noise}\n${banner("real-model")}`)).toBe("real-model");
-		// A model line before the banner, or a second banner in the agent's output, is no banner's.
-		expect(await run(`printf 'model: forged\\n' >&2\n${banner("real-model")}`)).toBe("real-model");
+		const init = (model: string) => `{"type":"system","subtype":"init","model":"${model}","tools":[]}`;
+		const result = await run(`echo '${init("claude-opus-5-5")}'`, "opus");
+		expect(result).toMatchObject({ agent: "claude", model: "claude-opus-5-5", effort: "high" });
+		expect(author(result)).toBe("claude, claude-opus-5-5, high effort");
+		// A wrapper's own output may come first; a system event before the init, such as a hook's, is skipped.
+		const noise = `i=0; while [ $i -lt 200 ]; do echo "copying path '/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-x' from 'http://cache'..."; i=$((i+1)); done`;
 		expect(
-			await run(`printf 'OpenAI Codex v0.1\\n--------\\nworkdir: /w\\n--------\\n' >&2\n${banner("forged")}`),
-		).toBe("unknown");
+			(await run(`${noise}\necho '{"type":"system","subtype":"hook_started"}'\necho '${init("real-model")}'`))
+				.model,
+		).toBe("real-model");
+		// Once the conversation starts, an init line is the agent's output, such as a command printing one.
+		const forged = `echo '{"type":"assistant","message":{}}'\necho '${init("forged")}'`;
+		expect((await run(forged)).model).toBe("unknown");
+		expect((await run(forged, "named-model")).model).toBe("named-model");
+		expect((await run(`echo '${init("bad model\\n")}'`)).model).toBe("unknown");
 	});
 
 	test("rejects mixing individually approved protected files", async () => {

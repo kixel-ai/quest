@@ -1368,7 +1368,7 @@ describe.skipIf(process.platform === "win32")("the watcher's land fixer", () => 
 		pull.labels = undefined;
 		expect(git(repo.origin, "rev-parse", `${fixed}^`)).toBe(head);
 		expect(github.mutations).toEqual([`enqueuePullRequest 5 ${fixed}`]);
-		expect(pull.body).toContain(`mechanical fix by Codex: \`add the missing file\` (head ${fixed})`);
+		expect(pull.body).toContain(`mechanical fix by Claude: \`add the missing file\` (head ${fixed})`);
 		expect(github.comments[5].at(-1)!.body).toContain(
 			`re-enqueued this pull request at ${fixed}, at the back of the merge queue`,
 		);
@@ -1940,7 +1940,7 @@ git commit -qm 'disable render_timeout'`;
 				"#6 ([job 1](https://github.com/upstream/project/actions/runs/60/job/71)), #7 ([job 1](https://github.com/upstream/project/actions/runs/70/job/71))",
 			);
 			expect(opened.body).toContain("adds its follow-up quest, `quest/m0/flaky/render-timeout.md`");
-			expect(opened.body).toContain(`## Review\n\nmechanical fix by Codex: \``);
+			expect(opened.body).toContain(`## Review\n\nmechanical fix by Claude: \``);
 			expect(opened.body).toContain(`(head ${head})`);
 			expect(readFlaky(state)).toMatchObject([
 				{
@@ -2061,7 +2061,7 @@ git commit -qm 'disable render_timeout'`;
 		expect(github.comments[10].at(-1)!.body).toContain("the pick it was fixing ended");
 		const handback = github.comments[9].at(-1)!.body;
 		expect(handback).toContain(
-			"Codex land fixer: `the test asserts the old behavior. Recommendation: decide which behavior is right`",
+			"Claude land fixer: `the test asserts the old behavior. Recommendation: decide which behavior is right`",
 		);
 		expect(handback).toContain("<pre>The merge queue removed");
 		expect(history(state, 9)!.rounds).toMatchObject([{ outcome: "handback" }]);

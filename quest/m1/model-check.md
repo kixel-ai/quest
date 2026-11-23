@@ -235,9 +235,9 @@ checkpoints and outages to count by hand:
   - Claude Code draws its status line only in an interactive session, so the
     planted `statusLine` has no control. Check whether print mode runs it now.
   - Codex reads a linked worktree's hooks from the main checkout's
-    `.codex/hooks.json`. In m0 neither the land fixer (`src/cli/land-fix.ts`,
-    which passes `--ignore-user-config`) nor `quest agent` used Codex hooks,
-    and `quest init` installs none. Recheck if either starts to.
+    `.codex/hooks.json`. In m0 `quest agent` used no Codex hooks, the land
+    fixer (`src/cli/land-fix.ts`) runs Claude Code, not Codex, and
+    `quest init` installs none. Recheck if either starts to.
 - The PR that finishes this run creates the next milestone's run the same
   way: in that milestone's directory, requiring this milestone's README,
   carrying forward the model ids and efforts it found, the routing tallies

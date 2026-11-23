@@ -13,26 +13,36 @@ export class FixerAgentError extends Error {
 	}
 }
 
-/** The model Codex's startup banner names, read from its stderr: `OpenAI Codex v<version>`, then `key: value` lines between two `--------` rules. */
-class Banner {
+/**
+ * The model Claude Code's `init` event names, read from its `stream-json` stdout. Only system events
+ * before the first conversation event count: anything the PRs' code prints arrives inside those.
+ */
+class Init {
 	model?: string;
 	private carry = "";
-	/** Rules still to read: unset before the banner, 0 after it, so a banner in the agent's later output counts for nothing. */
-	private rules?: number;
+	private done = false;
 
 	read(text: string): void {
-		if (this.rules === 0) return;
+		if (this.done) return;
 		const lines = (this.carry + text).split("\n");
-		// A line that never ends is no banner line; keep only its tail.
-		this.carry = lines.pop()!.slice(-256);
-		for (const line of lines.map((line) => line.replace(/\r$/, ""))) {
-			if (this.rules === undefined) {
-				if (/^OpenAI Codex v\S+$/.test(line)) this.rules = 2;
-			} else if (line === "--------") {
-				if (--this.rules === 0) return;
-			} else {
-				this.model ??= /^model: ([a-zA-Z0-9._/-]{1,100})$/.exec(line)?.[1];
+		// A line that never ends is no event; keep only enough of it to finish an init line.
+		this.carry = lines.pop()!.slice(-100_000);
+		for (const line of lines) {
+			let event: unknown;
+			try {
+				event = JSON.parse(line);
+			} catch {
+				continue; // A wrapper's own output before the agent starts.
 			}
+			if (!event || typeof event !== "object" || (event as { type?: unknown }).type !== "system") {
+				this.done = true;
+				return;
+			}
+			const { subtype, model } = event as { subtype?: unknown; model?: unknown };
+			if (subtype !== "init") continue;
+			if (typeof model === "string" && /^[a-zA-Z0-9._/-]{1,100}$/.test(model)) this.model = model;
+			this.done = true;
+			return;
 		}
 	}
 }
@@ -238,8 +248,8 @@ export function parseFixResult(text: string, numbers: number[], known: KnownFlak
 	return value as FixResult[];
 }
 
-/** Codex's reasoning efforts, for `model_reasoning_effort`. */
-export const EFFORTS = ["minimal", "low", "medium", "high", "xhigh"];
+/** The efforts the fixer may run Claude Code at: every one but `max`, which no quest agent runs. */
+export const EFFORTS = ["low", "medium", "high", "xhigh"];
 /**
  * The variable a daemon sets for its fixer wrapper to pass on as `quest land fix --effort`, since the
  * wrapper's arguments are only the failure log and the PR numbers.
@@ -250,7 +260,7 @@ export async function fix(
 	root: string,
 	log: string,
 	numbers: number[],
-	agent = "codex",
+	agent = "claude",
 	args?: string[],
 	model?: string,
 	effort = "medium",
@@ -262,8 +272,8 @@ export async function fix(
 		new Set(numbers).size !== numbers.length
 	)
 		throw new Error("fix needs one or more distinct positive PR numbers");
-	if (!args && (!process.env.OPENAI_BASE_URL || !process.env.OPENAI_API_KEY))
-		throw new Error("fix needs OPENAI_BASE_URL and OPENAI_API_KEY from the container wrapper");
+	if (!args && (!process.env.ANTHROPIC_BASE_URL || !process.env.ANTHROPIC_API_KEY))
+		throw new Error("fix needs ANTHROPIC_BASE_URL and ANTHROPIC_API_KEY from the container wrapper");
 	readFileSync(log); // Fail before starting an agent when the wrapper did not expose the log.
 	const flaky = knownFlaky(root);
 	// The daemon pinned each PR's head on its pr-<n> branch; name it so the agent need not look it up.
@@ -285,51 +295,48 @@ export async function fix(
 		...programEnvironment({ PATH: process.env.PATH }),
 		HOME: process.env.HOME,
 		LANG: "C.UTF-8",
-		OPENAI_BASE_URL: process.env.OPENAI_BASE_URL,
-		OPENAI_API_KEY: process.env.OPENAI_API_KEY,
-		CODEX_API_KEY: process.env.OPENAI_API_KEY,
+		// The proxy's client key is the only credential, sent as an API key: --bare never reads a stored login.
+		ANTHROPIC_BASE_URL: process.env.ANTHROPIC_BASE_URL,
+		ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
+		// The container reaches only the proxy and the dependency hosts, so no telemetry or update checks.
+		CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
+		// The wrapper's container is the sandbox; without this Claude Code refuses to skip permissions as root.
+		IS_SANDBOX: "1",
 		GIT_CONFIG_GLOBAL: "/dev/null",
 		GIT_CONFIG_NOSYSTEM: "1",
 		GIT_TERMINAL_PROMPT: "0",
 	};
+	// --bare and no setting sources load no CLAUDE.md, hook, plugin, or settings from HOME or the checkout,
+	// and --strict-mcp-config no MCP server, so the base's tree reaches the agent only as files it reads.
 	const argv = args ?? [
-		"exec",
-		"--ephemeral",
-		"--ignore-user-config",
-		"--ignore-rules",
-		"--dangerously-bypass-approvals-and-sandbox",
-		"-c",
-		"project_doc_max_bytes=0",
-		"-c",
-		`developer_instructions=${JSON.stringify(prompt)}`,
-		"-c",
-		'model_provider="quest-fixer"',
-		"-c",
-		'model_providers.quest-fixer.name="Host model proxy"',
-		"-c",
-		`model_providers.quest-fixer.base_url=${JSON.stringify(process.env.OPENAI_BASE_URL)}`,
-		"-c",
-		'model_providers.quest-fixer.env_key="OPENAI_API_KEY"',
-		"-c",
-		'model_providers.quest-fixer.wire_api="responses"',
-		// Without this, Codex runs the proxy's model with no reasoning at all ("reasoning effort: none").
-		"-c",
-		`model_reasoning_effort=${JSON.stringify(effort)}`,
+		"-p",
+		"--bare",
+		"--setting-sources",
+		"",
+		"--strict-mcp-config",
+		"--disable-slash-commands",
+		"--no-session-persistence",
+		"--dangerously-skip-permissions",
+		"--tools",
+		"Bash,Read,Edit,Write,Glob,Grep",
+		// Only the stream names the model before the agent's own output.
+		"--output-format",
+		"stream-json",
+		"--verbose",
+		"--effort",
+		effort,
 		...(model ? ["--model", model] : []),
-		"-",
 	];
-	// Codex names its model in the banner it prints, whether or not the command line does. Only the banner
-	// counts, since the agent's own output follows it, and whatever a wrapper printed before may be any length.
-	const banner = new Banner();
+	const init = new Init();
 	await new Promise<void>((done, reject) => {
 		// Relay the agent's output through pipes of its own rather than letting it inherit ours. Once Bun writes
-		// to a pipe it marks that pipe non-blocking, and an inheriting child shares the flag: Codex then panicked
-		// (exit 101) with EAGAIN as soon as one command's output outran the host's reader.
+		// to a pipe it marks that pipe non-blocking, and an inheriting child shares the flag: an agent then fails
+		// with EAGAIN as soon as one command's output outruns the host's reader.
 		const child = spawn(program, argv, { cwd: root, env, stdio: ["pipe", "pipe", "pipe"] });
 		child.stdout.pipe(process.stdout, { end: false });
 		child.stderr.pipe(process.stderr, { end: false });
-		child.stderr.on("data", (chunk: Buffer) => {
-			banner.read(chunk.toString("latin1"));
+		child.stdout.on("data", (chunk: Buffer) => {
+			init.read(chunk.toString("utf8"));
 		});
 		child.once("error", reject);
 		child.stdin.on("error", () => {});
@@ -340,11 +347,11 @@ export async function fix(
 	});
 	const results = parseFixResult(readFixResult(root), numbers, flaky);
 	const index = argv.findIndex((arg) => arg === "-m" || arg === "--model");
-	const ranModel =
-		(index >= 0 ? argv[index + 1] : argv.find((arg) => arg.startsWith("--model="))?.slice(8)) ?? banner.model;
+	const named = index >= 0 ? argv[index + 1] : argv.find((arg) => arg.startsWith("--model="))?.slice(8);
 	const identity = {
 		agent: basename(agent),
-		model: ranModel ?? "unknown",
+		// The init event names the model an alias such as `opus` resolved to.
+		model: init.model ?? named ?? "unknown",
 		// Replaced arguments may run the agent at any effort.
 		effort: args ? "unknown" : effort,
 	};
