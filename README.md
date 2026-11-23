@@ -1477,7 +1477,7 @@ claude	claude-opus-5-5	medium
 `--writer` prints the size's entry for that model, or else its entry at the
 nearest size that lists it, the larger on a tie; a model no list names is an
 error. An iterate on a PR whose first `Implementer:` line names an arm runs
-that arm's entry at the PR's size instead, as `quest models M --arm B`
+that arm's entry at the PR's size instead, as `quest models L --arm B`
 prints, and records it as `(iterate, XS, arm B)`. `--json` prints an array of `{harness, model, effort}` objects. The
 iterate records the size it was given in its `Implementer:` line, as
 `Implementer: Claude Code, claude-opus-5-5, medium effort (iterate, XS)`, so
