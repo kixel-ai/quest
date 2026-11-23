@@ -911,6 +911,9 @@ const noOutcomes = (): Omit<AccuracyRow, "size" | "harness" | "model" | "effort"
 	fixes: 0,
 });
 
+/** Whether a reviewer measures a reviewer, as the shadow and candidate do, so its findings stay out of the writer's row. */
+const measuring = (review: ReviewSummary) => review.shadow || review.candidate;
+
 /** Add a PR's outcomes to a writer's or arm's row, counting its tallies only when it is its branch's `latest`. */
 function outcome(row: ReturnType<typeof noOutcomes>, each: PullRow, latest: Set<PullRow>) {
 	row.pulls++;
@@ -918,10 +921,7 @@ function outcome(row: ReturnType<typeof noOutcomes>, each: PullRow, latest: Set<
 	if (each.handedBack) row.handedBack++;
 	row.fixes += each.fixedBy.length;
 	row.landFixes += each.landFixes.filter((by) => by !== MERGER).length;
-	// The shadow's and candidate's findings measure a reviewer, not the writer, so they stay out of the writer's row.
-	const counted = latest.has(each)
-		? each.review.filter((review) => review.tally !== null && !review.shadow && !review.candidate)
-		: [];
+	const counted = latest.has(each) ? each.review.filter((review) => review.tally !== null && !measuring(review)) : [];
 	if (counted.length === 0) return;
 	row.reviewed++;
 	for (const { score } of counted)
@@ -943,10 +943,7 @@ function outcome(row: ReturnType<typeof noOutcomes>, each: PullRow, latest: Set<
 function tallied(pulls: PullRow[], counts: (pull: PullRow) => boolean): Set<PullRow> {
 	const branch = (each: PullRow) => JSON.stringify([each.repository ?? each.number, each.branch]);
 	const rounds = (each: PullRow) =>
-		each.review.reduce(
-			(sum, review) => sum + (review.shadow || review.candidate ? 0 : (review.tally?.rounds ?? 0)),
-			0,
-		);
+		each.review.reduce((sum, review) => sum + (measuring(review) ? 0 : (review.tally?.rounds ?? 0)), 0);
 	const latest = new Map<string, PullRow>();
 	for (const each of pulls) {
 		if (!counts(each) || each.review.every((review) => review.tally === null)) continue;

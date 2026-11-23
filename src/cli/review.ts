@@ -61,8 +61,6 @@ export class ResponsesError extends ReviewInputError {}
 export class ReviewerUnavailableError extends Error {
 	/** Whether the second reviewer, rather than the pick or its shadow, could not run. */
 	second = false;
-	/** Whether the candidate could not run. */
-	candidate = false;
 
 	constructor(
 		readonly harness: HarnessName,
@@ -1961,10 +1959,10 @@ export function overridden(risk: Risk, override: Override | undefined): Risk {
 /**
  * Review the checkout's committed branch: one round of each reviewer on the same head, the size's pick and its
  * shadow and candidate while they run, or only `--harness`'s, each resuming its session on the branch unless `fresh`.
- * Every reviewer runs at once, and the first to fail stops the others and fails the whole, saving no round. A pick
+ * Every reviewer runs at once, and the first to fail stops the others and fails the whole, saving no round, except a
+ * candidate that cannot run, which is passed over while the others finish, its open findings dropped. A pick
  * that cannot run, logged out, not installed, or at its usage limit, passes the round to the size's next eligible
- * reviewer, unless the options name the reviewer; once none is left, the run fails as an outage. A candidate that
- * cannot run is passed over alone.
+ * reviewer, unless the options name the reviewer; once none is left, the run fails as an outage.
  *
  * The head's tier scales the review: a low head with nothing left to settle gets no local review, and a high one gets
  * a second reviewer on another model, the next of the size's list, which a round that raises the tier to high runs
@@ -2014,7 +2012,7 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 	// The size's candidate, unless its model is avoided, as when it wrote the branch last; a run that names its
 	// reviewer seats none.
 	const listed = CANDIDATES[sized.size];
-	let candidate = auto && listed !== undefined && !avoided(listed) ? listed : null;
+	const candidate = auto && listed !== undefined && !avoided(listed) ? listed : null;
 	const plan = (routed: Model, second: Model | null = null) =>
 		seatsFor({ routed, second, candidate, size: sized.size, auto, sessions, firsts, responses: options.responses });
 
@@ -2068,7 +2066,7 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 	);
 	const override = options.override === undefined ? saved?.override : { ...options.override, from: before.tier };
 	const base = { ref: baseRef, sha: baseSha };
-	const tallies = options.fresh ? dropped(saved) : (saved?.tallies ?? []);
+	const tallies = options.fresh ? dropped(saved?.tallies ?? [], saved?.sessions ?? []) : (saved?.tallies ?? []);
 	const { usage: _, ...value } = classified.value;
 	const state = (kept: Session[], tallies: Tally[], risk: Risk): State => ({
 		branch,
@@ -2131,21 +2129,14 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 	let second = secondFor(candidates[0]!);
 	planned = plan(candidates[0]!, second);
 	let done: Seated[];
+	let out: Awaited<ReturnType<typeof runSeats>>["out"];
 	for (;;) {
 		try {
-			done = await runSeats(shared, planned.seats, options.responses, options.signal);
+			({ done, out } = await runSeats(shared, planned.seats, options.responses, options.signal));
 			break;
 		} catch (error) {
 			if (!(error instanceof ReviewerUnavailableError)) throw error;
 			if (!(error instanceof ReviewLimitError)) down.set(error.harness, error);
-			// A candidate that cannot run is passed over, never the pick; the pick's model settles any findings it left.
-			if (error.candidate && candidate !== null) {
-				skipped.push({ ...candidate, reason: error.reason });
-				messages.push(error.message);
-				candidate = null;
-				planned = plan(candidates[at]!, second);
-				continue;
-			}
 			if (error.second && second !== null) {
 				skipped.push({ ...second, reason: error.reason });
 				messages.push(error.message);
@@ -2169,12 +2160,21 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 		}
 	}
 	let { seats, kept } = planned;
+	// A candidate that could not run is passed over, and its session's open findings are dropped as `--new` drops
+	// them, since no other model's round may stand in for its own.
+	let gone = planned.dropped;
+	if (out !== null) {
+		const failed = out.seat;
+		skipped.push({ ...failed.reviewer, reason: out.error.reason });
+		seats = seats.filter((seat) => seat !== failed);
+		if (failed.session !== undefined) gone = [...gone, failed.session];
+	}
 	// A reviewer this run left out, such as a shadow with nothing to settle, still judged the head its last round reviewed.
 	const standing = () => kept.map((session) => session.last).filter((round) => round.head === head);
 	const judged = () => settle(classified.value, [...done.map((each) => each.round), ...standing()]);
 	const persist = () => {
 		const after = tallied(
-			tallies,
+			dropped(tallies, gone),
 			done.map((each, i) => ({ round: each.round, settles: seats[i]!.session })),
 		);
 		const risk = overridden(judged(), override);
@@ -2190,7 +2190,7 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 			for (;;) {
 				const seat: Seat = { reviewer: secondTo(candidates[at]!), second: true, session: seated, first: 1 };
 				try {
-					const [extra] = await runSeats(shared, [seat], undefined, options.signal);
+					const [extra] = (await runSeats(shared, [seat], undefined, options.signal)).done;
 					done = [...done, extra!];
 					seats = [...seats, seat];
 					kept = kept.filter((session) => session !== seated);
@@ -2251,6 +2251,7 @@ interface Seating {
 function seatsFor({ routed, second, candidate, size, auto, sessions, firsts, responses }: Seating): {
 	seats: Seat[];
 	kept: Session[];
+	dropped: Session[];
 } {
 	const shadow = auto ? shadowOf(size, routed) : null;
 	const seated = (session: Session | undefined) => ({
@@ -2275,8 +2276,7 @@ function seatsFor({ routed, second, candidate, size, auto, sessions, firsts, res
 	if (replaced !== undefined) seats[0] = { ...seats[0]!, ...seated(replaced) };
 	// The shadow and the candidate each review a branch's first run, then rerun only while they have findings to
 	// settle, or once the reviewer they should be changed, as when a new pick moves the shadow's step. The session
-	// carries over to the new reviewer, as a replaced pick's does, so its findings stay settled. With no reviewer for
-	// the seat, the pick's model still seats it while the old session has findings, since only that seat settles them.
+	// carries over to the new reviewer, as a replaced pick's does, so its findings stay settled.
 	const beside = (want: Model | null, role: { shadow: true } | { candidate: true }) => {
 		const held = sessions.find((each) => seatRole(each) === seatRole(role));
 		const open = held !== undefined && unsettled([held]).length > 0;
@@ -2287,8 +2287,14 @@ function seatsFor({ routed, second, candidate, size, auto, sessions, firsts, res
 		if (auto && (held === undefined ? want !== null : open || stale))
 			seats.push({ reviewer: want ?? routed, ...role, ...seated(held) });
 	};
+	// A pick with no shadow seats one at its own effort while the old shadow has findings, since only a shadow settles
+	// them. A candidate's findings measure its own model, so with none to seat, its open findings are dropped instead,
+	// as `--new` drops them.
 	beside(shadow, { shadow: true });
-	beside(candidate !== null && candidate.model !== routed.model ? candidate : null, { candidate: true });
+	const trial = candidate !== null && candidate.model !== routed.model ? candidate : null;
+	const tried = sessions.find((each) => each.candidate);
+	const dropped = auto && trial === null && tried !== undefined && unsettled([tried]).length > 0 ? [tried] : [];
+	if (dropped.length === 0) beside(trial, { candidate: true });
 	// The second reviewer reviews every head while the tier is high, and settles its open findings once it is not.
 	const seconded = sessions.find((each) => each.second);
 	if (auto && (second !== null || (seconded !== undefined && unsettled([seconded]).length > 0))) {
@@ -2299,7 +2305,7 @@ function seatsFor({ routed, second, candidate, size, auto, sessions, firsts, res
 	// A run of the size's pick drops the other sessions but a shadow's, whose presence keeps it from rerunning. A
 	// run of --harness's reviewer alone keeps them all for the pick's next run. Either refuses to pass a head while
 	// one of them still has findings it cannot settle.
-	const others = unseated();
+	const others = unseated().filter((each) => !dropped.includes(each));
 	const kept = auto ? others.filter((each) => seatRole(each) !== null) : others;
 	const held = unsettled(others);
 	if (held.length > 0) {
@@ -2325,26 +2331,33 @@ function seatsFor({ routed, second, candidate, size, auto, sessions, firsts, res
 			`the last round reported ${settling} finding(s); pass --responses with a fix or refutation for each`,
 		);
 	}
-	return { seats, kept };
+	return { seats, kept, dropped };
 }
 
-/** Every seat's round at once, the first failure stopping the others and failing the whole. */
+/**
+ * Every seat's round at once, the first failure stopping the others and failing the whole, except the candidate's
+ * when it cannot run: the others finish, and `out` names it, since a reviewer on trial never stops a review.
+ */
 async function runSeats(
 	shared: Omit<Shared, "signal">,
 	seats: Seat[],
 	responses: string | undefined,
 	stop: AbortSignal | undefined,
-): Promise<Seated[]> {
+): Promise<{ done: Seated[]; out: { seat: Seat; error: ReviewerUnavailableError } | null }> {
 	const controller = new AbortController();
 	const signal = stop ? AbortSignal.any([stop, controller.signal]) : controller.signal;
+	let out: { seat: Seat; error: ReviewerUnavailableError } | null = null;
 	const results = await Promise.allSettled(
 		seats.map((seat) =>
 			reviewWith({ ...shared, signal }, seat, responses).catch((error: unknown) => {
 				// The seats it stops may reject with this same error, which must keep naming the seat that failed.
 				if (controller.signal.aborted) throw error;
 				if (error instanceof ReviewerUnavailableError) {
+					if (seat.candidate) {
+						out = { seat, error };
+						return null;
+					}
 					error.second = seat.second === true;
-					error.candidate = seat.candidate === true;
 				}
 				controller.abort(error);
 				throw error;
@@ -2353,7 +2366,8 @@ async function runSeats(
 	);
 	// The first failure stopped the others, so it is the one to report.
 	if (controller.signal.aborted) throw controller.signal.reason;
-	return results.map((result) => (result as PromiseFulfilledResult<Seated>).value);
+	const done = results.flatMap((result) => (result as PromiseFulfilledResult<Seated | null>).value ?? []);
+	return { done, out };
 }
 
 /**
@@ -2372,12 +2386,12 @@ function savedState(path: string, fresh: boolean | undefined): State | undefined
 }
 
 /**
- * The saved tallies without the findings `--new` drops unsettled, so a finding no session can settle stays
- * open nowhere, and one the new session reports again counts once.
+ * `tallies` without the open findings of `sessions`, which `--new`, or a candidate no round of its own settles, drops
+ * unsettled, so a finding no session can settle stays open nowhere, and one a new session reports again counts once.
  */
-function dropped(saved: State | undefined): Tally[] {
-	const tallies = (saved?.tallies ?? []).map((tally) => ({ ...tally, findings: { ...tally.findings } }));
-	for (const session of (saved?.sessions ?? []).filter(runs)) {
+function dropped(tallies: Tally[], sessions: Session[]): Tally[] {
+	tallies = tallies.map((tally) => ({ ...tally, findings: { ...tally.findings } }));
+	for (const session of sessions.filter(runs)) {
 		const tally = tallies.find((each) => sameSeat(each, session))!;
 		for (const finding of session.rounds.at(-1)!.findings) tally.findings[finding.severity]--;
 	}

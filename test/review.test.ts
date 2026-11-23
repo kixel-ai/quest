@@ -371,26 +371,64 @@ fakes(
 			"claude-fable-5-2 medium candidate",
 		]);
 
-		// Fable at its limit is passed over alone, and the pick's model settles its finding in its seat.
+		// Fable at its limit is passed over alone: the others' rounds stand without a rerun, and its open finding is
+		// dropped, as no other model's round may settle it.
 		vi.stubEnv("FAKE_FAILS", "claude-fable-5-2");
 		vi.stubEnv("FAKE_LIMITED", "reset");
 		write(s.repo, ".tmp/responses.md", "1. Fixed.\n2. Fixed.\n3. Fixed.\n");
 		const responses = join(s.repo, ".tmp", "responses.md");
 		write(s.repo, "src/lib.ts", "export const x = 3;\n");
 		git(s.repo, "commit", "-qam", "fix");
+		const before = s.calls().length;
 		const args = [...OPUS_WROTE, "--size", "L", "--responses", responses, "--json"];
 		const limited = await quest("--root", s.repo, "review", ...args);
 		expect(limited.code, limited.stderr).toBe(0);
-		const { rounds, skipped } = JSON.parse(limited.stdout);
+		const { rounds, skipped, tallies } = JSON.parse(limited.stdout);
 		expect(skipped.map((each: Skip) => `${each.model} ${each.effort}`)).toEqual(["claude-fable-5-2 medium"]);
-		expect(rounds.map(label)).toEqual([
-			"gpt-6.2-sol xhigh",
-			"gpt-6.2-sol high shadow",
-			"gpt-6.2-sol xhigh candidate",
-		]);
-		expect(rounds.map((r: Round) => r.earlier?.findings.map((f) => f.number))).toEqual([[1], [2], [3]]);
+		expect(rounds.map(label)).toEqual(["gpt-6.2-sol xhigh", "gpt-6.2-sol high shadow"]);
+		expect(rounds.map((r: Round) => r.earlier?.findings.map((f) => f.number))).toEqual([[1], [2]]);
+		const sol = s
+			.calls()
+			.slice(before)
+			.filter((c) => c.argv.includes("gpt-6.2-sol") && effortOf(c) !== null);
+		expect(sol).toHaveLength(2);
+		const tried = tallies.find((each: Tally) => each.candidate);
+		expect([tried.model, tried.findings.high, tried.rounds]).toEqual(["claude-fable-5-2", 0, 1]);
 		vi.stubEnv("FAKE_FAILS", undefined);
 		vi.stubEnv("FAKE_LIMITED", undefined);
+
+		// Once back, Fable reviews the branch again in a new session, so no responses are owed for what was dropped.
+		write(s.repo, ".tmp/responses.md", "4. Fixed.\n5. Fixed.\n");
+		write(s.repo, "src/lib.ts", "export const x = 4;\n");
+		git(s.repo, "commit", "-qam", "again");
+		const back = await quest("--root", s.repo, "review", ...args);
+		expect(back.code, back.stderr).toBe(0);
+		const again = JSON.parse(back.stdout).rounds;
+		expect(again.map(label)).toEqual([
+			"gpt-6.2-sol xhigh",
+			"gpt-6.2-sol high shadow",
+			"claude-fable-5-2 medium candidate",
+		]);
+		expect(again.map((r: Round) => r.earlier?.findings.length ?? null)).toEqual([1, 1, null]);
+
+		// Once Fable writes the branch, its candidate's open finding is dropped rather than held or settled by the pick.
+		const v = setup(null);
+		expect((await quest("--root", v.repo, "review", ...OPUS_WROTE, "--size", "L")).code).toBe(0);
+		write(v.repo, ".tmp/responses.md", "1. Fixed.\n2. Fixed.\n");
+		write(v.repo, "src/lib.ts", "export const x = 3;\n");
+		git(v.repo, "commit", "-qam", "fix");
+		const byFable = ["--exclude-model", "claude-fable-5-2", "--size", "L", "--json"];
+		const wrote = await quest(
+			"--root",
+			v.repo,
+			"review",
+			...byFable,
+			"--responses",
+			join(v.repo, ".tmp", "responses.md"),
+		);
+		expect(wrote.code, wrote.stderr).toBe(0);
+		expect(JSON.parse(wrote.stdout).rounds.map(label)).toEqual(["gpt-6.2-sol xhigh", "gpt-6.2-sol high shadow"]);
+		expect(JSON.parse(wrote.stdout).tallies.find((each: Tally) => each.candidate).findings.high).toBe(0);
 
 		// A branch Fable wrote last gets no candidate, nor does a run that names its reviewer.
 		const t = setup(null);
@@ -2076,6 +2114,9 @@ test("an Implementer line reads as agents write it", () => {
 		size: "XS",
 		arm: null,
 	});
+	// A retired GPT version's display name still reads, as older records name it.
+	expect(read("Codex, GPT-6.1 Sol, high effort")?.model).toBe("gpt-6.1-sol");
+	expect(read("GPT 6.2 Astra")?.model).toBe("gpt-6.2-astra");
 	expect(read("Claude Code, Opus 5.5, low effort (iterate, flow fix)")).toEqual(opus("low"));
 	expect(read("Claude Code, Opus 5.5, high effort (iterate, XS, arm B)")).toEqual({
 		...opus("high"),

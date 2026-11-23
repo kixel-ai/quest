@@ -1699,8 +1699,9 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"shadow still has findings. " +
 				`Beside them runs the size's candidate, a model on trial whose findings pair with the pick's: ${candidates}. ` +
 				"It runs as the shadow does, on the branch's first run and then while it has findings to settle or once the " +
-				"size's candidate changed, but none runs when its model is avoided; one that cannot run is passed over and " +
-				"named as skipped, never passing the round, and the pick's model settles its findings in its seat. " +
+				"size's candidate changed, but none runs when its model is avoided. One that cannot run is passed over while the " +
+				"others finish, named as skipped, never passing the round; when it cannot run or is avoided, its open findings " +
+				"are dropped, as --new drops them, since no other model may settle them. " +
 				"--exclude-model names each model to avoid; without it, the " +
 				"latest writer is avoided: the model the last Implementer line names in the `## Models` record of the body of the branch's open PR. " +
 				"When it names none or an `unknown` model, " +
