@@ -157,7 +157,8 @@ three hosts' saved review rounds:
     eval move under its 2026-11-21 decision (rejected: all here, building
     what the port strips; all in kixel.quest, waiting weeks for the port).
   - M ends its arm on Opus high, L gains a Fable arm, and XL writes on
-    Fable: [writer table](/quest/m0/writer-table.md).
+    Fable, as [moq-dev/quest#829](https://github.com/moq-dev/quest/pull/829)
+    routes them.
   - Fable reviews L beside the pick, and Astra picks for XL:
     [reviewer table](/quest/m0/reviewer-table.md).
   - Cost metric? ✅ Mean spend per merged PR, every session's, plus the

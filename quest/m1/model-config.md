@@ -34,7 +34,7 @@ Guidance:
   minimum where the evidence shows it fails there, such as Opus medium at M.
 - Config is the user's, never the checkout's, so a branch cannot change
   which model reviews it.
-- Land this after [writer table](/quest/m0/writer-table.md),
+- Land this after [writer table](https://github.com/moq-dev/quest/pull/829),
   [reviewer table](/quest/m0/reviewer-table.md),
   [Claude writers](/quest/m0/claude-writers.md), and
   [review seats](/quest/m0/review-seats.md), whose tables become the

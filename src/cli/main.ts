@@ -389,7 +389,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"(linux, macos, windows) under the quest's ## Hosts, empty when it runs anywhere, and models ranks the {harness, model, effort} " +
 				"entries that write the quest: its size's list, or the next size's while a Maintainer: item under its " +
 				"## Waiting leaves a decision open (quest models lists them). While the writer A/B runs, arm is A or B for " +
-				"a size that runs one, and null for L or a quest routed up for an open Maintainer: item, and models opens with that arm's entry; the agent that runs it " +
+				"a size that runs one, and null for M, XL, or a quest routed up for an open Maintainer: item, and models opens with that arm's entry; the agent that runs it " +
 				"records the arm on its Implementer line.\n\n" +
 				"--unclaimed ranks the fetched upstream default branch's tree instead of the checkout, then drops " +
 				"quests someone holds: a quest branch upstream, or an open PR from that branch in any repository. A " +
@@ -1434,7 +1434,10 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 			if (options.arm !== undefined) {
 				if (options.writer !== undefined) throw new UsageError("give --writer or --arm, not both");
 				const arms = ARMS[size];
-				if (!arms) throw new UsageError(`${size} runs no writer arms`);
+				if (!arms)
+					throw new UsageError(
+						`${size} runs no writer arms; an iterate on a PR an earlier arm wrote runs the model and effort its Implementer line records`,
+					);
 				entries = [arms[options.arm]];
 			} else if (options.writer !== undefined) {
 				const entry = writerAt(size, options.writer);
