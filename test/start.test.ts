@@ -3,10 +3,11 @@
 // github.com remote name reach a local bare repository.
 
 import { execFileSync } from "node:child_process";
-import { appendFileSync, cpSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { createHash } from "node:crypto";
+import { appendFileSync, cpSync, existsSync, mkdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { basename, join } from "node:path";
 
-import { afterEach, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import { claims, openDrafts, target } from "../src/cli/claims";
 import { githubRepository, readRemote, remoteRepository } from "../src/cli/github";
@@ -15,6 +16,7 @@ import { GitHubForge } from "../src/github/forge";
 import { type Output, main } from "../src/cli/main";
 import { Refusal } from "../src/core";
 import { releaseQuest, startQuest } from "../src/cli/start";
+import { Worktrees } from "../src/cli/worktree";
 import { ago } from "../src/github/hold";
 import { EPIC_README, GIT_SETTINGS, TWO, Tree, configure, initRepository, template, tempDir } from "./fixture";
 import { FakeKixelQuest, KIXEL, kixelEnv } from "./kixel-fakes";
@@ -23,6 +25,17 @@ const ONE = "quest/m0/epic/one.md";
 const BRANCH = "quest/m0/epic/one";
 const UPSTREAM = "https://github.com/example/project.git";
 const FORK = "https://github.com/me/project.git";
+
+// Claims from a default-branch checkout add a worktree, so keep their registry out of the user's.
+beforeEach(() => {
+	vi.stubEnv("QUEST_WORKTREE_HOME", tempDir());
+});
+
+/** Where a claim from `work`, on the default branch, puts the worktree for `BRANCH`. */
+function worktreeOf(work: string, branch = BRANCH): string {
+	const hash = createHash("sha256").update(branch).digest("hex").slice(0, 8);
+	return join(realpathSync(work), ".worktrees", `${branch.replaceAll("/", "-").slice(0, 100)}-${hash}`);
+}
 
 function git(cwd: string, ...args: string[]): string {
 	return execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
@@ -246,15 +259,22 @@ describe("start on GitHub", () => {
 		const work = clone(UPSTREAM, { [UPSTREAM]: bare });
 		const started = await start(work, github);
 
-		expect(started).toEqual({ branch: BRANCH, sha: tip(bare), url: "https://github.com/example/project/pull/1" });
+		expect(started).toEqual({
+			branch: BRANCH,
+			sha: tip(bare),
+			url: "https://github.com/example/project/pull/1",
+			worktree: worktreeOf(work),
+		});
 		const base = git(bare, "rev-parse", "main");
 		expect(git(bare, "rev-parse", `${started.sha}^`)).toBe(base);
 		expect(git(bare, "rev-parse", `${started.sha}^{tree}`)).toBe(git(bare, "rev-parse", `${base}^{tree}`));
 		expect(git(bare, "log", "-1", "--format=%B", started.sha)).toMatch(
 			/^chore\(quest\): claim quest\/m0\/epic\/one\.md\n\nQuest-Claim: [0-9a-f]{16}$/,
 		);
-		expect(git(work, "symbolic-ref", "HEAD")).toBe(`refs/heads/${BRANCH}`);
-		expect(git(work, "rev-parse", "HEAD")).toBe(started.sha);
+		// The main clone stays on its default branch; the claim's worktree holds the branch.
+		expect(git(work, "symbolic-ref", "HEAD")).toBe("refs/heads/main");
+		expect(git(worktreeOf(work), "symbolic-ref", "HEAD")).toBe(`refs/heads/${BRANCH}`);
+		expect(git(worktreeOf(work), "rev-parse", "HEAD")).toBe(started.sha);
 		expect(github.pulls).toMatchObject([
 			{ base: "example/project", head: { ref: BRANCH, repo: { full_name: "example/project" } }, draft: true },
 		]);
@@ -305,22 +325,125 @@ describe("start on GitHub", () => {
 		expect(git(work, "rev-parse", "HEAD")).toBe(started.sha);
 	});
 
-	test("warns rather than moving a diverged local branch", async () => {
+	test("a checkout off the default branch switches to the claim, and no worktree is added", async () => {
+		const bare = upstream();
+		const work = clone(UPSTREAM, { [UPSTREAM]: bare });
+		git(work, "switch", "-q", "-c", "other");
+		const started = await start(work, new FakeGitHub());
+		expect(started.worktree).toBeNull();
+		expect(git(work, "symbolic-ref", "HEAD")).toBe(`refs/heads/${BRANCH}`);
+		expect(git(work, "rev-parse", "HEAD")).toBe(started.sha);
+		expect(existsSync(join(work, ".worktrees"))).toBe(false);
+	});
+
+	test("a detached checkout switches to the claim", async () => {
+		const bare = upstream();
+		const work = clone(UPSTREAM, { [UPSTREAM]: bare });
+		git(work, "switch", "-q", "--detach");
+		const started = await start(work, new FakeGitHub());
+		expect(started.worktree).toBeNull();
+		expect(git(work, "symbolic-ref", "HEAD")).toBe(`refs/heads/${BRANCH}`);
+	});
+
+	test("a local branch from an earlier attempt gets a worktree, with a warning to merge the claim", async () => {
 		const bare = upstream();
 		const work = clone(UPSTREAM, { [UPSTREAM]: bare });
 		git(work, "branch", BRANCH);
+		const before = git(work, "rev-parse", BRANCH);
 		const warnings: string[] = [];
 		const started = await start(work, new FakeGitHub(), warnings);
 		expect(warnings).toEqual([
 			`claimed, but local branch ${BRANCH} already exists from an earlier attempt; ` +
-				`switch to it, merge the claim commit ${started.sha} into it, and resume that work before pushing`,
+				`it is checked out in ${worktreeOf(work)}; merge the claim commit ${started.sha} into it, ` +
+				"and resume that work before pushing",
 		]);
+		expect(started.worktree).toBe(worktreeOf(work));
 		expect(git(work, "symbolic-ref", "HEAD")).toBe("refs/heads/main");
+		expect(git(started.worktree!, "symbolic-ref", "HEAD")).toBe(`refs/heads/${BRANCH}`);
+		expect(git(work, "rev-parse", BRANCH)).toBe(before);
+	});
+
+	test("reuses the worktree that has the branch checked out, wherever it lives", async () => {
+		const bare = upstream();
+		const work = clone(UPSTREAM, { [UPSTREAM]: bare });
+		const elsewhere = join(tempDir(), "mine");
+		git(work, "worktree", "add", "-q", "-b", BRANCH, elsewhere, "main");
+		const warnings: string[] = [];
+		const started = await start(work, new FakeGitHub(), warnings);
+		expect(warnings).toEqual([]);
+		expect(started.worktree).toBe(realpathSync(elsewhere));
+		expect(git(elsewhere, "rev-parse", "HEAD")).toBe(started.sha);
+		expect(existsSync(join(work, ".worktrees"))).toBe(false);
+	});
+
+	test("restores the worktree an earlier claim made once its branch is gone", async () => {
+		const bare = upstream();
+		const work = clone(UPSTREAM, { [UPSTREAM]: bare });
+		const github = new FakeGitHub();
+		const path = (await start(work, github)).worktree!;
+		await releaseQuest(work, ONE, "origin", deps(github));
+		git(path, "switch", "-q", "--detach");
+		git(work, "branch", "-q", "-D", BRANCH);
+		const second = await start(work, github);
+		expect(second.worktree).toBe(path);
+		expect(git(path, "rev-parse", "HEAD")).toBe(second.sha);
+		expect(git(path, "symbolic-ref", "HEAD")).toBe(`refs/heads/${BRANCH}`);
+	});
+
+	test("a reused worktree that an earlier release dropped the reservation of is restored", async () => {
+		const bare = upstream();
+		const work = clone(UPSTREAM, { [UPSTREAM]: bare });
+		const github = new FakeGitHub();
+		const path = (await start(work, github)).worktree!;
+		const worktrees = new Worktrees();
+		const phase = () => worktrees.registered(path)!.phase;
+		worktrees.release(worktrees.registered(path)!.id);
+		expect(phase()).toBe("released");
+		await releaseQuest(work, ONE, "origin", deps(github));
+		await start(work, github);
+		expect(phase()).toBe("active");
+	});
+
+	test("protects the checkout's own default branch, which may differ from the upstream's", async () => {
+		const bare = upstream();
+		const work = clone(UPSTREAM, { [UPSTREAM]: bare });
+		git(bare, "branch", "develop", "main");
+		git(bare, "symbolic-ref", "HEAD", "refs/heads/develop");
+		git(work, "fetch", "-q", "origin");
+		git(work, "switch", "-q", "-c", "develop", "origin/develop");
+		const started = await start(work, new FakeGitHub());
+		expect(started.worktree).toBe(worktreeOf(work));
+		expect(git(work, "symbolic-ref", "HEAD")).toBe("refs/heads/develop");
+	});
+
+	test("a branch too long for a filename still gets a worktree, named by its hash", async () => {
+		const bare = upstream();
+		const work = clone(UPSTREAM, { [UPSTREAM]: bare });
+		const long = "a".repeat(245);
+		land(work, {
+			"quest/m0/epic/README.md": `${EPIC_README}- [Long](/quest/m0/epic/${long}.md)\n`,
+			[`quest/m0/epic/${long}.md`]: "# [S] Long\n\n## Goal\n\nA long name.\n",
+		});
+		const branch = `quest/m0/epic/${long}`;
+		const started = await start(work, new FakeGitHub(), [], `${branch}.md`);
+		expect(started.worktree).toBe(worktreeOf(work, branch));
+		expect(basename(started.worktree!).length).toBeLessThan(255);
+		expect(git(started.worktree!, "symbolic-ref", "HEAD")).toBe(`refs/heads/${branch}`);
+	});
+
+	test("says the claim stands when a worktree cannot be made", async () => {
+		const bare = upstream();
+		const work = clone(UPSTREAM, { [UPSTREAM]: bare });
+		mkdirSync(worktreeOf(work), { recursive: true });
+		await expect(start(work, new FakeGitHub())).rejects.toThrow(
+			/^claimed quest\/m0\/epic\/one\.md at https:\/\/github\.com\/example\/project\/pull\/1, but no checkout is on quest\/m0\/epic\/one: .*refusing to adopt/,
+		);
+		expect(tip(bare)).not.toBe("");
 	});
 
 	test("reaches a fork's parent with the scheme a URL alias resolves to", async () => {
 		const bare = upstream();
-		const forkBare = initRepository(undefined, { bare: true });
+		const forkBare = upstream();
 		const github = new FakeGitHub();
 		github.fork("me/project");
 		// `corp:me/project` expands to the fork's HTTPS URL, so the parent is read over HTTPS too.
@@ -390,7 +513,7 @@ describe("start on GitHub", () => {
 
 	test("pushes where the push URL points, as a fork, when the remote fetches from upstream", async () => {
 		const bare = upstream();
-		const forkBare = initRepository(undefined, { bare: true });
+		const forkBare = upstream();
 		const github = new FakeGitHub();
 		github.fork("me/project");
 		const forkSsh = "git@github.com:me/project.git";
@@ -461,7 +584,7 @@ describe("start on GitHub", () => {
 
 	test("a fork pushes to itself and opens the PR on its parent", async () => {
 		const bare = upstream();
-		const forkBare = initRepository(undefined, { bare: true });
+		const forkBare = upstream();
 		const github = new FakeGitHub();
 		github.fork("me/project");
 		const work = clone(FORK, { [FORK]: forkBare, [UPSTREAM]: bare });
@@ -504,7 +627,7 @@ describe("start on GitHub", () => {
 		["keeps quests too", "example/project", true],
 	])("a fork of a fork with quests whose parent %s claims on %s", async (_, expected, rooted) => {
 		const bares: Record<string, string> = { "example/project": upstream(), "me/project": upstream() };
-		const ownBare = initRepository(undefined, { bare: true });
+		const ownBare = upstream();
 		const github = new FakeGitHub();
 		if (!rooted) github.files.delete("example/project/quest/README.md");
 		github.files.set("me/project/quest/README.md", 200);
@@ -613,24 +736,24 @@ describe("start on GitHub", () => {
 		const bare = upstream();
 		const github = new FakeGitHub();
 		const work = clone(UPSTREAM, { [UPSTREAM]: bare });
-		await start(work, github);
-		appendFileSync(join(work, ONE), "\nWork in progress.\n");
-		git(work, "commit", "-q", "-m", "work", "--", ONE);
-		git(work, "push", "-q", "origin", `refs/heads/${BRANCH}:refs/heads/${BRANCH}`);
+		const { worktree } = await start(work, github);
+		appendFileSync(join(worktree!, ONE), "\nWork in progress.\n");
+		git(worktree!, "commit", "-q", "-m", "work", "--", ONE);
+		git(worktree!, "push", "-q", "origin", `refs/heads/${BRANCH}:refs/heads/${BRANCH}`);
 
 		await expect(releaseQuest(work, ONE, "origin", deps(github))).rejects.toThrow(
 			new Refusal(
 				`${BRANCH} on origin has work beyond its empty claim commit; close its PR yourself to abandon that work`,
 			),
 		);
-		expect(tip(bare)).toBe(git(work, "rev-parse", "HEAD"));
+		expect(tip(bare)).toBe(git(worktree!, "rev-parse", "HEAD"));
 		expect(github.pulls[0].state).toBe("open");
 
 		// An empty commit after the work, such as a CI retrigger, is not a claim either.
-		git(work, "commit", "-q", "--allow-empty", "-m", "retrigger");
-		git(work, "push", "-q", "origin", `refs/heads/${BRANCH}:refs/heads/${BRANCH}`);
+		git(worktree!, "commit", "-q", "--allow-empty", "-m", "retrigger");
+		git(worktree!, "push", "-q", "origin", `refs/heads/${BRANCH}:refs/heads/${BRANCH}`);
 		await expect(releaseQuest(work, ONE, "origin", deps(github))).rejects.toThrow(Refusal);
-		expect(tip(bare)).toBe(git(work, "rev-parse", "HEAD"));
+		expect(tip(bare)).toBe(git(worktree!, "rev-parse", "HEAD"));
 	});
 });
 
@@ -655,7 +778,7 @@ describe("start on Kixel Quest", () => {
 	test("claims with a draft PR there, refuses a second claim, and releases it", async () => {
 		const { bare, work, kixel } = hosted();
 		const first = await cli("--root", work, "start", ONE);
-		expect(first).toEqual({ code: 0, stdout: `${kixel.url(1)}\n`, stderr: "" });
+		expect(first).toEqual({ code: 0, stdout: `${kixel.url(1)}\n${worktreeOf(work)}\n`, stderr: "" });
 		expect(tip(bare)).toBe(git(work, "rev-parse", BRANCH));
 		const [pull] = kixel.pulls;
 		expect(pull).toMatchObject({ branch: BRANCH, base: "main", draft: true, title: "One" });
@@ -705,7 +828,7 @@ describe("start on another forge", () => {
 		const first = await cli("--root", work, "start", ONE);
 		expect(first).toEqual({
 			code: 0,
-			stdout: `${BRANCH}\n`,
+			stdout: `${BRANCH}\n${worktreeOf(work)}\n`,
 			stderr: "quest: origin is not on GitHub or Kixel Quest, so the claim branch was pushed without a PR\n",
 		});
 		expect(tip(bare)).not.toBe("");
@@ -728,7 +851,7 @@ describe("start on another forge", () => {
 
 		const out = await cli("--root", join(work, "sub"), "start", ONE);
 		expect(out.code, out.stderr).toBe(0);
-		expect(out.stdout).toBe(`${BRANCH}\n`);
+		expect(out.stdout).toBe(`${BRANCH}\n${join(worktreeOf(work), "sub")}\n`);
 		expect(tip(bare)).not.toBe("");
 	});
 
