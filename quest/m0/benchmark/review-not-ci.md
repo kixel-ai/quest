@@ -7,7 +7,7 @@ A PR's risk tier scales its local review and approval, never the CI it runs: eve
 
 ## Plan
 
-Decided 2026-11-22 (maintainer, `/quest-plan` from kixel-ai/kixel.quest's run), reversing [moq-dev/quest#802](https://github.com/moq-dev/quest/pull/802)'s full suite for high: ✅ the tier scales review and approval only (rejected: keeping the suite opt-in, which leaves code with no automatic consumer). CPU on the maintainer's hosts is the scarce resource, and the next commit's CI or the nightly run catches what the gate's scoped checks miss.
+Decided 2026-11-22 (maintainer, `/quest-plan` from kixel-ai/kixel.quest's run), reversing [kixel-ai/quest#802](https://github.com/kixel-ai/quest/pull/802)'s full suite for high: ✅ the tier scales review and approval only (rejected: keeping the suite opt-in, which leaves code with no automatic consumer). CPU on the maintainer's hosts is the scarce resource, and the next commit's CI or the nightly run catches what the gate's scoped checks miss.
 
 - ✅ A high PR gets two local reviewers on different models, both at the top entry of the review ranking `quest models` prints rather than the size's pick (rejected: the size's pick plus a second reviewer, which replaces the suite with nothing; three reviewers, which mostly repeat the first two at full token cost).
 - ✅ Medium keeps one reviewer at the size's pick (rejected: a second reviewer, since medium is the default for every repository without a `RISK.md`; revisit once the factory report shows medium PRs causing breakage). Low is unchanged.

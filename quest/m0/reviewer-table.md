@@ -12,8 +12,8 @@ and head's `quest eval run` scores and cost, as `AGENTS.md` requires for a
 reviewer change.
 
 Non-goals: what risk tiers buy in review, which
-[moq-dev/quest#819](https://github.com/moq-dev/quest/pull/819) changes; the
-writer table, which [moq-dev/quest#829](https://github.com/moq-dev/quest/pull/829) set.
+[kixel-ai/quest#819](https://github.com/kixel-ai/quest/pull/819) changes; the
+writer table, which [kixel-ai/quest#829](https://github.com/kixel-ai/quest/pull/829) set.
 
 ## Plan
 
