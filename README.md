@@ -315,7 +315,7 @@ uses `GH_TOKEN`, `GITHUB_TOKEN`, or `gh auth token`.
 Draft claims are placeholders. This repository's only PR check is the required
 `Queue`, skipped on the PR; its `Queue` workflow runs the checks when a reviewed
 head enters GitHub's merge queue. Platform verification runs after pushes to
-`main` and daily, and a failure there opens an issue.
+`main` and daily.
 
 ## Check a quest's PR
 

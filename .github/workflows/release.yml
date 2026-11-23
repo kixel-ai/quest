@@ -8,9 +8,8 @@ name: Release
 # draft release and publishes it, which creates the tag, so no tag exists
 # without its complete release. A failed or cancelled run needs no recovery:
 # the next run sees the same unreleased range and replaces any draft it left.
-# A failed run on main files an issue. Pull requests don't run this, so the
-# daily run is where binaries are first built and checked; manual runs on other
-# branches only build and check. scripts/release-plan.sh holds the decision.
+# Pull requests don't run this, so the daily run is where binaries are first
+# built and checked; manual runs on other branches only build and check. scripts/release-plan.sh holds the decision.
 on:
   schedule:
     - cron: "17 6 * * *"
@@ -254,11 +253,3 @@ jobs:
     uses: ./.github/workflows/install-check.yml
     with:
       tag: v${{ needs.plan.outputs.version }}
-
-  file-failure:
-    needs: [publish, install-check]
-    if: failure() && github.ref == 'refs/heads/main'
-    permissions:
-      contents: read
-      issues: write
-    uses: ./.github/workflows/file-failure.yml

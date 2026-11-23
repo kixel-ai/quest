@@ -3,7 +3,7 @@ name: Check
 # Runs after each push to main, outside pull requests and the merge queue, which
 # already runs `just check` and `just test`: this adds the flake check and the
 # installed lifecycle on Linux and macOS. A newer push cancels a pending run, so
-# runs coalesce, and a failure on main files an issue.
+# runs coalesce.
 on:
   push:
     branches: [main]
@@ -65,11 +65,3 @@ jobs:
       - name: Check that the gate admits and owns its command's descendants
         shell: bash
         run: bash scripts/gate-check.sh "$RUNNER_TEMP/quest-lifecycle-install/bin/quest"
-
-  file-failure:
-    needs: [check, lifecycle]
-    if: failure() && github.ref == 'refs/heads/main'
-    permissions:
-      contents: read
-      issues: write
-    uses: ./.github/workflows/file-failure.yml
