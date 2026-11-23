@@ -1434,9 +1434,9 @@ the same for every repository unless its `AGENTS.md` names others:
 |---|---|---|
 | XS | Claude Code `claude-sonnet-5-5` high | Codex `gpt-6.1-sol` low |
 | S | Claude Code `claude-opus-5-5` medium | Codex `gpt-6.1-sol` medium |
-| M | Claude Code `claude-opus-5-5` medium | Codex `gpt-6.1-sol` high |
+| M | Claude Code `claude-opus-5-5` high | Codex `gpt-6.1-sol` high |
 | L | Claude Code `claude-opus-5-5` high | Codex `gpt-6.1-sol` xhigh |
-| XL | Claude Code `claude-opus-5-5` xhigh | none |
+| XL | Claude Code `claude-fable-5-2` high | Claude Code `claude-opus-5-5` xhigh |
 
 `quest unblocked --json` lists each ready quest's ranked `models`: its size's
 list, or the next size's while a `Maintainer:` item under its `## Waiting`
@@ -1446,17 +1446,17 @@ to the next only while nothing is written: when the CLI is missing or logged
 out, or the agent stops at its usage limit with nothing beyond the claim
 commit. Once a model writes, the PR is its own.
 
-While the writer A/B runs, XS, S, M, and XL quests split 50/50 between two
+While the writer A/B runs, XS, S, and L quests split 50/50 between two
 arms, to measure where published guidance disagrees: arm A runs the table's
 writer, and arm B runs Claude Code `claude-opus-5-5` medium for XS,
-`claude-sonnet-5-5` high for S, `claude-opus-5-5` high for M, and
-`claude-fable-5-2` medium for XL. A hash of the quest's path picks the arm,
-so a restart or respawn keeps it; `quest unblocked --json` names it as `arm`,
-`A` or `B`, and puts its entry first in `models`. L runs no arm, nor does a
-quest with a `Maintainer:` decision open, which runs the next size's list, so
-an arm always runs at its PR's size; their `arm` is `null`. The agent
-that runs that entry ends its `Implementer:` line with the arm, as
-`Implementer: Claude Code, claude-opus-5-5, high effort (arm B)`; a fallback
+`claude-sonnet-5-5` high for S, and `claude-fable-5-2` medium for L, falling
+to the table's writer when Fable hits its usage limit. A hash of the quest's
+path picks the arm, so a restart or respawn keeps it; `quest unblocked --json`
+names it as `arm`, `A` or `B`, and puts its entry first in `models`. M and XL
+run no arm, nor does a quest with a `Maintainer:` decision open, which runs
+the next size's list, so an arm always runs at its PR's size; their `arm` is
+`null`. The agent that runs that entry ends its `Implementer:` line with the
+arm, as `Implementer: Claude Code, claude-fable-5-2, medium effort (arm B)`; a fallback
 names none, so its PR counts in neither arm.
 
 A `/quest-iterate` stays on the PR's writer, the model its `## Models`
