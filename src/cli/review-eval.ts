@@ -14,7 +14,7 @@ import type { HarnessName } from "./agent";
 import { git } from "./git";
 import { type ClaimDependencies, upstream } from "./claims";
 import { readRemote, remoteRepository, requireRemote } from "./github";
-import { type Model, REVIEWERS } from "./models";
+import { type Model, REVIEWERS, weaker } from "./models";
 import { recorded } from "./models-record";
 import {
 	type Assessment,
@@ -27,7 +27,7 @@ import {
 	firstRound,
 	pickReviewer,
 	reviewSize,
-	reviewingSize,
+	listing,
 	shadowOf,
 } from "./review";
 import type { Session } from "./usage";
@@ -345,7 +345,7 @@ export interface Seated {
 	effort: string;
 	/** The size's pick one effort away, beside the pick as `quest review` runs it. */
 	shadow?: true;
-	/** A high case's reviewer on a model other than the pick's, as `quest review` runs it. */
+	/** A high case's reviewer from a vendor other than the pick's, as `quest review` runs it. */
 	second?: true;
 	session: string;
 	usage: Usage[];
@@ -390,25 +390,26 @@ export interface EvalReport {
 
 /**
  * The reviewers a case gets, as `quest review` seats them for its classified tier: `harness`'s alone, or the pick,
- * avoiding its writer, and its shadow, or for a high case no shadow but a second reviewer on another model, both from
- * the largest size's list.
+ * avoiding its writer, and its shadow, or for a high case no shadow but a second reviewer from another vendor, both from
+ * the high list.
  */
 export function evalSeats(
 	entry: EvalCase,
 	options: Pick<EvalOptions, "harness" | "model" | "effort">,
 ): { reviewer: Model; shadow?: true; second?: true }[] {
-	const listed = reviewingSize(entry.size, entry.tier);
+	const listed = listing(entry.size, entry.tier);
 	if (options.harness !== undefined) return [{ reviewer: pickReviewer(listed, options, () => false) }];
-	const avoided = (model: Model) => model.model === entry.writer;
+	const avoided = (model: Model) =>
+		entry.writer !== null && (model.model === entry.writer || weaker(model.model, entry.writer));
 	const pick = pickReviewer(listed, {}, avoided);
 	const seats: { reviewer: Model; shadow?: true; second?: true }[] = [{ reviewer: pick }];
 	const shadow = entry.tier === "high" ? null : shadowOf(entry.size, pick);
 	if (shadow) seats.push({ reviewer: shadow, shadow: true });
 	if (entry.tier === "high") {
-		const second = REVIEWERS[listed].find((each) => !avoided(each) && each.model !== pick.model);
+		const second = REVIEWERS[listed].find((each) => !avoided(each) && each.harness !== pick.harness);
 		if (second === undefined)
 			throw new ReviewInputError(
-				`#${entry.pull} is high, and no model of the ${listed} list but ${pick.model} may review it`,
+				`#${entry.pull} is high, and no model of the ${listed} list from a vendor other than ${pick.harness}'s may review it`,
 			);
 		seats.push({ reviewer: second, second: true });
 	}

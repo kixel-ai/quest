@@ -1615,9 +1615,9 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 			else for (const line of messageLines(found)) print(line);
 		});
 
-	const reviewers = SIZES.map(
-		(size) => `${size} ${REVIEWERS[size].map((e) => `${e.harness} ${e.model} ${e.effort}`).join(", then ")}`,
-	).join("; ");
+	const reviewers = [...SIZES, "high" as const]
+		.map((list) => `${list} ${REVIEWERS[list].map((e) => `${e.harness} ${e.model} ${e.effort}`).join(", then ")}`)
+		.join("; ");
 	const classifiers = CLASSIFIERS.map((e) => `${e.harness} ${e.model} ${e.effort}`).join(", then ");
 	/** quest review's exit code for `error`: 2 for a usage error, 3 when no reviewer could run, else 1. */
 	const reviewFailure = (error: unknown, json = false): number => {
@@ -1641,7 +1641,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		.summary("Have a model other than the latest writer review the committed branch, read-only")
 		.description(
 			"Review the checkout's committed branch against its base with a reviewer its size picks, never the " +
-				`model that changed it last. Each size ranks its reviewers (harness, model, effort): ${reviewers}. The ` +
+				`model that changed it last. Each size, and the high list a high head uses, ranks its reviewers (harness, model, effort): ${reviewers}. The ` +
 				"first whose model is not avoided reviews. One that cannot run, as its CLI or provider reports before any " +
 				"finding is saved, passes the round to the next whose model is not avoided: a CLI that is not installed, " +
 				"logged out, or has its login rejected passes over every model of that CLI, and a model at its usage limit " +
@@ -1653,10 +1653,11 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"compared with its neighbor. The shadow runs on a " +
 				"branch's first run of the pick, then only while it has findings to settle or once the pick changed so it is " +
 				"no longer that step away; its findings are numbered and settled like any reviewer's, its session carries " +
-				"over to the new shadow, and a pick with no shadow seats one at its own effort while the old " +
-				"shadow still has findings. " +
+				"over to the new shadow, and a pick with no shadow seats the old one as it ran while it still has " +
+				"findings, unless its model is avoided or cannot run, when it seats one at the pick's own effort. " +
 				"--exclude-model names each model to avoid; without it, the " +
-				"latest writer is avoided: the model the last Implementer line names in the `## Models` record of the body of the branch's open PR. " +
+				"latest writer is avoided, with every model weaker than it (Sonnet than any other, Sol than Fable and Astra), " +
+				"so a reviewer is never weaker than the writer: the model the last Implementer line names in the `## Models` record of the body of the branch's open PR. " +
 				"When it names none or an `unknown` model, " +
 				"it is any model of the harness running this command, usually the session that just pushed, detected from the " +
 				"variables each sets, so Codex reviews from Claude Code and Claude Code from Codex; with --harness it is " +
@@ -1719,7 +1720,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"The classifier also names the class of RISK.md's ## Automatic list every changed file falls in, or none. " +
 				"The tier scales the review: a low head with no finding to settle runs no reviewer unless --harness, " +
 				"--model, or --effort names one, and a high head runs no shadow but gets a second reviewer: the first of the " +
-				"largest size's list on a model other than the pick's that can run, in its own session, which reviews " +
+				"high list from a vendor other than the pick's that can run, in its own session, which reviews " +
 				"every head while the tier is high and settles its findings after. A head the classifier or the " +
 				"maintainer's override holds high also takes its pick from that list, whatever the PR's size; a " +
 				"reviewer's raise changes only the second reviewer, so the pick stays the same on the head. --model and " +
@@ -1892,8 +1893,8 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"session: the base's AGENTS.md and CLAUDE.md at the case's merge base, its classified tier, and the prompts of " +
 				"this build, with the review rules of this checkout, its committed REVIEW.md at HEAD, so a change to the " +
 				"reviewer table, the prompts, or REVIEW.md is scored before it lands. The reviewers are the size's pick, " +
-				"avoiding the case's writer, and its shadow, or for a high case no shadow but a second reviewer on another model, " +
-				"both from the largest size's list, as quest review runs them, or --harness's alone, at its tier's " +
+				"avoiding the case's writer, and its shadow, or for a high case no shadow but a second reviewer from another vendor, " +
+				"both from the high list, as quest review runs them, or --harness's alone, at its tier's " +
 				"entry's model and effort unless --model and --effort override them. A reviewer that cannot run fails the run " +
 				"rather than passing the case to the next, so the score measures the reviewers it names. Cases run one at a time, their reviewers " +
 				"at once, and the first failure stops the run and fails it.\n\n" +

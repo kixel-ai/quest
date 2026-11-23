@@ -105,12 +105,18 @@ test("the pick avoids the case's writer, and --harness runs alone at its size's 
 	expect(names(evalSeats({ ...entry, writer: "gpt-6.1-sol" }, { harness: "codex" }))).toEqual(["gpt-6.1-sol medium"]);
 	expect(names(evalSeats(entry, { harness: "claude", effort: "high" }))).toEqual(["claude-opus-5-5 high"]);
 
-	// A high case gets the largest size's pick and a second reviewer on another model, as quest review seats them.
+	// A high case gets the high list's pick and a second reviewer from another vendor, as quest review seats them.
 	const high = { ...entry, tier: "high", writer: "claude-opus-5-5" } as EvalCase;
-	expect(names(evalSeats(high, {}))).toEqual(["gpt-6.1-sol xhigh", "claude-sonnet-5-5 high second"]);
+	expect(names(evalSeats(high, {}))).toEqual(["gpt-6.1-sol xhigh", "claude-fable-5-2 xhigh second"]);
+	// An L case's shadow would step down from the pick, but a high case runs none.
 	expect(names(evalSeats({ ...high, size: "L" }, {}))).toEqual([
 		"gpt-6.1-sol xhigh",
-		"claude-sonnet-5-5 high second",
+		"claude-fable-5-2 xhigh second",
+	]);
+	// Sol never reviews Fable's work, so Opus picks and Astra is the other vendor's.
+	expect(names(evalSeats({ ...high, writer: "claude-fable-5-2" }, {}))).toEqual([
+		"claude-opus-5-5 xhigh",
+		"gpt-6.2-astra xhigh second",
 	]);
 	expect(names(evalSeats(high, { harness: "claude" }))).toEqual(["claude-opus-5-5 xhigh"]);
 });
