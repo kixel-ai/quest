@@ -30,6 +30,7 @@ When it has an `arm` and runs that first entry, its brief says to end its `Imple
 Fall to the next when `quest agent` reports its CLI missing or logged out, or the agent stops on a usage limit with nothing written beyond the claim commit, continuing in that checkout and claim PR.
 Once a model has written anything, the PR is its: keep its worktree and session id to resume after the reset.
 Skip a quest whose list runs out, and report each harness's outage once.
+When its last entry stopped on a usage limit with nothing written beyond the claim commit, its checkout included, first release the claim with `quest start --release <quest>` from that checkout, so a later round or another coordinator starts it once a writer can run; it refuses with exit 3 once work was pushed, leaving the PR its writer's.
 
 ## Pull requests
 
