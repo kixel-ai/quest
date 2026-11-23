@@ -20,7 +20,7 @@ import {
 import { GitError, git } from "./git";
 import { requireRemote } from "./github";
 import { ago } from "../github/hold";
-import { Worktrees, canonical, derivedDefaults, mainCheckout } from "./worktree";
+import { Worktrees, canonical, derivedDefaults, mainCheckout, waiting } from "./worktree";
 import { mergedPull, pullsFrom } from "../github/claims";
 
 export interface Started {
@@ -172,18 +172,20 @@ async function place(
 	const held = checkedOut(root).get(`refs/heads/${branch}`);
 	if (held !== undefined) {
 		// A quest worktree an earlier release left stays charged for its growth again.
-		const owned = worktrees.registered(canonical(held));
-		if (owned) worktrees.restore(owned.id);
+		const owned = await waiting(() => worktrees.registered(canonical(held)));
+		if (owned) await waiting(() => worktrees.restore(owned.id));
 		checkout(held, branch, sha, warn);
 		return held;
 	}
 	const main = mainCheckout(root);
-	// The hash tells apart branches that differ only where the name keeps nothing, such as `a/b-c` and `a-b/c`.
-	const name = `${branch.replace(/[^A-Za-z0-9._-]/g, "-")}-${createHash("sha256").update(branch).digest("hex").slice(0, 8)}`;
-	const earlier = worktrees.registered(join(main, ".worktrees", name));
+	// The hash tells apart branches that differ only where the name keeps nothing, such as `a/b-c` and `a-b/c`,
+	// or past its cut: a filename holds 255 bytes, which a long branch would overflow.
+	const readable = branch.replace(/[^A-Za-z0-9._-]/g, "-").slice(0, 100);
+	const name = `${readable}-${createHash("sha256").update(branch).digest("hex").slice(0, 8)}`;
+	const earlier = await waiting(() => worktrees.registered(join(main, ".worktrees", name)));
 	let path: string;
 	if (earlier) {
-		path = worktrees.restore(earlier.id).path;
+		path = (await waiting(() => worktrees.restore(earlier.id))).path;
 	} else {
 		const { reserve, scratch } = derivedDefaults(main);
 		path = (await worktrees.create(main, name, reserve, sha, scratch)).path;

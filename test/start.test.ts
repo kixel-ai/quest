@@ -5,7 +5,7 @@
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { appendFileSync, cpSync, existsSync, mkdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
@@ -34,7 +34,7 @@ beforeEach(() => {
 /** Where a claim from `work`, on the default branch, puts the worktree for `BRANCH`. */
 function worktreeOf(work: string, branch = BRANCH): string {
 	const hash = createHash("sha256").update(branch).digest("hex").slice(0, 8);
-	return join(realpathSync(work), ".worktrees", `${branch.replaceAll("/", "-")}-${hash}`);
+	return join(realpathSync(work), ".worktrees", `${branch.replaceAll("/", "-").slice(0, 100)}-${hash}`);
 }
 
 function git(cwd: string, ...args: string[]): string {
@@ -414,6 +414,21 @@ describe("start on GitHub", () => {
 		const started = await start(work, new FakeGitHub());
 		expect(started.worktree).toBe(worktreeOf(work));
 		expect(git(work, "symbolic-ref", "HEAD")).toBe("refs/heads/develop");
+	});
+
+	test("a branch too long for a filename still gets a worktree, named by its hash", async () => {
+		const bare = upstream();
+		const work = clone(UPSTREAM, { [UPSTREAM]: bare });
+		const long = "a".repeat(245);
+		land(work, {
+			"quest/m0/epic/README.md": `${EPIC_README}- [Long](/quest/m0/epic/${long}.md)\n`,
+			[`quest/m0/epic/${long}.md`]: "# [S] Long\n\n## Goal\n\nA long name.\n",
+		});
+		const branch = `quest/m0/epic/${long}`;
+		const started = await start(work, new FakeGitHub(), [], `${branch}.md`);
+		expect(started.worktree).toBe(worktreeOf(work, branch));
+		expect(basename(started.worktree!).length).toBeLessThan(255);
+		expect(git(started.worktree!, "symbolic-ref", "HEAD")).toBe(`refs/heads/${branch}`);
 	});
 
 	test("says the claim stands when a worktree cannot be made", async () => {
