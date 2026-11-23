@@ -2181,23 +2181,11 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 					(error: unknown) => (error instanceof Error ? error : new Error(String(error))),
 				)
 			: null;
-	// Whether the branch's state holds the candidate's round, as a run saves it once the required seats finish.
-	let stored = false;
 	try {
 		return await reviewed();
-	} catch (error) {
-		// A run that fails stops the candidate too, but a round it already finished is kept, so a retry never pays
-		// for it again.
-		watcher.abort();
-		const outcome = await observing;
-		if (!stored && outcome !== null && !(outcome instanceof Error))
-			save(statePath, {
-				...(saved ?? { branch, sessions: [] }),
-				tallies: tallied(saved?.tallies ?? [], [{ round: outcome }]),
-				observed: outcome,
-			});
-		throw error;
 	} finally {
+		// A run that fails stops the candidate too, saving nothing of it, as it saves no other round, so a retry
+		// observes the same first head afresh.
 		watcher.abort();
 	}
 
@@ -2305,7 +2293,6 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 			]);
 			const risk = overridden(judged(), override);
 			save(statePath, state([...done.map((each) => each.session), ...kept], after, risk, observed));
-			stored = true;
 			return { after, risk };
 		};
 		let { after, risk } = persist();

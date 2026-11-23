@@ -1637,8 +1637,8 @@ the whole change and still weighs the responses. A round that would resume on
 the head the last round reviewed, when that round found nothing, runs no
 reviewer and repeats that round, marked `unchanged`. A refutation stands only
 when it cites evidence the reviewer can check. Findings are numbered across the
-reviewers, in the order the round printed them. The prompt numbers the last
-round's findings, and the reply settles each by its number as fixed, refuted,
+reviewers but the candidate, in the order the round printed them. The prompt
+numbers the last round's findings, and the reply settles each by its number as fixed, refuted,
 or still open, with a one-sentence reason; a reply that skips or repeats one,
 or keeps more open than it reports, fails like any malformed reply. A first
 round's schema has no such list. Each reviewer settles only its own findings,
@@ -1684,12 +1684,13 @@ harness, model, effort, and session, and its `usage` line; then for each reviewe
 harness, model, and effort, session, round,
 an `unchanged` line for a repeated round, a `usage` line per turn (input tokens, the part read from the prompt cache, and output),
 the score, a `raised` line with the tier and reason when it raised the classifier's, the
-finding count, then each finding as its number, severity, `path:line`, and title over its
-indented body, then `earlier` with the last round's head and its findings, each
+finding count, then each finding as its number, or `-` for the candidate's, which
+nothing settles, severity, `path:line`, and title over its indented body, then `earlier` with the last round's head and its findings, each
 as its number, disposition, severity, `path:line`, and title over its reason; last
 come a `record` line and a `next` line. `--json` prints one object with
 `rounds`, one per reviewer, `tallies`, every reviewer's findings across the
-branch's rounds, `risk`, the head's tier with its classification, `record`,
+branch's rounds, `risk`, the head's tier with its classification, `observed`,
+the candidate's round on an earlier head or null, `record`,
 and `next`.
 
 After each round, `quest review` rewrites the `## Review` section of the open PR
