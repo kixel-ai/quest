@@ -17,7 +17,6 @@ import {
 	located,
 	parseBase,
 	sameSeat,
-	seatRole,
 } from "./review";
 
 const HARNESSES: Record<Round["reviewer"], string> = { claude: "Claude Code", codex: "Codex" };
@@ -39,11 +38,11 @@ function code(text: string): string {
 const capitalized = (word: string) => word[0]!.toUpperCase() + word.slice(1);
 
 /**
- * A block's Reviewer line, ending in `, shadow` for the shadow, the size's pick one effort away, `, second` for the
- * second reviewer a high-risk head gets, or `, candidate` for the size's candidate.
+ * A block's Reviewer line, ending in `, shadow` for the shadow, the size's pick one effort away, or `, second` for the
+ * second reviewer a high-risk head gets.
  */
-const reviewerLine = (seat: Pick<Tally, "reviewer" | "model" | "effort" | "shadow" | "second" | "candidate">) =>
-	`- Reviewer: ${HARNESSES[seat.reviewer]}, ${seat.model}, ${seat.effort} effort${seatRole(seat) === null ? "" : `, ${seatRole(seat)}`}`;
+const reviewerLine = (seat: Pick<Tally, "reviewer" | "model" | "effort" | "shadow" | "second">) =>
+	`- Reviewer: ${HARNESSES[seat.reviewer]}, ${seat.model}, ${seat.effort} effort${seat.shadow ? ", shadow" : seat.second ? ", second" : ""}`;
 
 /** A tally's counts, as the record's `Rounds:` line and `quest usage` write them. */
 export interface Counts {
@@ -92,13 +91,10 @@ function classifiedBy({ by }: Risk["classified"]): string {
  * reviewer the run skipped since it could not run, then every tally on the branch, each round's reviewer's beside its
  * round, and a reviewer the run left out on its own.
  */
-export function reviewRecord({ rounds, tallies, risk, skipped, observed, head, base }: Reviewed): string {
+export function reviewRecord({ rounds, tallies, risk, skipped, head, base }: Reviewed): string {
 	// A reviewer the run left out may still hold open findings, which keep the head from passing too.
-	// The candidate's findings are recorded, never answered, so they hold back nothing.
-	const answered = (seat: { candidate?: true }) => !seat.candidate;
 	const clean =
-		rounds.filter(answered).every((round) => round.findings.length === 0) &&
-		tallies.filter(answered).every((tally) => counted(tally).open === 0);
+		rounds.every((round) => round.findings.length === 0) && tallies.every((tally) => counted(tally).open === 0);
 	const lines = [
 		MARK,
 		"",
@@ -127,7 +123,6 @@ export function reviewRecord({ rounds, tallies, risk, skipped, observed, head, b
 		if (tally === undefined) throw new Error(`no tally for ${round.reviewer}'s round`);
 		lines.push(`- Rounds: ${tally.rounds}; ${findingsText(counted(tally))}`);
 		if (round.findings.length === 0) lines.push("- Findings: none");
-		else if (round.candidate) lines.push("- Findings, recorded for comparison only, needing no fix or refutation:");
 		else lines.push("- Findings, open until the next round settles them:");
 		for (const finding of round.findings)
 			lines.push(`  - ${capitalized(finding.severity)}, ${code(located(finding))}: ${code(finding.title)}`);
@@ -149,16 +144,6 @@ export function reviewRecord({ rounds, tallies, risk, skipped, observed, head, b
 				? [`- Raised the risk to ${risk.tier}: ${code(risk.reason)}`]
 				: []),
 			`- Rounds: ${tally.rounds}; ${findingsText(counted(tally))}`,
-			// The candidate's findings stay in every record, since its comparison with the pick's needs their places.
-			...(tally.candidate && observed && observed.findings.length > 0
-				? [
-						`- Findings at ${observed.head.slice(0, 12)}, recorded for comparison only, needing no fix or refutation:`,
-						...observed.findings.map(
-							(finding) =>
-								`  - ${capitalized(finding.severity)}, ${code(located(finding))}: ${code(finding.title)}`,
-						),
-					]
-				: []),
 		);
 	return lines.join("\n");
 }
@@ -173,8 +158,6 @@ export interface ReviewSummary {
 	shadow: boolean;
 	/** Whether it is the second reviewer a high-risk head gets, on a model other than the pick's. */
 	second: boolean;
-	/** Whether it is the size's candidate, which observed the branch's first run. */
-	candidate: boolean;
 	/** Its latest session, null when the record names none; its round, null when the latest run left it out. */
 	session: string | null;
 	round: number | null;
@@ -233,7 +216,7 @@ export function parseReview(body: string): ReviewSummary[] {
 			if (!found) throw new Error(`the ## Review record has no line matching ${pattern.source}`);
 			return found;
 		};
-		const reviewer = match(/^- Reviewer: (.+?), (\S+), (\S+) effort(?:, (shadow|second|candidate))?\r?$/m);
+		const reviewer = match(/^- Reviewer: (.+?), (\S+), (\S+) effort(?:(, shadow)|(, second))?\r?$/m);
 		const tally = parseCounts(text);
 		// A reviewer the latest run left out has its tally, and its session with no round once tallies name it.
 		const session =
@@ -252,9 +235,8 @@ export function parseReview(body: string): ReviewSummary[] {
 			harness: reviewer[1]!,
 			model: reviewer[2]!,
 			effort: reviewer[3]!,
-			shadow: reviewer[4] === "shadow",
-			second: reviewer[4] === "second",
-			candidate: reviewer[4] === "candidate",
+			shadow: reviewer[4] !== undefined,
+			second: reviewer[5] !== undefined,
 			session: session && session[2]!,
 			round: session?.[3] === undefined ? null : Number(session[3]),
 			score: score ? Number(score[1]) : null,
@@ -373,14 +355,7 @@ export async function pullModels(
 ): Promise<PullModels | null> {
 	const pull = await openPull(root, baseRef, branch, deps);
 	if ("skipped" in pull) return null;
-	let reviewed: boolean;
-	try {
-		reviewed = parseReview(pull.body).length > 0;
-	} catch {
-		// A record this version cannot read still names a review.
-		reviewed = true;
-	}
-	return { ...recorded(pull.body), reviewed };
+	return recorded(pull.body);
 }
 
 /** Record a run in the `## Review` section of its branch's open PR. The edit is the token's user's, which `/quest-merge` counts only when that user wrote the PR. */

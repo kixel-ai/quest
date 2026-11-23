@@ -77,11 +77,10 @@ checkpoints and outages to count by hand:
     (`handedBack / pulls`, merged PRs included), and later
     `## Caused by` escapes per merged PR (`fixes / merged`).
   - Local reviewers, one point per `reviewers` row (PR size, harness,
-    model, effort, and seat: shadow, second, or candidate): cost per PR reviewed, `spent.cost /
+    model, effort, shadow): cost per PR reviewed, `spent.cost /
     spent.pulls`, against findings per reviewed PR (`tally.findings` over
     `reviewed`) and the share fixed, `tally.fixed` over the findings
-    settled one way or another (fixed, refuted, or settled), which does not
-    apply to the candidate, whose findings nothing settles.
+    settled one way or another (fixed, refuted, or settled).
   - Online reviewers, which run on flat plans and so have no cost per
     review, on a chart of their own: one point per `online` row, coverage
     (`reviewed / merged`) against findings per reviewed PR, labelled with

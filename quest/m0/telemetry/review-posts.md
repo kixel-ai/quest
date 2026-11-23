@@ -2,7 +2,7 @@
 
 ## Goal
 
-`quest review` posts each round to Kixel Quest: head, base, seat (harness, model, effort, shadow, second, or candidate seat), session, the risk tier with its reason and classifier, and each finding with file, lines, and severity, plus each finding's outcome as `--responses` settles it. The candidate's round, saved apart as `observed`, posts once, and its findings have no outcome.
+`quest review` posts each round to Kixel Quest: head, base, seat (harness, model, effort, shadow or second seat), session, the risk tier with its reason and classifier, and each finding with file, lines, and severity, plus each finding's outcome as `--responses` settles it.
 A head that gets no local reviewer posts its classification alone.
 It no longer writes the PR body's `## Review` section, and `quest status`, `quest merge`, and readiness read the review from Kixel Quest.
 

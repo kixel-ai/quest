@@ -71,8 +71,7 @@ export function culpritOf(pull: Pull): Culprit {
 	const tier = risk === null || "malformed" in risk ? null : risk.tier;
 	let reviewers: Seat[] = [];
 	try {
-		// The candidate only observed, so it guarded nothing.
-		reviewers = parseReview(pull.body).filter((review) => !review.candidate);
+		reviewers = parseReview(pull.body);
 	} catch {
 		// Malformed: no reviewers.
 	}

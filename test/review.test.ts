@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { afterEach, expect, test, vi } from "vitest";
 
@@ -8,7 +8,6 @@ import { SIZES, recordedRisk } from "../src/core";
 import {
 	type Finding,
 	type Round,
-	type Skip,
 	type Settled,
 	type Tally,
 	UnansweredError,
@@ -23,7 +22,6 @@ import {
 	review,
 	runningHarness,
 	parseState,
-	seatRole,
 	shadowOf,
 	sessionFile,
 	tallied,
@@ -350,120 +348,11 @@ fakes("a model at its usage limit passes the round to its CLI's next model, whos
 			reason: "usage limit, resets 2030-03-17T17:46:40Z",
 		},
 	]);
-	// Fable's candidate seat runs beside them, since only Opus hit its limit, and only once though the pick moved on.
-	expect(rounds.map((r: Round) => `${r.model} ${r.effort}${seatRole(r) ? ` ${seatRole(r)}` : ""}`)).toEqual([
+	expect(rounds.map((r: Round) => `${r.model} ${r.effort}${r.shadow ? " shadow" : ""}`)).toEqual([
 		"claude-sonnet-5-5 high",
 		"claude-sonnet-5-5 medium shadow",
-		"claude-fable-5-2 medium candidate",
 	]);
-	const fable = s.calls().filter((c) => c.argv.includes("claude-fable-5-2") && effortOf(c) !== null);
-	expect(fable).toHaveLength(2);
 });
-
-fakes(
-	"an L PR's candidate observes the first run once, unnumbered and never answered, unless it wrote the branch",
-	async () => {
-		const s = setup(null);
-		const label = (r: Round) => `${r.model} ${r.effort}${seatRole(r) ? ` ${seatRole(r)}` : ""}`;
-		// Only Fable, at medium, would raise the tier, and an observer raises nothing.
-		vi.stubEnv("FAKE_RAISE", "high@medium");
-		const first = await quest("--root", s.repo, "review", ...OPUS_WROTE, "--size", "L");
-		expect(first.code, first.stderr).toBe(0);
-		expect(first.stdout).toContain("\nreviewer claude claude-fable-5-2 medium candidate\n");
-		// The pick's and shadow's findings are numbered; the candidate's is listed without a number.
-		expect(first.stdout).toMatch(/\n1\. high .*\n[\s\S]*\n2\. high [\s\S]*\n- high /);
-		expect(first.stdout).not.toContain("\n3. ");
-		expect(first.stdout).not.toContain("\nraised ");
-		expect(first.stdout).toMatch(/\nnext respond: /);
-		vi.stubEnv("FAKE_RAISE", undefined);
-
-		// The next run answers only the numbered findings, and the candidate never runs again.
-		write(s.repo, ".tmp/responses.md", "1. Fixed.\n2. Fixed.\n");
-		const responses = join(s.repo, ".tmp", "responses.md");
-		write(s.repo, "src/lib.ts", "export const x = 3;\n");
-		git(s.repo, "commit", "-qam", "fix");
-		const args = [...OPUS_WROTE, "--size", "L", "--responses", responses, "--json"];
-		const next = await quest("--root", s.repo, "review", ...args);
-		expect(next.code, next.stderr).toBe(0);
-		const { rounds, tallies, risk } = JSON.parse(next.stdout);
-		expect(rounds.map(label)).toEqual(["gpt-6.2-sol xhigh", "gpt-6.2-sol high shadow"]);
-		expect(rounds.map((r: Round) => r.earlier?.findings.map((f) => f.number))).toEqual([[1], [2]]);
-		expect(risk.tier).not.toBe("high");
-		// Its finding stays recorded, never settled.
-		const tried = tallies.find((each: Tally) => each.candidate);
-		expect([tried.model, tried.rounds, tried.findings.high, tried.fixed]).toEqual(["claude-fable-5-2", 1, 1, 0]);
-		// The state keeps its round for every later record, and no session to resume.
-		const state = () => JSON.parse(readFileSync(sessionFile(join(s.repo, ".git"), "feature"), "utf8"));
-		expect(state().observed.findings).toHaveLength(1);
-		expect(state().sessions.map((each: { reviewer: string }) => each.reviewer)).toEqual(["codex", "codex"]);
-		// A restart with --new still never runs it again, and keeps its finding in its tally.
-		const restarted = await quest("--root", s.repo, "review", ...OPUS_WROTE, "--size", "L", "--new", "--json");
-		expect(restarted.code, restarted.stderr).toBe(0);
-		const fresh = JSON.parse(restarted.stdout);
-		expect(fresh.rounds.map(label)).toEqual(["gpt-6.2-sol xhigh", "gpt-6.2-sol high shadow"]);
-		expect(fresh.tallies.find((each: Tally) => each.candidate).findings.high).toBe(1);
-		expect(fresh.observed.findings).toHaveLength(1);
-
-		// A candidate that fails for any reason is a skip that never retries, its error kept out of the record.
-		const w = setup(null);
-		vi.stubEnv("FAKE_QUOTED", "1");
-		vi.stubEnv("FAKE_FAILS", "claude-fable-5-2");
-		const failed = await quest("--root", w.repo, "review", ...OPUS_WROTE, "--size", "L", "--json");
-		expect(failed.code, failed.stderr).toBe(0);
-		const out = JSON.parse(failed.stdout);
-		expect(out.skipped.map((each: Skip) => `${each.model} ${each.reason}`)).toEqual(["claude-fable-5-2 failed"]);
-		expect(out.skipped[0].detail).toBe("claude failed with exit status 1");
-		expect(out.rounds.map(label)).toEqual(["gpt-6.2-sol xhigh", "gpt-6.2-sol high shadow"]);
-		expect(JSON.parse(readFileSync(sessionFile(join(w.repo, ".git"), "feature"), "utf8")).observed).toBeNull();
-		vi.stubEnv("FAKE_QUOTED", undefined);
-		vi.stubEnv("FAKE_FAILS", undefined);
-		write(w.repo, ".tmp/responses.md", "1. Fixed.\n2. Fixed.\n");
-		write(w.repo, "src/lib.ts", "export const x = 3;\n");
-		git(w.repo, "commit", "-qam", "fix");
-		const after = await quest(
-			"--root",
-			w.repo,
-			"review",
-			...OPUS_WROTE,
-			"--size",
-			"L",
-			"--responses",
-			join(w.repo, ".tmp", "responses.md"),
-			"--json",
-		);
-		expect(after.code, after.stderr).toBe(0);
-		expect(JSON.parse(after.stdout).rounds.map(label)).toEqual(["gpt-6.2-sol xhigh", "gpt-6.2-sol high shadow"]);
-
-		// A branch Fable wrote last gets no candidate, nor does a run that names its reviewer.
-		const t = setup(null);
-		const byFable = ["--exclude-model", "claude-fable-5-2", "--size", "L", "--json"];
-		const fable = await quest("--root", t.repo, "review", ...byFable);
-		expect(fable.code, fable.stderr).toBe(0);
-		expect(JSON.parse(fable.stdout).rounds.map(label)).toEqual(["gpt-6.2-sol xhigh", "gpt-6.2-sol high shadow"]);
-		// Nor does a later head another model wrote, since it would pair with the pick's second round.
-		write(t.repo, ".tmp/responses.md", "1. Fixed.\n2. Fixed.\n");
-		write(t.repo, "src/lib.ts", "export const x = 3;\n");
-		git(t.repo, "commit", "-qam", "fix");
-		const answered = ["--responses", join(t.repo, ".tmp", "responses.md"), "--json"];
-		const later = await quest("--root", t.repo, "review", ...OPUS_WROTE, "--size", "L", ...answered);
-		expect(later.code, later.stderr).toBe(0);
-		expect(JSON.parse(later.stdout).rounds.map(label)).toEqual(["gpt-6.2-sol xhigh", "gpt-6.2-sol high shadow"]);
-		const u = setup(null);
-		const named = await quest(
-			"--root",
-			u.repo,
-			"review",
-			...OPUS_WROTE,
-			"--size",
-			"L",
-			"--harness",
-			"codex",
-			"--json",
-		);
-		expect(named.code, named.stderr).toBe(0);
-		expect(JSON.parse(named.stdout).rounds.map(label)).toEqual(["gpt-6.2-sol xhigh"]);
-	},
-);
 
 fakes("a reviewer CLI that is not installed passes the round to the next eligible one", async () => {
 	const s = setup(null);
@@ -1390,35 +1279,6 @@ function onGitHub(repo: string, pulls: FakePull[], fork = false): { body: string
 	});
 	return writes;
 }
-
-fakes("an L PR's record keeps the candidate's findings, and another clone's review rules it out", async () => {
-	const s = setup();
-	const pull = {
-		number: 7,
-		body: "Work.\n\n## Models\n\n- Size: L\n- Implementer: Claude Code, claude-opus-5-5, high effort\n",
-	};
-	onGitHub(s.repo, [pull]);
-	try {
-		const first = await quest("--root", s.repo, "review", "--json");
-		expect(first.code, first.stderr).toBe(0);
-		expect(JSON.parse(first.stdout).rounds.some((r: Round) => r.candidate)).toBe(true);
-		expect(pull.body).toContain(", candidate\n");
-		// The next round leaves the candidate out, and its block restates what it found.
-		write(s.repo, ".tmp/responses.md", "1. Fixed.\n2. Fixed.\n");
-		write(s.repo, "src/lib.ts", "export const x = 3;\n");
-		git(s.repo, "commit", "-qam", "fix");
-		const second = await quest("--root", s.repo, "review", "--responses", join(s.repo, ".tmp", "responses.md"));
-		expect(second.code, second.stderr).toBe(0);
-		expect(pull.body).toMatch(/, candidate\n[\s\S]*\n- Findings at [0-9a-f]{12}, recorded for comparison only/);
-		// A clone with no state of its own sees the review in the record, so it seats no candidate.
-		rmSync(sessionFile(join(s.repo, ".git"), "feature"));
-		const other = await quest("--root", s.repo, "review", "--json");
-		expect(other.code, other.stderr).toBe(0);
-		expect(JSON.parse(other.stdout).rounds.some((r: Round) => r.candidate)).toBe(false);
-	} finally {
-		vi.unstubAllGlobals();
-	}
-});
 
 fakes("each round rewrites the Review section of the branch's open PR, keeping the author's prose", async () => {
 	const s = setup();
@@ -2467,8 +2327,6 @@ test("the next step stops for the design checkpoint when a reviewer's every thir
 	expect(nextStep([round(4, 1)])).toMatch(/^next respond: /);
 	expect(nextStep([round(3, 0)])).toMatch(/^next done: /);
 	expect(nextStep([round(3, 2, "low")])).toMatch(/^next finish: /);
-	// The candidate's findings are never answered, so they leave nothing to do.
-	expect(nextStep([round(3, 0), { ...round(1, 2), candidate: true }])).toMatch(/^next done: /);
 	expect(nextStep([round(4, 1, "low")])).toMatch(/^next finish: /);
 	// Across reviewers: any finding not low needs another round, and a clean third round is no checkpoint.
 	expect(nextStep([round(1, 1, "low"), round(1, 1)])).toMatch(/^next respond: /);
@@ -2584,16 +2442,6 @@ test("saved sessions are read only in the current format, or refused naming --ne
 		tallies: [tally, { ...tally, shadow: true }],
 	};
 	expect(parseState(shadowed)).toEqual(shadowed);
-	// The candidate keeps its one round, or null once it failed, and a tally, but no session to resume.
-	const observed = { reviewer: "claude", candidate: true, session: "s-1", findings: [finding] };
-	const candidate = {
-		branch: "feature",
-		sessions: [session],
-		tallies: [tally, { ...tally, reviewer: "claude", candidate: true }],
-		observed,
-	};
-	expect(parseState(candidate)).toEqual(candidate);
-	expect(parseState({ ...candidate, observed: null })).toEqual({ ...candidate, observed: null });
 	// A retired reviewer's tally is dropped so the record never names it; its session stays for the run's numbering.
 	const retired = { ...session, reviewer: "opencode", session: "ses_1" };
 	expect(
@@ -2620,12 +2468,6 @@ test("saved sessions are read only in the current format, or refused naming --ne
 		{ branch: "feature", sessions: [{ ...session, shadow: true }], tallies: [tally] },
 		{ branch: "feature", sessions: [{ ...session, shadow: false }], tallies: [tally] },
 		{ ...shadowed, sessions: [...shadowed.sessions, { ...session, shadow: true }] },
-		// A candidate's session, a malformed observation, or one seat in two roles.
-		{ ...candidate, sessions: [...candidate.sessions, { ...session, candidate: true }] },
-		{ ...candidate, observed: { ...observed, candidate: undefined } },
-		{ ...candidate, observed: { ...observed, findings: undefined } },
-		{ ...shadowed, tallies: [tally, { ...tally, shadow: true, candidate: true }] },
-		{ ...shadowed, sessions: [session, { ...session, shadow: true, candidate: true }] },
 	])
 		expect(() => parseState(older)).toThrow(/--new/);
 });

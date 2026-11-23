@@ -72,18 +72,13 @@ Readout, the agent's choices for the implementer to revisit:
   maintainer with its tally. End the writer A/B by deleting its arms from
   `src/cli/models.ts`, with `quest models --arm`, the `arm` field of
   `quest unblocked --json`, and the arm notes in the README, guide, and
-  `/quest-run` and `/quest-iterate`. Keep the shadow reviewer only if the maintainer
-  chooses to: once L's pairs reach 116 first rounds, about 2026-12-20, end
-  its step down at L and XL, and read the step up at S and M below.
-- Read the candidate seat, Fable 5.2 medium observing each L branch's first
-  run beside the pick since
-  [moq-dev/quest#831](https://github.com/moq-dev/quest/pull/831): compare
-  its first-round tally with the pick's on the same head, as the shadow pairs
-  are, check whether its never-answered findings, which every record restates
-  with their head, name the defects later `## Caused by` lines trace to the
-  PR, read its rows marked `candidate` in `quest usage`, and
-  recommend promoting it to the pick, keeping it, or ending it by deleting
-  its entry from `CANDIDATES` in `src/cli/models.ts`.
+  `/quest-run` and `/quest-iterate`. [Reviewer rungs](/quest/m0/reviewer-rungs.md)
+  ends the shadow reviewer (maintainer, 2026-11-23, rejecting keeping L's
+  shadow until its 116 first rounds), so read the shadow pairs gathered
+  until it lands, and after it compare reviewer models and efforts from
+  the rungs' draws: findings by severity, fixed against refuted, and later
+  `## Caused by` escapes, per `quest usage`'s reviewer rows. Recommend
+  moving a model up, down, or off its rung with its tally.
 - Carry the tallies into [the model check](/quest/m1/model-check.md)'s
   baseline.
 - Chart the arms' cost against quality as
@@ -135,6 +130,7 @@ three hosts' saved review rounds:
     since [moq-dev/quest#802](https://github.com/moq-dev/quest/pull/802)). XL
     keeps its step down with L. Compare the step up's pairs as the step
     down's were, counting only rounds after the retarget merged.
+    Superseded 2026-11-23 (maintainer): reviewer rungs replace the shadow.
 - Writer A/B, PRs per arm, first-round findings over the PRs counted in
   parentheses, cost as the median merged PR with any attributed spend (5
   to 27% of each arm's merged PRs had none):
@@ -170,9 +166,11 @@ three hosts' saved review rounds:
   - M ends its arm on Opus high, L gains a Fable arm, and XL writes on
     Fable, as [moq-dev/quest#829](https://github.com/moq-dev/quest/pull/829)
     routes them.
-  - Fable reviews L beside the pick as `quest review`'s candidate seat,
-    and Astra picks for XL:
-    [moq-dev/quest#831](https://github.com/moq-dev/quest/pull/831).
+  - Astra picks for XL:
+    [moq-dev/quest#831](https://github.com/moq-dev/quest/pull/831). Its
+    Fable seat beside the L pick was dropped on 2026-11-23 for
+    [reviewer rungs](/quest/m0/reviewer-rungs.md), which seats Fable as a
+    rung member.
   - Cost metric? ✅ Mean spend per merged PR, every session's, plus the
     spend of later PRs that name it under `## Caused by`, with a bootstrap
     95% interval, the median reported beside it (rejected: the median
@@ -254,5 +252,6 @@ Baseline from the 2026-11-11 audit, at API list price:
 
 ## Related
 
+- [Reviewer rungs](/quest/m0/reviewer-rungs.md) - the per-round reviewer draw whose tallies the readout compares
 - [Model check](/quest/m1/model-check.md) - retunes the tables each
   milestone from these tallies

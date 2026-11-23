@@ -14,23 +14,19 @@ import type { HarnessName } from "./agent";
 import { git } from "./git";
 import { type ClaimDependencies, upstream } from "./claims";
 import { readRemote, remoteRepository, requireRemote } from "./github";
-import { CANDIDATES, type Model } from "./models";
+import type { Model } from "./models";
 import { recorded } from "./models-record";
 import {
 	type Assessment,
 	type Finding,
 	ReviewInputError,
-	ReviewerUnavailableError,
 	SEVERITIES,
-	type Skip,
 	type Usage,
 	baseInstructions,
 	classify,
 	firstRound,
-	interruption,
 	pickReviewer,
 	reviewSize,
-	seatRole,
 	shadowOf,
 } from "./review";
 import type { Session } from "./usage";
@@ -326,7 +322,7 @@ export interface EvalOptions {
 	root: string;
 	/** The set's path; defaults to {@link EVAL_FILE} at the checkout's root. */
 	set?: string;
-	/** The only reviewer, at its size's entry, with `model` and `effort` overriding it; else the pick, its shadow, and the size's candidate. */
+	/** The only reviewer, at its size's entry, with `model` and `effort` overriding it; else the pick and its shadow. */
 	harness?: HarnessName;
 	model?: string;
 	effort?: string;
@@ -345,8 +341,6 @@ export interface Seated {
 	effort: string;
 	/** The size's pick one effort away, beside the pick as `quest review` runs it. */
 	shadow?: true;
-	/** The size's candidate, beside the pick as `quest review` runs it. */
-	candidate?: true;
 	session: string;
 	usage: Usage[];
 	score: number;
@@ -359,8 +353,6 @@ export interface Seated {
 export interface Scored {
 	case: EvalCase;
 	seats: Seated[];
-	/** The candidate, when it could not run on the case: it only observes, so the other seats still score. */
-	skipped: Skip[];
 }
 
 /** Defects found and noise raised by one group of rounds. */
@@ -380,8 +372,8 @@ export interface EvalReport {
 	rules: { sha: string } | null;
 	scored: Scored[];
 	/**
-	 * Each seat over every case: `pick`, `shadow`, `candidate`, and, unless `--harness` named one reviewer, `either`,
-	 * what the case's seats found together, as a run of them all finds it.
+	 * Each seat over every case: `pick`, `shadow`, and, unless `--harness` named one reviewer, `either`, what the
+	 * case's seats found together, as a run of the pick and its shadow finds it.
 	 */
 	totals: Record<string, Tally>;
 	/** Each seat by the case's size and tier, as `pick M` or `shadow high`. */
@@ -390,23 +382,13 @@ export interface EvalReport {
 	cost: { usd: number; complete: boolean; priced: number; sessions: number } | null;
 }
 
-/**
- * The reviewers a case gets: `harness`'s alone, or as `quest review` seats them, the size's pick, avoiding its writer,
- * the pick's shadow, and the size's candidate unless its model wrote the case.
- */
-export function evalSeats(
-	entry: EvalCase,
-	options: Pick<EvalOptions, "harness" | "model" | "effort">,
-): { reviewer: Model; shadow?: true; candidate?: true }[] {
-	if (options.harness !== undefined) return [{ reviewer: pickReviewer(entry.size, options, () => false) }];
+/** The reviewers a case gets: `harness`'s alone, or the size's pick, avoiding its writer, and the pick's shadow. */
+export function evalSeats(entry: EvalCase, options: Pick<EvalOptions, "harness" | "model" | "effort">) {
+	if (options.harness !== undefined)
+		return [{ reviewer: pickReviewer(entry.size, options, () => false), shadow: undefined }];
 	const pick = pickReviewer(entry.size, {}, (model: Model) => model.model === entry.writer);
 	const shadow = shadowOf(entry.size, pick);
-	const candidate = CANDIDATES[entry.size];
-	return [
-		{ reviewer: pick },
-		...(shadow ? [{ reviewer: shadow, shadow: true as const }] : []),
-		...(candidate && candidate.model !== entry.writer ? [{ reviewer: candidate, candidate: true as const }] : []),
-	];
+	return [{ reviewer: pick, shadow: undefined }, ...(shadow ? [{ reviewer: shadow, shadow: true as const }] : [])];
 }
 
 /** The indexes of `defects` a finding names a line of. */
@@ -417,8 +399,7 @@ export function foundDefects(defects: Defect[], findings: Finding[]): number[] {
 
 /**
  * Review every case of the set at its head, one case at a time with its reviewers at once, and score them. The first
- * failure stops the run and fails it whole, as a partial score would read as the reviewer's, except the candidate's,
- * which skips it on that case, since it only observes.
+ * failure stops the run and fails it whole, as a partial score would read as the reviewer's.
  */
 export async function evaluate(options: EvalOptions, sessions: (since: Date) => Session[] | null): Promise<EvalReport> {
 	if ((options.model !== undefined || options.effort !== undefined) && options.harness === undefined)
@@ -451,14 +432,14 @@ export async function evaluate(options: EvalOptions, sessions: (since: Date) => 
 	const scored: Scored[] = [];
 	for (const [index, entry] of cases.entries()) {
 		options.progress?.(index + 1, cases.length, entry.pull);
-		scored.push({ case: entry, ...(await reviewCase(root, dir, entry, seats.get(entry)!, rules, options)) });
+		scored.push({ case: entry, seats: await reviewCase(root, dir, entry, seats.get(entry)!, rules, options) });
 	}
 	return {
 		repository,
 		rules: rules && { sha: rules.sha },
 		scored,
 		...tallies(scored, options.harness === undefined),
-		cost: lowerBound(priced(sessions(started), scored), scored),
+		cost: priced(sessions(started), scored),
 	};
 }
 
@@ -470,7 +451,7 @@ async function reviewCase(
 	seats: ReturnType<typeof evalSeats>,
 	rules: { sha: string; text: string } | null,
 	options: EvalOptions,
-): Promise<Omit<Scored, "case">> {
+): Promise<Seated[]> {
 	// Its own name, so a concurrent run of the same case keeps its checkout.
 	const checkout = join(dir, `${entry.pull}-${randomUUID()}`);
 	git(root, ["worktree", "add", "--quiet", "--detach", checkout, entry.head]);
@@ -490,18 +471,14 @@ async function reviewCase(
 		};
 		const controller = new AbortController();
 		const signal = options.signal ? AbortSignal.any([options.signal, controller.signal]) : controller.signal;
-		const skipped: Skip[] = [];
-		// An interruption fails the case rather than reading as the candidate's own failure.
-		const interrupted = seats.some((seat) => seat.candidate) ? interruption() : null;
 		const results = await Promise.allSettled(
-			seats.map(({ reviewer, shadow, candidate }) =>
+			seats.map(({ reviewer, shadow }) =>
 				firstRound(reviewer, { ...opening, signal }).then(
 					({ session, usage, verdict }): Seated => ({
 						reviewer: reviewer.harness,
 						model: reviewer.model,
 						effort: reviewer.effort,
 						...(shadow && { shadow }),
-						...(candidate && { candidate }),
 						session,
 						usage,
 						score: verdict.score,
@@ -509,21 +486,14 @@ async function reviewCase(
 						found: foundDefects(entry.defects ?? [], verdict.findings),
 					}),
 					(error: unknown) => {
-						if (candidate && !signal.aborted && !interrupted?.signal.aborted && error instanceof Error) {
-							const reason = error instanceof ReviewerUnavailableError ? error.reason : "failed";
-							skipped.push({ ...reviewer, reason, detail: error.message.replace(/\s+/g, " ").trim() });
-							return null;
-						}
 						controller.abort(error);
 						throw error;
 					},
 				),
 			),
 		);
-		interrupted?.stop();
 		if (controller.signal.aborted) throw controller.signal.reason;
-		const done = results.flatMap((result) => (result as PromiseFulfilledResult<Seated | null>).value ?? []);
-		return { seats: done, skipped };
+		return results.map((result) => (result as PromiseFulfilledResult<Seated>).value);
 	} finally {
 		git(root, ["worktree", "remove", "--force", checkout]);
 	}
@@ -543,9 +513,8 @@ function count(tally: Tally, entry: EvalCase, found: number[], findings: Finding
 }
 
 /**
- * The run's tallies: each seat in all, and by size and tier, with `either` for what a run of the case's seats but the
- * candidate, an observer whose findings no one acts on, found together when `combined`, every case counting, as one
- * whose pick has no shadow.
+ * The run's tallies: each seat in all, and by size and tier, with `either` for what a run of the pick and its shadow
+ * found together when `combined`, every case counting, as one whose pick has no shadow.
  */
 export function tallies(scored: Scored[], combined: boolean): Pick<EvalReport, "totals" | "by"> {
 	const totals: Record<string, Tally> = {};
@@ -559,21 +528,15 @@ export function tallies(scored: Scored[], combined: boolean): Pick<EvalReport, "
 			count((into[key] ??= empty()), entry, found, findings);
 	};
 	for (const { case: entry, seats } of scored) {
-		for (const seat of seats) add(seatRole(seat) ?? "pick", entry, seat.found, seat.findings);
+		for (const seat of seats) add(seat.shadow ? "shadow" : "pick", entry, seat.found, seat.findings);
 		// A case whose pick has no shadow, as one at low effort, still counts toward what the run found.
 		if (combined) {
-			const acted = seats.filter((seat) => !seat.candidate);
-			const found = [...new Set(acted.flatMap((seat) => seat.found))];
-			// Every seat's findings on a clean PR, as a run of them all raises them; the same defect twice is still one.
-			add("either", entry, found, entry.clean ? acted.flatMap((seat) => seat.findings) : []);
+			const found = [...new Set(seats.flatMap((seat) => seat.found))];
+			// Both seats' findings on a clean PR, as a run of both raises them; the same defect twice is still one.
+			add("either", entry, found, entry.clean ? seats.flatMap((seat) => seat.findings) : []);
 		}
 	}
 	return { totals, by };
-}
-
-/** `cost` as a lower bound once a case skipped its candidate, whose failed turns may have been billed with no session to price. */
-function lowerBound(cost: EvalReport["cost"], scored: Scored[]): EvalReport["cost"] {
-	return cost && scored.some((each) => each.skipped.length > 0) ? { ...cost, complete: false } : cost;
 }
 
 /**
@@ -628,15 +591,11 @@ export function evalLines(report: EvalReport): string[] {
 	for (const [seat, tally] of Object.entries(report.totals)) lines.push(`${seat}: ${share(tally)}; ${noise(tally)}`);
 	for (const [key, tally] of Object.entries(report.by).sort(([a], [b]) => a.localeCompare(b)))
 		lines.push(`  ${key}: ${share(tally)}; ${noise(tally)}`);
-	for (const { case: entry, seats, skipped } of report.scored) {
+	for (const { case: entry, seats } of report.scored) {
 		const kind = entry.clean ? "clean" : `${entry.defects!.length} defect(s)`;
 		lines.push(`#${entry.pull} ${entry.size} ${entry.tier} ${kind}`);
-		for (const skip of skipped)
-			lines.push(
-				`  ${skip.harness} ${skip.model} ${skip.effort} candidate: skipped, ${skip.reason}: ${skip.detail}`,
-			);
 		for (const seat of seats) {
-			const name = `${seat.reviewer} ${seat.model} ${seat.effort}${seatRole(seat) === null ? "" : ` ${seatRole(seat)}`}`;
+			const name = `${seat.reviewer} ${seat.model} ${seat.effort}${seat.shadow ? " shadow" : ""}`;
 			const result = entry.clean ? "" : ` found ${seat.found.length}/${entry.defects!.length},`;
 			lines.push(
 				`  ${name}: score ${seat.score},${result} ${seat.findings.length} findings; ${tokens(seat.usage)}; session ${seat.session}`,

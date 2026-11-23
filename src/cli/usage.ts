@@ -44,7 +44,7 @@ import {
 	reviewSessions,
 	severityText,
 } from "./review-record";
-import { SEVERITIES, seatRole } from "./review";
+import { SEVERITIES } from "./review";
 import { type RecordInput, buildRecords } from "./records";
 import { stateDirectory } from "./send";
 import { keptSplit } from "./split";
@@ -159,10 +159,10 @@ export interface AccuracyRow {
 	handedBack: number;
 	/** PRs whose record tallies their reviews; a record written before tallies counts for none of what follows. */
 	reviewed: number;
-	/** The reviewers' latest rounds on the reviewed PRs that have a score, and the scores' sum, leaving out the shadow's and candidate's. */
+	/** The reviewers' latest rounds on the reviewed PRs that have a score, and the scores' sum, leaving out the shadow's. */
 	scored: number;
 	score: number;
-	/** Every reviewer's findings but the shadow's and candidate's across every round on the reviewed PRs, and as `rounds`, each PR's most rounds. */
+	/** Every reviewer's findings but the shadow's across every round on the reviewed PRs, and as `rounds`, each PR's most rounds. */
 	tally: Omit<Counts, "first">;
 	firstRounds: FirstRounds;
 	/** Its writing sessions' spend on its merged PRs, so `spent.cost / spent.pulls` is its cost per merged PR. */
@@ -182,8 +182,6 @@ export interface ReviewerRow {
 	shadow: boolean;
 	/** The second reviewer a high-risk head gets, whose findings show what the second review catches. */
 	second: boolean;
-	/** The size's candidate, whose findings on a branch's first run are recorded beside the pick's. */
-	candidate: boolean;
 	/** PRs whose record tallies this reviewer, each branch counted once, and its findings across every round. */
 	reviewed: number;
 	tally: Omit<Counts, "first">;
@@ -540,18 +538,16 @@ const sized = (value: string | null | undefined): Size | null =>
 /**
  * A merged PR's reviews with its last round's open findings settled when all of them are low, since the review
  * rule fixes or refutes those before merge without another round; nothing records which, so they count as settled.
- * The candidate's findings are never answered, so they neither stop this nor settle.
  */
 function settledOnMerge(reviews: ReviewSummary[], merged: boolean): ReviewSummary[] {
 	const settles =
 		merged &&
 		reviews.every(
-			({ tally, open, candidate }) =>
-				candidate || (open.high === 0 && open.medium === 0 && (tally === null || tally.open === open.low)),
+			({ tally, open }) => open.high === 0 && open.medium === 0 && (tally === null || tally.open === open.low),
 		);
 	if (!settles) return reviews;
 	return reviews.map((review) =>
-		review.tally === null || review.candidate
+		review.tally === null
 			? review
 			: { ...review, tally: { ...review.tally, settled: review.tally.settled + review.tally.open, open: 0 } },
 	);
@@ -913,9 +909,6 @@ const noOutcomes = (): Omit<AccuracyRow, "size" | "harness" | "model" | "effort"
 	fixes: 0,
 });
 
-/** Whether a reviewer measures a reviewer, as the shadow and candidate do, so its findings stay out of the writer's row. */
-const measuring = (review: ReviewSummary) => review.shadow || review.candidate;
-
 /** Add a PR's outcomes to a writer's or arm's row, counting its tallies only when it is its branch's `latest`. */
 function outcome(row: ReturnType<typeof noOutcomes>, each: PullRow, latest: Set<PullRow>) {
 	row.pulls++;
@@ -923,7 +916,8 @@ function outcome(row: ReturnType<typeof noOutcomes>, each: PullRow, latest: Set<
 	if (each.handedBack) row.handedBack++;
 	row.fixes += each.fixedBy.length;
 	row.landFixes += each.landFixes.filter((by) => by !== MERGER).length;
-	const counted = latest.has(each) ? each.review.filter((review) => review.tally !== null && !measuring(review)) : [];
+	// The shadow's findings measure an effort step, not the writer, so they stay out of the writer's row.
+	const counted = latest.has(each) ? each.review.filter((review) => review.tally !== null && !review.shadow) : [];
 	if (counted.length === 0) return;
 	row.reviewed++;
 	for (const { score } of counted)
@@ -945,7 +939,7 @@ function outcome(row: ReturnType<typeof noOutcomes>, each: PullRow, latest: Set<
 function tallied(pulls: PullRow[], counts: (pull: PullRow) => boolean): Set<PullRow> {
 	const branch = (each: PullRow) => JSON.stringify([each.repository ?? each.number, each.branch]);
 	const rounds = (each: PullRow) =>
-		each.review.reduce((sum, review) => sum + (measuring(review) ? 0 : (review.tally?.rounds ?? 0)), 0);
+		each.review.reduce((sum, review) => sum + (review.shadow ? 0 : (review.tally?.rounds ?? 0)), 0);
 	const latest = new Map<string, PullRow>();
 	for (const each of pulls) {
 		if (!counts(each) || each.review.every((review) => review.tally === null)) continue;
@@ -1011,7 +1005,14 @@ function reviewerRows(pulls: PullRow[]): ReviewerRow[] {
 	const rows = new Map<string, ReviewerRow>();
 	const latest = tallied(pulls, () => true);
 	const row = (each: PullRow, review: ReviewSummary) => {
-		const id = JSON.stringify([each.size, review.harness, review.model, review.effort, seatRole(review)]);
+		const id = JSON.stringify([
+			each.size,
+			review.harness,
+			review.model,
+			review.effort,
+			review.shadow,
+			review.second,
+		]);
 		let found = rows.get(id);
 		if (!found) {
 			found = {
@@ -1021,7 +1022,6 @@ function reviewerRows(pulls: PullRow[]): ReviewerRow[] {
 				effort: review.effort,
 				shadow: review.shadow,
 				second: review.second,
-				candidate: review.candidate,
 				reviewed: 0,
 				tally: noCounts(),
 				firstRounds: noFirst(),
@@ -1060,8 +1060,8 @@ function reviewerRows(pulls: PullRow[]): ReviewerRow[] {
 	}
 	return [...rows.values()].sort((a, b) =>
 		order(
-			[a.size, a.harness, a.model, a.effort, seatRole(a) ?? ""],
-			[b.size, b.harness, b.model, b.effort, seatRole(b) ?? ""],
+			[a.size, a.harness, a.model, a.effort, String(a.shadow), String(a.second)],
+			[b.size, b.harness, b.model, b.effort, String(b.shadow), String(b.second)],
 		),
 	);
 }
@@ -1488,7 +1488,7 @@ export function usageLines(report: Usage): string[] {
 		if (row.unreadReview) lines.push(`  unread review: ${row.unreadReview}`);
 		for (const r of row.review)
 			lines.push(
-				`  review: ${r.harness}, ${r.model}, ${r.effort} effort${seatRole(r) === null ? "" : `, ${seatRole(r)}`}; ${r.round === null ? "not in the latest run" : `round ${r.round}, score ${r.score ?? "-"}/10`}; ${r.tally === null ? "no tally" : `rounds ${r.tally.rounds}, ${findingsText(r.tally)}`}`,
+				`  review: ${r.harness}, ${r.model}, ${r.effort} effort${r.shadow ? ", shadow" : r.second ? ", second" : ""}; ${r.round === null ? "not in the latest run" : `round ${r.round}, score ${r.score ?? "-"}/10`}; ${r.tally === null ? "no tally" : `rounds ${r.tally.rounds}, ${findingsText(r.tally)}`}`,
 			);
 		for (const o of row.online)
 			lines.push(`  online review: ${o.reviewer}, ${o.finalHead ? "" : "not "}at the final head; ${answers(o)}`);
@@ -1555,7 +1555,7 @@ export function usageLines(report: Usage): string[] {
 					r.size ?? "-",
 					r.harness,
 					r.model,
-					`${r.effort}${seatRole(r) === null ? "" : `, ${seatRole(r)}`}`,
+					`${r.effort}${r.shadow ? ", shadow" : r.second ? ", second" : ""}`,
 					`${r.reviewed} reviewed: rounds ${mean(r.tally.rounds, r.reviewed)}, ${findingsText({ ...r.tally, first: null })}, ${firsts(r.firstRounds)}; ${per(r.spent, "PR reviewed")}`,
 				]),
 			),

@@ -1525,19 +1525,7 @@ answered, and settled like any reviewer's. A pick with no shadow seats one
 at its own effort while the old shadow still has findings, so none
 is left unanswered. The reviewers run at once;
 the first to fail, such as on a usage limit, stops the others, and the round
-saves none. The candidate below is the exception.
-
-On the first head the pick reviews on a branch, the size's candidate, a model
-on trial, observes beside them: Claude Code `claude-fable-5-2` medium for an L
-PR, and none at other sizes. None runs when its model wrote the branch last, or
-in a run that names its reviewer. It runs once per branch, `--new` included,
-in a session no later run resumes. Its findings are listed unnumbered and
-recorded for comparison with the pick's, and every later record restates them
-with the head they describe. Nothing answers them with `--responses`, they
-count toward no `next` step, and the candidate never raises the risk. A
-candidate that fails for any reason, such as its usage limit or a provider that
-does not offer its model, is passed over while the others finish, named as
-skipped, and never retried.
+saves none.
 
 A reviewer that cannot run passes the round to the next whose model is not
 the latest writer's, so Sonnet reviews what Opus changed last while Sol is
@@ -1570,7 +1558,7 @@ Without a record, or when its last line names an `unknown` model, the harness
 running the command, usually the session that
 just pushed, is taken to be the latest writer, so Codex reviews from Claude Code
 and Claude Code from Codex. `--harness` names the only reviewer instead of
-the pick, the shadow, and the candidate, at its entry's model and effort, and `--model` and `--effort`
+the pick and the shadow, at its entry's model and effort, and `--model` and `--effort`
 override the size pick's or that reviewer's, as a repository whose `AGENTS.md`
 names other reviewers needs. A `--harness` run keeps the other
 reviewers' sessions for the pick's next run, and refuses while one has
@@ -1628,7 +1616,7 @@ fails like any malformed reply. Each finding is high, medium, or low severity;
 low is anything that would not block landing. The score informs; the findings
 and their refutations still decide when the loop ends. Later rounds take
 `--responses`, the author's free-text fixes and refutations, which a round that
-reported numbered findings requires: every reviewer's but the candidate's. A later round resumes the session and checks only
+reported findings requires. A later round resumes the session and checks only
 what changed since the last round's head and its findings when nothing but the
 head changed: the same model, effort, and base, a merge base the last round's
 covers, as when the base moved on, and the same applicable `AGENTS.md`,
@@ -1637,8 +1625,8 @@ the whole change and still weighs the responses. A round that would resume on
 the head the last round reviewed, when that round found nothing, runs no
 reviewer and repeats that round, marked `unchanged`. A refutation stands only
 when it cites evidence the reviewer can check. Findings are numbered across the
-reviewers but the candidate, in the order the round printed them. The prompt
-numbers the last round's findings, and the reply settles each by its number as fixed, refuted,
+reviewers, in the order the round printed them. The prompt numbers the last
+round's findings, and the reply settles each by its number as fixed, refuted,
 or still open, with a one-sentence reason; a reply that skips or repeats one,
 or keeps more open than it reports, fails like any malformed reply. A first
 round's schema has no such list. Each reviewer settles only its own findings,
@@ -1684,13 +1672,12 @@ harness, model, effort, and session, and its `usage` line; then for each reviewe
 harness, model, and effort, session, round,
 an `unchanged` line for a repeated round, a `usage` line per turn (input tokens, the part read from the prompt cache, and output),
 the score, a `raised` line with the tier and reason when it raised the classifier's, the
-finding count, then each finding as its number, or `-` for the candidate's, which
-nothing settles, severity, `path:line`, and title over its indented body, then `earlier` with the last round's head and its findings, each
+finding count, then each finding as its number, severity, `path:line`, and title over its
+indented body, then `earlier` with the last round's head and its findings, each
 as its number, disposition, severity, `path:line`, and title over its reason; last
 come a `record` line and a `next` line. `--json` prints one object with
 `rounds`, one per reviewer, `tallies`, every reviewer's findings across the
-branch's rounds, `risk`, the head's tier with its classification, `observed`,
-the candidate's round on an earlier head or null, `record`,
+branch's rounds, `risk`, the head's tier with its classification, `record`,
 and `next`.
 
 After each round, `quest review` rewrites the `## Review` section of the open PR
@@ -1702,8 +1689,7 @@ prints `record <url>`. The record
 names the reviewed head and the base's short SHA, the head's risk tier and who
 classified it, then for each reviewer its
 harness, model, and effort, its Reviewer line ending in `, shadow` for the
-shadow, `, second` for the second reviewer, or `, candidate` for the
-candidate, the session and round, the score and rationale, the tier it raised the
+shadow or `, second` for the second reviewer, the session and round, the score and rationale, the tier it raised the
 risk to and why, its tally, each finding with
 its location, and the last round's findings with their dispositions. The
 tally, as `- Rounds: 3; first round 2 (medium 2); findings 4 (high 1, medium 3): fixed 3, refuted 1, open 0`,
@@ -1715,10 +1701,9 @@ for the reviewer that raised it when a new size pick's reviewer fixes or
 refutes it, but one that reviewer keeps open becomes its own, since its round
 reports it again. `--new` drops the findings it leaves unsettled from the
 tallies. A reviewer the run left out keeps a block with only its session and
-tally, and the candidate's also restates its findings with the head they
-describe. `quest status` takes the last full SHA the section names as the
-reviewed head, so the head appears in full only once no reviewer but the
-candidate reports a finding, and model text
+tally. `quest status` takes the last full SHA the section names as the
+reviewed head, so the head appears in full only once no reviewer reports a
+finding, and model text
 appears as inline code, which mentions or links nothing and never holds a full
 SHA. The section runs to the next level-1 or
 level-2 heading, both as Markdown parses them, so an example in a code fence is
@@ -1862,7 +1847,7 @@ before it lands, and put the score and its cost in its PR.
 quest eval add 570 --fix 704 --what "It counts every link as a culprit." \
   --defect src/cli/usage.ts:395-399 --defect src/cli/usage.ts:408-410
 quest eval add 503 --clean
-quest eval run                          # the size's pick and its shadow on every case, and its candidate unless it wrote the case
+quest eval run                          # the size's pick and its shadow on every case
 quest eval run --harness claude --effort high --pr 570
 ```
 
@@ -1874,10 +1859,8 @@ giving the reviewers the first round `quest review` gives, with the base's
 `AGENTS.md` and `CLAUDE.md` and this checkout's committed `REVIEW.md`. A
 finding on any line of a defect's places finds it; every finding on a clean PR
 is noise. It prints defects found and clean findings by severity for the pick,
-its shadow, the candidate, which sits out a case its model wrote and is listed
-as skipped on a case it cannot run while the others still score, and either,
-what the seats but the candidate found together, by size and by tier, each
-case's rounds, and the cost token-max prices for the run's sessions.
+its shadow, and either, by size and by tier, each case's rounds, and the cost
+token-max prices for the run's sessions.
 
 ## Audit cost and accuracy
 
@@ -1926,7 +1909,7 @@ whole cost. Each session gets the record
 it, so a review's sub-agents count as reviewing. Each PR shows its `## Models` size, its risk tier and
 whether a reviewer raised it, and its implementers, and as `unread:` each Implementer line it cannot read; each reviewer the
 `quest review` record names, with its latest round and score and its tally of
-findings across every round, marked `shadow`, `second`, or `candidate` for those seats, where a merged PR whose last round left only low
+findings across every round, marked `shadow` or `second` for those seats, where a merged PR whose last round left only low
 findings open counts them settled, since `/quest-review` fixes or refutes those
 before merge without another round; the land fixer's fixes; the later merged PRs
 whose `## Caused by` names it on a bullet that opens with its link, as
@@ -1950,11 +1933,10 @@ a bot resolving its own thread or a later review leaving it out, and as
 unanswered otherwise.
 
 Rollups follow: spend by size, role, harness, model, and effort; accuracy
-by size and implementer, which sums the tallies but the shadow's and the
-candidate's, and their
+by size and implementer, which sums the tallies but the shadow's, and their
 first rounds over the PRs whose every such tally records one, so it counts
 every finding the routed reviewers caught before merge, while the shadow's
-and candidate's findings measure a reviewer rather than the writer. Since a branch's tallies span every PR from it, only the
+findings measure an effort step rather than the writer. Since a branch's tallies span every PR from it, only the
 PR whose record holds its latest tally, by the most rounds and then the newest,
 counts them, and a record written before tallies
 counts as unreviewed. An `Implementer:` line's own size, as
@@ -1968,7 +1950,7 @@ and spend on a model no line names, such as a sub-agent on a smaller model,
 to the line that took the most. Spend that fits several lines goes to the
 first line when an implementing session spent it and to the later ones when an
 iterating one did. Local reviewers roll up the same way, by the
-PR's size and each reviewer's harness, model, effort, and seat mark: PRs
+PR's size and each reviewer's harness, model, effort, and shadow mark: PRs
 reviewed, tallies, first rounds, and reviewing cost per PR, where a session
 the record names, or its sub-agent, goes to that reviewer. Spend still left
 fitting several, such as a routed and a shadow reviewer at one effort whose

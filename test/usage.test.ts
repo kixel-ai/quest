@@ -8,7 +8,7 @@ import { implementer } from "../src/cli/models-record";
 import { fixes } from "../src/cli/land-fixer";
 import type { Risk, Round, Tally } from "../src/cli/review";
 import { classifierSessions, parseReview, reviewRecord, reviewSessions } from "../src/cli/review-record";
-import { culpritOf, culprits } from "../src/cli/breakage";
+import { culprits } from "../src/cli/breakage";
 import { type Session, causes, fold, parseSessions, share, usage, usageLines } from "../src/cli/usage";
 import type { LoggedWait } from "../src/cli/waits";
 import { SPLIT_CATEGORIES, type TimeSplit } from "../src/core";
@@ -291,7 +291,7 @@ describe("PR records", () => {
 		{ ...tally("codex", 3, { high: 1, medium: 1, low: 2 }, 2, 1), first: { high: 1, medium: 0, low: 1 } },
 		{ ...tally("codex", 1, { high: 0, medium: 0, low: 0 }, 0, 0), shadow: true as const },
 		// A left-out reviewer still names its session, so `quest usage` counts that session as reviewing.
-		{ ...tally("claude", 2, { high: 2, medium: 0, low: 0 }, 1, 0), session: CLAUDE, candidate: true as const },
+		{ ...tally("claude", 2, { high: 2, medium: 0, low: 0 }, 1, 0), session: CLAUDE },
 	];
 
 	const SKIP = {
@@ -317,7 +317,6 @@ describe("PR records", () => {
 				effort: "high",
 				shadow: false,
 				second: false,
-				candidate: false,
 				session: THREAD,
 				round: 3,
 				score: 7,
@@ -338,7 +337,6 @@ describe("PR records", () => {
 				effort: "medium",
 				shadow: true,
 				second: false,
-				candidate: false,
 				session: "thread-2",
 				round: 1,
 				score: 10,
@@ -353,14 +351,13 @@ describe("PR records", () => {
 				},
 				open: { high: 0, medium: 0, low: 0 },
 			},
-			// A reviewer the run left out, such as a candidate with nothing to settle, keeps its tally.
+			// A reviewer the run left out, such as the pick a new one replaced, keeps its tally.
 			{
 				harness: "Claude Code",
 				model: "m",
 				effort: "high",
 				shadow: false,
 				second: false,
-				candidate: true,
 				session: CLAUDE,
 				round: null,
 				score: null,
@@ -378,37 +375,13 @@ describe("PR records", () => {
 		]);
 		// An open finding keeps the head short; once no reviewer reports one, it is named in full.
 		expect(body).not.toContain("b".repeat(40));
-		// Codex's tally still holds an open finding, which keeps it short too.
+		// Claude's left-out tally still holds an open finding, which keeps it short too.
 		const clean = [{ ...round, findings: [] }, second];
 		expect(reviewRecord({ ...at, rounds: clean, tallies, risk, skipped: [] })).not.toContain("b".repeat(40));
-		// The candidate's findings are never answered, so its open ones do not, and its failure's detail stays out.
-		const settledAll = [tally("codex", 3, { high: 1, medium: 1, low: 2 }, 3, 1), tallies[1]!, tallies[2]!];
-		const passed = reviewRecord({
-			...at,
-			rounds: clean,
-			tallies: settledAll,
-			risk,
-			skipped: [{ ...SKIP, detail: "provider said: secret" }],
-		});
-		expect(passed).toContain(`- Head: ${"b".repeat(40)}\n`);
-		expect(passed).not.toContain("secret");
-		const observed = { ...round, reviewer: "claude" as const, candidate: true as const };
-		expect(reviewRecord({ ...at, rounds: [observed], tallies, risk, skipped: [] })).toContain(
-			"\n- Findings, recorded for comparison only, needing no fix or refutation:\n",
+		const settledAll = [tally("codex", 3, { high: 1, medium: 1, low: 2 }, 3, 1), tallies[1]!];
+		expect(reviewRecord({ ...at, rounds: clean, tallies: settledAll, risk, skipped: [] })).toContain(
+			`- Head: ${"b".repeat(40)}\n`,
 		);
-		// A later record restates the candidate's findings with the head they describe.
-		const later = reviewRecord({ ...at, rounds: clean, tallies, risk, skipped: [], observed });
-		expect(later).toContain(
-			`\n- Findings at ${round.head.slice(0, 12)}, recorded for comparison only, needing no fix or refutation:\n`,
-		);
-		expect(parseReview(`## Review\n\n${later}\n`).find((each) => each.candidate)!.open.high).toBe(
-			round.findings.filter((f) => f.severity === "high").length,
-		);
-		// The candidate guarded nothing, so a culprit's reviewers leave it out.
-		const pull = { number: 1, state: "merged", closed: null, body: `## Review\n\n${later}\n` };
-		expect(
-			culpritOf(pull as unknown as Parameters<typeof culpritOf>[0]).reviewers.map((each) => each.harness),
-		).toEqual(["Codex", "Codex"]);
 		expect(fixes(body)).toEqual(["codex, gpt-6.2-sol, medium effort"]);
 		// The reviewer sessions read even from a record whose other lines this version cannot parse.
 		const newer = body.replace(/^- Rounds: 3;/m, "- Rounds: 3; first round 1 (medium 1);");

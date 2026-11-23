@@ -58,15 +58,6 @@ export const REVIEWERS: Record<Size, readonly Model[]> = {
 	XL: [astra("high"), opus("xhigh"), sonnet("high")],
 };
 
-/**
- * Each size's candidate reviewer, an observer on trial: it reviews a branch's
- * first run beside the pick, and its findings are recorded for the readout in
- * quest/m0/routing-evidence/README.md, never answered, counted, or used to raise
- * the risk. A branch whose latest writer is its model gets none. XL has none,
- * since Fable writes its quests.
- */
-export const CANDIDATES: Partial<Record<Size, Model>> = { L: fable("medium") };
-
 /** One side of the writer A/B: A runs the size's own first writer, B the alternative. */
 export type Arm = "A" | "B";
 export const ARM_NAMES: readonly Arm[] = ["A", "B"];
