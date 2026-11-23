@@ -854,22 +854,25 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 	landCommand
 		.command("fix")
 		.description(
-			"Run a mechanical agent fix inside the credential-free fixer container; write quest-land-result.json, whose optional comments the daemon posts. Model endpoint and client key: OPENAI_BASE_URL and OPENAI_API_KEY.",
+			"Run a mechanical agent fix inside the credential-free fixer container; write quest-land-result.json, whose optional comments the daemon posts. Runs Claude Code with no user or project configuration; model endpoint and client key: ANTHROPIC_BASE_URL and ANTHROPIC_API_KEY.",
 		)
 		.argument("<log>", "Full failure log exposed by the wrapper")
 		.argument("<prs...>", "PR numbers with pr-<n> branches")
-		.option("--agent <executable>", "Agent executable", "codex")
-		.option("--model <id>", "Agent model recorded in the result (passed to default Codex)")
+		.option("--agent <executable>", "Agent executable", "claude")
+		.option(
+			"--model <id>",
+			"Agent model, passed to default Claude Code; the result records the model its output names, else this",
+		)
 		.option(
 			"--agent-arg <argument>",
-			"Replace default codex exec arguments (repeatable)",
+			"Replace default claude -p arguments (repeatable)",
 			(value: string, previous: string[]) => [...previous, value],
 			[] as string[],
 		)
 		.addOption(
 			new Option(
 				"--effort <level>",
-				`Default Codex's model_reasoning_effort (default: $${EFFORT_VARIABLE}, or medium)`,
+				`Default Claude Code's effort (default: $${EFFORT_VARIABLE}, or medium)`,
 			).choices(EFFORTS),
 		)
 		.action(
@@ -940,10 +943,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		)
 		.option("--fixer-jobs <count>", "Most fixer jobs to run at once", positiveInteger("fixer-jobs"), 2)
 		.addOption(
-			new Option(
-				"--fixer-effort <level>",
-				`The fixer's model_reasoning_effort, passed to the wrapper in $${EFFORT_VARIABLE}`,
-			)
+			new Option("--fixer-effort <level>", `The fixer's effort, passed to the wrapper in $${EFFORT_VARIABLE}`)
 				.choices(EFFORTS)
 				.default("medium"),
 		)

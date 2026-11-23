@@ -24,26 +24,27 @@ const fable = (effort: string): Model => ({ harness: "claude", model: "claude-fa
 /**
  * Each size's writers, ranked: a spawn starts the quest on the first that can
  * run, falling through only while nothing is written, since the model that
- * writes a PR runs all its iterates. XS runs Sonnet rather than the cheaper
- * Haiku, whose surcharge past 100k input tokens leads users to cap its
- * compaction window there, barely above an agent's fixed load of prompt,
- * context, and skill. No size runs Opus at low, which misses too much. XL
- * starts on Fable, since its quests are hard rather than just big; Opus
+ * writes a PR runs all its iterates. Only Claude writes, so every review
+ * crosses vendor or model; a quest whose writers are all at their usage limit
+ * waits for one rather than starting on another vendor. XS runs Sonnet rather
+ * than the cheaper Haiku, whose surcharge past 100k input tokens leads users
+ * to cap its compaction window there, barely above an agent's fixed load of
+ * prompt, context, and skill. No size runs Opus at low, which misses too much.
+ * XL starts on Fable, since its quests are hard rather than just big; Opus
  * takes over when Fable hits its usage limit, which a subscription caps at
  * half the weekly limit.
  */
 export const WRITERS: Record<Size, readonly Model[]> = {
-	XS: [sonnet("high"), sol("low")],
-	S: [opus("medium"), sol("medium")],
-	M: [opus("high"), sol("high")],
-	L: [opus("high"), sol("xhigh")],
+	XS: [sonnet("high")],
+	S: [opus("medium")],
+	M: [opus("high")],
+	L: [opus("high")],
 	XL: [fable("high"), opus("xhigh")],
 };
 
 /**
  * Each PR size's reviewers, ranked: the first whose model is not the latest
- * writer's reviews it, so Claude reviews what Sol changed last, and one that
- * cannot run passes the review to the next. Sonnet comes last so Opus-written
+ * writer's reviews it, and one that cannot run passes the review to the next. Sonnet comes last so Opus-written
  * work still has a reviewer when Sol is out; at low it found none of the eval
  * set's M defects, so it runs no lower than medium.
  */

@@ -10,8 +10,8 @@ effort. Low-tier heads get a local review for the first time. Once these
 seats find what Pullfrog finds behind them, per dollar, Pullfrog and its
 required-approval ruleset retire.
 
-Non-goals: the writers, which [Claude writers](/quest/m0/claude-writers.md)
-owns; the shadow and Fable candidate seats, which measure and do not count
+Non-goals: the writers, which only Claude runs since
+[moq-dev/quest#832](https://github.com/moq-dev/quest/pull/832); the shadow and Fable candidate seats, which measure and do not count
 toward a tier's seats.
 
 ## Plan
