@@ -1628,7 +1628,7 @@ fails like any malformed reply. Each finding is high, medium, or low severity;
 low is anything that would not block landing. The score informs; the findings
 and their refutations still decide when the loop ends. Later rounds take
 `--responses`, the author's free-text fixes and refutations, which a round that
-reported findings requires. A later round resumes the session and checks only
+reported numbered findings requires: every reviewer's but the candidate's. A later round resumes the session and checks only
 what changed since the last round's head and its findings when nothing but the
 head changed: the same model, effort, and base, a merge base the last round's
 covers, as when the base moved on, and the same applicable `AGENTS.md`,
@@ -1715,8 +1715,8 @@ refutes it, but one that reviewer keeps open becomes its own, since its round
 reports it again. `--new` drops the findings it leaves unsettled from the
 tallies. A reviewer the run left out keeps a block with only its session and
 tally. `quest status` takes the last full SHA the section names as the
-reviewed head, so the head appears in full only once no reviewer reports a
-finding, and model text
+reviewed head, so the head appears in full only once no reviewer but the
+candidate reports a finding, and model text
 appears as inline code, which mentions or links nothing and never holds a full
 SHA. The section runs to the next level-1 or
 level-2 heading, both as Markdown parses them, so an example in a code fence is

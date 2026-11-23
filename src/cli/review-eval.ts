@@ -459,7 +459,7 @@ export async function evaluate(options: EvalOptions, sessions: (since: Date) => 
 		rules: rules && { sha: rules.sha },
 		scored,
 		...tallies(scored, options.harness === undefined),
-		cost: priced(sessions(started), scored),
+		cost: lowerBound(priced(sessions(started), scored), scored),
 	};
 }
 
@@ -567,6 +567,11 @@ export function tallies(scored: Scored[], combined: boolean): Pick<EvalReport, "
 		}
 	}
 	return { totals, by };
+}
+
+/** `cost` as a lower bound once a case skipped its candidate, whose failed turns may have been billed with no session to price. */
+function lowerBound(cost: EvalReport["cost"], scored: Scored[]): EvalReport["cost"] {
+	return cost && scored.some((each) => each.skipped.length > 0) ? { ...cost, complete: false } : cost;
 }
 
 /**

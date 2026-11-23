@@ -440,6 +440,14 @@ fakes(
 		const fable = await quest("--root", t.repo, "review", ...byFable);
 		expect(fable.code, fable.stderr).toBe(0);
 		expect(JSON.parse(fable.stdout).rounds.map(label)).toEqual(["gpt-6.2-sol xhigh", "gpt-6.2-sol high shadow"]);
+		// Nor does a later head another model wrote, since it would pair with the pick's second round.
+		write(t.repo, ".tmp/responses.md", "1. Fixed.\n2. Fixed.\n");
+		write(t.repo, "src/lib.ts", "export const x = 3;\n");
+		git(t.repo, "commit", "-qam", "fix");
+		const answered = ["--responses", join(t.repo, ".tmp", "responses.md"), "--json"];
+		const later = await quest("--root", t.repo, "review", ...OPUS_WROTE, "--size", "L", ...answered);
+		expect(later.code, later.stderr).toBe(0);
+		expect(JSON.parse(later.stdout).rounds.map(label)).toEqual(["gpt-6.2-sol xhigh", "gpt-6.2-sol high shadow"]);
 		const u = setup(null);
 		const named = await quest(
 			"--root",

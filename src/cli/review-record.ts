@@ -127,7 +127,7 @@ export function reviewRecord({ rounds, tallies, risk, skipped, observed, head, b
 		if (tally === undefined) throw new Error(`no tally for ${round.reviewer}'s round`);
 		lines.push(`- Rounds: ${tally.rounds}; ${findingsText(counted(tally))}`);
 		if (round.findings.length === 0) lines.push("- Findings: none");
-		else if (round.candidate) lines.push("- Findings, recorded for comparison and never answered:");
+		else if (round.candidate) lines.push("- Findings, recorded for comparison only, needing no fix or refutation:");
 		else lines.push("- Findings, open until the next round settles them:");
 		for (const finding of round.findings)
 			lines.push(`  - ${capitalized(finding.severity)}, ${code(located(finding))}: ${code(finding.title)}`);
@@ -152,7 +152,7 @@ export function reviewRecord({ rounds, tallies, risk, skipped, observed, head, b
 			// The candidate's findings stay in every record, since its comparison with the pick's needs their places.
 			...(tally.candidate && observed && observed.findings.length > 0
 				? [
-						`- Findings at ${observed.head.slice(0, 12)}, recorded for comparison and never answered:`,
+						`- Findings at ${observed.head.slice(0, 12)}, recorded for comparison only, needing no fix or refutation:`,
 						...observed.findings.map(
 							(finding) =>
 								`  - ${capitalized(finding.severity)}, ${code(located(finding))}: ${code(finding.title)}`,

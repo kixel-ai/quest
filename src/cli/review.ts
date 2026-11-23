@@ -2157,13 +2157,18 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 		return { rounds: [], tallies, risk: low, skipped: [], ...left, branch, head, base, sized };
 	}
 
-	// The size's candidate observes the first head the pick reviews on the branch, once and beside the others, in a
-	// session no later run resumes, unless its model is avoided, as when it wrote the branch last, or the run names its
-	// reviewer. Its outcome waits for theirs, so a pick that passes the round on never runs it twice.
+	// The size's candidate observes the first head the pick reviews on the branch, beside it, so the two first rounds
+	// pair: once, in a session no later run resumes, and never on a branch already reviewed, as when its model wrote
+	// the first head, nor in a run that names its reviewer. Its outcome waits for theirs, so a pick that passes the
+	// round on never runs it twice.
 	const listed = CANDIDATES[sized.size];
 	const watcher = new AbortController();
 	const observing =
-		!named && saved?.observed === undefined && listed !== undefined && !avoided(listed)
+		!named &&
+		saved?.observed === undefined &&
+		(saved?.tallies ?? []).length === 0 &&
+		listed !== undefined &&
+		!avoided(listed)
 			? reviewWith(
 					{
 						...shared,
@@ -2176,10 +2181,23 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 					(error: unknown) => (error instanceof Error ? error : new Error(String(error))),
 				)
 			: null;
+	// Whether the branch's state holds the candidate's round, as a run saves it once the required seats finish.
+	let stored = false;
 	try {
 		return await reviewed();
+	} catch (error) {
+		// A run that fails stops the candidate too, but a round it already finished is kept, so a retry never pays
+		// for it again.
+		watcher.abort();
+		const outcome = await observing;
+		if (!stored && outcome !== null && !(outcome instanceof Error))
+			save(statePath, {
+				...(saved ?? { branch, sessions: [] }),
+				tallies: tallied(saved?.tallies ?? [], [{ round: outcome }]),
+				observed: outcome,
+			});
+		throw error;
 	} finally {
-		// A run that fails stops the candidate too, saving nothing of it.
 		watcher.abort();
 	}
 
@@ -2287,6 +2305,7 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 			]);
 			const risk = overridden(judged(), override);
 			save(statePath, state([...done.map((each) => each.session), ...kept], after, risk, observed));
+			stored = true;
 			return { after, risk };
 		};
 		let { after, risk } = persist();

@@ -78,10 +78,10 @@ Readout, the agent's choices for the implementer to revisit:
 - Read the candidate seat, Fable 5.2 medium observing each L branch's first
   run beside the pick since
   [moq-dev/quest#831](https://github.com/moq-dev/quest/pull/831): compare
-  its first-round tally with the pick's, as the shadow pairs are, match its
-  never-answered findings, which every record restates with their head, by
-  location against the findings and dispositions the pick's rounds record,
-  read its rows marked `candidate` in `quest usage`, and
+  its first-round tally with the pick's on the same head, as the shadow pairs
+  are, check whether its never-answered findings, which every record restates
+  with their head, name the defects later `## Caused by` lines trace to the
+  PR, read its rows marked `candidate` in `quest usage`, and
   recommend promoting it to the pick, keeping it, or ending it by deleting
   its entry from `CANDIDATES` in `src/cli/models.ts`.
 - Carry the tallies into [the model check](/quest/m1/model-check.md)'s

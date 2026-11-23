@@ -1676,7 +1676,18 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		const reviewed = savedReview(error);
 		if (reviewed !== undefined) {
 			const { rounds, tallies, risk, skipped } = reviewed;
-			if (json) print(JSON.stringify({ rounds, tallies, risk, skipped, record: null, next: null }));
+			if (json)
+				print(
+					JSON.stringify({
+						rounds,
+						tallies,
+						risk,
+						skipped,
+						observed: reviewed.observed ?? null,
+						record: null,
+						next: null,
+					}),
+				);
 			else for (const line of roundLines(reviewed)) print(line);
 		}
 		const outage = error instanceof ReviewerUnavailableError || error instanceof ReviewOutageError;
@@ -1744,9 +1755,9 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"`/code-review <effort> <merge-base>...HEAD` with text after it), given the range, the base's REVIEW.md, if " +
 				"any, and any responses up front, then resumes that session for one turn that reports the review in one " +
 				"JSON schema without reading anything again. --responses gives the author's fixes and refutations of " +
-				"the last round's findings, required while that round reported any; the reply settles each of those " +
+				"the last round's numbered findings, required while that round reported any; the reply settles each of those " +
 				"findings, by its number in the prompt, as fixed, refuted, or still open. Findings are numbered across " +
-				"the reviewers in the order the round printed them, and each reviewer settles only its own, given " +
+				"the reviewers in the order the round printed them, the candidate's left unnumbered, and each reviewer settles only its own, given " +
 				"--responses only when it has some. A later round resumes the " +
 				"session and checks only what changed since the last round's head and those findings when nothing " +
 				"but the head changed: the same model, effort, and base, a merge base the last round's covers, as " +
@@ -1803,7 +1814,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"one object: `rounds`, one per reviewer, `tallies`, every reviewer's findings across the branch's rounds, `risk`, the head's tier with its classification, `skipped`, each reviewer passed over with its reason, `observed`, the candidate's round on an earlier head or null, `record`, and `next`.\n\n" +
 				"After each round, it rewrites the `## Review` section of the branch's open PR into the base, the one from the repository the base's remote pushes to, else the only one from another repository whose pushed head `HEAD` contains, as the " +
 				"user the GitHub token names, keeping the rest of the body, and prints `record <url>`: the reviewed " +
-				"head, named in full only once no reviewer reports a finding, the base, the head's risk tier and reason, " +
+				"head, named in full only once no reviewer but the candidate reports a finding, the base, the head's risk tier and reason, " +
 				"an `- Overridden:` line, the classifier's tier and who set it, a `- Class:` line, a `- Local review: none` line for a low head no reviewer ran on, a `- Skipped:` line for each reviewer passed over, and each reviewer, its Reviewer line ending in `, shadow` for the shadow, `, second` for the second reviewer, or `, candidate` for the candidate, its " +
 				"session and round, score, the tier it raised the risk to and why, its tally of findings across the branch's rounds, and each finding with its disposition. With no " +
 				"such PR, several from other repositories that `HEAD` contains, or a remote off GitHub, it prints `record skipped: <why>` and changes nothing.\n\n" +
@@ -1956,7 +1967,8 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"entry's model and effort unless --model and --effort override them. A reviewer that cannot run fails the run " +
 				"rather than passing the case to the next, so the score measures the reviewers it names, except the candidate, " +
 				"which only observes, so the case lists it as skipped and the others still score. Cases run one at a time, their reviewers " +
-				"at once, and the first failure stops the run and fails it.\n\n" +
+				"at once, and the first failure of a seat but the candidate stops the run and fails it. A case the candidate " +
+				"skipped after a paid turn makes the cost a lower bound.\n\n" +
 				"Prints the set's counts and rules, a line per seat (pick, shadow, candidate, and, without --harness, either: what " +
 				"the case's seats but the candidate found together, as a run of them all finds it) with defects found and clean findings by severity, the same by size and tier, " +
 				"each case's rounds with score, defects found, findings, tokens the CLI reported, and session, and the " +

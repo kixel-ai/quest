@@ -394,12 +394,12 @@ describe("PR records", () => {
 		expect(passed).not.toContain("secret");
 		const observed = { ...round, reviewer: "claude" as const, candidate: true as const };
 		expect(reviewRecord({ ...at, rounds: [observed], tallies, risk, skipped: [] })).toContain(
-			"\n- Findings, recorded for comparison and never answered:\n",
+			"\n- Findings, recorded for comparison only, needing no fix or refutation:\n",
 		);
 		// A later record restates the candidate's findings with the head they describe.
 		const later = reviewRecord({ ...at, rounds: clean, tallies, risk, skipped: [], observed });
 		expect(later).toContain(
-			`\n- Findings at ${round.head.slice(0, 12)}, recorded for comparison and never answered:\n`,
+			`\n- Findings at ${round.head.slice(0, 12)}, recorded for comparison only, needing no fix or refutation:\n`,
 		);
 		expect(parseReview(`## Review\n\n${later}\n`).find((each) => each.candidate)!.open.high).toBe(
 			round.findings.filter((f) => f.severity === "high").length,
