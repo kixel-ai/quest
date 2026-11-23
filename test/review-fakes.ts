@@ -240,6 +240,65 @@ if (argv[1] === "review") {
 	event({ type: "turn.completed", usage: { input_tokens: 100, cached_input_tokens: 80, output_tokens: 7 } });
 }
 `,
+	// Antigravity's print mode: the prompt is one stream-json line on stdin, and the workspace is logged as it stood,
+	// since quest removes it after the turn. FAKE_DENIED ends a turn on a denied command, as print mode does.
+	agy: `
+const fs = require("node:fs");
+const path = require("node:path");${LOG}
+const argv = process.argv.slice(2);
+const raw = fs.readFileSync(0, "utf8");
+const stdin = raw ? JSON.parse(raw).message.content : "";
+const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => /^(CLAUDE|CODEX|ANTHROPIC|ANTIGRAVITY|AGY|FAKE_HOST|PATH$)/.test(k)));
+const walk = (dir) => fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) =>
+	entry.isDirectory() ? walk(path.join(dir, entry.name)).map((name) => entry.name + "/" + name) : [entry.name]);
+const workspace = argv[0] === "models" ? null : Object.fromEntries(walk(".").map((name) => [name, fs.readFileSync(name, "utf8")]));
+logged({ argv, stdin, env, cwd: process.cwd(), workspace });
+const model = argv.includes("--model") ? argv[argv.indexOf("--model") + 1] : undefined;
+const only = process.env.FAKE_FAILS?.split(",");
+const fake = (name) => (!only || only.includes("agy") || only.includes(model) ? process.env[name] : undefined);
+if (argv[0] === "models") {
+	console.log("Fetching available models...");
+	if (fake("FAKE_LOGGED_OUT")) {
+		console.log("Error: Please sign in to view available models. Launch the CLI without arguments to sign in.");
+		process.exit(1);
+	}
+	console.log("gemini-4-carbon-high\\tGemini 4 Carbon (High)");
+	process.exit(0);
+}
+const at = (flag) => (argv.includes(flag) ? argv[argv.indexOf(flag) + 1] : undefined);
+const conversation = at("--conversation") ?? "conversation-" + (at("--json-schema") ? "ask" : "1");
+const event = (value) => console.log(JSON.stringify(value));
+const result = (fields, usage = { input_tokens: 0, output_tokens: 0, thinking_tokens: 0, cache_read_tokens: 0 }) =>
+	event({ event: "result", result: { conversation_id: conversation, status: "SUCCESS", response: "", num_turns: 1, usage, ...fields } });
+const fail = (error) => {
+	result({ status: "ERROR", error });
+	console.error("error: " + error);
+	process.exit(1);
+};
+const QUOTA = (reset) => "Error 429, Message: Quota exhausted for gemini-4-carbon., Status: RESOURCE_EXHAUSTED, Details: [map[@type:type.googleapis.com/google.rpc.ErrorInfo domain:cloudcode-pa.googleapis.com metadata:map[" + reset + "] reason:QUOTA_EXHAUSTED]]";
+event({ event: "init", conversation_id: conversation, init: { model, cwd: process.cwd(), tools: [], permission_mode: "always-proceed" } });
+if (fake("FAKE_REJECTED")) fail("authentication failed or timed out");
+const failing = (process.env.FAKE_CLASSIFY ?? "").split(",");
+if (at("--json-schema") && !at("--conversation")) {
+	if (failing.includes("agy-rejected")) fail("authentication failed or timed out");
+	if (failing.includes("agy-limited")) fail(QUOTA("quotaResetTimeStamp:2030-03-17T17:46:40Z"));
+	const reply = failing.includes("agy-unusable") ? JSON.stringify({ tier: "huge", reason: "x" }) : ${RISK_REPLY};
+	result({ response: reply + "\\n", structured_output: JSON.parse(reply) }, { input_tokens: 40, output_tokens: 3, thinking_tokens: 1, cache_read_tokens: 0 });
+} else if (!at("--conversation")) {
+	if (process.env.FAKE_DENIED) {
+		result({ denied_actions: [{ action: "command", display_name: "Bash" }] });
+		process.exit(0);
+	}
+	result({ response: "Found an off-by-one.\\n" }, { input_tokens: 90, output_tokens: 50, thinking_tokens: 40, cache_read_tokens: 10 });
+} else {
+	if (fake("FAKE_LIMITED")) fail(QUOTA(fake("FAKE_LIMITED") === "unknown" ? "" : "quotaResetDelay:3600s quotaResetTimeStamp:2030-03-17T17:46:40Z"));
+	${REPLY}
+	result(
+		{ response: reply + "\\n", structured_output: process.env.FAKE_REPLY ? undefined : JSON.parse(reply) },
+		{ input_tokens: 20, output_tokens: 7, thinking_tokens: 2, cache_read_tokens: 80 },
+	);
+}
+`,
 };
 
 export const git = (dir: string, ...args: string[]) =>
@@ -264,6 +323,8 @@ export interface Call {
 	stdin: string;
 	env: Record<string, string>;
 	cwd: string;
+	/** The files of an Antigravity turn's working directory, as it ran. */
+	workspace?: Record<string, string> | null;
 }
 
 /** Credentials and routes the running session may hold, cleared so each test sets its own. */
@@ -325,6 +386,7 @@ export function setup(host: "CLAUDECODE" | "CODEX_THREAD_ID" | null = "CLAUDECOD
 		...HOST_CREDENTIALS,
 		"CLAUDECODE",
 		"CODEX_THREAD_ID",
+		"ANTIGRAVITY_CONVERSATION_ID",
 		"CLAUDE_CONFIG_DIR",
 		"CODEX_HOME",
 		"OPENAI_BASE_URL",
@@ -340,6 +402,8 @@ export function setup(host: "CLAUDECODE" | "CODEX_THREAD_ID" | null = "CLAUDECOD
 		"FAKE_DISPOSITION",
 		"FAKE_RISK",
 		"FAKE_RAISE",
+		"FAKE_DENIED",
+		"FAKE_CLASSIFY",
 	]) {
 		vi.stubEnv(name, undefined);
 	}

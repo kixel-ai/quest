@@ -379,6 +379,8 @@ describe.each(["codex", "claude"] as const)("%s", (harness) => {
 				effort: EFFORT,
 				schema: schema(0),
 				schemaFile: "",
+				root: fixture.clone,
+				ranges: [],
 			};
 			const [program, ...args] = claudeFlags(context);
 			run = spawnSync(program, args, {
@@ -432,6 +434,8 @@ describe.each(["codex", "claude"] as const)("%s", (harness) => {
 				effort: EFFORT,
 				schema: schema(0),
 				schemaFile: "",
+				root: fixture.clone,
+				ranges: [],
 			};
 			const [program, ...args] = claudeFlags(context);
 			run = spawnSync(program, args, {

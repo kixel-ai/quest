@@ -36,7 +36,8 @@ import {
 import {
 	AgentInputError,
 	HARNESSES,
-	type HarnessName,
+	REVIEW_HARNESSES,
+	type ReviewHarness,
 	type Launch,
 	admitAgent,
 	processDependencies,
@@ -1812,7 +1813,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 			new Option(
 				"--harness <name>",
 				"The only reviewer to run, instead of the size's pick and the shadow",
-			).choices(HARNESSES),
+			).choices(REVIEW_HARNESSES),
 		)
 		.option("--model <model>", "Model the size's pick, or --harness's reviewer, runs instead")
 		.option(
@@ -1851,7 +1852,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				branch?: string;
 				override?: Tier;
 				reason?: string;
-				harness?: HarnessName;
+				harness?: ReviewHarness;
 				model?: string;
 				effort?: string;
 				excludeModel?: string[];
@@ -1954,7 +1955,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		)
 		.option("--set <file>", `The eval set (default: ${EVAL_FILE} at the checkout's root)`)
 		.addOption(
-			new Option("--harness <name>", "The only reviewer, instead of the pick and shadow").choices(HARNESSES),
+			new Option("--harness <name>", "The only reviewer, instead of the pick and shadow").choices(REVIEW_HARNESSES),
 		)
 		.option("--model <model>", "Model --harness's reviewer runs instead of its size's")
 		.option("--effort <level>", "Reasoning effort --harness's reviewer runs at instead of its size's", effortLevel)
@@ -1966,7 +1967,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		.action(
 			(options: {
 				set?: string;
-				harness?: HarnessName;
+				harness?: ReviewHarness;
 				model?: string;
 				effort?: string;
 				pr?: number[];

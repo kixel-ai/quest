@@ -4,14 +4,17 @@
 // (quest/m1/model-check.md) audits these lists each milestone.
 import { createHash } from "node:crypto";
 import { type Doc, SIZES, type Size, onMaintainer, size, waits } from "../core";
-import type { HarnessName } from "./agent";
+import type { HarnessName, ReviewHarness } from "./agent";
 
 /** One harness running one model at one effort. */
-export interface Model {
-	harness: HarnessName;
+export interface Model<H extends ReviewHarness = HarnessName> {
+	harness: H;
 	model: string;
 	effort: string;
 }
+
+/** A model `quest review` runs, on any CLI it reviews with. */
+export type ReviewModel = Model<ReviewHarness>;
 
 /** The size of a PR with neither a quest nor `--size`. */
 export const DEFAULT_SIZE: Size = "M";
@@ -48,7 +51,7 @@ export const WRITERS: Record<Size, readonly Model[]> = {
  * work still has a reviewer when Sol is out; at low it found none of the eval
  * set's M defects, so it runs no lower than medium.
  */
-export const REVIEWERS: Record<Size, readonly Model[]> = {
+export const REVIEWERS: Record<Size, readonly ReviewModel[]> = {
 	XS: [sol("medium"), opus("low"), sonnet("medium")],
 	S: [sol("medium"), opus("low"), sonnet("medium")],
 	M: [sol("high"), opus("medium"), sonnet("medium")],
@@ -65,11 +68,13 @@ export const ARM_NAMES: readonly Arm[] = ["A", "B"];
  * can run classifies, past any logged out or at its usage limit. The tier never depends on who wrote the change,
  * so the list is the same for every PR, unlike the reviewers'. Haiku is the
  * cheapest, and the classifier's prompt stays below the 100k input tokens past
- * which it costs five times as much.
+ * which it costs five times as much. Gemini Flash, Antigravity's cheapest,
+ * comes last, so a contributor whose only plan is Google's can still classify.
  */
-export const CLASSIFIERS: readonly Model[] = [
+export const CLASSIFIERS: readonly ReviewModel[] = [
 	{ harness: "claude", model: "claude-haiku-5-5", effort: "low" },
 	sol("low"),
+	{ harness: "agy", model: "gemini-3.8-flash", effort: "low" },
 ];
 
 /**

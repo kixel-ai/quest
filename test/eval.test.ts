@@ -11,6 +11,7 @@ import {
 	evalSeats,
 	foundDefects,
 	parseEvalSet,
+	agyCost,
 	priced,
 	tallies,
 } from "../src/cli/review-eval";
@@ -23,6 +24,7 @@ afterEach(() => {
 	vi.unstubAllGlobals();
 });
 
+const AT = new Date("2026-11-23T00:00:00Z");
 const A = "a".repeat(40);
 const B = "b".repeat(40);
 const base = { base: A, head: B, size: "M", tier: "medium", reason: "It changes a command.", writer: null };
@@ -170,27 +172,56 @@ test("the cost sums the run's sessions token-max priced, a lower bound when one 
 	];
 	const session = (id: string, cost: number, complete = true) =>
 		({ harness: "codex", id, parent: null, cost, complete }) as Session;
-	expect(priced(null, scored)).toBeNull();
-	expect(priced([session("s1", 1.5), session("s2", 0.25), session("s3", 9)], scored)).toEqual({
+	expect(priced(null, scored, AT)).toBeNull();
+	expect(priced([session("s1", 1.5), session("s2", 0.25), session("s3", 9)], scored, AT)).toEqual({
 		usd: 1.75,
 		complete: true,
 		priced: 2,
 		sessions: 2,
 	});
-	expect(priced([session("s1", 1.5)], scored)).toMatchObject({ usd: 1.5, complete: false, priced: 1 });
-	expect(priced([session("s1", 1.5), session("s2", 1, false)], scored)).toMatchObject({ complete: false });
-	expect(priced([{ ...session("s1", 1.5), harness: "claude" }], scored)).toMatchObject({ priced: 0 });
+	expect(priced([session("s1", 1.5)], scored, AT)).toMatchObject({ usd: 1.5, complete: false, priced: 1 });
+	expect(priced([session("s1", 1.5), session("s2", 1, false)], scored, AT)).toMatchObject({ complete: false });
+	expect(priced([{ ...session("s1", 1.5), harness: "claude" }], scored, AT)).toMatchObject({ priced: 0 });
 	// Codex reviews in a sub-session of the seat's, which may spawn its own.
 	const child = (id: string, parent: string, cost: number) => ({ ...session(id, cost), parent });
 	expect(
 		priced(
 			[child("c2", "c1", 0.5), session("s1", 1), child("c1", "s1", 2), child("x", "y", 9), session("s2", 1)],
 			scored,
+			AT,
 		),
 	).toEqual({ usd: 4.5, complete: true, priced: 2, sessions: 2 });
 	// A sub-session naming no ID is counted, but claims no top session as its child.
 	const anonymous = { ...child("c1", "s1", 2), id: null };
-	expect(priced([session("s1", 1), anonymous, session("x", 9)], scored)).toMatchObject({ usd: 3, priced: 1 });
+	expect(priced([session("s1", 1), anonymous, session("x", 9)], scored, AT)).toMatchObject({ usd: 3, priced: 1 });
+});
+
+test("agy seats are priced from their reported tokens at Google's list price on the run's day, without token-max", () => {
+	const agy = (model: string, usage: Seated["usage"]): Seated => ({ ...seat([], []), reviewer: "agy", model, usage });
+	// A million tokens of each kind: uncached input, cached input, and output.
+	const usage: Seated["usage"] = [
+		{ turn: "review", input: 1_500_000, cached: 1_000_000, output: 600_000 },
+		{ turn: "findings", input: 500_000, cached: 0, output: 400_000 },
+	];
+	const clean = { pull: 4, ...base, clean: true } as EvalCase;
+	const run = (model: string, at: string) => priced(null, [{ case: clean, seats: [agy(model, usage)] }], new Date(at));
+	expect(agyCost("gemini-4-carbon", usage, new Date("2026-11-30T23:00:00Z"))).toBeCloseTo(2 + 0.1 + 10);
+	expect(run("gemini-4-carbon", "2026-12-01T00:00:00Z")).toEqual({
+		usd: expect.closeTo(4 + 0.2 + 20),
+		complete: true,
+		priced: 1,
+		sessions: 1,
+	});
+	// The effort may ride on the model ID.
+	expect(run("gemini-4-carbon-high", "2026-11-23T00:00:00Z")?.usd).toBeCloseTo(12.1);
+	expect(run("gemini-3.8-flash", "2026-12-31T12:00:00Z")?.usd).toBeCloseTo(0.75 + 0.075 + 3.75);
+	expect(run("gemini-3.8-flash", "2027-01-01T00:00:00Z")?.usd).toBeCloseTo(1.5 + 0.15 + 7.5);
+	expect(run("gemini-9", "2026-11-23T00:00:00Z")).toEqual({ usd: 0, complete: false, priced: 0, sessions: 1 });
+	// Beside a seat token-max prices, both count, and the run is unpriced without token-max.
+	const mixed: Scored[] = [{ case: clean, seats: [seat([], []), agy("gemini-4-carbon", usage)] }];
+	const codex = { harness: "codex", id: "s1", parent: null, cost: 1, complete: true } as Session;
+	expect(priced([codex], mixed, AT)).toEqual({ usd: expect.closeTo(13.1), complete: true, priced: 2, sessions: 2 });
+	expect(priced(null, mixed, AT)).toBeNull();
 });
 
 /**

@@ -51,8 +51,14 @@ afterEach(() => {
 test("the reviewer is the harness this command is not running under", () => {
 	expect(runningHarness({ CLAUDECODE: "1" })).toBe("claude");
 	expect(runningHarness({ CODEX_THREAD_ID: "t" })).toBe("codex");
+	expect(runningHarness({ ANTIGRAVITY_CONVERSATION_ID: "c" })).toBe("agy");
 	expect(() => runningHarness({})).toThrow("pass --harness");
-	expect(() => runningHarness({ CLAUDECODE: "1", CODEX_THREAD_ID: "t" })).toThrow("both");
+	expect(() => runningHarness({ CLAUDECODE: "1", CODEX_THREAD_ID: "t" })).toThrow(
+		"Claude Code and Codex variables are set",
+	);
+	expect(() => runningHarness({ CODEX_THREAD_ID: "t", ANTIGRAVITY_CONVERSATION_ID: "c" })).toThrow(
+		"Codex and Antigravity variables are set",
+	);
 });
 
 test("each size's reviewer is the first whose model is not the latest writer's", () => {
@@ -1078,6 +1084,101 @@ fakes("claude reviews read-only with the base's instructions, then reports in th
 	}
 });
 
+const AGY = ["--harness", "agy", "--model", "gemini-4-carbon", "--effort", "high"];
+
+fakes("agy reviews from a workspace of its own, reading the change from files, then reports in the schema", async () => {
+	const s = setup("CLAUDECODE");
+	// An Antigravity session's own state and an Antigravity gateway never reach the reviewer.
+	vi.stubEnv("ANTIGRAVITY_LS_ADDRESS", "127.0.0.1:1");
+	vi.stubEnv("AGY_LLM_GATEWAY_URL", "http://127.0.0.1:9");
+	const result = await quest("--root", s.repo, "review", ...AGY, "--json");
+	expect(result.code, result.stderr).toBe(0);
+	const [round] = JSON.parse(result.stdout).rounds;
+	expect(round).toMatchObject({ reviewer: "agy", model: "gemini-4-carbon", effort: "high", score: 8 });
+	expect(round.findings).toEqual([FINDING]);
+	// Input counts the cached tokens, which agy reports apart; output already holds thinking.
+	expect(round.usage).toEqual([
+		{ turn: "review", input: 100, cached: 10, output: 50 },
+		{ turn: "findings", input: 100, cached: 80, output: 7 },
+	]);
+
+	const [status, first, second] = s.calls();
+	expect(status!.argv).toEqual(["models"]);
+	const mergeBase = git(s.repo, "merge-base", "origin/main", "HEAD");
+	const head = git(s.repo, "rev-parse", "HEAD");
+	expect(first!.argv).not.toContain("--json-schema");
+	expect(first!.argv).not.toContain("--conversation");
+	expect(first!.stdin).toContain("Review the change for what it breaks");
+	expect(second!.argv[second!.argv.indexOf("--conversation") + 1]).toBe("conversation-1");
+	const schemaFile = second!.argv[second!.argv.indexOf("--json-schema") + 1]!;
+	expect(JSON.parse(readFileSync(schemaFile, "utf8")).required).toContain("risk");
+	for (const call of [first!, second!]) {
+		const flag = (name: string) => call.argv[call.argv.indexOf(name) + 1];
+		expect(call.argv.slice(0, 3)).toEqual(["-p", "", "--input-format"]);
+		expect(flag("--agent")).toBe("quest-reviewer");
+		expect(call.argv).toContain("--dangerously-skip-permissions");
+		expect(call.argv).toContain("--disable-slash-commands");
+		expect(JSON.parse(flag("--settings")).permissions.deny).toEqual(
+			expect.arrayContaining(["command(*)", "write_file(*)", "read_url(*)", "mcp(*)"]),
+		);
+		expect(flag("--model")).toBe("gemini-4-carbon");
+		expect(flag("--effort")).toBe("high");
+		// It runs outside the checkout, in a directory removed after the turn.
+		expect(call.cwd.startsWith(s.repo)).toBe(false);
+		expect(existsSync(call.cwd)).toBe(false);
+		const agent = call.workspace![".agents/agents/quest-reviewer.md"]!;
+		expect(agent).toContain("tools:\n  - view_file\n  - finish\n");
+		expect(agent).toContain("inheritCustomizations: false");
+		expect(agent).toContain("BASE-ROOT rule");
+		expect(agent).not.toContain("HEAD-ROOT rule");
+		expect(call.workspace!["files.txt"]!.split("\n")).toContain("src/lib.ts");
+		expect(call.workspace!["diff-1.diff"]).toContain("+export const x = 2;");
+		expect(call.stdin).toContain(`The checkout under review is ${s.repo}`);
+		expect(call.stdin).toContain(`\`diff-1.diff\` holds \`git diff ${mergeBase}..${head}\``);
+		expect(Object.keys(call.env).filter((name) => /^(ANTIGRAVITY|AGY)_/.test(name))).toEqual([]);
+	}
+
+	// A later round also gets what changed since the head it reviewed.
+	write(s.repo, "src/lib.ts", "export const x = 4;\n");
+	git(s.repo, "commit", "-qam", "fix");
+	const responses = join(s.repo, ".tmp", "responses.md");
+	write(s.repo, ".tmp/responses.md", "Fixed at src/lib.ts:1.\n");
+	const later = await quest("--root", s.repo, "review", ...AGY, "--responses", responses);
+	expect(later.code, later.stderr).toBe(0);
+	const resumed = s.calls().at(-1)!;
+	expect(resumed.argv[resumed.argv.indexOf("--conversation") + 1]).toBe("conversation-1");
+	const now = git(s.repo, "rev-parse", "HEAD");
+	expect(resumed.stdin).toContain(`\`diff-2.diff\` holds \`git diff ${head} ${now}\``);
+	expect(resumed.workspace!["diff-2.diff"]).toContain("+export const x = 4;");
+});
+
+fakes.for([
+	["FAKE_LOGGED_OUT", "1", "error: agy is not logged in; run `agy`"],
+	["FAKE_REJECTED", "1", "error: agy is not logged in; run `agy`"],
+	["FAKE_LIMITED", "reset", "error: agy hit its usage limit; resets 2030-03-17T17:46:40Z"],
+	["FAKE_LIMITED", "unknown", "error: agy hit its usage limit; resets unknown"],
+	["FAKE_DENIED", "1", "quest: agy failed: agy denied command, which ended the turn"],
+] as const)("agy's login, quota, and denied actions fail its round as the real CLI reports them (%s=%s)", async ([
+	flag,
+	value,
+	message,
+]) => {
+	const s = setup("CLAUDECODE");
+	vi.stubEnv(flag, value);
+	const result = await quest("--root", s.repo, "review", ...AGY);
+	expect(result.stderr).toBe(`${message}\n`);
+	expect(result.code).toBe(flag === "FAKE_DENIED" ? 1 : 3);
+});
+
+fakes("a workspace inside a repository is refused before agy runs, since agy would load its configuration", async () => {
+	const s = setup("CLAUDECODE");
+	vi.stubEnv("XDG_RUNTIME_DIR", join(s.repo, ".tmp", "run"));
+	const result = await quest("--root", s.repo, "review", ...AGY);
+	expect(result.code).toBe(2);
+	expect(result.stderr).toContain(`lies in the repository at ${s.repo}`);
+	expect(s.calls().filter((call) => call.argv[0] !== "models")).toEqual([]);
+});
+
 fakes("a later round resumes the session with the new head and the author's responses", async () => {
 	const s = setup();
 	expect((await quest("--root", s.repo, "review")).code).toBe(0);
@@ -1513,6 +1614,26 @@ fakes("without a logged-in Claude Code, Codex classifies", async () => {
 	expect(JSON.parse(readFileSync(reportFile, "utf8")).required).toContain("risk");
 });
 
+fakes("with only Antigravity installed, Gemini Flash classifies, reading the diff from its workspace", async () => {
+	const s = setup();
+	moveBase(s.repo, (dir) => write(dir, "RISK.md", riskFile([])));
+	const only = join(s.bin, "..", "agy-only");
+	mkdirSync(only);
+	symlinkSync(execFileSync("which", ["git"], { encoding: "utf8" }).trim(), join(only, "git"));
+	symlinkSync(join(s.bin, "agy"), join(only, "agy"));
+	vi.stubEnv("PATH", only);
+	const result = await quest("--root", s.repo, "review", ...AGY);
+	expect(result.code, result.stderr).toBe(0);
+	expect(result.stdout).toContain("classifier agy gemini-3.8-flash low conversation-ask\n");
+	const call = s.calls().find((each) => each.argv.includes("gemini-3.8-flash"))!;
+	expect(call.argv).not.toContain("--conversation");
+	expect(JSON.parse(readFileSync(call.argv[call.argv.indexOf("--json-schema") + 1]!, "utf8")).required).toEqual([
+		"tier",
+		"reason",
+	]);
+	expect(call.workspace!["diff-1.diff"]).toContain("+export const x = 2;");
+});
+
 fakes(
 	"a classifier whose turn fails on its login or usage limit, or replies unusably, passes the turn to the next",
 	async () => {
@@ -1529,22 +1650,26 @@ fakes(
 			expect(passed.code, passed.stderr).toBe(0);
 			expect(passed.stdout).toContain("classifier codex gpt-6.1-sol low thread-classify\n");
 		}
+		// Gemini Flash answers last.
+		const last = await run("claude-limited,codex-limited");
+		expect(last.code, last.stderr).toBe(0);
+		expect(last.stdout).toContain("classifier agy gemini-3.8-flash low conversation-ask\n");
 		// With every classifier out of usage, the run fails on the limit that resets first.
-		expect(await run("claude-limited,codex-limited")).toMatchObject({
+		expect(await run("claude-limited,codex-limited,agy-limited")).toMatchObject({
 			code: 3,
 			stdout: "",
 			stderr: `error: codex hit its usage limit; resets ${codexReset}\n`,
 		});
 		// Otherwise it names why each failed.
-		const failed = await run("claude-rejected,codex-limited");
+		const failed = await run("claude-rejected,codex-limited,agy-rejected");
 		expect(failed.code).toBe(2);
 		expect(failed.stderr).toMatch(
-			/^error: no classifier could set the risk tier: claude is not logged in .*; codex hit its usage limit; resets /,
+			/^error: no classifier could set the risk tier: claude is not logged in .*; codex hit its usage limit; resets .*; agy is not logged in; run `agy`\n$/,
 		);
-		const unusable = await run("claude-unusable,codex-unusable");
+		const unusable = await run("claude-unusable,codex-unusable,agy-unusable");
 		expect(unusable.code).toBe(2);
 		expect(unusable.stderr).toBe(
-			"error: no classifier could set the risk tier: claude claude-haiku-5-5: the classifier's reply has no risk tier with a reason; codex gpt-6.1-sol: the classifier's reply is not JSON\n",
+			"error: no classifier could set the risk tier: claude claude-haiku-5-5: the classifier's reply has no risk tier with a reason; codex gpt-6.1-sol: the classifier's reply is not JSON; agy gemini-3.8-flash: the classifier's reply has no risk tier with a reason\n",
 		);
 	},
 	20_000,
@@ -2675,6 +2800,8 @@ test("a question about data alone runs with no tools on either CLI", () => {
 		effort: "low",
 		schema: {},
 		schemaFile: "/s.json",
+		root: "/r",
+		ranges: [],
 	};
 	const claude = claudeFlags({ ...context, tools: "" });
 	expect(claude[claude.indexOf("--tools") + 1]).toBe("");

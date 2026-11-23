@@ -10,11 +10,11 @@ import { join } from "node:path";
 import { type Repository, type Size, SIZES, type Tier, TIERS } from "../core";
 import { parser } from "../core/parse";
 import { type GitHub, object, repositoryPath } from "../github/client";
-import type { HarnessName } from "./agent";
+import type { ReviewHarness } from "./agent";
 import { git } from "./git";
 import { type ClaimDependencies, upstream } from "./claims";
 import { readRemote, remoteRepository, requireRemote } from "./github";
-import type { Model } from "./models";
+import type { ReviewModel } from "./models";
 import { recorded } from "./models-record";
 import {
 	type Assessment,
@@ -323,7 +323,7 @@ export interface EvalOptions {
 	/** The set's path; defaults to {@link EVAL_FILE} at the checkout's root. */
 	set?: string;
 	/** The only reviewer, at its size's entry, with `model` and `effort` overriding it; else the pick and its shadow. */
-	harness?: HarnessName;
+	harness?: ReviewHarness;
 	model?: string;
 	effort?: string;
 	/** Only these PRs of the set. */
@@ -336,7 +336,7 @@ export interface EvalOptions {
 
 /** One reviewer's round on a case. */
 export interface Seated {
-	reviewer: HarnessName;
+	reviewer: ReviewHarness;
 	model: string;
 	effort: string;
 	/** The size's pick one effort away, beside the pick as `quest review` runs it. */
@@ -378,7 +378,10 @@ export interface EvalReport {
 	totals: Record<string, Tally>;
 	/** Each seat by the case's size and tier, as `pick M` or `shadow high`. */
 	by: Record<string, Tally>;
-	/** The cost of the run's sessions at API list price, as token-max prices them, or null when it is not installed. */
+	/**
+	 * The cost of the run's sessions at API list price, as token-max prices them and agy's by its reported tokens, or
+	 * null when a seat needs token-max and it is not installed.
+	 */
 	cost: { usd: number; complete: boolean; priced: number; sessions: number } | null;
 }
 
@@ -386,7 +389,7 @@ export interface EvalReport {
 export function evalSeats(entry: EvalCase, options: Pick<EvalOptions, "harness" | "model" | "effort">) {
 	if (options.harness !== undefined)
 		return [{ reviewer: pickReviewer(entry.size, options, () => false), shadow: undefined }];
-	const pick = pickReviewer(entry.size, {}, (model: Model) => model.model === entry.writer);
+	const pick = pickReviewer(entry.size, {}, (model: ReviewModel) => model.model === entry.writer);
 	const shadow = shadowOf(entry.size, pick);
 	return [{ reviewer: pick, shadow: undefined }, ...(shadow ? [{ reviewer: shadow, shadow: true as const }] : [])];
 }
@@ -439,7 +442,7 @@ export async function evaluate(options: EvalOptions, sessions: (since: Date) => 
 		rules: rules && { sha: rules.sha },
 		scored,
 		...tallies(scored, options.harness === undefined),
-		cost: priced(sessions(started), scored),
+		cost: priced(sessions(started), scored, started),
 	};
 }
 
@@ -540,19 +543,53 @@ export function tallies(scored: Scored[], combined: boolean): Pick<EvalReport, "
 }
 
 /**
- * The cost of `scored`'s sessions and their descendants, such as the sub-session Codex runs its review in, among those
- * token-max exported, or null when it is not installed. It is a lower bound when a seat's session is missing or one
- * is incomplete.
+ * Google's API list price in dollars per million tokens of each model Antigravity reviews with, newest first, each from
+ * its first day, since token-max prices no agy session. Output includes thinking; caching is implicit.
  */
-export function priced(exported: Session[] | null, scored: Scored[]): EvalReport["cost"] {
-	if (exported === null) return null;
+const AGY_PRICES: Record<string, { from: string; input: number; cached: number; output: number }[]> = {
+	"gemini-4-carbon": [
+		{ from: "2026-12-01", input: 4, cached: 0.2, output: 20 },
+		{ from: "", input: 2, cached: 0.1, output: 10 },
+	],
+	"gemini-3.8-flash": [
+		{ from: "2027-01-01", input: 1.5, cached: 0.15, output: 7.5 },
+		{ from: "", input: 0.75, cached: 0.075, output: 3.75 },
+	],
+};
+
+/** The list price of an agy seat's reported tokens on `at`'s day, or null for a model without a known price. */
+export function agyCost(model: string, usage: Usage[], at: Date): number | null {
+	// A model ID may carry its effort, as `gemini-4-carbon-high`.
+	const prices = AGY_PRICES[model.replace(/-(?:low|medium|high)$/, "")];
+	const day = at.toISOString().slice(0, 10);
+	const price = prices?.find((each) => day >= each.from);
+	if (price === undefined) return null;
+	const sum = usage.reduce(
+		(total, u) => total + (u.input - u.cached) * price.input + u.cached * price.cached + u.output * price.output,
+		0,
+	);
+	return sum / 1e6;
+}
+
+/**
+ * The cost of `scored`'s sessions: each agy seat's reported tokens at Google's list price on `at`'s day, and the
+ * others' sessions and their descendants, such as the sub-session Codex runs its review in, among those token-max
+ * exported. It is null when a seat needs token-max and it is not installed, and a lower bound when a seat's session is
+ * missing, one is incomplete, or an agy model has no known price.
+ */
+export function priced(exported: Session[] | null, scored: Scored[], at: Date): EvalReport["cost"] {
+	const all = scored.flatMap(({ seats }) => seats);
+	const agy = all.filter((seat) => seat.reviewer === "agy");
+	const others = all.filter((seat) => seat.reviewer !== "agy");
+	if (exported === null && others.length > 0) return null;
+	const costs = agy.map((seat) => agyCost(seat.model, seat.usage, at));
 	const id = (harness: string, session: string | null) => JSON.stringify([harness, session]);
-	const seats = scored.flatMap(({ seats }) => seats.map((seat) => id(seat.reviewer, seat.session)));
+	const seats = others.map((seat) => id(seat.reviewer, seat.session));
 	const ours = new Set(seats);
 	const matched = new Set<Session>();
 	for (let grew = true; grew;) {
 		grew = false;
-		for (const each of exported)
+		for (const each of exported ?? [])
 			if (
 				!matched.has(each) &&
 				(ours.has(id(each.harness, each.id)) || ours.has(id(each.harness, each.parent)))
@@ -563,12 +600,16 @@ export function priced(exported: Session[] | null, scored: Scored[]): EvalReport
 				grew = true;
 			}
 	}
-	const found = seats.filter((seat) => [...matched].some((each) => id(each.harness, each.id) === seat)).length;
+	const found =
+		seats.filter((seat) => [...matched].some((each) => id(each.harness, each.id) === seat)).length +
+		costs.filter((cost) => cost !== null).length;
 	return {
-		usd: [...matched].reduce((sum, each) => sum + each.cost, 0),
-		complete: found === seats.length && [...matched].every((each) => each.complete),
+		usd:
+			[...matched].reduce((sum, each) => sum + each.cost, 0) +
+			costs.reduce<number>((sum, cost) => sum + (cost ?? 0), 0),
+		complete: found === all.length && [...matched].every((each) => each.complete),
 		priced: found,
-		sessions: seats.length,
+		sessions: all.length,
 	};
 }
 

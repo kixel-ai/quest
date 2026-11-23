@@ -11,7 +11,7 @@
 // refuted with evidence does not recur.
 import { execFile, spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { mkdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, posix } from "node:path";
 import { promisify } from "node:util";
 
@@ -29,10 +29,19 @@ import {
 	size as questSize,
 	riskier,
 } from "../core";
-import { HARNESSES, type HarnessName, LINE_LIMIT, LOGINS, boundedLines, strippedEnvironment } from "./agent";
+import {
+	LINE_LIMIT,
+	LOGINS,
+	REVIEW_HARNESSES,
+	type ReviewHarness,
+	agentDirectory,
+	boundedLines,
+	privateDirectory,
+	strippedEnvironment,
+} from "./agent";
 import { discoveryEnv, git } from "./git";
-import { LIMIT, codexReset } from "./limit";
-import { CLASSIFIERS, DEFAULT_SIZE, type Model, REVIEWERS } from "./models";
+import { AGY_LIMIT, LIMIT, agyReset, codexReset } from "./limit";
+import { CLASSIFIERS, DEFAULT_SIZE, REVIEWERS, type ReviewModel } from "./models";
 import { programEnvironment, requireProgram } from "./program";
 import type { recorded } from "./models-record";
 import { save } from "./worktree";
@@ -62,7 +71,7 @@ export class ReviewerUnavailableError extends Error {
 	second = false;
 
 	constructor(
-		readonly harness: HarnessName,
+		readonly harness: ReviewHarness,
 		readonly reason: string,
 		message: string,
 	) {
@@ -73,7 +82,7 @@ export class ReviewerUnavailableError extends Error {
 /** The reviewer's account hit its usage limit on `model`, which resets at `until` (epoch milliseconds) if the CLI named it. */
 export class ReviewLimitError extends ReviewerUnavailableError {
 	constructor(
-		harness: HarnessName,
+		harness: ReviewHarness,
 		readonly until: number | null,
 		readonly model: string,
 	) {
@@ -83,7 +92,7 @@ export class ReviewLimitError extends ReviewerUnavailableError {
 }
 
 /** A reviewer the size ranks that a run passed over, since it could not run, and why. */
-export interface Skip extends Model {
+export interface Skip extends ReviewModel {
 	reason: string;
 }
 
@@ -145,7 +154,7 @@ export interface Usage {
 
 /** One reviewer's finished round, as `quest review` prints it. */
 export interface Round {
-	reviewer: HarnessName;
+	reviewer: ReviewHarness;
 	/** The round is the shadow's: the size's pick one effort away, whose findings measure what that step buys. */
 	shadow?: true;
 	/** The round is the second reviewer's, on a model other than the pick's, which a high-risk head gets too. */
@@ -192,7 +201,7 @@ export interface Assessment {
 
 /** How the head's tier was set before review: by a model, by a path held high, or by default with no risk file. */
 export type Classification =
-	| { kind: "model"; harness: HarnessName; model: string; effort: string; session: string }
+	| { kind: "model"; harness: ReviewHarness; model: string; effort: string; session: string }
 	| { kind: "paths" }
 	| { kind: "default" };
 
@@ -284,23 +293,28 @@ export const schema = (earlier: number) =>
 
 /**
  * The harness running this command, from the variables each sets for its
- * commands. Both set means one runs inside the other, and which is innermost
+ * commands. Two set means one runs inside the other, and which is innermost
  * cannot be told, so that is an error too.
  */
-export function runningHarness(env: NodeJS.ProcessEnv): HarnessName {
-	const claude = env.CLAUDECODE === "1";
-	const codex = env.CODEX_THREAD_ID !== undefined;
-	if (claude && codex) throw new ReviewInputError("both Claude Code and Codex variables are set; pass --harness");
-	if (claude) return "claude";
-	if (codex) return "codex";
+export function runningHarness(env: NodeJS.ProcessEnv): ReviewHarness {
+	const set = (
+		[
+			["claude", "Claude Code", env.CLAUDECODE === "1"],
+			["codex", "Codex", env.CODEX_THREAD_ID !== undefined],
+			["agy", "Antigravity", env.ANTIGRAVITY_CONVERSATION_ID !== undefined],
+		] as const
+	).filter(([, , running]) => running);
+	if (set.length > 1)
+		throw new ReviewInputError(`${set.map(([, name]) => name).join(" and ")} variables are set; pass --harness`);
+	if (set.length === 1) return set[0]![0];
 	throw new ReviewInputError(
-		"not running under Claude Code or Codex; pass --harness to name the reviewer, or --exclude-model for the model that changed it last",
+		"not running under Claude Code, Codex, or Antigravity; pass --harness to name the reviewer, or --exclude-model for the model that changed it last",
 	);
 }
 
 /** What picks a round's reviewer from its size's list. */
 export interface Choice {
-	harness?: HarnessName;
+	harness?: ReviewHarness;
 	model?: string;
 	effort?: string;
 	/** The models never to pick; without any, the latest writer's is avoided. */
@@ -314,7 +328,7 @@ export interface Choice {
  * the harness running this command, which is usually the session that just
  * pushed, unless `--harness` names the reviewer, which then avoids nothing.
  */
-export function authored(choice: Choice, env: NodeJS.ProcessEnv, latest?: string): (entry: Model) => boolean {
+export function authored(choice: Choice, env: NodeJS.ProcessEnv, latest?: string): (entry: ReviewModel) => boolean {
 	const exclude = choice.exclude ?? [];
 	if (exclude.length > 0) return (entry) => exclude.includes(entry.model);
 	if (latest !== undefined && latest !== "unknown") return (entry) => entry.model === latest;
@@ -329,7 +343,7 @@ export function authored(choice: Choice, env: NodeJS.ProcessEnv, latest?: string
  * overriding its model and effort. An override never brings back an avoided
  * model.
  */
-export function pickReviewer(size: Size, choice: Choice, avoided: (entry: Model) => boolean): Model {
+export function pickReviewer(size: Size, choice: Choice, avoided: (entry: ReviewModel) => boolean): ReviewModel {
 	const list = REVIEWERS[size];
 	const entry =
 		choice.harness === undefined ? list.find((e) => !avoided(e)) : list.find((e) => e.harness === choice.harness);
@@ -354,7 +368,7 @@ export function pickReviewer(size: Size, choice: Choice, avoided: (entry: Model)
  * model is not avoided, or only the one `--harness`, `--model`, or `--effort` names, so a run that names its
  * reviewer never measures another.
  */
-export function rankedReviewers(size: Size, choice: Choice, avoided: (entry: Model) => boolean): Model[] {
+export function rankedReviewers(size: Size, choice: Choice, avoided: (entry: ReviewModel) => boolean): ReviewModel[] {
 	const first = pickReviewer(size, choice, avoided);
 	if (choice.harness !== undefined || choice.model !== undefined || choice.effort !== undefined) return [first];
 	return REVIEWERS[size].filter((entry) => !avoided(entry));
@@ -394,7 +408,7 @@ export type ReviewOptions = BaseOptions & {
 	/** The checkout to review. */
 	root: string;
 	/** The reviewer; defaults to the first of the size's list whose model is not the latest writer's. */
-	harness?: HarnessName;
+	harness?: ReviewHarness;
 	model?: string;
 	effort?: string;
 	/** The models never to pick; without any, the latest writer's is avoided. */
@@ -434,7 +448,7 @@ export const processDependencies = (): ReviewDependencies => ({ env: process.env
 
 /** One reviewer's findings across every round on a branch, which a `--new` session continues. */
 export interface Tally {
-	reviewer: HarnessName;
+	reviewer: ReviewHarness;
 	/** The shadow's tally, kept apart from the size's pick of the same harness. */
 	shadow?: true;
 	/** The second reviewer's tally, kept apart from the pick's. */
@@ -487,7 +501,7 @@ interface State {
 
 /** One reviewer's session on a branch. */
 interface Session {
-	reviewer: HarnessName;
+	reviewer: ReviewHarness;
 	/** The shadow's session; the branch keeps at most one. */
 	shadow?: true;
 	/** The second reviewer's session; the branch keeps at most one. */
@@ -512,6 +526,10 @@ export interface Context {
 	 * the branch's own change, never the base's newer commits.
 	 */
 	mergeBase: string;
+	/** The checkout at the reviewed head, which a reviewer with no shell reads by path. */
+	root: string;
+	/** Each `git diff` range the prompt names, as it names it, which a reviewer with no shell is handed as a file. */
+	ranges: string[];
 	/** The base's agent instructions, given in place of the checkout's. */
 	instructions: string;
 	model: string;
@@ -523,7 +541,7 @@ export interface Context {
 	openaiBaseUrl?: string;
 	/**
 	 * The tools Claude may call, comma-separated; a reviewer's by default. Empty asks a question about data alone,
-	 * which Codex answers with its tools off.
+	 * which Codex and Antigravity answer with their tools off.
 	 */
 	tools?: string;
 }
@@ -532,6 +550,11 @@ interface Turn {
 	argv: string[];
 	stdin: string;
 	env: NodeJS.ProcessEnv;
+	/**
+	 * Files the CLI reads from its working directory, by path within it. A turn with them runs in a new private
+	 * directory holding only them, outside any repository, instead of the checkout.
+	 */
+	workspace?: Record<string, string>;
 }
 
 interface Reply {
@@ -559,8 +582,8 @@ interface Reviewer {
 	status: string[];
 	/** How the user logs in. */
 	login: string;
-	/** The variable naming the configuration directory, and so the stored login, the status check reads. */
-	profile: string;
+	/** The variable naming the configuration directory, and so the stored login, the status check reads, if any. */
+	profile?: string;
 	/**
 	 * Credentials the CLI reads from the environment, passed when it has no
 	 * stored login or a route is set, since a route's credential is meant for it.
@@ -937,7 +960,158 @@ export function codexFlags(context: Context): string[] {
 	];
 }
 
-const CLIS: Record<HarnessName, Reviewer> = { claude, codex };
+/** The agent every Antigravity turn runs as, which its workspace defines. */
+const AGY_AGENT = "quest-reviewer";
+
+/**
+ * A backstop should a release hand the reviewer agent a tool beyond its list: deny rules hold in every mode, past
+ * `--dangerously-skip-permissions`, so no command, write, web request, or MCP call runs.
+ */
+const AGY_SETTINGS = JSON.stringify({
+	permissions: {
+		deny: ["command(*)", "write_file(*)", "read_url(*)", "execute_url(*)", "download_url(*)", "mcp(*)"],
+	},
+});
+
+/** What an Antigravity review turn asks for, which has no built-in review command to run. */
+const AGY_REVIEW =
+	"Review the change for what it breaks: bugs, security holes, cases it misses, and dependents it leaves behind. " +
+	"Report each problem with its file and line, the scenario that triggers it, and the wrong result.";
+
+/**
+ * The reviewer agent: its tool list replaces every tool Antigravity offers, and it inherits none of the user's hooks,
+ * rules, plugins, or MCP servers. Its body is the system prompt. Antigravity 1.5.14 hands an agent no search or
+ * directory tool, so `view_file` is all it reads with; `finish` returns a `--json-schema` reply. A question about
+ * data alone gets `finish` only.
+ */
+function agyAgent(context: Context): string {
+	const tools = context.tools === "" ? ["finish"] : ["view_file", "finish"];
+	return [
+		"---",
+		`name: ${AGY_AGENT}`,
+		"description: Reviews a change by reading its files.",
+		"tools:",
+		...tools.map((tool) => `  - ${tool}`),
+		"mainAgent: true",
+		"subagent: false",
+		"inheritMcp: false",
+		"inheritCustomizations: false",
+		"---",
+		"",
+		context.instructions,
+		"",
+	].join("\n");
+}
+
+/**
+ * One Antigravity turn, run from a workspace of its own outside the checkout, whose agent configuration Antigravity
+ * would otherwise load, and whose files its permission checks would refuse to read without approval, which print mode
+ * cannot give, so permissions are skipped and the agent's tool list and `AGY_SETTINGS` bound it. With no shell, the
+ * workspace holds what `git` would show: the checkout's tracked files, and the diff of each range the prompt names.
+ * The prompt arrives on stdin, since an argument holds no more than 128 KiB on Linux.
+ */
+function agyTurn(context: Context, prompt: string, flags: string[]): Turn {
+	const workspace: Record<string, string> = { [`.agents/agents/${AGY_AGENT}.md`]: agyAgent(context) };
+	let content = prompt;
+	if (context.tools !== "") {
+		workspace["files.txt"] = git(context.root, ["ls-files"]);
+		const diffs = context.ranges.map((range, index) => {
+			const name = `diff-${index + 1}.diff`;
+			workspace[name] = git(context.root, ["diff", "--no-ext-diff", "--no-textconv", "--no-color", ...range.split(" ")]);
+			return `, and \`${name}\` holds \`git diff ${range}\``;
+		});
+		content =
+			`You have no shell, so run no command. The checkout under review is ${context.root}, at the head: read its ` +
+			"files by absolute path. Your working directory holds what commands would show: `files.txt` lists the " +
+			`checkout's tracked files${diffs.join("")}.\n\n${prompt}`;
+	}
+	return {
+		argv: [
+			"agy",
+			"-p",
+			"",
+			"--input-format",
+			"stream-json",
+			"--output-format",
+			"stream-json",
+			"--model",
+			context.model,
+			"--effort",
+			context.effort,
+			"--agent",
+			AGY_AGENT,
+			"--dangerously-skip-permissions",
+			"--disable-slash-commands",
+			"--settings",
+			AGY_SETTINGS,
+			...flags,
+		],
+		stdin: `${JSON.stringify({ event: "user", message: { role: "user", content } })}\n`,
+		env: {},
+		workspace,
+	};
+}
+
+/**
+ * Google's Antigravity CLI, which only reviews. It runs on the user's own login and configuration directory, where
+ * it keeps its login when no keyring holds it, as over ssh; the reviewer agent keeps the user's customizations out,
+ * except their skills' text and their MCP servers' processes, whose tools it cannot call. Its status check lists the
+ * account's models, which fails while it is logged out. Environment credentials never replace the login, so none pass.
+ */
+const agy: Reviewer = {
+	status: ["agy", "models"],
+	login: "agy",
+	credentials: [],
+	routeCredentials: [],
+	connection: [],
+	routes: () => [],
+	// Such as "authentication failed or timed out", once a sign-in it cannot open times out.
+	unauthorized: /authentication failed or timed out|not logged into Antigravity|Please sign in/,
+	review: (context, _session, prompt) => agyTurn(context, `${AGY_REVIEW}\n\n${prompt}`, []),
+	resume: (context, session, prompt) =>
+		agyTurn(context, prompt, ["--conversation", session, "--json-schema", context.schemaFile]),
+	ask: (context, _session, prompt) => agyTurn(context, prompt, ["--json-schema", context.schemaFile]),
+	// The conversation is named first, and the last line holds the result, its usage, and any denied action, which
+	// ends a print-mode turn early as though it succeeded.
+	reader() {
+		let session: string | undefined;
+		let result: Record<string, unknown> | undefined;
+		return {
+			line(line) {
+				const event = json(line);
+				if (event?.event === "init") session = text(event.conversation_id) ?? session;
+				if (event?.event === "result") result = record(event.result);
+			},
+			reply(_code, stderr) {
+				const limit = (failure: string) =>
+					AGY_LIMIT.test(failure) ? { until: agyReset(failure, new Date()) } : undefined;
+				if (result === undefined) return { error: "agy printed no result", limited: limit(stderr) };
+				const denied = (Array.isArray(result.denied_actions) ? result.denied_actions : []).map(
+					(action) => text(record(action)?.action) ?? "an action",
+				);
+				const error =
+					result.status !== "SUCCESS"
+						? (text(result.error) ?? `agy reported ${String(result.status)}`)
+						: denied.length > 0
+							? `agy denied ${names(denied)}, which ended the turn`
+							: undefined;
+				const usage = record(result.usage) ?? {};
+				const cached = count(usage.cache_read_tokens);
+				return {
+					session: text(result.conversation_id) || session,
+					text: text(result.response),
+					structured: result.structured_output,
+					// Its input tokens leave out the cached ones; its output tokens include thinking.
+					usage: { input: count(usage.input_tokens) + cached, cached, output: count(usage.output_tokens) },
+					error,
+					limited: error === undefined ? undefined : limit(`${error}\n${stderr}`),
+				};
+			},
+		};
+	},
+};
+
+const CLIS: Record<ReviewHarness, Reviewer> = { claude, codex, agy };
 
 /** Codex's review turn reports all zeros, which is no measurement. */
 const reported = (usage: Omit<Usage, "turn"> | undefined): usage is Omit<Usage, "turn"> =>
@@ -969,7 +1143,7 @@ function run(
 		try {
 			program = requireProgram(argv[0], env);
 		} catch (error) {
-			reject(new ReviewerUnavailableError(argv[0] as HarnessName, "not installed", (error as Error).message));
+			reject(new ReviewerUnavailableError(argv[0] as ReviewHarness, "not installed", (error as Error).message));
 			return;
 		}
 		const child = spawn(program, argv.slice(1), {
@@ -1006,7 +1180,7 @@ function run(
 			reject(
 				error.code === "ENOENT"
 					? new ReviewerUnavailableError(
-							argv[0] as HarnessName,
+							argv[0] as ReviewHarness,
 							"not installed",
 							`${argv[0]} is not installed`,
 						)
@@ -1026,7 +1200,7 @@ const ABORT_GRACE_MS = 10_000;
 
 /** The reviewer CLI with the environment it runs in and the error for a login the API rejects. */
 interface Cli {
-	harness: HarnessName;
+	harness: ReviewHarness;
 	reviewer: Reviewer;
 	env: NodeJS.ProcessEnv;
 	/** Thrown when a turn fails on authentication, as a logged-out status check fails. */
@@ -1039,8 +1213,34 @@ const names = (list: string[]) => list.join(" and ");
 
 /** The stored login the status check read, so a session running with another profile can tell. */
 function profile(reviewer: Reviewer, env: NodeJS.ProcessEnv): string {
+	if (reviewer.profile === undefined) return "";
 	const dir = env[reviewer.profile];
-	return dir ? `the profile ${reviewer.profile}=${dir}` : `its default profile (${reviewer.profile} is unset)`;
+	return dir ? ` to the profile ${reviewer.profile}=${dir}` : ` to its default profile (${reviewer.profile} is unset)`;
+}
+
+/**
+ * A new private directory holding `files`, for a turn's CLI to run in: under the user's agent directory, which no
+ * other user can write, and outside any repository, since Antigravity loads the agent configuration of every
+ * directory from its working directory up to the one holding `.git`.
+ */
+function workspace(files: Record<string, string>): string {
+	const dir = mkdtempSync(join(privateDirectory(agentDirectory()), "review-"));
+	try {
+		for (let up = dir; up !== dirname(up); up = dirname(up))
+			if (existsSync(join(up, ".git")))
+				throw new ReviewInputError(
+					`the reviewer's workspace ${dir} lies in the repository at ${up}, whose agent configuration the ` +
+						"reviewer would load; set XDG_RUNTIME_DIR, or TMPDIR without it, to a directory outside any repository",
+				);
+		for (const [path, content] of Object.entries(files)) {
+			mkdirSync(dirname(join(dir, path)), { recursive: true, mode: 0o700 });
+			writeFileSync(join(dir, path), content, { mode: 0o600 });
+		}
+	} catch (error) {
+		rmSync(dir, { recursive: true, force: true });
+		throw error;
+	}
+	return dir;
 }
 
 /** The variables among `names` that `env` sets, with their values. */
@@ -1060,7 +1260,7 @@ const pick = (env: NodeJS.ProcessEnv, names: string[]) =>
  * gateway, which then judges the credential on the first turn.
  */
 async function prepare(
-	harness: HarnessName,
+	harness: ReviewHarness,
 	cwd: string,
 	userEnv: NodeJS.ProcessEnv,
 	signal?: AbortSignal,
@@ -1075,7 +1275,7 @@ async function prepare(
 	const routes = reviewer.routes(env);
 	const through = routes.length > 0 ? ` through ${names(routes)}` : "";
 	const host = managed ? ", ignoring the host-managed provider's route" : "";
-	const loggedOut = `${harness} is not logged in to ${profile(reviewer, env)}${through}${host}; run \`${reviewer.login}\``;
+	const loggedOut = `${harness} is not logged in${profile(reviewer, env)}${through}${host}; run \`${reviewer.login}\``;
 	const loggedIn = async (env: NodeJS.ProcessEnv) =>
 		(await run(reviewer.status, cwd, env, "", undefined, signal)).code === 0;
 	const credentials = [...reviewer.credentials, ...(routes.length > 0 ? reviewer.routeCredentials : [])].filter(
@@ -1105,7 +1305,7 @@ async function prepare(
 
 /** The environment `quest review` runs `harness`'s CLI in, for a caller that runs it with the same login. */
 export async function reviewerEnvironment(
-	harness: HarnessName,
+	harness: ReviewHarness,
 	cwd: string,
 	env: NodeJS.ProcessEnv,
 ): Promise<NodeJS.ProcessEnv> {
@@ -1122,7 +1322,14 @@ export const RETRIED_429 = /exceeded retry limit, last status: 429\b/;
 /** Run one reviewer turn on `model`, failing on any error it reports, and as logged out on an authentication error. */
 async function turn(cli: Cli, call: Turn, cwd: string, model: string): Promise<Reply> {
 	const reader = cli.reviewer.reader();
-	const { code, stderr } = await run(call.argv, cwd, { ...cli.env, ...call.env }, call.stdin, reader, cli.signal);
+	const dir = call.workspace && workspace(call.workspace);
+	let ran: { code: number; stderr: string };
+	try {
+		ran = await run(call.argv, dir ?? cwd, { ...cli.env, ...call.env }, call.stdin, reader, cli.signal);
+	} finally {
+		if (dir) rmSync(dir, { recursive: true, force: true });
+	}
+	const { code, stderr } = ran;
 	const reply = reader.reply(code, stderr);
 	if (code !== 0 || reply.error !== undefined) {
 		// A login can expire or be revoked while the status check still passes. A CLI may report it
@@ -1625,7 +1832,7 @@ function load(path: string): unknown {
 }
 
 /** A reviewer's seat on a branch: its harness, and whether it is the shadow or the second reviewer. */
-export type SeatId = { reviewer: HarnessName; shadow?: true; second?: true };
+export type SeatId = { reviewer: ReviewHarness; shadow?: true; second?: true };
 const seatKey = (seat: SeatId) => `${seat.reviewer}${seat.shadow ? " shadow" : ""}${seat.second ? " second" : ""}`;
 /** Whether two reviewers hold the same seat: the same harness and role. */
 export const sameSeat = (a: SeatId, b: SeatId) => seatKey(a) === seatKey(b);
@@ -1645,7 +1852,7 @@ const SHADOW_STEPS: Record<Size, -1 | 1 | null> = { XS: null, S: 1, M: 1, L: -1,
  * size runs none or no effort is known there, as below Opus low, above xhigh, or off the ladder, such as Codex's
  * `minimal`.
  */
-export function shadowOf(size: Size, routed: Model): Model | null {
+export function shadowOf(size: Size, routed: ReviewModel): ReviewModel | null {
 	const step = SHADOW_STEPS[size];
 	const at = EFFORTS.indexOf(routed.effort);
 	const effort = step === null || at < 0 ? undefined : EFFORTS[at + step];
@@ -1717,7 +1924,7 @@ export function parseState(value: unknown): State {
  * Whether quest still runs `seat`'s reviewer. A retired one has no CLI to resume its session or settle its findings,
  * so its session is dropped, open findings included, and the routed reviewer reviews the whole branch.
  */
-const runs = (seat: { reviewer: string }) => (HARNESSES as readonly string[]).includes(seat.reviewer);
+const runs = (seat: { reviewer: string }) => (REVIEW_HARNESSES as readonly string[]).includes(seat.reviewer);
 
 /**
  * The branch whose session a round continues: `name`, checked as a branch
@@ -1862,6 +2069,7 @@ export async function classify(input: Classifying): Promise<{ key: string; value
 		instructions: CLASSIFY_INSTRUCTIONS,
 		schema: classSchema(classes),
 		prompt,
+		ranges: [range],
 		who: "classifier",
 		task: "set the risk tier",
 		parse: (value) => classed(value, classes, "the classifier's reply"),
@@ -1891,6 +2099,8 @@ export interface Question<T = unknown> {
 	prompt: string;
 	/** The tools Claude may call; a reviewer's by default. */
 	tools?: string;
+	/** Each `git diff` range the prompt names, as it names it. */
+	ranges?: string[];
 	/** Who answers and what for, as `classifier` and `set the risk tier`, for errors. */
 	who: string;
 	task: string;
@@ -1903,18 +2113,18 @@ export interface Question<T = unknown> {
  * turn that replied, unusable ones first, so a caller can count what the question cost.
  */
 export interface Answer<T = unknown> {
-	entry: Model;
+	entry: ReviewModel;
 	session: string;
 	value: T;
 	usage: Omit<Usage, "turn"> | null;
-	spent: { entry: Model; usage: Omit<Usage, "turn"> | null }[];
+	spent: { entry: ReviewModel; usage: Omit<Usage, "turn"> | null }[];
 }
 
 /**
  * Ask the first of `entries` that can run: one that is logged out, has its login rejected, or hit its usage limit
  * passes the question to the next, since each answers the same prompt.
  */
-export async function ask<T>(entries: readonly Model[], question: Question<T>): Promise<Answer<T>> {
+export async function ask<T>(entries: readonly ReviewModel[], question: Question<T>): Promise<Answer<T>> {
 	const schemaFile = saveSchema(question.dir, question.schema);
 	const failures: (ReviewInputError | ReviewerUnavailableError)[] = [];
 	const spent: Answer<T>["spent"] = [];
@@ -1925,6 +2135,8 @@ export async function ask<T>(entries: readonly Model[], question: Question<T>): 
 			const context: Context = {
 				// A question reviews no range.
 				mergeBase: "",
+				root: question.cwd,
+				ranges: question.ranges ?? [],
 				instructions: question.instructions,
 				model: entry.model,
 				effort: entry.effort,
@@ -2056,7 +2268,7 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 		next += session.rounds.at(-1)!.findings.length;
 	}
 	const sessions = all.filter(runs);
-	const plan = (routed: Model, second: Model | null = null) =>
+	const plan = (routed: ReviewModel, second: ReviewModel | null = null) =>
 		seatsFor({ routed, second, size: sized.size, auto, sessions, firsts, responses: options.responses });
 
 	// The first candidate's seats are checked before the classifier spends a turn.
@@ -2131,14 +2343,14 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 	const skipped: Skip[] = [];
 	const messages: string[] = [];
 	// A login or a missing CLI rules out its harness's every model; a usage limit only the model that hit it.
-	const down = new Map<HarnessName, ReviewerUnavailableError>();
+	const down = new Map<ReviewHarness, ReviewerUnavailableError>();
 	// Models passed over this run, which the second reviewer never falls to.
 	const secondOut = new Set<string>();
 	// The second reviewer: the first of the size's list on a model other than the pick's that can run. A list with no
 	// other model, as when every other one is avoided, cannot review a high head; one whose others cannot run is out.
 	// It comes from the size's whole list, since --model or --effort narrows only the pick.
 	const pool = auto ? REVIEWERS[sized.size].filter((each) => !avoided(each)) : candidates;
-	const secondTo = (routed: Model): Model => {
+	const secondTo = (routed: ReviewModel): ReviewModel => {
 		const others = pool.filter((each) => each.model !== routed.model);
 		if (others.length === 0)
 			throw new ReviewInputError(
@@ -2154,7 +2366,7 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 	// else another, whose new session settles them by number as a replaced pick's does.
 	const seconded = sessions.find((session) => session.second);
 	const unsettledSecond = auto && seconded !== undefined && seconded.rounds.at(-1)!.findings.length > 0;
-	const secondFor = (routed: Model): Model | null => {
+	const secondFor = (routed: ReviewModel): ReviewModel | null => {
 		if (!high(before) && !unsettledSecond) return null;
 		if (!high(before)) {
 			const own = pool.find(
@@ -2260,9 +2472,9 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 
 /** What picks a run's seats: the routed reviewer and the second, whether the size picked them, and the branch's sessions. */
 interface Seating {
-	routed: Model;
+	routed: ReviewModel;
 	/** The second reviewer a high-risk head gets, or null. */
-	second: Model | null;
+	second: ReviewModel | null;
 	/** The PR's size, which sets the shadow's step. */
 	size: Size;
 	auto: boolean;
@@ -2480,7 +2692,7 @@ interface Shared {
  * or the replaced reviewer's, whose findings its new session settles.
  */
 interface Seat {
-	reviewer: Model;
+	reviewer: ReviewModel;
 	shadow?: true;
 	second?: true;
 	session?: Session;
@@ -2531,6 +2743,12 @@ async function reviewWith(shared: Shared, seat: Seat, responses: string | undefi
 	const schemaFile = saveSchema(shared.dir, replySchema);
 	const context: Context = {
 		mergeBase: change.mergeBase,
+		root,
+		// As the prompts name them: the change, and for a later round what changed since the last.
+		ranges: [
+			`${change.mergeBase}..${change.head}`,
+			...(resume ? [`${previous!.head} ${change.head}`] : []),
+		],
 		instructions: instructionsPrompt(shared.base.sha, shared.files),
 		model: picked.model,
 		effort: picked.effort,
@@ -2646,7 +2864,7 @@ export interface Opening {
 
 /** One reviewer's first round on a change, in a new session no branch keeps, with the prompts `quest review` gives. */
 export async function firstRound(
-	reviewer: Model,
+	reviewer: ReviewModel,
 	opening: Opening,
 ): Promise<{ session: string; usage: Usage[]; verdict: Verdict }> {
 	const { root, change } = opening;
@@ -2654,6 +2872,8 @@ export async function firstRound(
 	const replySchema = schema(0);
 	const context: Context = {
 		mergeBase: change.mergeBase,
+		root,
+		ranges: [`${change.mergeBase}..${change.head}`],
 		instructions: instructionsPrompt(change.mergeBase, opening.files),
 		model: reviewer.model,
 		effort: reviewer.effort,
