@@ -1504,20 +1504,25 @@ whole branch at the PR's size.
 committed branch before it is pushed for review, at an effort set by the PR's
 size. Each size ranks its reviewers, the same for every repository:
 
-| PR size | Reviewer | When Sol changed it last | Last |
-|---|---|---|---|
-| XS | Codex `gpt-6.1-sol` medium | Claude Code `claude-opus-5-5` low | Claude Code `claude-sonnet-5-5` medium |
-| S | Codex `gpt-6.1-sol` medium | Claude Code `claude-opus-5-5` low | Claude Code `claude-sonnet-5-5` medium |
-| M, or none | Codex `gpt-6.1-sol` high | Claude Code `claude-opus-5-5` medium | Claude Code `claude-sonnet-5-5` medium |
-| L | Codex `gpt-6.1-sol` xhigh | Claude Code `claude-opus-5-5` high | Claude Code `claude-sonnet-5-5` high |
-| XL | Codex `gpt-6.1-sol` xhigh | Claude Code `claude-opus-5-5` xhigh | Claude Code `claude-sonnet-5-5` high |
+| PR size | Reviewers, first to last |
+|---|---|
+| XS | Codex `gpt-6.1-sol` medium, Claude Code `claude-opus-5-5` low, Claude Code `claude-sonnet-5-5` medium |
+| S | Codex `gpt-6.1-sol` medium, Claude Code `claude-opus-5-5` low, Claude Code `claude-sonnet-5-5` medium |
+| M, or none | Antigravity `gemini-4-carbon` high, Codex `gpt-6.1-sol` high, Claude Code `claude-opus-5-5` medium, Claude Code `claude-sonnet-5-5` medium |
+| L | Codex `gpt-6.1-sol` xhigh, Claude Code `claude-opus-5-5` high, Claude Code `claude-sonnet-5-5` high |
+| XL | Codex `gpt-6.1-sol` xhigh, Claude Code `claude-opus-5-5` xhigh, Claude Code `claude-sonnet-5-5` high |
+
+Gemini Carbon leads M, where it caught 8 of the eval set's 11 culprits to Sol
+high's none, more per dollar at Google's API list price; it also raised far
+more findings on clean PRs. A contributor without Antigravity reviews an M PR
+with Sol.
 
 Beside it, the shadow, the pick's model one effort away on the ladder (low,
 medium, high, xhigh), reviews the same head in its own session, so the routing
 can be retuned from what each effort step finds over its neighbor. It runs one
 effort above the pick for an S or M PR (Sol high for S), one below for an L or
 XL PR, and not at all for an XS PR, and is skipped when no such effort is on
-the ladder, as above xhigh or for an `--effort` off it.
+the ladder, as above xhigh, above the high Carbon tops out at, so M runs none, or for an `--effort` off it.
 
 It runs on the branch's first run of the pick, then reruns only while it has findings to settle, or once the pick
 changed so that it is no longer that step away; its findings are numbered,

@@ -44,6 +44,16 @@ import {
 	write,
 } from "./review-fakes";
 
+// These tests run the review flow on Claude Code and Codex, so M ranks them as it did before Gemini Carbon led it;
+// test/ranking.test.ts checks the shipped table, Carbon included.
+vi.mock("../src/cli/models", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("../src/cli/models")>();
+	return {
+		...actual,
+		REVIEWERS: { ...actual.REVIEWERS, M: actual.REVIEWERS.M.filter((entry) => entry.harness !== "agy") },
+	};
+});
+
 afterEach(() => {
 	vi.unstubAllEnvs();
 });

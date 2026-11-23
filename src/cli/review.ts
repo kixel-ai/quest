@@ -42,7 +42,7 @@ import {
 } from "./agent";
 import { discoveryEnv, git } from "./git";
 import { AGY_LIMIT, LIMIT, agyReset, codexReset } from "./limit";
-import { CLASSIFIERS, DEFAULT_SIZE, REVIEWERS, type ReviewModel } from "./models";
+import { CLASSIFIERS, DEFAULT_SIZE, MODEL_EFFORTS, REVIEWERS, type ReviewModel } from "./models";
 import { programEnvironment, requireProgram } from "./program";
 import type { recorded } from "./models-record";
 import { save } from "./worktree";
@@ -1888,13 +1888,14 @@ const SHADOW_STEPS: Record<Size, -1 | 1 | null> = { XS: null, S: 1, M: 1, L: -1,
 
 /**
  * The shadow of `routed`, the pick for a PR of `size`: its model one effort away by `SHADOW_STEPS`, or null when the
- * size runs none or no effort is known there, as below Opus low, above xhigh, or off the ladder, such as Codex's
- * `minimal`.
+ * size runs none or no effort is known there, as below Opus low, above xhigh, above the efforts its model offers,
+ * such as Carbon's high, or off the ladder, such as Codex's `minimal`.
  */
 export function shadowOf(size: Size, routed: ReviewModel): ReviewModel | null {
 	const step = SHADOW_STEPS[size];
-	const at = EFFORTS.indexOf(routed.effort);
-	const effort = step === null || at < 0 ? undefined : EFFORTS[at + step];
+	const ladder = MODEL_EFFORTS[routed.model] ?? EFFORTS;
+	const at = ladder.indexOf(routed.effort);
+	const effort = step === null || at < 0 ? undefined : ladder[at + step];
 	return effort === undefined ? null : { ...routed, effort };
 }
 

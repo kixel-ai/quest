@@ -23,6 +23,12 @@ const sol = (effort: string): Model => ({ harness: "codex", model: "gpt-6.1-sol"
 const opus = (effort: string): Model => ({ harness: "claude", model: "claude-opus-5-5", effort });
 const sonnet = (effort: string): Model => ({ harness: "claude", model: "claude-sonnet-5-5", effort });
 const fable = (effort: string): Model => ({ harness: "claude", model: "claude-fable-5-2", effort });
+const carbon = (effort: string): ReviewModel => ({ harness: "agy", model: "gemini-4-carbon", effort });
+
+/** The efforts a model offers when they are fewer than the whole ladder, as `agy models` lists Carbon's. */
+export const MODEL_EFFORTS: Readonly<Record<string, readonly string[]>> = {
+	"gemini-4-carbon": ["low", "medium", "high"],
+};
 
 /**
  * Each size's writers, ranked: a spawn starts the quest on the first that can
@@ -49,12 +55,14 @@ export const WRITERS: Record<Size, readonly Model[]> = {
  * Each PR size's reviewers, ranked: the first whose model is not the latest
  * writer's reviews it, and one that cannot run passes the review to the next. Sonnet comes last so Opus-written
  * work still has a reviewer when Sol is out; at low it found none of the eval
- * set's M defects, so it runs no lower than medium.
+ * set's M defects, so it runs no lower than medium. Gemini Carbon at high leads M, where it caught 8 of the eval
+ * set's 11 culprits to Sol high's none, more per dollar at Google's list price; at S and L Sol caught more per
+ * dollar, and XS and XL have no culprit to compare on. A contributor without Antigravity passes to Sol.
  */
 export const REVIEWERS: Record<Size, readonly ReviewModel[]> = {
 	XS: [sol("medium"), opus("low"), sonnet("medium")],
 	S: [sol("medium"), opus("low"), sonnet("medium")],
-	M: [sol("high"), opus("medium"), sonnet("medium")],
+	M: [carbon("high"), sol("high"), opus("medium"), sonnet("medium")],
 	L: [sol("xhigh"), opus("high"), sonnet("high")],
 	XL: [sol("xhigh"), opus("xhigh"), sonnet("high")],
 };
