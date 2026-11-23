@@ -53,7 +53,11 @@ Guidance:
   `quest eval add` first.
 - Each seat is a reviewer `quest review` already runs, so a seat that
   cannot run passes to another vendor on the round's rung, and an outage
-  is every vendor out, as today.
+  is every vendor out, as today. Recommended: when the drawn rung has too
+  few vendors that can run, such as when Gemini is out or the rung's only
+  Claude model wrote the head, fill the missing seats from the size's
+  rung, then the rungs next to it, and fail as an outage only when no
+  rung has a distinct vendor left.
 - Dropping Pullfrog's ruleset is a change to kixel-ai/dotfiles'
   `bin/repo-settings`, not this repository; list it in the PR's
   follow-ups when the readout recommends it.

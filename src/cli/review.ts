@@ -1636,7 +1636,8 @@ const EFFORTS = ["low", "medium", "high", "xhigh"];
 /**
  * The effort step each PR size's shadow runs from its pick, or null for none. The 2026-11-22 readout of
  * quest/m0/routing-evidence/README.md found each step down losing half or more of the pick's findings at XS to M,
- * so XS runs none, S and M test the step up, and L and XL keep the step down until L has its sample.
+ * so XS runs none, S and M test the step up, and L and XL keep the step down until quest/m0/reviewer-rungs.md
+ * replaces the shadow.
  */
 const SHADOW_STEPS: Record<Size, -1 | 1 | null> = { XS: null, S: 1, M: 1, L: -1, XL: -1 };
 

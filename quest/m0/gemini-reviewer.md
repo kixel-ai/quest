@@ -2,7 +2,7 @@
 
 ## Goal
 
-`quest review --harness agy --model <id> [--effort <level>]` reviews a branch through Google's Antigravity CLI (`agy -p`), read-only, isolated from the checkout's and the user's config, on the user's own Antigravity login, so a contributor with a Google AI plan can review with Gemini 4 Carbon. The PR scores Gemini 4 Carbon with `quest eval run` against the current reviewers, and moves it ahead of Codex Sol in each PR size's `REVIEWERS` ranking where it catches more culprits per dollar.
+`quest review --harness agy --model <id> [--effort <level>]` reviews a branch through Google's Antigravity CLI (`agy -p`), read-only, isolated from the checkout's and the user's config, on the user's own Antigravity login, so a contributor with a Google AI plan can review with Gemini 4 Carbon. The PR scores Gemini 4 Carbon with `quest eval run` against the current reviewers, and moves it ahead of the size's Codex entry (Sol, or Astra at XL) in each PR size's `REVIEWERS` ranking where it catches more culprits per dollar. Once [reviewer rungs](/quest/m0/reviewer-rungs.md) has landed, the eval places Carbon on a rung instead, and the draw seats it.
 
 Non-goals: `agy` as a writer, iterate, or land-fixer harness; models other than Gemini in the ranking, which [the model check](/quest/m1/model-check.md) can add from its own evidence once the harness exists.
 
