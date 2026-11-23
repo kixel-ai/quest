@@ -1730,12 +1730,15 @@ ${requeueScript}
 		expect((await run(forged)).model).toBe("unknown");
 		expect((await run(forged, "named-model")).model).toBe("named-model");
 		expect((await run(`echo '${init("bad model\\n")}'`)).model).toBe("unknown");
+		// A JSON value that is no object, such as a wrapper printing a number, is noise, not the conversation's start.
+		expect((await run(`echo 7\necho true\necho '"x"'\necho '${init("after-scalars")}'`)).model).toBe(
+			"after-scalars",
+		);
 		// A plugin that would feed the agent the checkout's AGENTS.md stops the run.
-		await expect(
-			run(
-				`echo '{"type":"system","subtype":"init","model":"m","plugins":[{"source":"cc-plugin-agents-md@builtin"}]}'`,
-			),
-		).rejects.toThrow("injects the checkout's AGENTS.md");
+		for (const plugin of ['{"source":"cc-plugin-agents-md@builtin"}', '{"name":"agents-md","path":"/p"}'])
+			await expect(
+				run(`echo '{"type":"system","subtype":"init","model":"m","plugins":[${plugin}]}'`),
+			).rejects.toThrow("injects the checkout's AGENTS.md");
 	});
 
 	test("rejects mixing individually approved protected files", async () => {

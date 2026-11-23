@@ -41,7 +41,8 @@ class Init {
 			} catch {
 				continue; // A wrapper's own output before the agent starts.
 			}
-			if (!event || typeof event !== "object" || (event as { type?: unknown }).type !== "system") {
+			if (!event || typeof event !== "object") continue; // A wrapper's own output, too.
+			if ((event as { type?: unknown }).type !== "system") {
 				this.done = true;
 				return;
 			}
@@ -49,8 +50,11 @@ class Init {
 			if (subtype !== "init") continue;
 			if (typeof model === "string" && /^[a-zA-Z0-9._/-]{1,100}$/.test(model)) this.model = model;
 			if (Array.isArray(plugins))
+				// Builds name a plugin by `name` and `path` or by `source`, so every one counts.
 				this.plugins = plugins.flatMap((plugin) =>
-					plugin && typeof plugin.source === "string" ? [plugin.source as string] : [],
+					plugin && typeof plugin === "object"
+						? [plugin.name, plugin.source, plugin.path].filter((v): v is string => typeof v === "string")
+						: [],
 				);
 			this.done = true;
 			return;
