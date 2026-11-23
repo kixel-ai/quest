@@ -427,6 +427,62 @@ fakes("Codex reaches a gateway at OPENAI_BASE_URL, whose persistent 429 is the p
 		expect(call.argv.join(" ")).toContain('-c openai_base_url="http://127.0.0.1:4000/v1"');
 });
 
+// Codex trims a credential and reads a blank one as unset, so it would send its stored login.
+fakes.each([
+	["", undefined],
+	["1", undefined],
+	["", " \t"],
+])(
+	"Codex sent to a gateway with no credential never gets the stored login (logged out: %j, credentials: %j)",
+	async (loggedOut, blank) => {
+		const s = setup();
+		vi.stubEnv("FAKE_LOGGED_OUT", loggedOut);
+		vi.stubEnv("OPENAI_BASE_URL", "http://127.0.0.1:4000/v1");
+		vi.stubEnv("CODEX_API_KEY", blank);
+		vi.stubEnv("CODEX_ACCESS_TOKEN", blank);
+		// OpenAI's own key is no credential Codex reads.
+		vi.stubEnv("OPENAI_API_KEY", "openai-key");
+		const result = await quest("--root", s.repo, "review");
+		expect(result.code).toBe(3);
+		expect(result.stderr).toContain(
+			"codex would send its stored login to the gateway OPENAI_BASE_URL names, which has no credential; " +
+				"set CODEX_API_KEY (any value, for a gateway that needs none) or CODEX_ACCESS_TOKEN for the gateway, " +
+				"or unset OPENAI_BASE_URL",
+		);
+		// Refused before Codex runs at all, not even its status check.
+		expect(s.calls()).toEqual([]);
+	},
+);
+
+fakes.each([
+	["CODEX_API_KEY", "gateway-key"],
+	["CODEX_ACCESS_TOKEN", "gateway-token"],
+])("a gateway's %s wins over Codex's stored login, which its status check never needs", async (name, value) => {
+	const s = setup();
+	vi.stubEnv("OPENAI_BASE_URL", "http://127.0.0.1:4000/v1");
+	vi.stubEnv(name, value);
+	const result = await quest("--root", s.repo, "review");
+	expect(result.code, result.stderr).toBe(0);
+	const calls = s.calls();
+	expect(calls.length).toBeGreaterThan(1);
+	for (const call of calls) {
+		expect(call.argv[0]).toBe("exec");
+		expect(call.env[name]).toBe(value);
+	}
+});
+
+fakes("a gateway that rejects Codex's key names the key and the gateway", async () => {
+	const s = setup();
+	vi.stubEnv("OPENAI_BASE_URL", "http://127.0.0.1:4000/v1");
+	vi.stubEnv("CODEX_API_KEY", "gateway-key");
+	vi.stubEnv("FAKE_REJECTED", "turn");
+	const result = await quest("--root", s.repo, "review");
+	expect(result.code).toBe(3);
+	expect(result.stderr).toContain(
+		"codex rejected CODEX_API_KEY through OPENAI_BASE_URL; replace it, or run `codex login`",
+	);
+});
+
 fakes("a reviewer with no stored login reviews with the credential its CLI reads from the environment", async () => {
 	const s = setup();
 	vi.stubEnv("FAKE_LOGGED_OUT", "1");
@@ -552,16 +608,90 @@ fakes.each([
 	}
 });
 
-fakes("a gateway with no credential and no stored login names the gateway", async () => {
+fakes.each([
+	["", undefined],
+	["1", undefined],
+	["", " \t"],
+])(
+	"a gateway with no credential never gets the stored login (logged out: %j, credentials: %j)",
+	async (loggedOut, blank) => {
+		const s = setup("CODEX_THREAD_ID");
+		vi.stubEnv("FAKE_LOGGED_OUT", loggedOut);
+		vi.stubEnv("ANTHROPIC_BASE_URL", "https://gateway.example");
+		vi.stubEnv("ANTHROPIC_API_KEY", blank);
+		vi.stubEnv("ANTHROPIC_AUTH_TOKEN", blank);
+		// A tenant header and a login token give the gateway no credential of its own.
+		vi.stubEnv("ANTHROPIC_CUSTOM_HEADERS", "X-Gateway-Tenant: review\nX-Authorization: no");
+		vi.stubEnv("CLAUDE_CODE_OAUTH_TOKEN", "oauth-login");
+		const result = await quest("--root", s.repo, "review");
+		expect(result.code).toBe(3);
+		expect(result.stderr).toContain(
+			"claude would send its stored login to the gateway ANTHROPIC_BASE_URL names, which has no credential; " +
+				"set ANTHROPIC_API_KEY, ANTHROPIC_AUTH_TOKEN, or an Authorization header in ANTHROPIC_CUSTOM_HEADERS " +
+				"for the gateway (any value, for one that needs none), or unset ANTHROPIC_BASE_URL",
+		);
+		// Refused before Claude runs at all, not even its status check.
+		expect(s.calls()).toEqual([]);
+	},
+);
+
+fakes("an Authorization header in ANTHROPIC_CUSTOM_HEADERS is the gateway's credential", async () => {
+	const s = setup("CODEX_THREAD_ID");
+	vi.stubEnv("ANTHROPIC_BASE_URL", "https://gateway.example");
+	vi.stubEnv("ANTHROPIC_CUSTOM_HEADERS", "X-Gateway-Tenant: review\r\n  authorization :  Bearer gateway");
+	const result = await quest("--root", s.repo, "review");
+	expect(result.code, result.stderr).toBe(0);
+	expect(s.calls().length).toBeGreaterThan(1);
+	for (const call of s.calls()) {
+		expect(call.env.ANTHROPIC_BASE_URL).toBe("https://gateway.example");
+		expect(call.env.ANTHROPIC_CUSTOM_HEADERS).toContain("Bearer gateway");
+	}
+});
+
+fakes("a cloud provider ignores ANTHROPIC_BASE_URL, so it needs no gateway credential", async () => {
+	const s = setup("CODEX_THREAD_ID");
+	vi.stubEnv("ANTHROPIC_BASE_URL", "https://gateway.example");
+	vi.stubEnv("CLAUDE_CODE_USE_BEDROCK", "1");
+	const result = await quest("--root", s.repo, "review");
+	expect(result.code, result.stderr).toBe(0);
+	for (const call of s.calls()) expect(call.env.CLAUDE_CODE_USE_BEDROCK).toBe("1");
+});
+
+fakes("a host-managed provider is dropped, and the review runs on the stored login", async () => {
+	const s = setup("CODEX_THREAD_ID");
+	vi.stubEnv("CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST", "1");
+	vi.stubEnv("ANTHROPIC_BASE_URL", "http://127.0.0.1:8317");
+	vi.stubEnv("ANTHROPIC_CUSTOM_HEADERS", "X-Host: t3");
+	vi.stubEnv("ANTHROPIC_AUTH_TOKEN", "host-token");
+	vi.stubEnv("CLAUDE_CODE_USE_BEDROCK", "1");
+	const result = await quest("--root", s.repo, "review");
+	expect(result.code, result.stderr).toBe(0);
+	expect(s.calls().length).toBeGreaterThan(1);
+	for (const call of s.calls()) {
+		for (const name of [
+			"CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST",
+			"ANTHROPIC_BASE_URL",
+			"ANTHROPIC_CUSTOM_HEADERS",
+			"ANTHROPIC_AUTH_TOKEN",
+			"CLAUDE_CODE_USE_BEDROCK",
+		]) {
+			expect(call.env[name], name).toBeUndefined();
+		}
+	}
+});
+
+fakes("a host-managed provider with no stored login fails as logged out", async () => {
 	const s = setup("CODEX_THREAD_ID");
 	vi.stubEnv("FAKE_LOGGED_OUT", "1");
-	vi.stubEnv("ANTHROPIC_BASE_URL", "https://gateway.example");
+	vi.stubEnv("CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST", "true");
+	vi.stubEnv("ANTHROPIC_BASE_URL", "http://127.0.0.1:8317");
+	vi.stubEnv("ANTHROPIC_AUTH_TOKEN", "host-token");
 	const result = await quest("--root", s.repo, "review");
 	expect(result.code).toBe(3);
 	expect(result.stderr).toContain(
-		"claude is not logged in to its default profile (CLAUDE_CONFIG_DIR is unset) through ANTHROPIC_BASE_URL; run `claude auth login`",
+		"claude is not logged in to its default profile (CLAUDE_CONFIG_DIR is unset), ignoring the host-managed " +
+			"provider's route; run `claude auth login`",
 	);
-	// The size's pick and its shadow each check the login, and the first to fail stops the other's; no turn runs.
 	expect(s.calls().length).toBeGreaterThanOrEqual(1);
 	for (const call of s.calls()) expect(call.argv).toEqual(["auth", "status"]);
 });

@@ -9,6 +9,8 @@ went, and the reviewers still run nothing from a reviewed head.
 
 ## Plan
 
+Decided 2026-11-22 (maintainer, `/quest-plan` in [kixel-ai/kixel.quest#104](https://github.com/kixel-ai/kixel.quest/pull/104)): ✅ Kixel Quest reads experiments out itself, putting a decision prompt in the inbox when one reaches its sample, with the tally and its routing chart (rejected: a recurring agent quest; the view only). Once its [readouts](https://github.com/kixel-ai/kixel.quest/blob/main/quest/m0/insight/readouts.md) land, trim this quest to what they do not do, bumping stale model ids and running `just review-sandbox` with the installed CLIs, and delete its tallies and charts (amended 2026-11-23, review of kixel-ai/kixel.quest#104; rejected: deleting it whole, which would leave the sandbox test with no owner); until then, run as below.
+
 Recurring, decided 2026-10-28 (user, /quest-plan of the follow-ups from
 [moq-dev/quest#271](https://github.com/moq-dev/quest/pull/271)) as the
 review harness check. The m0 run was
@@ -235,9 +237,9 @@ checkpoints and outages to count by hand:
   - Claude Code draws its status line only in an interactive session, so the
     planted `statusLine` has no control. Check whether print mode runs it now.
   - Codex reads a linked worktree's hooks from the main checkout's
-    `.codex/hooks.json`. In m0 neither the land fixer (`src/cli/land-fix.ts`,
-    which passes `--ignore-user-config`) nor `quest agent` used Codex hooks,
-    and `quest init` installs none. Recheck if either starts to.
+    `.codex/hooks.json`. In m0 `quest agent` used no Codex hooks, the land
+    fixer (`src/cli/land-fix.ts`) runs Claude Code, not Codex, and
+    `quest init` installs none. Recheck if either starts to.
 - The PR that finishes this run creates the next milestone's run the same
   way: in that milestone's directory, requiring this milestone's README,
   carrying forward the model ids and efforts it found, the routing tallies

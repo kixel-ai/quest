@@ -16,6 +16,8 @@ there.
 
 ## Plan
 
+Decided 2026-11-22 (maintainer, `/quest-plan` in [kixel-ai/kixel.quest#104](https://github.com/kixel-ai/kixel.quest/pull/104)): ✅ Kixel Quest reads experiments out itself, putting a decision prompt in the inbox when one reaches its sample, with the tally and its routing chart (rejected: a recurring agent quest; the view only). Delete this quest once its [readouts](https://github.com/kixel-ai/kixel.quest/blob/main/quest/m0/insight/readouts.md) land; until then, run as below.
+
 Decided 2026-11-11 (user, /quest-plan, from an audit of PRs merged
 2026-11-01 to 11-11 in moq-dev/moq, moq-dev/moq.pro and moq-dev/quest):
 
@@ -157,7 +159,8 @@ three hosts' saved review rounds:
     eval move under its 2026-11-21 decision (rejected: all here, building
     what the port strips; all in kixel.quest, waiting weeks for the port).
   - M ends its arm on Opus high, L gains a Fable arm, and XL writes on
-    Fable: [writer table](/quest/m0/writer-table.md).
+    Fable, as [moq-dev/quest#829](https://github.com/moq-dev/quest/pull/829)
+    routes them.
   - Fable reviews L beside the pick, and Astra picks for XL:
     [reviewer table](/quest/m0/reviewer-table.md).
   - Cost metric? ✅ Mean spend per merged PR, every session's, plus the

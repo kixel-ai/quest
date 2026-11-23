@@ -13,7 +13,7 @@ reviewer change.
 
 Non-goals: what risk tiers buy in review, which
 [moq-dev/quest#819](https://github.com/moq-dev/quest/pull/819) changes; the
-writer table, which [writer table](/quest/m0/writer-table.md) owns.
+writer table, which [moq-dev/quest#829](https://github.com/moq-dev/quest/pull/829) set.
 
 ## Plan
 

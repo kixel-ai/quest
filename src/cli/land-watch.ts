@@ -71,7 +71,7 @@ export interface WatchOptions {
 	fixer?: string;
 	/** The most fixer jobs that run at once. */
 	fixerJobs: number;
-	/** The fixer's `model_reasoning_effort`. */
+	/** The fixer's `--effort`, `low` to `xhigh`. */
 	fixerEffort: string;
 	/** Patterns of tags fetched from GitHub into each fixer checkout. */
 	fixerTag: string[];

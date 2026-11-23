@@ -71,7 +71,7 @@ export interface FixContext {
 	fixer: string;
 	/** The most fixer jobs that run at once; other dropped PRs wait for a slot, oldest first. */
 	jobs: number;
-	/** The fixer's `model_reasoning_effort`, passed to its wrapper in `QUEST_LAND_FIXER_EFFORT`. */
+	/** The fixer's effort, passed to its wrapper in `QUEST_LAND_FIXER_EFFORT`. */
 	effort: string;
 	/** Minutes a fixer may run from its admission. */
 	timeout: number;

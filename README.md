@@ -132,7 +132,7 @@ $ quest --root examples/export unblocked
 1	quest/m0/export.md
 
 $ quest --root examples/export unblocked --json --limit 1
-[{"path":"quest/m0/export.md","dependents":1,"hosts":[],"arm":"B","models":[{"harness":"claude","model":"claude-sonnet-5-5","effort":"high"},{"harness":"claude","model":"claude-opus-5-5","effort":"medium"},{"harness":"codex","model":"gpt-6.1-sol","effort":"medium"}]}]
+[{"path":"quest/m0/export.md","dependents":1,"hosts":[],"arm":"B","models":[{"harness":"claude","model":"claude-sonnet-5-5","effort":"high"},{"harness":"claude","model":"claude-opus-5-5","effort":"medium"}]}]
 ```
 
 Each plain output line contains the count, a tab, and the path. On a terminal,
@@ -888,8 +888,8 @@ its PR still waits as the queue dropped it:
   conflicts as its log. The log ends with the PR's own checks on the dropped
   head: each check's result, whether it is required, and its URL, then the
   last 20,000 characters of each failing GitHub Actions job's log. At most `--fixer-jobs` (2) run at once; the rest wait
-  for a slot. `--fixer-effort` (medium) sets the fixer's
-  `model_reasoning_effort`, passed to the wrapper in `QUEST_LAND_FIXER_EFFORT`,
+  for a slot. `--fixer-effort` (medium) sets the fixer's Claude Code
+  effort, passed to the wrapper in `QUEST_LAND_FIXER_EFFORT`,
   which `quest land fix --effort` reads by default. Each `--fixer-tag`
   pattern, such as `deploy-*`, fetches the matching tags from GitHub into
   the checkout, pruning those GitHub deleted, so a check that reads them
@@ -983,15 +983,15 @@ Wrappers must expose only the supplied tree and log, never the state directory
 or its private bare repository.
 The wrapper starts an ephemeral container and runs `quest land fix <log> <prs...>`
 there, exposing that repository read/write and the log read-only at the given paths.
-It supplies a fresh HOME, `OPENAI_BASE_URL` (the OpenAI-compatible Responses
-endpoint, including `/v1`) and `OPENAI_API_KEY` (the gate's proxy client key).
+It supplies a fresh HOME, `ANTHROPIC_BASE_URL` (the proxy's Anthropic Messages
+endpoint, without `/v1`) and `ANTHROPIC_API_KEY` (the gate's proxy client key).
 The daemon never supplies these or any Git/GitHub credential, and the wrapper
 must keep every other credential out of the container. Its network must reach the
 model proxy and, so the fixer can run the repository's checks on its fix, the
 package registries and `github.com`/`codeload.github.com` that the repository's
 dependencies come from.
 The prompt allows only those dependency fetches: no GitHub API, no push, no other
-host. Codex login stays on CLIProxyAPI.
+host. The Claude login stays on the proxy.
 The wrapper waits for the payload, returns its exit status, and tears down its
 container on exit or SIGTERM. A fixer gets 60 minutes from its start. A wrapper
 that queues for a shared launcher prints `quest land fixer: admitted <unix-seconds>`
@@ -1000,15 +1000,17 @@ output, so the wait for a slot does not use up the run. Waiting counts against
 a total of 120 minutes from the spawn, which is also the deadline of a wrapper
 that prints no such line. On timeout the daemon sends SIGTERM, allows at
 least 10 seconds for container cleanup, then sends SIGKILL on a later collection. The payload defaults
-to `codex exec`; `--agent <executable>` and repeatable `--agent-arg <argument>`
+to `claude -p` in bare mode, loading no user or checkout configuration, hooks,
+skills, or MCP servers, and limited to the shell and file tools; `--agent <executable>` and repeatable `--agent-arg <argument>`
 replace it for another CLI. It writes `<cwd>/quest-land-result.json`: an array of
 `{number, action:"requeue", reason}`, `{number, action:"fixed", head, reason}`, or
 `{number, action:"handback", diagnosis, recommendation}`, with no extra fields
 beyond an optional `comment`, an optional `blame: true` on a PR that caused the failure (a blamed PR is
 fixed or handed back), and on a handback an optional `log: [first, last]` citing the
 failure log's lines, which its comment quotes.
-The payload adds `agent` and `model` metadata to each result (`--model <id>`
-selects the default Codex model; unknown models fall back to `Codex`).
+The payload adds `agent`, `model`, and `effort` metadata to each result: the
+model Claude Code's `init` event names, else the `--model <id>` it was given,
+else `unknown`.
 Reasons and diagnoses are single lines. Fixed heads must be committed on `pr-<n>`.
 A `comment` is Markdown of at most 4000 characters that the fixer wants on its PR.
 The fixer holds no GitHub credential, since PR code it builds can read the
@@ -1346,7 +1348,9 @@ on the host:
   and owns every descendant, including ones that start their own process group
   or session. Only a process that asks another service manager to start it
   escapes.
-  A cancelled gate waits until the scope is empty.
+  A cancelled gate waits until the scope is empty. A gate whose scope the user
+  manager has not started within 60 seconds fails, naming the scope, and
+  cancels its start job; a healthy manager starts one in well under that.
 - macOS, and Linux without such a user manager (as in most containers and on
   Ubuntu 22.04), run the command as the leader of a new session and own its
   process group. A descendant that moves to another process group or session,
@@ -1434,15 +1438,17 @@ as the agent.
 ## Route work by size
 
 `quest` ranks the harnesses, models, and efforts that write work of each size,
-the same for every repository unless its `AGENTS.md` names others:
+the same for every repository unless its `AGENTS.md` names others. Only
+Claude Code writes, so every review crosses vendor or model, and a quest whose
+writers are all at their usage limit waits for one:
 
 | Size | Writer | Fallback |
 |---|---|---|
-| XS | Claude Code `claude-sonnet-5-5` high | Codex `gpt-6.1-sol` low |
-| S | Claude Code `claude-opus-5-5` medium | Codex `gpt-6.1-sol` medium |
-| M | Claude Code `claude-opus-5-5` medium | Codex `gpt-6.1-sol` high |
-| L | Claude Code `claude-opus-5-5` high | Codex `gpt-6.1-sol` xhigh |
-| XL | Claude Code `claude-opus-5-5` xhigh | none |
+| XS | Claude Code `claude-sonnet-5-5` high | none |
+| S | Claude Code `claude-opus-5-5` medium | none |
+| M | Claude Code `claude-opus-5-5` high | none |
+| L | Claude Code `claude-opus-5-5` high | none |
+| XL | Claude Code `claude-fable-5-2` high | Claude Code `claude-opus-5-5` xhigh |
 
 `quest unblocked --json` lists each ready quest's ranked `models`: its size's
 list, or the next size's while a `Maintainer:` item under its `## Waiting`
@@ -1452,17 +1458,17 @@ to the next only while nothing is written: when the CLI is missing or logged
 out, or the agent stops at its usage limit with nothing beyond the claim
 commit. Once a model writes, the PR is its own.
 
-While the writer A/B runs, XS, S, M, and XL quests split 50/50 between two
+While the writer A/B runs, XS, S, and L quests split 50/50 between two
 arms, to measure where published guidance disagrees: arm A runs the table's
 writer, and arm B runs Claude Code `claude-opus-5-5` medium for XS,
-`claude-sonnet-5-5` high for S, `claude-opus-5-5` high for M, and
-`claude-fable-5-2` medium for XL. A hash of the quest's path picks the arm,
-so a restart or respawn keeps it; `quest unblocked --json` names it as `arm`,
-`A` or `B`, and puts its entry first in `models`. L runs no arm, nor does a
-quest with a `Maintainer:` decision open, which runs the next size's list, so
-an arm always runs at its PR's size; their `arm` is `null`. The agent
-that runs that entry ends its `Implementer:` line with the arm, as
-`Implementer: Claude Code, claude-opus-5-5, high effort (arm B)`; a fallback
+`claude-sonnet-5-5` high for S, and `claude-fable-5-2` medium for L, falling
+to the table's writer when Fable hits its usage limit. A hash of the quest's
+path picks the arm, so a restart or respawn keeps it; `quest unblocked --json`
+names it as `arm`, `A` or `B`, and puts its entry first in `models`. M and XL
+run no arm, nor does a quest with a `Maintainer:` decision open, which runs
+the next size's list, so an arm always runs at its PR's size; their `arm` is
+`null`. The agent that runs that entry ends its `Implementer:` line with the
+arm, as `Implementer: Claude Code, claude-fable-5-2, medium effort (arm B)`; a fallback
 names none, so its PR counts in neither arm.
 
 A `/quest-iterate` stays on the PR's writer, the model its `## Models`
@@ -1474,17 +1480,19 @@ XS, and `quest models` prints the entry to run:
 ```console
 $ quest models XS
 claude	claude-sonnet-5-5	high
-codex	gpt-6.1-sol	low
 
 $ quest models XS --writer claude-opus-5-5
 claude	claude-opus-5-5	medium
 ```
 
 `--writer` prints the size's entry for that model, or else its entry at the
-nearest size that lists it, the larger on a tie; a model no list names is an
-error. An iterate on a PR whose first `Implementer:` line names an arm runs
-that arm's entry at the PR's size instead, as `quest models M --arm B`
-prints, and records it as `(iterate, XS, arm B)`. `--json` prints an array of `{harness, model, effort}` objects. The
+nearest size that lists it, the larger on a tie. A model no list names, such
+as Codex's, is an error, and the coordinator then starts the iterate on its
+size's first entry that can run. An iterate on a PR whose first
+`Implementer:` line names an arm runs that arm's entry at the PR's size instead, as `quest models L --arm B`
+prints, and records it as `(iterate, XS, arm B)`. For an arm its size no
+longer runs, which `--arm` refuses, it runs the model and effort that line
+records. `--json` prints an array of `{harness, model, effort}` objects. The
 iterate records the size it was given in its `Implementer:` line, as
 `Implementer: Claude Code, claude-opus-5-5, medium effort (iterate, XS)`, so
 the model check can audit the routing. `quest review` still reviews the
@@ -1523,7 +1531,8 @@ saves none.
 A reviewer that cannot run passes the round to the next eligible one, so
 Astra reviews what Opus changed last while Sol is out. That is a failure the CLI or provider reports before any finding is
 saved, never text in the diff or a reply: a CLI that is not installed, logged
-out, or has its login rejected passes over every model of that CLI, and a
+out, or has its login rejected, or sent to a gateway with no credential,
+passes over every model of that CLI, and a
 model at its usage limit passes over only itself. The run prints a `skipped`
 line for each reviewer it passed over, and the record names it in its
 header:
@@ -1570,7 +1579,16 @@ CLI reads from the environment (`ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, or
 `CODEX_ACCESS_TOKEN` for Codex) passes only when the CLI has no stored login or
 a gateway or provider is set. A provider's own keys (`ANTHROPIC_AWS_API_KEY`,
 `ANTHROPIC_FOUNDRY_API_KEY`, `ANTHROPIC_FOUNDRY_AUTH_TOKEN`) pass only while a
-gateway or provider is set. Variables that would change the reviewer's plugins,
+gateway or provider is set. Claude Code never sends its stored login to a
+gateway: with `ANTHROPIC_BASE_URL` set and no cloud provider, it needs
+`ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, or an `Authorization` header in
+`ANTHROPIC_CUSTOM_HEADERS`, else it cannot run. Nor does Codex: with
+`OPENAI_BASE_URL` set, it needs `CODEX_API_KEY` or `CODEX_ACCESS_TOKEN`, and
+skips its login check, which never asks the gateway. Under
+`CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST`, as in a T3 Code session, `quest review` drops every
+Claude Code gateway, provider, and credential in the environment, since the
+host set them, and reviews on the stored login.
+Variables that would change the reviewer's plugins,
 permissions, model, or configuration stay stripped.
 A logged-out error names the profile the CLI checked, `CLAUDE_CONFIG_DIR` or
 `CODEX_HOME`, or the default when unset, and any gateway or provider.
@@ -2313,7 +2331,8 @@ one run, since the next run starts without scratch.
 
 `run` owns processes through a systemd user scope per run, so it needs Linux
 5.14+ with a systemd 254+ user manager and unified cgroup v2; it fails on other
-hosts. It handles signals as the gate does on such a host: SIGINT, SIGTERM, or
+hosts, and fails a run whose scope its user manager has not started within 60
+seconds. It handles signals as the gate does on such a host: SIGINT, SIGTERM, or
 SIGHUP reaches every process in the run's scope, the run waits until the scope
 is empty, and a second signal kills everything at once. A run inside another
 Quest scope, such as a gate's, binds its own scope to that one, so the
