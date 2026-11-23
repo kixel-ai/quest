@@ -2251,6 +2251,7 @@ test("an Implementer line reads as agents write it", () => {
 	// A retired GPT version's display name still reads, as older records name it.
 	expect(read("Codex, GPT-6.1 Sol, high effort")?.model).toBe("gpt-6.1-sol");
 	expect(read("Codex, openai/gpt-6.1-sol, high effort")?.model).toBe("gpt-6.1-sol");
+	expect(read("Codex, openai-proxy/gpt-6.1-sol, high effort")?.model).toBe("gpt-6.1-sol");
 	expect(read("GPT 6.2 Astra")?.model).toBe("gpt-6.2-astra");
 	expect(read("Claude Code, Opus 5.5, low effort (iterate, flow fix)")).toEqual(opus("low"));
 	expect(read("Claude Code, Opus 5.5, high effort (iterate, XS, arm B)")).toEqual({

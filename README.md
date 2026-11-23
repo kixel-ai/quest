@@ -1715,7 +1715,8 @@ for the reviewer that raised it when a new size pick's reviewer fixes or
 refutes it, but one that reviewer keeps open becomes its own, since its round
 reports it again. `--new` drops the findings it leaves unsettled from the
 tallies. A reviewer the run left out keeps a block with only its session and
-tally. `quest status` takes the last full SHA the section names as the
+tally, and the candidate's also restates its findings with the head they
+describe. `quest status` takes the last full SHA the section names as the
 reviewed head, so the head appears in full only once no reviewer but the
 candidate reports a finding, and model text
 appears as inline code, which mentions or links nothing and never holds a full
@@ -1861,7 +1862,7 @@ before it lands, and put the score and its cost in its PR.
 quest eval add 570 --fix 704 --what "It counts every link as a culprit." \
   --defect src/cli/usage.ts:395-399 --defect src/cli/usage.ts:408-410
 quest eval add 503 --clean
-quest eval run                          # the size's pick, its shadow, and its candidate on every case
+quest eval run                          # the size's pick, its shadow, and any candidate on every case
 quest eval run --harness claude --effort high --pr 570
 ```
 

@@ -2270,16 +2270,6 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 		let observed = saved?.observed;
 		let watched: Round | null = null;
 		let unwatched: Skip | null = null;
-		if (observing !== null) {
-			const outcome = await observing;
-			if (!(outcome instanceof Error)) watched = observed = outcome;
-			else if (options.signal?.aborted) throw outcome;
-			else {
-				const reason = outcome instanceof ReviewerUnavailableError ? outcome.reason : "failed";
-				unwatched = { ...listed!, reason, detail: flat(outcome.message) };
-				observed = null;
-			}
-		}
 		const rounds = () => [...done.map((each) => each.round), ...(watched ? [watched] : [])];
 		const passed = () => [...skipped, ...(unwatched ? [unwatched] : [])];
 		const left = () => (watched === null && observed ? { observed } : {});
@@ -2333,6 +2323,19 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 						sized,
 					});
 				throw error;
+			}
+			({ after, risk } = persist());
+		}
+		// The candidate's outcome comes last, so the required rounds are saved, and a raise escalates, without waiting
+		// on a reviewer that only observes.
+		if (observing !== null) {
+			const outcome = await observing;
+			if (!(outcome instanceof Error)) watched = observed = outcome;
+			else if (options.signal?.aborted) throw outcome;
+			else {
+				const reason = outcome instanceof ReviewerUnavailableError ? outcome.reason : "failed";
+				unwatched = { ...listed!, reason, detail: flat(outcome.message) };
+				observed = null;
 			}
 			({ after, risk } = persist());
 		}

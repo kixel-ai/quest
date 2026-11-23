@@ -404,9 +404,7 @@ export function evalSeats(
 	return [
 		{ reviewer: pick },
 		...(shadow ? [{ reviewer: shadow, shadow: true as const }] : []),
-		...(candidate && candidate.model !== entry.writer && candidate.model !== pick.model
-			? [{ reviewer: candidate, candidate: true as const }]
-			: []),
+		...(candidate && candidate.model !== entry.writer ? [{ reviewer: candidate, candidate: true as const }] : []),
 	];
 }
 
