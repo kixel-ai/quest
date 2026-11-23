@@ -1804,8 +1804,8 @@ function detachedMessage(root: string, baseBranch: string): string {
 	return `${message}, such as ${[...names].map((n) => `--branch ${n}`).join(" or ")}`;
 }
 
-/** A PR's `## Models` record. */
-export type PullModels = ReturnType<typeof recorded>;
+/** A PR's `## Models` record, and whether its `## Review` record names a reviewer, as one another clone ran. */
+export type PullModels = ReturnType<typeof recorded> & { reviewed?: boolean };
 
 type ModelsRecord = PullModels | null | undefined;
 
@@ -2163,30 +2163,36 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 	// round on never runs it twice.
 	const listed = CANDIDATES[sized.size];
 	const watcher = new AbortController();
-	const observing =
+	const observes =
 		!named &&
 		saved?.observed === undefined &&
 		(saved?.tallies ?? []).length === 0 &&
+		// Another clone's review, which this clone's state does not hold, is in the PR's record.
+		!record?.reviewed &&
 		listed !== undefined &&
-		!avoided(listed)
-			? reviewWith(
-					{
-						...shared,
-						signal: options.signal ? AbortSignal.any([options.signal, watcher.signal]) : watcher.signal,
-					},
-					{ reviewer: listed, candidate: true, first: 1 },
-					undefined,
-				).then(
-					(seated) => seated.round,
-					(error: unknown) => (error instanceof Error ? error : new Error(String(error))),
-				)
-			: null;
+		!avoided(listed);
+	// An interruption during the candidate stops the run, rather than reading as the candidate's own failure.
+	const interrupted = observes ? interruption() : null;
+	const observing = observes
+		? reviewWith(
+				{
+					...shared,
+					signal: options.signal ? AbortSignal.any([options.signal, watcher.signal]) : watcher.signal,
+				},
+				{ reviewer: listed, candidate: true, first: 1 },
+				undefined,
+			).then(
+				(seated) => seated.round,
+				(error: unknown) => (error instanceof Error ? error : new Error(String(error))),
+			)
+		: null;
 	try {
 		return await reviewed();
 	} finally {
 		// A run that fails stops the candidate too, saving nothing of it, as it saves no other round, so a retry
 		// observes the same first head afresh.
 		watcher.abort();
+		interrupted?.stop();
 	}
 
 	async function reviewed(): Promise<Reviewed> {
@@ -2277,15 +2283,32 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 		const standing = () => kept.map((session) => session.last).filter((round) => round.head === head);
 		const judged = () => settle(classified.value, [...done.map((each) => each.round), ...standing()]);
 		const persist = () => {
-			const after = tallied(tallies, [
-				...done.map((each, i) => ({ round: each.round, settles: seats[i]!.session })),
-				...(watched ? [{ round: watched }] : []),
-			]);
+			const after = tallied(
+				tallies,
+				done.map((each, i) => ({ round: each.round, settles: seats[i]!.session })),
+			);
 			const risk = overridden(judged(), override);
-			save(statePath, state([...done.map((each) => each.session), ...kept], after, risk, observed));
+			save(statePath, state([...done.map((each) => each.session), ...kept], after, risk));
 			return { after, risk };
 		};
 		let { after, risk } = persist();
+		// The candidate's outcome, collected once the required rounds are saved, so a raise escalates without waiting on
+		// a reviewer that only observes, and merged into the state as it is then, so a newer run's review saved
+		// meanwhile stands.
+		const collect = async () => {
+			if (observing === null || watched !== null || unwatched !== null) return;
+			const outcome = await observing;
+			if (outcome instanceof Error && (options.signal?.aborted || interrupted?.signal.aborted)) throw outcome;
+			if (!(outcome instanceof Error)) watched = observed = outcome;
+			else {
+				const reason = outcome instanceof ReviewerUnavailableError ? outcome.reason : "failed";
+				unwatched = { ...listed!, reason, detail: flat(outcome.message) };
+				observed = null;
+			}
+			const current = savedState(statePath, false)!;
+			after = watched ? tallied(current.tallies, [{ round: watched }]) : current.tallies;
+			save(statePath, { ...current, tallies: after, observed });
+		};
 		// A round that raised the tier to high gets the second review the lower tier skipped, at once. The rounds already
 		// run are saved first, so a second reviewer that cannot run costs them nothing; the next run seats it again.
 		if (!seats.some((seat) => seat.second) && high(judged())) {
@@ -2309,7 +2332,8 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 				}
 			} catch (error) {
 				// Whatever stopped the second review, the rounds saved before it still need their findings answered, so
-				// the failure carries them to the report.
+				// the failure carries them to the report, with the candidate's, which no later run would pair.
+				await collect().catch(() => undefined);
 				if (typeof error === "object" && error !== null)
 					savedBefore.set(error, {
 						rounds: rounds(),
@@ -2326,19 +2350,7 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 			}
 			({ after, risk } = persist());
 		}
-		// The candidate's outcome comes last, so the required rounds are saved, and a raise escalates, without waiting
-		// on a reviewer that only observes.
-		if (observing !== null) {
-			const outcome = await observing;
-			if (!(outcome instanceof Error)) watched = observed = outcome;
-			else if (options.signal?.aborted) throw outcome;
-			else {
-				const reason = outcome instanceof ReviewerUnavailableError ? outcome.reason : "failed";
-				unwatched = { ...listed!, reason, detail: flat(outcome.message) };
-				observed = null;
-			}
-			({ after, risk } = persist());
-		}
+		await collect();
 		return { rounds: rounds(), tallies: after, risk, skipped: passed(), ...left(), branch, head, base, sized };
 	}
 }
@@ -2439,6 +2451,18 @@ function seatsFor({ routed, second, size, auto, sessions, firsts, responses }: S
 		);
 	}
 	return { seats, kept };
+}
+
+/**
+ * A signal that aborts once the process is told to stop, as a reviewer CLI's runner forwards the signal to the CLI
+ * rather than exiting, so a seat whose failure only observes can tell an interruption from its own failure.
+ */
+export function interruption(): { signal: AbortSignal; stop(): void } {
+	const controller = new AbortController();
+	const names = ["SIGINT", "SIGTERM", "SIGHUP"] as const;
+	const abort = () => controller.abort(new Error("interrupted"));
+	for (const name of names) process.on(name, abort);
+	return { signal: controller.signal, stop: () => names.forEach((name) => process.off(name, abort)) };
 }
 
 /** Every seat's round at once, the first failure stopping the others and failing the whole. */

@@ -373,7 +373,14 @@ export async function pullModels(
 ): Promise<PullModels | null> {
 	const pull = await openPull(root, baseRef, branch, deps);
 	if ("skipped" in pull) return null;
-	return recorded(pull.body);
+	let reviewed: boolean;
+	try {
+		reviewed = parseReview(pull.body).length > 0;
+	} catch {
+		// A record this version cannot read still names a review.
+		reviewed = true;
+	}
+	return { ...recorded(pull.body), reviewed };
 }
 
 /** Record a run in the `## Review` section of its branch's open PR. The edit is the token's user's, which `/quest-merge` counts only when that user wrote the PR. */

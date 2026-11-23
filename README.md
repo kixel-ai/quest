@@ -1862,7 +1862,7 @@ before it lands, and put the score and its cost in its PR.
 quest eval add 570 --fix 704 --what "It counts every link as a culprit." \
   --defect src/cli/usage.ts:395-399 --defect src/cli/usage.ts:408-410
 quest eval add 503 --clean
-quest eval run                          # the size's pick, its shadow, and any candidate on every case
+quest eval run                          # the size's pick and its shadow on every case, and its candidate unless it wrote the case
 quest eval run --harness claude --effort high --pr 570
 ```
 

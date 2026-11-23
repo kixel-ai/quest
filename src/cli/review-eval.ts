@@ -27,6 +27,7 @@ import {
 	baseInstructions,
 	classify,
 	firstRound,
+	interruption,
 	pickReviewer,
 	reviewSize,
 	seatRole,
@@ -490,6 +491,8 @@ async function reviewCase(
 		const controller = new AbortController();
 		const signal = options.signal ? AbortSignal.any([options.signal, controller.signal]) : controller.signal;
 		const skipped: Skip[] = [];
+		// An interruption fails the case rather than reading as the candidate's own failure.
+		const interrupted = seats.some((seat) => seat.candidate) ? interruption() : null;
 		const results = await Promise.allSettled(
 			seats.map(({ reviewer, shadow, candidate }) =>
 				firstRound(reviewer, { ...opening, signal }).then(
@@ -506,7 +509,7 @@ async function reviewCase(
 						found: foundDefects(entry.defects ?? [], verdict.findings),
 					}),
 					(error: unknown) => {
-						if (candidate && !signal.aborted && error instanceof Error) {
+						if (candidate && !signal.aborted && !interrupted?.signal.aborted && error instanceof Error) {
 							const reason = error instanceof ReviewerUnavailableError ? error.reason : "failed";
 							skipped.push({ ...reviewer, reason, detail: error.message.replace(/\s+/g, " ").trim() });
 							return null;
@@ -517,6 +520,7 @@ async function reviewCase(
 				),
 			),
 		);
+		interrupted?.stop();
 		if (controller.signal.aborted) throw controller.signal.reason;
 		const done = results.flatMap((result) => (result as PromiseFulfilledResult<Seated | null>).value ?? []);
 		return { seats: done, skipped };

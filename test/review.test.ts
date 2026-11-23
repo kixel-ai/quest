@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { afterEach, expect, test, vi } from "vitest";
 
@@ -1390,6 +1390,35 @@ function onGitHub(repo: string, pulls: FakePull[], fork = false): { body: string
 	});
 	return writes;
 }
+
+fakes("an L PR's record keeps the candidate's findings, and another clone's review rules it out", async () => {
+	const s = setup();
+	const pull = {
+		number: 7,
+		body: "Work.\n\n## Models\n\n- Size: L\n- Implementer: Claude Code, claude-opus-5-5, high effort\n",
+	};
+	onGitHub(s.repo, [pull]);
+	try {
+		const first = await quest("--root", s.repo, "review", "--json");
+		expect(first.code, first.stderr).toBe(0);
+		expect(JSON.parse(first.stdout).rounds.some((r: Round) => r.candidate)).toBe(true);
+		expect(pull.body).toContain(", candidate\n");
+		// The next round leaves the candidate out, and its block restates what it found.
+		write(s.repo, ".tmp/responses.md", "1. Fixed.\n2. Fixed.\n");
+		write(s.repo, "src/lib.ts", "export const x = 3;\n");
+		git(s.repo, "commit", "-qam", "fix");
+		const second = await quest("--root", s.repo, "review", "--responses", join(s.repo, ".tmp", "responses.md"));
+		expect(second.code, second.stderr).toBe(0);
+		expect(pull.body).toMatch(/, candidate\n[\s\S]*\n- Findings at [0-9a-f]{12}, recorded for comparison only/);
+		// A clone with no state of its own sees the review in the record, so it seats no candidate.
+		rmSync(sessionFile(join(s.repo, ".git"), "feature"));
+		const other = await quest("--root", s.repo, "review", "--json");
+		expect(other.code, other.stderr).toBe(0);
+		expect(JSON.parse(other.stdout).rounds.some((r: Round) => r.candidate)).toBe(false);
+	} finally {
+		vi.unstubAllGlobals();
+	}
+});
 
 fakes("each round rewrites the Review section of the branch's open PR, keeping the author's prose", async () => {
 	const s = setup();
