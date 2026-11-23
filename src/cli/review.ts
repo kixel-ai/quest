@@ -34,7 +34,7 @@ import { discoveryEnv, git } from "./git";
 import { LIMIT, codexReset } from "./limit";
 import { CLASSIFIERS, DEFAULT_SIZE, type Model, REVIEWERS } from "./models";
 import { programEnvironment, requireProgram } from "./program";
-import type { recorded } from "./models-record";
+import { canonicalModel, type recorded } from "./models-record";
 import { save } from "./worktree";
 
 /** A mistake in the arguments, checkout, or environment, reported as a usage error. */
@@ -315,9 +315,11 @@ export interface Choice {
  * pushed, unless `--harness` names the reviewer, which then avoids nothing.
  */
 export function authored(choice: Choice, env: NodeJS.ProcessEnv, latest?: string): (entry: Model) => boolean {
+	// A provider-qualified spelling of a listed model, from `--model` or a record, is that model.
+	const same = (a: string, b: string) => canonicalModel(a) === canonicalModel(b);
 	const exclude = choice.exclude ?? [];
-	if (exclude.length > 0) return (entry) => exclude.includes(entry.model);
-	if (latest !== undefined && latest !== "unknown") return (entry) => entry.model === latest;
+	if (exclude.length > 0) return (entry) => exclude.some((model) => same(model, entry.model));
+	if (latest !== undefined && latest !== "unknown") return (entry) => same(entry.model, latest);
 	if (choice.harness !== undefined) return () => false;
 	const running = runningHarness(env);
 	return (entry) => entry.harness === running;

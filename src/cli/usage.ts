@@ -25,7 +25,7 @@ import {
 	WAIT_KINDS,
 } from "../core";
 import type { Arm } from "./models";
-import { recorded } from "./models-record";
+import { canonicalModel, recorded } from "./models-record";
 import { type ClaimDependencies, upstream } from "./claims";
 import { repositoryPath } from "../github/client";
 import { git } from "./git";
@@ -853,12 +853,14 @@ export function share(
 		shares.set(seat, to);
 	};
 	const rest: Spent[] = [];
+	const canonical = (model: string | null) => (model === null ? null : canonicalModel(model));
 	for (const each of spent) {
 		if (each.seat !== undefined) {
 			into(each.seat, each);
 			continue;
 		}
-		const same = seats.flatMap((seat, i) => (seat.model === each.model ? [i] : []));
+		const model = canonical(each.model);
+		const same = seats.flatMap((seat, i) => (canonical(seat.model) === model ? [i] : []));
 		const effort = each.effort ?? "unknown";
 		const exact = same.filter((i) => seats[i]!.effort === effort);
 		const loose = same.filter((i) => seats[i]!.effort === "unknown" || effort === "unknown");

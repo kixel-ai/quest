@@ -4,7 +4,8 @@
 
 `quest review` seats one local reviewer on a low-tier head, two on medium,
 and three on high, each from a different vendor, each drawn from the
-round's [reviewer rung](/quest/m0/reviewer-rungs.md), with Gemini through
+round's [reviewer rung](/quest/m0/reviewer-rungs.md), or a neighboring rung
+when it is short of vendors that can run, with Gemini through
 `agy` among the vendors and never the writer's model. Low-tier heads get a
 local review for the first time. Once these seats find what Pullfrog finds
 behind them, per dollar, Pullfrog and its required-approval ruleset retire.
@@ -52,12 +53,12 @@ Guidance:
   eval set has few L and no XL cases; add the audit's XL culprits with
   `quest eval add` first.
 - Each seat is a reviewer `quest review` already runs, so a seat that
-  cannot run passes to another vendor on the round's rung, and an outage
-  is every vendor out, as today. Recommended: when the drawn rung has too
-  few vendors that can run, such as when Gemini is out or the rung's only
-  Claude model wrote the head, fill the missing seats from the size's
-  rung, then the rungs next to it, and fail as an outage only when no
-  rung has a distinct vendor left.
+  cannot run passes to another vendor on the round's rung. Recommended:
+  when the drawn rung has too few vendors that can run, such as when
+  Gemini is out or the rung's only Claude model wrote the head, fill the
+  missing seats from the size's rung, then the rungs next to it. The
+  round is an outage once a seat its tier needs finds no distinct vendor
+  on any rung, which includes every vendor being out.
 - Dropping Pullfrog's ruleset is a change to kixel-ai/dotfiles'
   `bin/repo-settings`, not this repository; list it in the PR's
   follow-ups when the readout recommends it.

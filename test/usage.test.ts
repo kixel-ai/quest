@@ -521,6 +521,18 @@ describe("share", () => {
 			[0, 9, 1],
 			[1, 1, 1],
 		]);
+		// A provider-qualified spelling of a seat's listed model goes to that seat.
+		expect(
+			costs(
+				share(
+					[spend("openai/gpt-6.2-astra", "high", 3, "iterating")],
+					[
+						{ model: "claude-opus-5-5", effort: "high" },
+						{ model: "gpt-6.2-astra", effort: "high" },
+					],
+				),
+			),
+		).toEqual([[1, 3, 0]]);
 	});
 });
 

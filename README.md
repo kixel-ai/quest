@@ -1876,12 +1876,12 @@ moq-dev/quest, PRs updated and sessions active since 2026-11-06; costs (~$) esti
 #569 S medium merged: quest: finish model routing (quest/m0/model-routing/README)
   risk: medium, It changes which model reviews each PR size.
   implementer: Claude Code, claude-opus-5-5, unknown effort
-  review: Codex, gpt-6.2-sol, medium effort; round 1, score 10/10; rounds 1, findings 0: fixed 0, refuted 0, open 0
+  review: Codex, gpt-6.1-sol, medium effort; round 1, score 10/10; rounds 1, findings 0: fixed 0, refuted 0, open 0
   online review: review (OpenAI), not at the final head; 0 findings: 0 accepted, 0 declined, 0 unclassified, 0 unanswered
-  land fixes: codex, gpt-6.2-sol, medium effort
+  land fixes: codex, gpt-6.1-sol, medium effort
   sessions:
      implementing  local  claude  claude-opus-5-5   low     in 50, cache 36.2k written 1.1M read, out 6.1k, ~$0.63
-     reviewing     local  codex   gpt-6.2-sol       medium  in 14.7k, cache 0 written 39.8k read, out 421, ~$0.04
+     reviewing     local  codex   gpt-6.1-sol       medium  in 14.7k, cache 0 written 39.8k read, out 421, ~$0.04
      classifying   local  claude  claude-haiku-5-5  low     in 9.2k, cache 0 written 0 read, out 38, ~$0.00
   waits: gate-run 4m, pull 12m
   time: writing 9m (41%), understanding 6m (27%), testing 4m (18%), reporting 3m (14%), idle 2m

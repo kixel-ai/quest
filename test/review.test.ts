@@ -84,6 +84,11 @@ test("each size's reviewer is the first whose model is not the latest writer's",
 	expect(() => pickReviewer("M", { harness: "claude" }, opus)).toThrow("claude-opus-5-5 is avoided");
 	expect(at("S", authored({ exclude: ["claude-opus-5-5"] }, { CLAUDECODE: "1" }))).toBe("codex gpt-6.2-sol medium");
 	expect(at("S", authored({ exclude: ["gpt-6.2-sol"] }, { CLAUDECODE: "1" }))).toBe("claude claude-opus-5-5 low");
+	// A provider-qualified spelling of a listed model is that model, whether a record or --model names it.
+	expect(at("S", authored({}, {}, "openai/gpt-6.2-sol"))).toBe("claude claude-opus-5-5 low");
+	expect(at("S", authored({ exclude: ["openai/gpt-6.2-sol"] }, {}))).toBe("claude claude-opus-5-5 low");
+	const astra = authored({ harness: "codex" }, {}, "gpt-6.2-astra");
+	expect(() => pickReviewer("XL", { harness: "codex", model: "openai/gpt-6.2-astra" }, astra)).toThrow("is avoided");
 	// No harness need be detected once the implementers are named.
 	expect(at("M", authored({ exclude: ["other-model"] }, {}))).toBe("codex gpt-6.2-sol high");
 	const all = authored({ exclude: ["gpt-6.2-sol", "claude-opus-5-5", "claude-sonnet-5-5"] }, {});
@@ -2140,6 +2145,7 @@ test("an Implementer line reads as agents write it", () => {
 	// A retired GPT version's display name still reads, as older records name it; an unlisted ID reads as written.
 	expect(read("Codex, GPT-6.1 Sol, high effort")?.model).toBe("gpt-6.1-sol");
 	expect(read("Codex, GPT 6.1  Sol, high effort")?.model).toBe("gpt-6.1-sol");
+	expect(read("Codex, GPT-6.1-SOL, high effort")?.model).toBe("gpt-6.1-sol");
 	expect(read("Codex, openai/gpt-6.1-sol, high effort")?.model).toBe("openai/gpt-6.1-sol");
 	expect(read("Codex, openrouter/gpt-5-mini, high effort")?.model).toBe("openrouter/gpt-5-mini");
 	expect(read("GPT 6.2 Astra")?.model).toBe("gpt-6.2-astra");
