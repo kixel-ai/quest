@@ -27,6 +27,10 @@ Decided 2026-11-22 (maintainer, /quest-run on [moq-dev/quest#805](https://github
   - Google's FAQ (https://antigravity.google/docs/faq, read 2026-11-22) says "Wrapping `agy` inside third-party coding agents or applications, or automating account rotation, is not supported under consumer plans", and that using third-party software to access Antigravity "can result in suspension or termination of your account". It recommends an API key for third-party agents. The maintainer chose the Ultra login knowing this.
 - ✅ Close #805, which holds only a claim commit and the Cursor findings, once this replan merges (rejected: leave it open).
 
+Decided 2026-11-22 (maintainer, `/quest-plan` of the routing audit in [moq-dev/quest#826](https://github.com/moq-dev/quest/pull/826)): ✅ m0 (rejected: leave it in m1), since [review seats](/quest/m0/review-seats.md) seats a Gemini reviewer on medium and high PRs once this harness exists.
+
+The maintainer's Ultra login (kixelated@gmail.com) was signed in on 2026-11-22 on the Linux workstation that runs agent sessions (`agy` 1.5.14) and on the macOS laptop (`agy` 1.5.6, run from the dotfiles flake, since the laptop's Nix profile predates `agy`). `agy models` lists `gemini-4-carbon-low`, `-medium`, and `-high` on both. The CI host and the desktop are not signed in.
+
 Guidance:
 
 - [moq-dev/quest#805](https://github.com/moq-dev/quest/pull/805)'s body holds the Cursor probes in full. Repeat each one for `agy` before choosing the isolation design:
@@ -55,7 +59,6 @@ Guidance:
 
 ## Waiting
 
-- Maintainer (PC): sign `agy` in with the Ultra account on the Linux workstation that runs agent sessions and on a macOS host, then confirm Carbon runs there with a one-word prompt, such as `agy -p --model <Carbon's id> hi`. On 2026-11-22, `agy models` on the Linux workstation printed "Please sign in". An agent cannot finish Google's login for the maintainer's account; it can drive the maintainer's agent Chrome once they pick the account. Done when `agy models` lists Carbon on both hosts.
 - kixel-ai/token-max: `token-max sessions` prices `agy` sessions. Check that an `agy` review session shows a nonzero cost there. If that stalls, the Plan's fallback prices them in `quest eval`.
 
 ## Related
