@@ -42,8 +42,8 @@ Decided 2026-11-22 (maintainer, `/quest-plan` follow-up of
   (maintainer, 2026-11-22, on
   [moq-dev/quest#819](https://github.com/moq-dev/quest/pull/819#issuecomment-7087183777):
   "don't have sonnet review opus, that's extremely dumb"; rejected: high
-  risk only). Sonnet is weaker than every other model, so it reviews only
-  Sonnet's work, and Sol is weaker than Fable and Astra. moq-dev/quest#819
+  risk only). Sonnet is weaker than every other model and never reviews its
+  own work, so it reviews nothing, and Sol is weaker than Fable and Astra. moq-dev/quest#819
   puts the rule in `weaker()` in `src/cli/models.ts`. Its high-tier second
   seat is interim: the reviewer rungs quest that
   [moq-dev/quest#831](https://github.com/moq-dev/quest/pull/831) adds draws

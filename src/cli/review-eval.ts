@@ -325,8 +325,8 @@ export interface EvalOptions {
 	/** The set's path; defaults to {@link EVAL_FILE} at the checkout's root. */
 	set?: string;
 	/**
-	 * The only reviewer, at its size's entry, with `model` and `effort` overriding it; else the pick and its shadow, and
-	 * the second reviewer of a high case.
+	 * The only reviewer, at its entry in the case's list, its size's or the high one, with `model` and `effort`
+	 * overriding it; else the pick and its shadow, or for a high case the pick and the second reviewer.
 	 */
 	harness?: HarnessName;
 	model?: string;

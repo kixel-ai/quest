@@ -1504,7 +1504,7 @@ whole branch at the PR's size.
 committed branch before it is pushed for review, at an effort set by the PR's
 size. Each size ranks its reviewers, the same for every repository:
 
-| PR size | Reviewer | When Sol or Fable changed it last | Then, while those are out |
+| PR size | Reviewer | When Sol, Fable, or Astra changed it last | Then, while those are out |
 |---|---|---|---|
 | XS | Codex `gpt-6.1-sol` medium | Claude Code `claude-opus-5-5` low | Codex `gpt-6.2-astra` medium, then Claude Code `claude-fable-5-2` medium |
 | S | Codex `gpt-6.1-sol` medium | Claude Code `claude-opus-5-5` low | Codex `gpt-6.2-astra` medium, then Claude Code `claude-fable-5-2` medium |
@@ -1553,7 +1553,8 @@ change cannot lower its own review; any other PR, such as a skill's own, takes
 the `Size:` line of the `## Models` record in its open PR's body, and a PR with
 neither gets M's reviewers. `--size` overrides both. The first reviewer whose
 model is neither the latest writer's nor weaker than it reviews: Sonnet is
-weaker than every other model, so it reviews only Sonnet's work, and Sol is
+weaker than every other model and never reviews its own work, so it reviews
+nothing and no list names it, and Sol is
 weaker than Fable and Astra. The record's last `Implementer:` line
 names the latest writer, since each session moves its line last whenever it pushes, or
 `--exclude-model` names each model to avoid instead, with every model weaker
@@ -1561,10 +1562,13 @@ than it. Earlier writers may review.
 Without a record, or when its last line names an `unknown` model, the harness
 running the command, usually the session that
 just pushed, is taken to be the latest writer, so Codex reviews from Claude Code
-and Claude Code from Codex. `--harness` names the only reviewer instead of
-the pick and the shadow, at its entry's model and effort, and `--model` and `--effort`
-override the size pick's or that reviewer's, as a repository whose `AGENTS.md`
-names other reviewers needs. A `--harness` run keeps the other
+and Claude Code from Codex; with no model known, no weaker one is avoided, so
+the never-weaker rule needs the record. `--harness` names the only reviewer instead of
+the pick and the shadow, at the model and effort of its first entry whose model is not avoided, and
+`--model` and `--effort` override the size pick's or that reviewer's, as a
+repository whose `AGENTS.md` names other reviewers needs; a `--model` the list
+names runs on its own entry's harness and effort, and one it does not at
+`--harness`'s first entry. A `--harness` run keeps the other
 reviewers' sessions for the pick's next run, and refuses while one has
 findings to settle, so a head never passes one reviewer alone while the other's
 findings are open. When the latest writer changes the size's pick to one with
@@ -1725,8 +1729,9 @@ logged out, its login rejected, or at its usage limit, and 1 for other
 failures. The only eligible reviewer's usage limit prints one line,
 `error: <harness> hit its usage limit; resets <time>`, where `<time>` is the
 reset as an ISO 8601 UTC timestamp, or `unknown` when the CLI named none; with
-several, it prints `error: no eligible <size> reviewer could run: <model>
-<effort> (<error>), ...`.
+several, it prints `error: no eligible <list> reviewer could run: <model>
+<effort> (<error>), ...`, where `<list>` is the PR's size, or `high` for a high
+head's list.
 Through a gateway that pools accounts, such as CLIProxyAPI, the limit is the
 pool's: Claude Code shows its "All credentials for model ... are cooling down",
 and Codex, sent to `OPENAI_BASE_URL`, gives up on the gateway's 429 after its

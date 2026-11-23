@@ -1669,10 +1669,10 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"so a reviewer is never weaker than the writer: the model the last Implementer line names in the `## Models` record of the body of the branch's open PR. " +
 				"When it names none or an `unknown` model, " +
 				"it is any model of the harness running this command, usually the session that just pushed, detected from the " +
-				"variables each sets, so Codex reviews from Claude Code and Claude Code from Codex; with --harness it is " +
+				"variables each sets, so Codex reviews from Claude Code and Claude Code from Codex, and with no model known no weaker one is avoided; with --harness it is " +
 				"none. " +
-				"--harness names the only reviewer instead of the pick and the shadow, at its entry's model and effort, and --model and " +
-				"--effort override that reviewer's, or without --harness, the size pick's; a repository whose AGENTS.md names other reviewers " +
+				"--harness names the only reviewer instead of the pick and the shadow, at the model and effort of its first entry whose model is not avoided, and --model and " +
+				"--effort override that reviewer's, or without --harness, the size pick's; a --model the list names runs on its own entry's harness and effort, and one it does not at --harness's first entry; a repository whose AGENTS.md names other reviewers " +
 				"passes them. A --harness run keeps the other reviewers' sessions for the next run of the pick, and refuses while one has findings to settle, as a run of the pick does while a reviewer only --harness runs has some. When the latest writer changes the size's pick to one with no session on the branch, its first session settles the open findings of the reviewer it replaces. The reviewers run at once, and the first to fail stops the others and fails the " +
 				"run, saving no round. The " +
 				"size is --size, else the size of the quest a quest/ branch names, read from the base's tip so a " +
@@ -1771,8 +1771,8 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"Implementer line naming no model it can read, is a usage error, unless --size or --exclude-model replaces it. A usage limit of the only " +
 				"eligible reviewer prints one line, " +
 				"`error: <harness> hit its usage limit; resets <time>`, where <time> is the reset as an ISO 8601 UTC " +
-				"timestamp, or `unknown` when the CLI named none; with several, it prints `error: no eligible <size> " +
-				"reviewer could run: <model> <effort> (<error>), ...`, each error as the only reviewer's would read.",
+				"timestamp, or `unknown` when the CLI named none; with several, it prints `error: no eligible <list> " +
+				"reviewer could run: <model> <effort> (<error>), ...`, where <list> is the PR's size or high for a high head's list, each error as the only reviewer's would read.",
 		)
 		.option("--base <remote/branch>", "Base branch to review against (default: origin's default branch)")
 		.addOption(
@@ -1927,8 +1927,12 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"The only reviewer, instead of the pick and the shadow or second reviewer",
 			).choices(HARNESSES),
 		)
-		.option("--model <model>", "Model --harness's reviewer runs instead of its size's")
-		.option("--effort <level>", "Reasoning effort --harness's reviewer runs at instead of its size's", effortLevel)
+		.option("--model <model>", "Model --harness's reviewer runs instead of its list's entry")
+		.option(
+			"--effort <level>",
+			"Reasoning effort --harness's reviewer runs at instead of its list's entry",
+			effortLevel,
+		)
 		.option("--pr <number>", "Only this case; repeat for each", (value: string, previous: number[] = []) => [
 			...previous,
 			positiveInteger("--pr")(value),

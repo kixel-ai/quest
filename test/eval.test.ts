@@ -90,7 +90,7 @@ test("a finding finds a defect only on one of its places' lines in its file", ()
 	expect(foundDefects([defect], [finding("src/a.ts", null), finding("src/c.ts", 11)])).toEqual([]);
 });
 
-test("the pick avoids the case's writer, and --harness runs alone at its size's entry", () => {
+test("the pick avoids the case's writer, and --harness runs alone at its list's entry", () => {
 	const entry = { pull: 3, ...base, size: "S", clean: true } as EvalCase;
 	const names = (seats: ReturnType<typeof evalSeats>) =>
 		seats.map(
@@ -173,6 +173,27 @@ test("tallies count defects found and clean findings per seat, size, and tier, a
 			.concat(["shadow M", "shadow S", "shadow low", "shadow medium"])
 			.sort(),
 	);
+});
+
+test("a high case's second reviewer tallies as its own seat, and either counts what it found", () => {
+	const high = {
+		pull: 6,
+		...base,
+		tier: "high",
+		defects: [defect, { ...defect, at: [{ file: "src/b.ts", from: 5, to: 5 }] }],
+	} as EvalCase;
+	const second: Seated = { ...seat([1], [finding("src/b.ts", 5)]), second: true, session: "s3" };
+	const { totals, by } = tallies([{ case: high, seats: [seat([0], [finding("src/a.ts", 10)]), second] }], true);
+	expect(totals.second).toEqual({
+		culprits: 1,
+		found: 1,
+		defects: 2,
+		clean: 0,
+		noise: { high: 0, medium: 0, low: 0 },
+	});
+	expect(totals.either).toMatchObject({ culprits: 1, found: 2, defects: 2 });
+	expect(by["second high"]).toMatchObject({ culprits: 1, found: 1 });
+	expect(totals.shadow).toBeUndefined();
 });
 
 test("either counts a case whose pick has no shadow, and a run of one named reviewer has none", () => {

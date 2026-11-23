@@ -97,7 +97,7 @@ export function savedReview(error: unknown): Reviewed | undefined {
 	return typeof error === "object" && error !== null ? savedBefore.get(error) : undefined;
 }
 
-/** Every eligible reviewer of the size was unavailable, each for the reason `skipped` names. */
+/** Every eligible reviewer of a list, a size's or the high one, was unavailable, each for the reason `skipped` names. */
 export class ReviewOutageError extends Error {
 	constructor(
 		size: Listing,
@@ -329,13 +329,17 @@ export function authored(choice: Choice, env: NodeJS.ProcessEnv, latest?: string
 /**
  * The reviewer for a PR of `size`: the first entry of its list whose model
  * is not avoided, or `--harness`'s first such entry, else its first, with
- * `--model` and `--effort` overriding its model and effort. An override never
- * brings back an avoided model.
+ * `--model` and `--effort` overriding its model and effort. A `--model` the
+ * list names runs on its own entry's harness and effort; one it does not
+ * runs at `--harness`'s first entry. An override never brings back an
+ * avoided model.
  */
 export function pickReviewer(size: Listing, choice: Choice, avoided: (entry: Model) => boolean): Model {
 	const list = REVIEWERS[size];
 	const ours = list.filter((e) => choice.harness === undefined || e.harness === choice.harness);
-	const entry = ours.find((e) => !avoided(e)) ?? (choice.harness === undefined ? undefined : ours[0]);
+	const named = choice.model === undefined ? undefined : ours.find((e) => e.model === choice.model);
+	const first = choice.harness === undefined ? undefined : ours[0];
+	const entry = named ?? (choice.model === undefined ? undefined : first) ?? ours.find((e) => !avoided(e)) ?? first;
 	if (entry === undefined && choice.harness === undefined) {
 		const models = [...new Set(list.map((e) => e.model))].join(", ");
 		throw new ReviewInputError(`every ${size} reviewer (${models}) is avoided; pass --harness and --model`);
@@ -403,11 +407,11 @@ type BaseOptions = { base?: string; fetched?: false } | { base: string; fetched:
 export type ReviewOptions = BaseOptions & {
 	/** The checkout to review. */
 	root: string;
-	/** The reviewer; defaults to the first of the size's list whose model is not the latest writer's. */
+	/** The reviewer; defaults to the first of its list whose model is neither the latest writer's nor weaker than it. */
 	harness?: HarnessName;
 	model?: string;
 	effort?: string;
-	/** The models never to pick; without any, the latest writer's is avoided. */
+	/** The models never to pick, with every model weaker than them; without any, the latest writer's is avoided. */
 	exclude?: string[];
 	/** The PR's size, instead of its quest's or the default. */
 	size?: Size;
@@ -2168,7 +2172,7 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 		const others = secondsTo(routed, avoided);
 		if (others.length === 0)
 			throw new ReviewInputError(
-				`a high-risk head needs a second reviewer from a vendor other than ${routed.harness}'s, and every such model of the high list is avoided; name the latest writer in the PR's ## Models record or with --exclude-model`,
+				`a high-risk head needs a second reviewer from a vendor other than ${routed.harness}'s, and every such model of the high list is avoided, as the latest writer's or weaker than it; when the writer was guessed from the running harness, name it in the PR's ## Models record or with --exclude-model`,
 			);
 		const next = others.find((each) => !out.has(each.model) && !down.has(each.harness));
 		if (next === undefined) throw new ReviewOutageError("high", skipped, messages);

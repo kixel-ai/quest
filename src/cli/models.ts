@@ -49,7 +49,7 @@ const astra = (effort: string): Model => ({ harness: "codex", model: "gpt-6.2-as
 
 /**
  * The writers each model is weaker than, so it never reviews their work: Sonnet is weaker than every other model,
- * so it reviews only Sonnet's work, and Sol is weaker than the frontier models.
+ * and never reviews its own work, so it reviews nothing, and Sol is weaker than the frontier models.
  */
 const WEAKER_THAN: ReadonlyMap<string, readonly string[]> = new Map([
 	["gpt-6.1-sol", ["claude-fable-5-2", "gpt-6.2-astra"]],
@@ -68,7 +68,7 @@ export const unfit =
 /**
  * Each list's reviewers, ranked: the first that is neither the latest writer's model nor {@link weaker} than it
  * reviews the PR, so Opus reviews what Fable wrote, and one that cannot run passes the review to the next. Now that
- * Sonnet reviews only its own work, Astra and then Fable close each size's list, so Opus's work still has a reviewer
+ * Sonnet reviews nothing, Astra and then Fable close each size's list, so Opus's work still has a reviewer
  * while Sol, or all of Codex, is out. A high head reviews from `high`, whatever its size: the pick, then a second
  * reviewer from the other vendor, so Sol and Fable review Opus's work, Opus and Astra Fable's.
  */

@@ -140,6 +140,13 @@ test("each size's reviewer is the first whose model is not the latest writer's",
 		model: "claude-fable-5-2",
 		effort: "xhigh",
 	});
+	// A listed --model runs on its own entry's harness and effort; an unlisted one at --harness's first entry.
+	expect(pickReviewer("M", { model: "claude-fable-5-2" }, byOpus)).toEqual({
+		harness: "claude",
+		model: "claude-fable-5-2",
+		effort: "high",
+	});
+	expect(pickReviewer("M", { harness: "claude", model: "claude-opus-4-7" }, byOpus).effort).toBe("medium");
 	const sol = authored({ harness: "codex", exclude: ["gpt-6.1-sol"] }, {});
 	expect(pickReviewer("M", { harness: "codex" }, sol).model).toBe("gpt-6.2-astra");
 	// Avoiding Astra avoids Sol, which is weaker, so no Codex entry is left.
@@ -1450,8 +1457,8 @@ fakes(
 	async () => {
 		const s = setup();
 		moveBase(s.repo, (dir) => write(dir, "RISK.md", riskFile(["- `src/` - customers' averages run on it"])));
-		// A high head is reviewed from the largest size's list, whatever its size: its pick, and a second reviewer on a
-		// model other than the pick's and the writer's.
+		// A high head is reviewed from the high list, whatever its size: its pick, and a second reviewer from another
+		// vendor, neither the writer's model nor weaker than it.
 		const listed = await quest("--root", s.repo, "review", "--exclude-model", "claude-opus-5-5");
 		expect(listed.code, listed.stderr).toBe(0);
 		const reason = "it changes src/lib.ts, which is always high: customers' averages run on it";
@@ -1671,7 +1678,7 @@ fakes("a reviewer raises the tier, and the record keeps the classifier's beside 
 				"- Raised the risk to high: `It rewrites the wire format peers read.`",
 			].join("\n"),
 		);
-		// The raise to high gets the second review the medium tier skipped, in the same run, from the largest size's list.
+		// The raise to high gets the second review the medium tier skipped, in the same run, from the high list.
 		expect(result.stdout).toContain("\nreviewer claude claude-fable-5-2 xhigh second\n");
 		expect(pull.body).toContain("- Reviewer: Claude Code, claude-fable-5-2, xhigh effort, second\n");
 		expect(recordedRisk(pull.body)).toEqual({
@@ -1712,7 +1719,7 @@ fakes(
 		write(s.repo, ".tmp/responses.md", "1. Fixed.\n2. Fixed.\n3. Fixed.\n");
 		const seconds = (out: string) => out.split("\n").filter((line) => /^reviewer .* second$/.test(line));
 		try {
-			// The second reviewer the raise calls for cannot run, and no other model is left: an outage naming it.
+			// The second reviewer the raise calls for cannot run, and no other vendor's model is left: an outage naming it.
 			vi.stubEnv("FAKE_LIMITED", "reset");
 			vi.stubEnv("FAKE_FAILS", "claude-fable-5-2");
 			const out = await quest("--root", s.repo, "review");
