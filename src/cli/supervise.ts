@@ -2,7 +2,7 @@
 // systemd user scope, named once and never reused, so its cgroup holds every descendant that does
 // not ask another service manager to start it. Other hosts fail explicitly; only the gate settles
 // for a process group there (see `group` in gate.ts).
-import { type ChildProcessWithoutNullStreams, execFile, execFileSync, spawn } from "node:child_process";
+import { type ChildProcessWithoutNullStreams, execFileSync, spawn } from "node:child_process";
 import { closeSync, existsSync, constants as fs, openSync, readdirSync, readFileSync, watch, writeSync } from "node:fs";
 import { constants, hostname } from "node:os";
 // Cgroup paths are POSIX paths, also in the tests that parse them on Windows.
@@ -344,12 +344,16 @@ function scoped(unit: string, cwd: string, command: string[], options: RunOption
 			unsupported: UNSUPPORTED,
 			launcher: "systemd-run",
 			emptied: () => stopBound(unit),
-			// Cancels the start job outright, so it can never later adopt systemd-run's PID once
-			// another process reuses it; systemd-run then exits on its own.
-			abandon: (done) =>
-				execFile("systemctl", ["--user", "stop", "--no-block", unit], { env: options.env }, (error) =>
-					done(error ?? undefined),
-				),
+			abandon() {
+				// Cancels a queued start job outright, so systemd-run exits on its own. Its failure, such
+				// as a manager too stuck to answer, leaves systemd-run waiting, which `contain` handles.
+				const cancel = spawn("systemctl", ["--user", "stop", "--no-block", unit], {
+					env: options.env,
+					stdio: "ignore",
+				});
+				cancel.on("error", () => {});
+				cancel.unref();
+			},
 			bound: Boolean(enclosing),
 			measure,
 		},
@@ -383,8 +387,8 @@ interface Containment {
 	launcher: string;
 	/** Stop what the cgroup's end leaves to systemd, once the cgroup is empty. */
 	emptied(): Promise<void>;
-	/** Give up a cgroup that never started (see `START_LIMIT`), so the launcher exits; reports a failure to `done`. */
-	abandon(done: (error?: Error) => void): void;
+	/** Cancel, without waiting, a start of the cgroup that has not happened yet, so the launcher exits. */
+	abandon(): void;
 	/**
 	 * Whether an enclosing Quest owner kills this cgroup at its own second signal, so a repeated
 	 * signal this process receives, which may be a copy of that owner's, leaves the kill to it.
@@ -432,8 +436,12 @@ function contain(
 		const stop = () => {
 			if (interrupted) return;
 			interrupted = cancelled(cancel.signal);
-			// The shell reads end-of-file and never starts the command.
-			if (!admitted) return admission.destroy();
+			if (!admitted) {
+				// The shell reads end-of-file and never starts the command.
+				admission.destroy();
+				if (group === undefined) describe.abandon();
+				return;
+			}
 			if (!forwards(cancel.signal)) return;
 			const name = requested(cancel.signal);
 			signalled = true;
@@ -456,19 +464,25 @@ function contain(
 			if (group) kill(group);
 		};
 		const unfollow = follow(cancel, stop, terminate);
-		// Also bounds a run interrupted before its cgroup started, which would otherwise wait on it too.
+		let abandoned = false;
+		// Never killed, the launcher keeps its PID, which a start job queued with it may still adopt
+		// (systemd 254 passes the PID alone); if the cgroup ever starts, its shell finds the
+		// admission closed and exits. So the run settles without the launcher, unwatched.
 		const deadline = setTimeout(() => {
 			if (group !== undefined) return;
-			if (!interrupted)
-				failure = new Error(
-					`the systemd user manager did not start ${describe.name} within ${START_LIMIT / 1000} seconds; see \`systemctl --user list-jobs\``,
-				);
+			abandoned = true;
 			admission.destroy();
-			describe.abandon((error) => {
-				if (!error) return;
-				process.stderr.write(`quest: cannot cancel the start of ${describe.name}: ${error.message}\n`);
-				child.kill("SIGKILL");
-			});
+			if (!interrupted) describe.abandon();
+			cleanup();
+			for (const stream of child.stdio) stream?.destroy();
+			child.unref();
+			if (interrupted) resolve({ status: interrupted, cpu: null });
+			else
+				reject(
+					new Error(
+						`the systemd user manager did not start ${describe.name} within ${START_LIMIT / 1000} seconds; see \`systemctl --user list-jobs\``,
+					),
+				);
 		}, START_LIMIT);
 		const cleanup = () => {
 			clearTimeout(deadline);
@@ -492,13 +506,13 @@ function contain(
 				return;
 			}
 			group = join("/sys/fs/cgroup", path);
-			// Too late: the run already failed (see `START_LIMIT`), and the exit kills the cgroup.
-			if (interrupted || failure) return;
+			if (interrupted) return;
 			admitted = true;
 			admission.end("admitted\n");
 		});
 
 		child.once("error", (error) => {
+			if (abandoned) return;
 			hold?.destroy();
 			cleanup();
 			reject(
@@ -508,6 +522,7 @@ function contain(
 			);
 		});
 		child.once("exit", async (code, signal) => {
+			if (abandoned) return;
 			let cpu: number | null = null;
 			try {
 				// Read before anything else, while the holder keeps the cgroup; a run cancelled hard may have lost it.
