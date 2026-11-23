@@ -1053,6 +1053,8 @@ const pick = (env: NodeJS.ProcessEnv, names: string[]) =>
  * shell's API key never overrides a stored subscription login, so a review is
  * billed as the user's own CLI sessions are. A gateway with no credential of
  * its own would receive the stored login, so it is refused before the CLI runs.
+ * A route's status check runs unless `routeUnchecked` says it never sees the
+ * gateway, which then judges the credential on the first turn.
  */
 async function prepare(
 	harness: HarnessName,
