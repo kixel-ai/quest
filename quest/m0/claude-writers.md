@@ -40,4 +40,4 @@ Guidance:
 
 ## Related
 
-- [Writer table](/quest/m0/writer-table.md) - the lists this edits
+- [Writer table](https://github.com/moq-dev/quest/pull/829) - the lists this edits
