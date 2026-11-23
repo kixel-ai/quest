@@ -284,11 +284,16 @@ quest start --release quest/m0/export.md
 
 It pushes an empty claim commit, built on the upstream default branch, to the
 quest's branch (its path without `.md`), then opens a draft PR
-from it right away and prints the PR's URL. It switches your checkout to the
-claim on a new local branch, or fast-forwards that branch if it is already
-checked out. A local branch left from an earlier attempt is not moved: the
-claim still succeeds, with a warning to switch to it and merge the claim
-commit. A fork pushes to itself and opens the PR on its upstream, found
+from it right away and prints the PR's URL. A checkout on the default branch,
+such as the main clone, stays there: a second line prints the directory to
+work in, the one matching where it ran, in a worktree on the claim's branch:
+the one that already has the branch checked out, else a new one under
+`.worktrees/` that `quest worktree` owns. The default branch is the one of the
+repository the claim was pushed to, a fork's own. Any
+other checkout switches to the claim on a new local branch, or fast-forwards
+that branch if it is already checked out. A local branch left from an earlier
+attempt is not moved: the claim still succeeds, with a warning to merge the
+claim commit into it. A fork pushes to itself and opens the PR on its upstream, found
 as for `unblocked --unclaimed`, so a fork with its own quests claims on
 itself. It reads
 readiness from the upstream default branch it builds on, not your checkout. It
@@ -312,9 +317,10 @@ the way, or work on the branch), 2 for invalid arguments, and 1 for other
 failures. On GitHub it
 uses `GH_TOKEN`, `GITHUB_TOKEN`, or `gh auth token`.
 
-Draft claims are placeholders. This repository reports skipped checks on PRs;
-its `Queue` workflow runs the checks when a reviewed head enters GitHub's merge
-queue. Platform verification also runs after pushes to `main`.
+Draft claims are placeholders. This repository's only PR check is the required
+`Queue`, skipped on the PR; its `Queue` workflow runs the checks when a reviewed
+head enters GitHub's merge queue. Platform verification runs after pushes to
+`main` and daily.
 
 ## Check a quest's PR
 
@@ -1340,7 +1346,9 @@ on the host:
   and owns every descendant, including ones that start their own process group
   or session. Only a process that asks another service manager to start it
   escapes.
-  A cancelled gate waits until the scope is empty.
+  A cancelled gate waits until the scope is empty. A gate whose scope the user
+  manager has not started within 60 seconds fails, naming the scope, and
+  cancels its start job; a healthy manager starts one in well under that.
 - macOS, and Linux without such a user manager (as in most containers and on
   Ubuntu 22.04), run the command as the leader of a new session and own its
   process group. A descendant that moves to another process group or session,
@@ -1434,9 +1442,9 @@ the same for every repository unless its `AGENTS.md` names others:
 |---|---|---|
 | XS | Claude Code `claude-sonnet-5-5` high | Codex `gpt-6.2-sol` low |
 | S | Claude Code `claude-opus-5-5` medium | Codex `gpt-6.2-sol` medium |
-| M | Claude Code `claude-opus-5-5` medium | Codex `gpt-6.2-sol` high |
+| M | Claude Code `claude-opus-5-5` high | Codex `gpt-6.2-sol` high |
 | L | Claude Code `claude-opus-5-5` high | Codex `gpt-6.2-sol` xhigh |
-| XL | Claude Code `claude-opus-5-5` xhigh | none |
+| XL | Claude Code `claude-fable-5-2` high | Claude Code `claude-opus-5-5` xhigh |
 
 `quest unblocked --json` lists each ready quest's ranked `models`: its size's
 list, or the next size's while a `Maintainer:` item under its `## Waiting`
@@ -1446,17 +1454,17 @@ to the next only while nothing is written: when the CLI is missing or logged
 out, or the agent stops at its usage limit with nothing beyond the claim
 commit. Once a model writes, the PR is its own.
 
-While the writer A/B runs, XS, S, M, and XL quests split 50/50 between two
+While the writer A/B runs, XS, S, and L quests split 50/50 between two
 arms, to measure where published guidance disagrees: arm A runs the table's
 writer, and arm B runs Claude Code `claude-opus-5-5` medium for XS,
-`claude-sonnet-5-5` high for S, `claude-opus-5-5` high for M, and
-`claude-fable-5-2` medium for XL. A hash of the quest's path picks the arm,
-so a restart or respawn keeps it; `quest unblocked --json` names it as `arm`,
-`A` or `B`, and puts its entry first in `models`. L runs no arm, nor does a
-quest with a `Maintainer:` decision open, which runs the next size's list, so
-an arm always runs at its PR's size; their `arm` is `null`. The agent
-that runs that entry ends its `Implementer:` line with the arm, as
-`Implementer: Claude Code, claude-opus-5-5, high effort (arm B)`; a fallback
+`claude-sonnet-5-5` high for S, and `claude-fable-5-2` medium for L, falling
+to the table's writer when Fable hits its usage limit. A hash of the quest's
+path picks the arm, so a restart or respawn keeps it; `quest unblocked --json`
+names it as `arm`, `A` or `B`, and puts its entry first in `models`. M and XL
+run no arm, nor does a quest with a `Maintainer:` decision open, which runs
+the next size's list, so an arm always runs at its PR's size; their `arm` is
+`null`. The agent that runs that entry ends its `Implementer:` line with the
+arm, as `Implementer: Claude Code, claude-fable-5-2, medium effort (arm B)`; a fallback
 names none, so its PR counts in neither arm.
 
 A `/quest-iterate` stays on the PR's writer, the model its `## Models`
@@ -1477,8 +1485,10 @@ claude	claude-opus-5-5	medium
 `--writer` prints the size's entry for that model, or else its entry at the
 nearest size that lists it, the larger on a tie; a model no list names is an
 error. An iterate on a PR whose first `Implementer:` line names an arm runs
-that arm's entry at the PR's size instead, as `quest models M --arm B`
-prints, and records it as `(iterate, XS, arm B)`. `--json` prints an array of `{harness, model, effort}` objects. The
+that arm's entry at the PR's size instead, as `quest models L --arm B`
+prints, and records it as `(iterate, XS, arm B)`. For an arm its size no
+longer runs, which `--arm` refuses, it runs the model and effort that line
+records. `--json` prints an array of `{harness, model, effort}` objects. The
 iterate records the size it was given in its `Implementer:` line, as
 `Implementer: Claude Code, claude-opus-5-5, medium effort (iterate, XS)`, so
 the model check can audit the routing. `quest review` still reviews the
@@ -1528,7 +1538,8 @@ A reviewer that cannot run passes the round to the next whose model is not
 the latest writer's, so Sonnet reviews what Opus changed last while Sol is
 out. That is a failure the CLI or provider reports before any finding is
 saved, never text in the diff or a reply: a CLI that is not installed, logged
-out, or has its login rejected passes over every model of that CLI, and a
+out, or has its login rejected, or Claude Code sent to a gateway with no
+credential, passes over every model of that CLI, and a
 model at its usage limit passes over only itself. The run prints a `skipped`
 line for each reviewer it passed over, and the record names it in its
 header:
@@ -1573,7 +1584,14 @@ CLI reads from the environment (`ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, or
 `CODEX_ACCESS_TOKEN` for Codex) passes only when the CLI has no stored login or
 a gateway or provider is set. A provider's own keys (`ANTHROPIC_AWS_API_KEY`,
 `ANTHROPIC_FOUNDRY_API_KEY`, `ANTHROPIC_FOUNDRY_AUTH_TOKEN`) pass only while a
-gateway or provider is set. Variables that would change the reviewer's plugins,
+gateway or provider is set. Claude Code never sends its stored login to a
+gateway: with `ANTHROPIC_BASE_URL` set and no cloud provider, it needs
+`ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, or an `Authorization` header in
+`ANTHROPIC_CUSTOM_HEADERS`, else it cannot run. Under
+`CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST`, as in a T3 Code session, it drops every
+Claude Code gateway, provider, and credential in the environment, since the
+host set them, and reviews on the stored login.
+Variables that would change the reviewer's plugins,
 permissions, model, or configuration stay stripped.
 A logged-out error names the profile the CLI checked, `CLAUDE_CONFIG_DIR` or
 `CODEX_HOME`, or the default when unset, and any gateway or provider.
@@ -2325,7 +2343,8 @@ one run, since the next run starts without scratch.
 
 `run` owns processes through a systemd user scope per run, so it needs Linux
 5.14+ with a systemd 254+ user manager and unified cgroup v2; it fails on other
-hosts. It handles signals as the gate does on such a host: SIGINT, SIGTERM, or
+hosts, and fails a run whose scope its user manager has not started within 60
+seconds. It handles signals as the gate does on such a host: SIGINT, SIGTERM, or
 SIGHUP reaches every process in the run's scope, the run waits until the scope
 is empty, and a second signal kills everything at once. A run inside another
 Quest scope, such as a gate's, binds its own scope to that one, so the

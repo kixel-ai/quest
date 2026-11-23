@@ -29,15 +29,16 @@ const fable = (effort: string): Model => ({ harness: "claude", model: "claude-fa
  * Haiku, whose surcharge past 100k input tokens leads users to cap its
  * compaction window there, barely above an agent's fixed load of prompt,
  * context, and skill. No size runs Opus at low, which misses too much. XL
- * stays on Opus rather than Fable, which a subscription caps at half its
- * weekly limit and which uses that limit faster.
+ * starts on Fable, since its quests are hard rather than just big; Opus
+ * takes over when Fable hits its usage limit, which a subscription caps at
+ * half the weekly limit.
  */
 export const WRITERS: Record<Size, readonly Model[]> = {
 	XS: [sonnet("high"), sol("low")],
 	S: [opus("medium"), sol("medium")],
-	M: [opus("medium"), sol("high")],
+	M: [opus("high"), sol("high")],
 	L: [opus("high"), sol("xhigh")],
-	XL: [opus("xhigh")],
+	XL: [fable("high"), opus("xhigh")],
 };
 
 /**
@@ -99,13 +100,12 @@ export const SPLIT_CHECKERS: readonly Model[] = [sonnet("medium"), sol("medium")
 /**
  * The writer A/B: each armed size's quests split between its first writer
  * and an alternative where published results disagree, until the readout in
- * quest/m0/routing-evidence/README.md deletes it. L runs no arm.
+ * quest/m0/routing-evidence/README.md deletes it. M and XL run no arm.
  */
 export const ARMS: Partial<Record<Size, Record<Arm, Model>>> = {
 	XS: { A: sonnet("high"), B: opus("medium") },
 	S: { A: opus("medium"), B: sonnet("high") },
-	M: { A: opus("medium"), B: opus("high") },
-	XL: { A: opus("xhigh"), B: fable("medium") },
+	L: { A: opus("high"), B: fable("medium") },
 };
 
 /**

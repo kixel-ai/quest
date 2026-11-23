@@ -1,7 +1,8 @@
 // `quest start`: claim a ready quest by pushing an empty claim commit to its
 // branch and opening a draft PR from it right away, and release that claim
 // while nothing but the claim commit is on the branch.
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
+import { join } from "node:path";
 
 import { type OpenPull, Refusal, questBranch } from "../core";
 import {
@@ -9,6 +10,7 @@ import {
 	type Hosting,
 	type Target,
 	type Upstream,
+	defaultBranch,
 	ensure,
 	held,
 	remoteBranches,
@@ -18,6 +20,7 @@ import {
 import { GitError, git } from "./git";
 import { requireRemote } from "./github";
 import { ago } from "../github/hold";
+import { Worktrees, canonical, derivedDefaults, mainCheckout, waiting } from "./worktree";
 import { mergedPull, pullsFrom } from "../github/claims";
 
 export interface Started {
@@ -26,6 +29,11 @@ export interface Started {
 	sha: string;
 	/** The draft PR; `null` off GitHub. */
 	url: string | null;
+	/**
+	 * The directory in a worktree on `branch` that matches the one `quest start` ran in, to work in, when that
+	 * checkout stayed on the default branch; `null` when it moved onto the claim.
+	 */
+	worktree: string | null;
 }
 
 /** The refusal for a quest the upstream default branch lacks: finished upstream, or not merged yet. */
@@ -83,8 +91,19 @@ export async function startQuest(
 		url = await openDraft(root, up.hosting, remote, path, title, branch, sha);
 	}
 
-	checkout(root, branch, sha, deps.warn);
-	return { branch, sha, url };
+	let worktree: string | null;
+	try {
+		// The repository the claim was pushed to, such as a fork, names the default branch; it may differ from the upstream's.
+		const top = await place(root, defaultBranch(root, up.push), branch, sha, deps.warn);
+		// A quest tree below the repository root is found again at the same place in the worktree.
+		worktree = top === null ? null : join(top, git(root, ["rev-parse", "--show-prefix"]).replace(/\/$/, ""));
+	} catch (error) {
+		const message = error instanceof Error ? error.message : String(error);
+		throw new Error(
+			`claimed ${path}${url === null ? "" : ` at ${url}`}, but no checkout is on ${branch}: ${message}`,
+		);
+	}
+	return { branch, sha, url, worktree };
 }
 
 /**
@@ -133,19 +152,88 @@ async function obstructed(
 }
 
 /**
+ * Put work on the claim's branch without moving a checkout off the default branch: a checkout on it,
+ * such as the main clone, is left alone, and the branch's worktree is returned, the one that already
+ * has it checked out or else one `quest worktree` owns under `.worktrees/`. Any other checkout is put
+ * on the claim, and `null` is returned.
+ */
+async function place(
+	root: string,
+	trunk: string,
+	branch: string,
+	sha: string,
+	warn: (message: string) => void,
+): Promise<string | null> {
+	if (head(root) !== `refs/heads/${trunk}`) {
+		checkout(root, branch, sha, warn);
+		return null;
+	}
+	const worktrees = new Worktrees();
+	const held = checkedOut(root).get(`refs/heads/${branch}`);
+	if (held !== undefined) {
+		// A quest worktree an earlier release left stays charged for its growth again.
+		const owned = await waiting(() => worktrees.registered(canonical(held)));
+		if (owned) await waiting(() => worktrees.restore(owned.id));
+		checkout(held, branch, sha, warn);
+		return held;
+	}
+	const main = mainCheckout(root);
+	// The hash tells apart branches that differ only where the name keeps nothing, such as `a/b-c` and `a-b/c`,
+	// or past its cut: a filename holds 255 bytes, which a long branch would overflow.
+	const readable = branch.replace(/[^A-Za-z0-9._-]/g, "-").slice(0, 100);
+	const name = `${readable}-${createHash("sha256").update(branch).digest("hex").slice(0, 8)}`;
+	const earlier = await waiting(() => worktrees.registered(join(main, ".worktrees", name)));
+	let path: string;
+	if (earlier) {
+		path = (await waiting(() => worktrees.restore(earlier.id))).path;
+	} else {
+		const { reserve, scratch } = derivedDefaults(main);
+		path = (await worktrees.create(main, name, reserve, sha, scratch)).path;
+	}
+	const ref = `refs/heads/${branch}`;
+	if (succeeds(path, ["rev-parse", "--verify", "--quiet", ref])) {
+		// The branch is checked out nowhere, so this worktree can take it; its tip is not moved.
+		const switched = succeeds(path, ["switch", "--quiet", branch]);
+		warn(
+			`claimed, but local branch ${branch} already exists from an earlier attempt; ` +
+				`${switched ? `it is checked out in ${path}; ` : `switch ${path} to it, `}` +
+				`merge the claim commit ${sha} into it, and resume that work before pushing`,
+		);
+	} else if (!succeeds(path, ["switch", "--quiet", "-c", branch, sha])) {
+		throw new Error(`could not switch ${path} to a new ${branch}`);
+	}
+	return path;
+}
+
+/** The ref `root`'s HEAD names, or `null` when detached. */
+function head(root: string): string | null {
+	try {
+		return git(root, ["symbolic-ref", "-q", "HEAD"]);
+	} catch {
+		return null;
+	}
+}
+
+/** Each branch ref checked out in one of the repository's worktrees, with that worktree's path. */
+function checkedOut(root: string): Map<string, string> {
+	const found = new Map<string, string>();
+	for (const entry of git(root, ["worktree", "list", "--porcelain", "-z"]).split("\0\0")) {
+		const lines = entry.split("\0");
+		const path = lines.find((line) => line.startsWith("worktree "))?.slice(9);
+		const ref = lines.find((line) => line.startsWith("branch "))?.slice(7);
+		if (path !== undefined && ref !== undefined) found.set(ref, path);
+	}
+	return found;
+}
+
+/**
  * Put the checkout on the claim, so work lands on the quest's branch. The claim
  * changes no files, so this carries uncommitted changes along. Whatever cannot
  * be done safely is left as a warning saying what to run.
  */
 function checkout(root: string, branch: string, sha: string, warn: (message: string) => void): void {
 	const ref = `refs/heads/${branch}`;
-	let current = "";
-	try {
-		current = git(root, ["symbolic-ref", "-q", "HEAD"]);
-	} catch {
-		// Detached HEAD.
-	}
-	if (current === ref) {
+	if (head(root) === ref) {
 		// Already on the quest's branch, as after `git worktree add -b`: catch it up to the claim.
 		if (!succeeds(root, ["merge", "--ff-only", "--quiet", sha])) {
 			warn(`${branch} has diverged from the claim commit; merge ${sha} into it before pushing`);

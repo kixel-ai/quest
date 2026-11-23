@@ -97,6 +97,12 @@ export interface Scopes {
 /** The command may have started and its scope may still hold processes, so its run stays recorded. */
 export class Retained extends Error {}
 
+/**
+ * How long a run waits for its scope to start. A healthy user manager, even one busy reloading,
+ * starts one in well under this; past it, the manager is stuck and would leave the run waiting silently.
+ */
+export const START_LIMIT = 60_000;
+
 export const UNSUPPORTED =
 	"quest worktree run needs Linux 5.14 or later with a systemd user manager (systemd 254 or later) and unified cgroup v2";
 
@@ -338,6 +344,16 @@ function scoped(unit: string, cwd: string, command: string[], options: RunOption
 			unsupported: UNSUPPORTED,
 			launcher: "systemd-run",
 			emptied: () => stopBound(unit),
+			abandon() {
+				// Cancels a queued start job outright, so systemd-run exits on its own. Its failure, such
+				// as a manager too stuck to answer, leaves systemd-run waiting, which `contain` handles.
+				const cancel = spawn("systemctl", ["--user", "stop", "--no-block", unit], {
+					env: options.env,
+					stdio: "ignore",
+				});
+				cancel.on("error", () => {});
+				cancel.unref();
+			},
 			bound: Boolean(enclosing),
 			measure,
 		},
@@ -371,6 +387,8 @@ interface Containment {
 	launcher: string;
 	/** Stop what the cgroup's end leaves to systemd, once the cgroup is empty. */
 	emptied(): Promise<void>;
+	/** Cancel, without waiting, a start of the cgroup that has not happened yet, so the launcher exits. */
+	abandon(): void;
 	/**
 	 * Whether an enclosing Quest owner kills this cgroup at its own second signal, so a repeated
 	 * signal this process receives, which may be a copy of that owner's, leaves the kill to it.
@@ -418,8 +436,12 @@ function contain(
 		const stop = () => {
 			if (interrupted) return;
 			interrupted = cancelled(cancel.signal);
-			// The shell reads end-of-file and never starts the command.
-			if (!admitted) return admission.destroy();
+			if (!admitted) {
+				// The shell reads end-of-file and never starts the command.
+				admission.destroy();
+				if (group === undefined) describe.abandon();
+				return;
+			}
 			if (!forwards(cancel.signal)) return;
 			const name = requested(cancel.signal);
 			signalled = true;
@@ -442,7 +464,28 @@ function contain(
 			if (group) kill(group);
 		};
 		const unfollow = follow(cancel, stop, terminate);
+		let abandoned = false;
+		// Never killed, the launcher keeps its PID, which a start job queued with it may still adopt
+		// (systemd 254 passes the PID alone); if the cgroup ever starts, its shell finds the
+		// admission closed and exits. So the run settles without the launcher, unwatched.
+		const deadline = setTimeout(() => {
+			if (group !== undefined) return;
+			abandoned = true;
+			admission.destroy();
+			if (!interrupted) describe.abandon();
+			cleanup();
+			for (const stream of child.stdio) stream?.destroy();
+			child.unref();
+			if (interrupted) resolve({ status: interrupted, cpu: null });
+			else
+				reject(
+					new Error(
+						`the systemd user manager did not start ${describe.name} within ${START_LIMIT / 1000} seconds; see \`systemctl --user list-jobs\``,
+					),
+				);
+		}, START_LIMIT);
 		const cleanup = () => {
+			clearTimeout(deadline);
 			unfollow();
 			own?.close();
 		};
@@ -469,6 +512,7 @@ function contain(
 		});
 
 		child.once("error", (error) => {
+			if (abandoned) return;
 			hold?.destroy();
 			cleanup();
 			reject(
@@ -478,6 +522,7 @@ function contain(
 			);
 		});
 		child.once("exit", async (code, signal) => {
+			if (abandoned) return;
 			let cpu: number | null = null;
 			try {
 				// Read before anything else, while the holder keeps the cgroup; a run cancelled hard may have lost it.

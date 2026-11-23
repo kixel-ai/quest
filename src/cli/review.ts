@@ -591,6 +591,10 @@ interface Reviewer {
 	connection: string[];
 	/** The variables in `env` that send the CLI's requests to a gateway or another provider. */
 	routes(env: NodeJS.ProcessEnv): string[];
+	/** Whether the host session manages the CLI's provider, so the routes and credentials in `env` are the host's. */
+	managed?(env: NodeJS.ProcessEnv): boolean;
+	/** The error for a gateway in `env` with no credential of its own, to which the CLI would send its stored login. */
+	bareGateway?(env: NodeJS.ProcessEnv): string | undefined;
 	/** Matches the CLI's error for a login or credential the API rejected: expired, revoked, or invalid. */
 	unauthorized: RegExp;
 	/** The CLI's own review, given `prompt`'s scope, rules, and responses. */
@@ -617,6 +621,25 @@ const text = (value: unknown) => (typeof value === "string" ? value : undefined)
 
 /** The cloud providers Claude Code reaches its model through, each with a `CLAUDE_CODE_USE_` switch. */
 const CLAUDE_PROVIDERS = ["BEDROCK", "VERTEX", "FOUNDRY", "MANTLE", "ANTHROPIC_AWS", "ANTHROPIC_GOOGLE_CLOUD"];
+
+/** Claude Code turns a switch on only for `1`, `true`, `yes`, or `on`, so `0` or `false` sets nothing. */
+const enabled = (value: string | undefined) => /^\s*(1|true|yes|on)\s*$/i.test(value ?? "");
+
+/** The `CLAUDE_CODE_USE_` switches `env` turns on. */
+const claudeProviders = (env: NodeJS.ProcessEnv) =>
+	CLAUDE_PROVIDERS.map((provider) => `CLAUDE_CODE_USE_${provider}`).filter((name) => enabled(env[name]));
+
+/**
+ * Whether ANTHROPIC_CUSTOM_HEADERS, one `Name: value` per line, sets an Authorization header, which
+ * Claude Code sends in place of its stored login's.
+ */
+const authorizes = (headers: string | undefined) =>
+	(headers ?? "").split(/\r?\n/).some((line) => {
+		const colon = line.indexOf(":");
+		return (
+			colon > 0 && line.slice(0, colon).trim().toLowerCase() === "authorization" && line.slice(colon + 1).trim()
+		);
+	});
 
 /**
  * Claude Code reads no settings files: the checkout's would let a change
@@ -655,13 +678,21 @@ const claude: Reviewer = {
 		"ANTHROPIC_VERTEX_BASE_URL",
 		"ANTHROPIC_VERTEX_PROJECT_ID",
 	],
-	// Claude Code turns a provider on only for `1`, `true`, `yes`, or `on`, so `0` or `false` routes nothing.
-	routes: (env) => [
-		...(env.ANTHROPIC_BASE_URL ? ["ANTHROPIC_BASE_URL"] : []),
-		...CLAUDE_PROVIDERS.map((provider) => `CLAUDE_CODE_USE_${provider}`).filter((name) =>
-			/^\s*(1|true|yes|on)\s*$/i.test(env[name] ?? ""),
-		),
-	],
+	routes: (env) => [...(env.ANTHROPIC_BASE_URL ? ["ANTHROPIC_BASE_URL"] : []), ...claudeProviders(env)],
+	// A T3 Code session points ANTHROPIC_BASE_URL at the host's own gateway, with no credential for it.
+	managed: (env) => enabled(env.CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST),
+	// Claude Code sends its stored OAuth login to ANTHROPIC_BASE_URL unless an API key, an auth token, or
+	// an Authorization header replaces it. A cloud provider's switch sends nothing there.
+	bareGateway: (env) =>
+		env.ANTHROPIC_BASE_URL &&
+		claudeProviders(env).length === 0 &&
+		!env.ANTHROPIC_API_KEY &&
+		!env.ANTHROPIC_AUTH_TOKEN &&
+		!authorizes(env.ANTHROPIC_CUSTOM_HEADERS)
+			? "claude would send its stored login to the gateway ANTHROPIC_BASE_URL names, which has no credential; " +
+				"set ANTHROPIC_API_KEY, ANTHROPIC_AUTH_TOKEN, or an Authorization header in ANTHROPIC_CUSTOM_HEADERS " +
+				"for the gateway (any value, for one that needs none), or unset ANTHROPIC_BASE_URL"
+			: undefined,
 	unauthorized: LOGINS.claude.unauthorized,
 	// The command's level sets its own effort, overriding `--effort`, so it is given the same one. It takes
 	// text after its target as one double-quoted argument. It runs nothing under `--json-schema`, so the
@@ -1018,14 +1049,26 @@ const pick = (env: NodeJS.ProcessEnv, names: string[]) =>
  * A CLI with no stored login, or one sent to a gateway or another provider,
  * also keeps the credentials it would read from the environment. Otherwise a
  * shell's API key never overrides a stored subscription login, so a review is
- * billed as the user's own CLI sessions are.
+ * billed as the user's own CLI sessions are. A gateway with no credential of
+ * its own would receive the stored login, so it is refused before the CLI runs.
  */
-async function prepare(harness: HarnessName, cwd: string, env: NodeJS.ProcessEnv, signal?: AbortSignal): Promise<Cli> {
+async function prepare(
+	harness: HarnessName,
+	cwd: string,
+	userEnv: NodeJS.ProcessEnv,
+	signal?: AbortSignal,
+): Promise<Cli> {
 	const reviewer = CLIS[harness];
+	// A host-managed provider's route and credentials bill the review through the host, so it runs on the stored login.
+	const managed = reviewer.managed?.(userEnv) ?? false;
+	const env = managed ? strippedEnvironment(userEnv) : userEnv;
+	const bare = reviewer.bareGateway?.(env);
+	if (bare) throw new ReviewerUnavailableError(harness, "gateway without credential", bare);
 	const connected = { ...strippedEnvironment(env), ...pick(env, reviewer.connection) };
 	const routes = reviewer.routes(env);
 	const through = routes.length > 0 ? ` through ${names(routes)}` : "";
-	const loggedOut = `${harness} is not logged in to ${profile(reviewer, env)}${through}; run \`${reviewer.login}\``;
+	const host = managed ? ", ignoring the host-managed provider's route" : "";
+	const loggedOut = `${harness} is not logged in to ${profile(reviewer, env)}${through}${host}; run \`${reviewer.login}\``;
 	const loggedIn = async (env: NodeJS.ProcessEnv) =>
 		(await run(reviewer.status, cwd, env, "", undefined, signal)).code === 0;
 	const credentials = [...reviewer.credentials, ...(routes.length > 0 ? reviewer.routeCredentials : [])].filter(

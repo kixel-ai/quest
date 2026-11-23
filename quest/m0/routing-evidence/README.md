@@ -162,7 +162,8 @@ three hosts' saved review rounds:
     eval move under its 2026-11-21 decision (rejected: all here, building
     what the port strips; all in kixel.quest, waiting weeks for the port).
   - M ends its arm on Opus high, L gains a Fable arm, and XL writes on
-    Fable: [writer table](/quest/m0/writer-table.md).
+    Fable, as [moq-dev/quest#829](https://github.com/moq-dev/quest/pull/829)
+    routes them.
   - Fable reviews L beside the pick as `quest review`'s candidate seat,
     and Astra picks for XL:
     [moq-dev/quest#831](https://github.com/moq-dev/quest/pull/831).
@@ -180,18 +181,24 @@ three hosts' saved review rounds:
     effort, and a token and cost table. Behind local review it still
     found something on 147 of 272 high-tier and 148 of 549 medium-tier
     merged PRs, 93% of its findings accepted, most likely for its model
-    differing from the mostly-Sol pick. Once moq-dev/quest#819's Opus
-    xhigh second seat runs on high heads, compare what Pullfrog still
-    finds behind it per dollar, and recommend the inline seat that would
-    replace it, on every tier, with its tally.
+    differing from the mostly-Sol pick. Once moq-dev/quest#819's second
+    seat runs on high heads (Opus xhigh, or Sonnet high when Opus wrote
+    the branch, never the writer's model), compare what Pullfrog still
+    finds behind it per dollar, and recommend retiring it once
+    [review seats](/quest/m0/review-seats.md)' one, two, or three vendor
+    seats match it, with its tally.
   - Replay bench? ✅ Not yet (rejected: build it in kixel.quest now). It
     would rerun merged L and XL quests from their base with each writer,
     paired, deciding in days for about $6k a comparison what a live arm
     needs about 100 PRs an arm for.
   - XL? ✅ No splitting rule: the maintainer judged XL quests harder, not
     bigger (rejected: split XL at plan time; measure XL against split
-    work first). Tally XL under Fable against this audit's Opus baseline:
-    11 merged, 82% later culprits, 7.5 rounds.
+    work first). Tally XL under Fable against this audit's baseline: 11
+    merged, 82% later culprits, 7.5 rounds. That baseline is not all Opus:
+    the maintainer has implemented and reviewed XL quests by hand with
+    Fable, and those sessions' `Implementer:` lines may say Opus or
+    `unknown`, so read each XL PR's sessions for its model before crediting
+    either.
   - Pace: report each Fable arm's fall-throughs, quests that started on
     Fable but fell to Opus at its usage limit. When they exceed a fifth of
     the L arm's quests, recommend running a quarter of L on Fable instead.

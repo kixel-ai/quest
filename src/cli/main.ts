@@ -390,7 +390,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"(linux, macos, windows) under the quest's ## Hosts, empty when it runs anywhere, and models ranks the {harness, model, effort} " +
 				"entries that write the quest: its size's list, or the next size's while a Maintainer: item under its " +
 				"## Waiting leaves a decision open (quest models lists them). While the writer A/B runs, arm is A or B for " +
-				"a size that runs one, and null for L or a quest routed up for an open Maintainer: item, and models opens with that arm's entry; the agent that runs it " +
+				"a size that runs one, and null for M, XL, or a quest routed up for an open Maintainer: item, and models opens with that arm's entry; the agent that runs it " +
 				"records the arm on its Implementer line.\n\n" +
 				"--unclaimed ranks the fetched upstream default branch's tree instead of the checkout, then drops " +
 				"quests someone holds: a quest branch upstream, or an open PR from that branch in any repository. A " +
@@ -543,10 +543,15 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		.summary("Claim a ready quest with a draft PR, or release that claim")
 		.description(
 			"Claim a ready quest: push an empty claim commit, built on the upstream default branch, to the quest's " +
-				"branch (its path without .md), then open a draft PR from it right away. Switches the " +
-				"checkout to the claim on a new local branch, or fast-forwards that branch when it is checked out, " +
-				"and prints the PR URL, or the branch off GitHub. A local branch left from an earlier attempt is not " +
-				"moved: the claim still succeeds, with a warning to switch to it and merge the claim commit.\n\n" +
+				"branch (its path without .md), then open a draft PR from it right away, and print its URL, or the " +
+				"branch off GitHub. A checkout on the default branch, such as the main clone, stays there: a second " +
+				"line prints the directory to work in, the one matching where it ran, in a worktree on the claim's " +
+				"branch: the one that already has the branch checked out, else a new one under .worktrees/ that " +
+				"`quest worktree` owns. Whether a checkout is on the default branch is read from the repository the " +
+				"claim was pushed to, a fork's own when it differs from its upstream's. Any other " +
+				"checkout switches to the claim on a new local branch, or fast-forwards that branch when it is " +
+				"checked out. A local branch left from an earlier attempt is not moved: the claim still succeeds, " +
+				"with a warning to merge the claim commit into it.\n\n" +
 				"Readiness comes from the fetched upstream default branch's tree, not the checkout. Fails on a tree " +
 				"quest check rejects, which can hide a blocker. Refuses a blocked quest, one missing from the " +
 				"upstream default branch, and one already held: a branch upstream or an open PR from that branch in " +
@@ -600,6 +605,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				(started) => {
 					if (typeof started === "number") return started;
 					print(started.url ?? started.branch);
+					if (started.worktree !== null) print(started.worktree);
 				},
 			);
 		});
@@ -1429,7 +1435,10 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 			if (options.arm !== undefined) {
 				if (options.writer !== undefined) throw new UsageError("give --writer or --arm, not both");
 				const arms = ARMS[size];
-				if (!arms) throw new UsageError(`${size} runs no writer arms`);
+				if (!arms)
+					throw new UsageError(
+						`${size} runs no writer arms; an iterate on a PR an earlier arm wrote runs the model and effort its Implementer line records`,
+					);
 				entries = [arms[options.arm]];
 			} else if (options.writer !== undefined) {
 				const entry = writerAt(size, options.writer);
@@ -1686,7 +1695,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				`model that changed it last. Each size ranks its reviewers (harness, model, effort): ${reviewers}. The ` +
 				"first whose model is not avoided reviews. One that cannot run, as its CLI or provider reports before any " +
 				"finding is saved, passes the round to the next whose model is not avoided: a CLI that is not installed, " +
-				"logged out, or has its login rejected passes over every model of that CLI, and a model at its usage limit " +
+				"logged out, or has its login rejected, or Claude Code sent to a gateway with no credential, passes over every model of that CLI, and a model at its usage limit " +
 				"only itself; the run's report and record name each it passed over and why. A reviewer --harness, --model, " +
 				"or --effort names never passes the round on. Beside the reviewer, on the same head in its own session, runs the shadow, " +
 				"which follows the round to the reviewer it passes to: " +
@@ -1722,7 +1731,11 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"stored login; the credential the CLI reads from the environment (ANTHROPIC_API_KEY, ANTHROPIC_AUTH_TOKEN, " +
 				"or CLAUDE_CODE_OAUTH_TOKEN for Claude Code, CODEX_API_KEY or CODEX_ACCESS_TOKEN for Codex) passes only " +
 				"when the CLI has no stored login or a gateway or provider is set, and a provider's own keys " +
-				"(ANTHROPIC_AWS_API_KEY, ANTHROPIC_FOUNDRY_API_KEY, ANTHROPIC_FOUNDRY_AUTH_TOKEN) only while one is set. A logged-out error names the profile it checked, " +
+				"(ANTHROPIC_AWS_API_KEY, ANTHROPIC_FOUNDRY_API_KEY, ANTHROPIC_FOUNDRY_AUTH_TOKEN) only while one is set. " +
+				"Claude Code never sends its stored login to a gateway: with ANTHROPIC_BASE_URL set and no cloud provider, it needs " +
+				"ANTHROPIC_API_KEY, ANTHROPIC_AUTH_TOKEN, or an Authorization header in ANTHROPIC_CUSTOM_HEADERS, else it cannot run. " +
+				"Under CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST, as in a T3 Code session, it drops every Claude Code gateway, provider, and " +
+				"credential in the environment, since the host set them, and reviews on the stored login. A logged-out error names the profile it checked, " +
 				"CLAUDE_CONFIG_DIR or CODEX_HOME, or the default when unset, and any gateway or provider.\n\n" +
 				"Every turn reviews only the branch's own change, from the merge base of HEAD with the base's tip, so " +
 				"a branch behind its base draws no findings on the base's newer code. The first round runs the " +

@@ -43,7 +43,7 @@ import {
 } from "../src/cli/gate";
 import { forwards, foregroundStat, statProcess } from "../src/cli/interrupt";
 import { gateBoundary, main } from "../src/cli/main";
-import { measuredRun, alive as ownerAlive, questScope } from "../src/cli/supervise";
+import { measuredRun, alive as ownerAlive, questScope, START_LIMIT } from "../src/cli/supervise";
 import { readWaits } from "../src/cli/waits";
 import { created, onTerminal, run, signalled, tempDir } from "./fixture";
 
@@ -1120,6 +1120,91 @@ describe.runIf(process.platform === "linux")("a systemd scope", () => {
 		} finally {
 			warn.mockRestore();
 		}
+	});
+
+	/**
+	 * Run through a `systemd-run` that never starts the scope, as a stuck user manager leaves it,
+	 * and a `systemctl` that records its arguments and, when `cancels`, ends that `systemd-run` as
+	 * cancelling its start job does; otherwise it hangs, as against a manager too stuck to answer.
+	 */
+	async function neverStarted(cancels: boolean, interrupt: boolean) {
+		const dir = tempDir();
+		const bin = join(dir, "bin");
+		const pid = join(dir, "pid");
+		const args = join(dir, "args");
+		mkdirSync(bin);
+		writeFileSync(join(bin, "systemd-run"), `#!/bin/sh\necho $$ > ${quote(pid)}\nexec sleep 1000\n`);
+		writeFileSync(
+			join(bin, "systemctl"),
+			`#!/bin/sh\necho $$ > ${quote(join(dir, "cancel"))}\necho "$@" > ${quote(args)}\n${cancels ? `kill "$(cat ${quote(pid)})"` : "exec sleep 1000"}\n`,
+		);
+		chmodSync(join(bin, "systemd-run"), 0o755);
+		chmodSync(join(bin, "systemctl"), 0o755);
+		const unit = `quest-gate-${randomUUID()}.scope`;
+		const { stop, cancel } = cancellation();
+		const tick = () => new Promise((resolve) => setImmediate(resolve));
+		vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+		try {
+			let settled = false;
+			const result = measuredRun(unit, process.cwd(), ["/bin/sh", "-c", "exit 0"], {
+				cancel,
+				within: null,
+				env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
+			}).then(
+				(measured) => measured,
+				(error: Error) => error,
+			);
+			void result.then(() => (settled = true));
+			while (!existsSync(pid)) await tick();
+			if (interrupt) stop.abort("SIGINT");
+			if (!(interrupt && cancels)) {
+				vi.advanceTimersByTime(START_LIMIT - 1);
+				for (let i = 0; i < 100; i++) await tick();
+				expect(settled).toBe(false);
+				vi.advanceTimersByTime(1);
+			}
+			const outcome = await result;
+			while (!existsSync(args)) await tick();
+			const launcher = Number(readFileSync(pid, "utf8"));
+			return {
+				unit,
+				outcome,
+				args: readFileSync(args, "utf8").trim(),
+				launcherAlive: ownerAlive({ host: hostname(), pid: launcher }),
+			};
+		} finally {
+			vi.useRealTimers();
+			for (const left of [pid, join(dir, "cancel")])
+				try {
+					process.kill(Number(readFileSync(left, "utf8")), "SIGKILL");
+				} catch {
+					// Never started, or already gone.
+				}
+		}
+	}
+
+	test("fails a run whose scope never starts, cancelling its start job without waiting on it", async () => {
+		const { unit, outcome, args, launcherAlive } = await neverStarted(false, false);
+		expect(outcome).toEqual(
+			new Error(
+				`the systemd user manager did not start ${unit} within 60 seconds; see \`systemctl --user list-jobs\``,
+			),
+		);
+		expect(args).toBe(`--user stop --no-block ${unit}`);
+		// Killing it would free its PID for the queued start job to adopt.
+		expect(launcherAlive).toBe(true);
+	});
+
+	test("an interrupt before the scope starts cancels its start job", async () => {
+		const { unit, outcome, args } = await neverStarted(true, true);
+		expect(args).toBe(`--user stop --no-block ${unit}`);
+		expect(outcome).toEqual({ status: 130, cpu: null });
+	});
+
+	test("an interrupted run whose start job cannot be cancelled ends at the start limit", async () => {
+		const { outcome, launcherAlive } = await neverStarted(false, true);
+		expect(outcome).toEqual({ status: 130, cpu: null });
+		expect(launcherAlive).toBe(true);
 	});
 
 	test("reads a short command's CPU however soon systemd removes its scope", async () => {
