@@ -575,14 +575,19 @@ export function agyCost(model: string, usage: Usage[], at: Date): number | null 
  * The cost of `scored`'s sessions: each agy seat's reported tokens at Google's list price on `at`'s day, and the
  * others' sessions and their descendants, such as the sub-session Codex runs its review in, among those token-max
  * exported. It is null when a seat needs token-max and it is not installed, and a lower bound when a seat's session is
- * missing, one is incomplete, or an agy model has no known price.
+ * missing, one is incomplete, or an agy seat reported no usage for a turn or runs a model without a known price.
  */
 export function priced(exported: Session[] | null, scored: Scored[], at: Date): EvalReport["cost"] {
 	const all = scored.flatMap(({ seats }) => seats);
 	const agy = all.filter((seat) => seat.reviewer === "agy");
 	const others = all.filter((seat) => seat.reviewer !== "agy");
 	if (exported === null && others.length > 0) return null;
-	const costs = agy.map((seat) => agyCost(seat.model, seat.usage, at));
+	// A seat runs a review turn and a findings turn; one that reported no usage is unpriced.
+	const costs = agy.map((seat) =>
+		seat.usage.some((u) => u.turn === "review") && seat.usage.some((u) => u.turn === "findings")
+			? agyCost(seat.model, seat.usage, at)
+			: null,
+	);
 	const id = (harness: string, session: string | null) => JSON.stringify([harness, session]);
 	const seats = others.map((seat) => id(seat.reviewer, seat.session));
 	const ours = new Set(seats);

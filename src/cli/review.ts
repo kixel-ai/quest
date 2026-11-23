@@ -11,7 +11,7 @@
 // refuted with evidence does not recur.
 import { execFile, spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, posix } from "node:path";
 import { promisify } from "node:util";
 
@@ -541,7 +541,7 @@ export interface Context {
 	openaiBaseUrl?: string;
 	/**
 	 * The tools Claude may call, comma-separated; a reviewer's by default. Empty asks a question about data alone,
-	 * which Codex and Antigravity answer with their tools off.
+	 * which Codex answers with its tools off.
 	 */
 	tools?: string;
 }
@@ -550,11 +550,8 @@ interface Turn {
 	argv: string[];
 	stdin: string;
 	env: NodeJS.ProcessEnv;
-	/**
-	 * Files the CLI reads from its working directory, by path within it. A turn with them runs in a new private
-	 * directory holding only them, outside any repository, instead of the checkout.
-	 */
-	workspace?: Record<string, string>;
+	/** A private directory outside any repository the turn runs in instead of the checkout, removed once it ends. */
+	workspace?: string;
 }
 
 interface Reply {
@@ -580,6 +577,8 @@ interface Reader {
 interface Reviewer {
 	/** Exits non-zero when the CLI is logged out. */
 	status: string[];
+	/** Whether the status check runs in an empty workspace, as a CLI that loads the checkout's configuration needs. */
+	isolated?: true;
 	/** How the user logs in. */
 	login: string;
 	/** The variable naming the configuration directory, and so the stored login, the status check reads, if any. */
@@ -981,17 +980,16 @@ const AGY_REVIEW =
 /**
  * The reviewer agent: its tool list replaces every tool Antigravity offers, and it inherits none of the user's hooks,
  * rules, plugins, or MCP servers. Its body is the system prompt. Antigravity 1.5.14 hands an agent no search or
- * directory tool, so `view_file` is all it reads with; `finish` returns a `--json-schema` reply. A question about
- * data alone gets `finish` only.
+ * directory tool, so `view_file` is all it reads with; `finish` returns a `--json-schema` reply.
  */
 function agyAgent(context: Context): string {
-	const tools = context.tools === "" ? ["finish"] : ["view_file", "finish"];
 	return [
 		"---",
 		`name: ${AGY_AGENT}`,
 		"description: Reviews a change by reading its files.",
 		"tools:",
-		...tools.map((tool) => `  - ${tool}`),
+		"  - view_file",
+		"  - finish",
 		"mainAgent: true",
 		"subagent: false",
 		"inheritMcp: false",
@@ -1007,24 +1005,28 @@ function agyAgent(context: Context): string {
  * One Antigravity turn, run from a workspace of its own outside the checkout, whose agent configuration Antigravity
  * would otherwise load, and whose files its permission checks would refuse to read without approval, which print mode
  * cannot give, so permissions are skipped and the agent's tool list and `AGY_SETTINGS` bound it. With no shell, the
- * workspace holds what `git` would show: the checkout's tracked files, and the diff of each range the prompt names.
- * The prompt arrives on stdin, since an argument holds no more than 128 KiB on Linux.
+ * workspace holds what `git` would show: the checkout's tracked files, and the diff of each range the prompt names,
+ * each named by absolute path, since a resumed conversation still sees the earlier turn's workspace, now removed. The
+ * prompt arrives on stdin, since an argument holds no more than 128 KiB on Linux.
  */
 function agyTurn(context: Context, prompt: string, flags: string[]): Turn {
-	const workspace: Record<string, string> = { [`.agents/agents/${AGY_AGENT}.md`]: agyAgent(context) };
-	let content = prompt;
-	if (context.tools !== "") {
-		workspace["files.txt"] = git(context.root, ["ls-files"]);
-		const diffs = context.ranges.map((range, index) => {
-			const name = `diff-${index + 1}.diff`;
-			workspace[name] = git(context.root, ["diff", "--no-ext-diff", "--no-textconv", "--no-color", ...range.split(" ")]);
-			return `, and \`${name}\` holds \`git diff ${range}\``;
-		});
-		content =
-			`You have no shell, so run no command. The checkout under review is ${context.root}, at the head: read its ` +
-			"files by absolute path. Your working directory holds what commands would show: `files.txt` lists the " +
-			`checkout's tracked files${diffs.join("")}.\n\n${prompt}`;
-	}
+	const files: Record<string, string> = { [`.agents/agents/${AGY_AGENT}.md`]: agyAgent(context) };
+	files["files.txt"] = git(context.root, ["ls-files"]);
+	for (const [index, range] of context.ranges.entries())
+		files[`diff-${index + 1}.diff`] = git(context.root, [
+			"diff",
+			"--no-ext-diff",
+			"--no-textconv",
+			"--no-color",
+			...range.split(" "),
+		]);
+	// Created last, since a turn that is never run leaves its workspace behind.
+	const dir = workspace(files);
+	const content =
+		`You have no shell, so run no command. The repository's checkout is ${context.root}: read its files by ` +
+		`absolute path. \`${dir}/files.txt\` lists its tracked files` +
+		context.ranges.map((range, index) => `, and \`${dir}/diff-${index + 1}.diff\` holds \`git diff ${range}\``).join("") +
+		`.\n\n${prompt}`;
 	return {
 		argv: [
 			"agy",
@@ -1048,7 +1050,7 @@ function agyTurn(context: Context, prompt: string, flags: string[]): Turn {
 		],
 		stdin: `${JSON.stringify({ event: "user", message: { role: "user", content } })}\n`,
 		env: {},
-		workspace,
+		workspace: dir,
 	};
 }
 
@@ -1060,6 +1062,7 @@ function agyTurn(context: Context, prompt: string, flags: string[]): Turn {
  */
 const agy: Reviewer = {
 	status: ["agy", "models"],
+	isolated: true,
 	login: "agy",
 	credentials: [],
 	routeCredentials: [],
@@ -1071,16 +1074,21 @@ const agy: Reviewer = {
 	resume: (context, session, prompt) =>
 		agyTurn(context, prompt, ["--conversation", session, "--json-schema", context.schemaFile]),
 	ask: (context, _session, prompt) => agyTurn(context, prompt, ["--json-schema", context.schemaFile]),
-	// The conversation is named first, and the last line holds the result, its usage, and any denied action, which
-	// ends a print-mode turn early as though it succeeded.
+	// The conversation is named first, each model step that finishes reports its usage, and the last line holds the
+	// result and any denied action, which ends a print-mode turn early as though it succeeded. The result's usage sums
+	// the whole conversation, every earlier turn's included, so the turn's own is its steps'.
 	reader() {
 		let session: string | undefined;
 		let result: Record<string, unknown> | undefined;
+		const steps = new Map<unknown, Record<string, unknown>>();
 		return {
 			line(line) {
 				const event = json(line);
 				if (event?.event === "init") session = text(event.conversation_id) ?? session;
 				if (event?.event === "result") result = record(event.result);
+				const step = record(event?.step_update);
+				const usage = record(step?.usage);
+				if (usage !== undefined) steps.set(step!.step_index, usage);
 			},
 			reply(_code, stderr) {
 				const limit = (failure: string) =>
@@ -1095,14 +1103,14 @@ const agy: Reviewer = {
 						: denied.length > 0
 							? `agy denied ${names(denied)}, which ended the turn`
 							: undefined;
-				const usage = record(result.usage) ?? {};
-				const cached = count(usage.cache_read_tokens);
+				const sum = (key: string) => [...steps.values()].reduce((total, usage) => total + count(usage[key]), 0);
+				const cached = sum("cache_read_tokens");
 				return {
 					session: text(result.conversation_id) || session,
 					text: text(result.response),
 					structured: result.structured_output,
 					// Its input tokens leave out the cached ones; its output tokens include thinking.
-					usage: { input: count(usage.input_tokens) + cached, cached, output: count(usage.output_tokens) },
+					usage: { input: sum("input_tokens") + cached, cached, output: sum("output_tokens") },
 					error,
 					limited: error === undefined ? undefined : limit(`${error}\n${stderr}`),
 				};
@@ -1219,12 +1227,12 @@ function profile(reviewer: Reviewer, env: NodeJS.ProcessEnv): string {
 }
 
 /**
- * A new private directory holding `files`, for a turn's CLI to run in: under the user's agent directory, which no
- * other user can write, and outside any repository, since Antigravity loads the agent configuration of every
- * directory from its working directory up to the one holding `.git`.
+ * A new private directory holding `files`, for a CLI to run in: under the user's agent directory, which no other user
+ * can write, and outside any repository, since Antigravity loads the agent configuration of every directory from its
+ * working directory, symlinks resolved, up to the one holding `.git`.
  */
 function workspace(files: Record<string, string>): string {
-	const dir = mkdtempSync(join(privateDirectory(agentDirectory()), "review-"));
+	const dir = realpathSync(mkdtempSync(join(privateDirectory(agentDirectory()), "review-")));
 	try {
 		for (let up = dir; up !== dirname(up); up = dirname(up))
 			if (existsSync(join(up, ".git")))
@@ -1276,8 +1284,14 @@ async function prepare(
 	const through = routes.length > 0 ? ` through ${names(routes)}` : "";
 	const host = managed ? ", ignoring the host-managed provider's route" : "";
 	const loggedOut = `${harness} is not logged in${profile(reviewer, env)}${through}${host}; run \`${reviewer.login}\``;
-	const loggedIn = async (env: NodeJS.ProcessEnv) =>
-		(await run(reviewer.status, cwd, env, "", undefined, signal)).code === 0;
+	const loggedIn = async (env: NodeJS.ProcessEnv) => {
+		const dir = reviewer.isolated ? workspace({}) : cwd;
+		try {
+			return (await run(reviewer.status, dir, env, "", undefined, signal)).code === 0;
+		} finally {
+			if (dir !== cwd) rmSync(dir, { recursive: true, force: true });
+		}
+	};
 	const credentials = [...reviewer.credentials, ...(routes.length > 0 ? reviewer.routeCredentials : [])].filter(
 		(name) => set(env[name]),
 	);
@@ -1322,12 +1336,11 @@ export const RETRIED_429 = /exceeded retry limit, last status: 429\b/;
 /** Run one reviewer turn on `model`, failing on any error it reports, and as logged out on an authentication error. */
 async function turn(cli: Cli, call: Turn, cwd: string, model: string): Promise<Reply> {
 	const reader = cli.reviewer.reader();
-	const dir = call.workspace && workspace(call.workspace);
 	let ran: { code: number; stderr: string };
 	try {
-		ran = await run(call.argv, dir ?? cwd, { ...cli.env, ...call.env }, call.stdin, reader, cli.signal);
+		ran = await run(call.argv, call.workspace ?? cwd, { ...cli.env, ...call.env }, call.stdin, reader, cli.signal);
 	} finally {
-		if (dir) rmSync(dir, { recursive: true, force: true });
+		if (call.workspace) rmSync(call.workspace, { recursive: true, force: true });
 	}
 	const { code, stderr } = ran;
 	const reply = reader.reply(code, stderr);
@@ -2173,8 +2186,8 @@ export async function ask<T>(entries: readonly ReviewModel[], question: Question
 }
 
 /**
- * Why no model answered: the usage limit that resets first when every one hit its own, so a caller waits for the
- * earliest, else each model's reason.
+ * Why no model answered: the usage limit that resets first when every one whose CLI is installed hit its own, so a
+ * caller waits for the earliest, else each model's reason.
  */
 function unanswered(
 	failures: (ReviewInputError | ReviewerUnavailableError)[],
@@ -2182,8 +2195,11 @@ function unanswered(
 	spent: Answer<unknown>["spent"],
 ): Error {
 	const limits = failures.filter((each) => each instanceof ReviewLimitError);
+	const installed = failures.filter(
+		(each) => !(each instanceof ReviewerUnavailableError && each.reason === "not installed"),
+	);
 	// Every model at its limit replied to nothing, so nothing was spent.
-	if (limits.length > 0 && limits.length === failures.length)
+	if (limits.length > 0 && limits.length === installed.length)
 		return limits.sort((a, b) => (a.until ?? Infinity) - (b.until ?? Infinity))[0]!;
 	return new UnansweredError(`no ${who} could ${task}: ${failures.map((each) => each.message).join("; ")}`, spent);
 }

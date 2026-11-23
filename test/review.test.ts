@@ -1104,6 +1104,9 @@ fakes("agy reviews from a workspace of its own, reading the change from files, t
 
 	const [status, first, second] = s.calls();
 	expect(status!.argv).toEqual(["models"]);
+	// Even the status check runs outside the checkout.
+	expect(status!.cwd.startsWith(s.repo)).toBe(false);
+	expect(existsSync(status!.cwd)).toBe(false);
 	const mergeBase = git(s.repo, "merge-base", "origin/main", "HEAD");
 	const head = git(s.repo, "rev-parse", "HEAD");
 	expect(first!.argv).not.toContain("--json-schema");
@@ -1133,8 +1136,10 @@ fakes("agy reviews from a workspace of its own, reading the change from files, t
 		expect(agent).not.toContain("HEAD-ROOT rule");
 		expect(call.workspace!["files.txt"]!.split("\n")).toContain("src/lib.ts");
 		expect(call.workspace!["diff-1.diff"]).toContain("+export const x = 2;");
-		expect(call.stdin).toContain(`The checkout under review is ${s.repo}`);
-		expect(call.stdin).toContain(`\`diff-1.diff\` holds \`git diff ${mergeBase}..${head}\``);
+		expect(call.stdin).toContain(`The repository's checkout is ${s.repo}`);
+		// A resumed conversation still names the first turn's removed workspace, so each file is named in full.
+		expect(call.stdin).toContain(`\`${call.cwd}/files.txt\` lists its tracked files`);
+		expect(call.stdin).toContain(`\`${call.cwd}/diff-1.diff\` holds \`git diff ${mergeBase}..${head}\``);
 		expect(Object.keys(call.env).filter((name) => /^(ANTIGRAVITY|AGY)_/.test(name))).toEqual([]);
 	}
 
@@ -1148,7 +1153,7 @@ fakes("agy reviews from a workspace of its own, reading the change from files, t
 	const resumed = s.calls().at(-1)!;
 	expect(resumed.argv[resumed.argv.indexOf("--conversation") + 1]).toBe("conversation-1");
 	const now = git(s.repo, "rev-parse", "HEAD");
-	expect(resumed.stdin).toContain(`\`diff-2.diff\` holds \`git diff ${head} ${now}\``);
+	expect(resumed.stdin).toContain(`\`${resumed.cwd}/diff-2.diff\` holds \`git diff ${head} ${now}\``);
 	expect(resumed.workspace!["diff-2.diff"]).toContain("+export const x = 4;");
 });
 
@@ -1660,6 +1665,15 @@ fakes(
 			stdout: "",
 			stderr: `error: codex hit its usage limit; resets ${codexReset}\n`,
 		});
+		// A classifier whose CLI is not installed stands aside.
+		const path = process.env.PATH;
+		const without = join(s.bin, "..", "no-agy");
+		mkdirSync(without);
+		for (const name of ["claude", "codex"]) symlinkSync(join(s.bin, name), join(without, name));
+		symlinkSync(execFileSync("which", ["git"], { encoding: "utf8" }).trim(), join(without, "git"));
+		vi.stubEnv("PATH", without);
+		expect(await run("claude-limited,codex-limited")).toMatchObject({ code: 3, stdout: "" });
+		vi.stubEnv("PATH", path);
 		// Otherwise it names why each failed.
 		const failed = await run("claude-rejected,codex-limited,agy-rejected");
 		expect(failed.code).toBe(2);
