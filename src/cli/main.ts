@@ -1690,7 +1690,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				`model that changed it last. Each size ranks its reviewers (harness, model, effort): ${reviewers}. The ` +
 				"first whose model is not avoided reviews. One that cannot run, as its CLI or provider reports before any " +
 				"finding is saved, passes the round to the next whose model is not avoided: a CLI that is not installed, " +
-				"logged out, or has its login rejected, or Claude Code sent to a gateway with no credential, passes over every model of that CLI, and a model at its usage limit " +
+				"logged out, or has its login rejected, or sent to a gateway with no credential, passes over every model of that CLI, and a model at its usage limit " +
 				"only itself; the run's report and record name each it passed over and why. A reviewer --harness, --model, " +
 				"or --effort names never passes the round on. Beside the reviewer, on the same head in its own session, runs the shadow, " +
 				"which follows the round to the reviewer it passes to: " +
@@ -1723,7 +1723,9 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"(ANTHROPIC_AWS_API_KEY, ANTHROPIC_FOUNDRY_API_KEY, ANTHROPIC_FOUNDRY_AUTH_TOKEN) only while one is set. " +
 				"Claude Code never sends its stored login to a gateway: with ANTHROPIC_BASE_URL set and no cloud provider, it needs " +
 				"ANTHROPIC_API_KEY, ANTHROPIC_AUTH_TOKEN, or an Authorization header in ANTHROPIC_CUSTOM_HEADERS, else it cannot run. " +
-				"Under CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST, as in a T3 Code session, it drops every Claude Code gateway, provider, and " +
+				"Nor does Codex: with OPENAI_BASE_URL set, it needs CODEX_API_KEY or CODEX_ACCESS_TOKEN, and skips its login check, " +
+				"which never asks the gateway. " +
+				"Under CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST, as in a T3 Code session, quest review drops every Claude Code gateway, provider, and " +
 				"credential in the environment, since the host set them, and reviews on the stored login. A logged-out error names the profile it checked, " +
 				"CLAUDE_CONFIG_DIR or CODEX_HOME, or the default when unset, and any gateway or provider.\n\n" +
 				"Every turn reviews only the branch's own change, from the merge base of HEAD with the base's tip, so " +
