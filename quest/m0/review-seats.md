@@ -37,16 +37,18 @@ Decided 2026-11-22 (maintainer, `/quest-plan` follow-up of
   three: Astra high, Gemini, and a Claude model other than the writer's,
   such as Opus xhigh for a Fable-written XL quest. The Claude seat never
   takes the writer's model: on an Opus-written head it is Fable, as
-  moq-dev/quest#819 already seats Fable xhigh when Opus wrote a high head.
+  moq-dev/quest#819's interim second seat is on a high head.
 - ✅ No seat is ever weaker than the latest writer, at every size and tier
   (maintainer, 2026-11-22, on
   [moq-dev/quest#819](https://github.com/moq-dev/quest/pull/819#issuecomment-7087183777):
   "don't have sonnet review opus, that's extremely dumb"; rejected: high
   risk only). Sonnet is weaker than every other model, so it reviews only
   Sonnet's work, and Sol is weaker than Fable and Astra. moq-dev/quest#819
-  puts the rule in `weaker()` in `src/cli/models.ts`, and it rules out the
-  Sonnet entries [reviewer table](/quest/m0/reviewer-table.md) lists for
-  Opus-written work.
+  puts the rule in `weaker()` in `src/cli/models.ts`. Its high-tier second
+  seat is interim: the reviewer rungs quest that
+  [moq-dev/quest#831](https://github.com/moq-dev/quest/pull/831) adds draws
+  each round's seats from rungs instead of fixed per-vendor models, while the
+  tier still sets how many seats run.
 - Pullfrog retires on evidence, as [routing evidence](/quest/m0/routing-evidence/README.md)
   records: compare what it still finds behind these seats per dollar, from
   its run logs' cost tables.

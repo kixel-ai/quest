@@ -32,7 +32,7 @@ import {
 import { HARNESSES, type HarnessName, LINE_LIMIT, LOGINS, boundedLines, strippedEnvironment } from "./agent";
 import { discoveryEnv, git } from "./git";
 import { LIMIT, codexReset } from "./limit";
-import { CLASSIFIERS, DEFAULT_SIZE, type Listing, type Model, REVIEWERS, weaker } from "./models";
+import { CLASSIFIERS, DEFAULT_SIZE, type Listing, type Model, REVIEWERS, unfit } from "./models";
 import { programEnvironment, requireProgram } from "./program";
 import type { recorded } from "./models-record";
 import { save } from "./worktree";
@@ -305,22 +305,22 @@ export interface Choice {
 	harness?: HarnessName;
 	model?: string;
 	effort?: string;
-	/** The models never to pick; without any, the latest writer's is avoided. */
+	/** The models never to pick, with every model weaker than them; without any, the latest writer's is avoided. */
 	exclude?: string[];
 }
 
 /**
- * Whether an entry's model is the one to avoid: one of `exclude`, or else the
- * latest writer. That is the model of the last Implementer line in the PR's
- * `## Models` record (`latest`). When it names none or an `unknown` model, it is
- * the harness running this command, which is usually the session that just
- * pushed, unless `--harness` names the reviewer, which then avoids nothing.
+ * Whether an entry's model is one to avoid: one of `exclude`, or else the
+ * latest writer, or one weaker than either. The latest writer is the model of
+ * the last Implementer line in the PR's `## Models` record (`latest`). When it
+ * names none or an `unknown` model, it is the harness running this command,
+ * which is usually the session that just pushed, unless `--harness` names the
+ * reviewer, which then avoids nothing.
  */
 export function authored(choice: Choice, env: NodeJS.ProcessEnv, latest?: string): (entry: Model) => boolean {
-	const exclude = choice.exclude ?? [];
-	if (exclude.length > 0) return (entry) => exclude.includes(entry.model);
-	if (latest !== undefined && latest !== "unknown")
-		return (entry) => entry.model === latest || weaker(entry.model, latest);
+	const exclude = (choice.exclude ?? []).map(unfit);
+	if (exclude.length > 0) return (entry) => exclude.some((each) => each(entry));
+	if (latest !== undefined && latest !== "unknown") return unfit(latest);
 	if (choice.harness !== undefined) return () => false;
 	const running = runningHarness(env);
 	return (entry) => entry.harness === running;
@@ -328,14 +328,14 @@ export function authored(choice: Choice, env: NodeJS.ProcessEnv, latest?: string
 
 /**
  * The reviewer for a PR of `size`: the first entry of its list whose model
- * is not avoided, or `--harness`'s entry, with `--model` and `--effort`
- * overriding its model and effort. An override never brings back an avoided
- * model.
+ * is not avoided, or `--harness`'s first such entry, else its first, with
+ * `--model` and `--effort` overriding its model and effort. An override never
+ * brings back an avoided model.
  */
 export function pickReviewer(size: Listing, choice: Choice, avoided: (entry: Model) => boolean): Model {
 	const list = REVIEWERS[size];
-	const entry =
-		choice.harness === undefined ? list.find((e) => !avoided(e)) : list.find((e) => e.harness === choice.harness);
+	const ours = list.filter((e) => choice.harness === undefined || e.harness === choice.harness);
+	const entry = ours.find((e) => !avoided(e)) ?? (choice.harness === undefined ? undefined : ours[0]);
 	if (entry === undefined && choice.harness === undefined) {
 		const models = [...new Set(list.map((e) => e.model))].join(", ");
 		throw new ReviewInputError(`every ${size} reviewer (${models}) is avoided; pass --harness and --model`);
@@ -354,6 +354,10 @@ export function pickReviewer(size: Listing, choice: Choice, avoided: (entry: Mod
 
 /** The list that reviews a head of `tier` on a PR of `size`: `high` for a high head, whatever its size. */
 export const listing = (size: Size, tier: Tier): Listing => (tier === "high" ? "high" : size);
+
+/** The reviewers that may take a high head's second seat beside `pick`, ranked: the high list's from another vendor. */
+export const secondsTo = (pick: Model, avoided: (entry: Model) => boolean): Model[] =>
+	REVIEWERS.high.filter((each) => !avoided(each) && each.harness !== pick.harness);
 
 /**
  * The reviewers a run tries in turn, each when those before it cannot run: every entry of the size's list whose
@@ -2065,9 +2069,9 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 	let unshadowed = false;
 	// A login or a missing CLI rules out its harness's every model; a usage limit only the model that hit it.
 	const down = new Map<HarnessName, ReviewerUnavailableError>();
-	// Old shadows' models that could not run this run, so their findings pass to the pick's model.
-	const shadowOut = new Set<string>();
-	const usable = (model: Model) => !avoided(model) && !down.has(model.harness) && !shadowOut.has(model.model);
+	// Models passed over this run, which no later seat falls to: an old shadow's findings pass to the pick's model.
+	const out = new Set<string>();
+	const usable = (model: Model) => !avoided(model) && !down.has(model.harness) && !out.has(model.model);
 	const plan = (routed: Model, second: Model | null = null) =>
 		seatsFor({
 			routed,
@@ -2157,21 +2161,17 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 	unshadowed = overridden(before, override).tier === "high";
 	const skipped: Skip[] = [];
 	const messages: string[] = [];
-	// Models passed over this run, which the second reviewer never falls to.
-	const secondOut = new Set<string>();
 	// The second reviewer: the first of the high list from a vendor other than the pick's that can run. A list with
 	// no such model, as when every other one is avoided, cannot review a high head; one whose others cannot run is
 	// out. It comes from the whole list, since --model or --effort narrows only the pick.
-	const pool = (size: Listing) => (auto ? REVIEWERS[size].filter((each) => !avoided(each)) : candidates);
-	const top = "high";
 	const secondTo = (routed: Model): Model => {
-		const others = pool(top).filter((each) => each.harness !== routed.harness);
+		const others = secondsTo(routed, avoided);
 		if (others.length === 0)
 			throw new ReviewInputError(
-				`a high-risk head needs a second reviewer from a vendor other than ${routed.harness}'s, and every such model of the ${top} list is avoided; name the latest writer in the PR's ## Models record or with --exclude-model`,
+				`a high-risk head needs a second reviewer from a vendor other than ${routed.harness}'s, and every such model of the high list is avoided; name the latest writer in the PR's ## Models record or with --exclude-model`,
 			);
-		const next = others.find((each) => !secondOut.has(each.model) && !down.has(each.harness));
-		if (next === undefined) throw new ReviewOutageError(top, skipped, messages);
+		const next = others.find((each) => !out.has(each.model) && !down.has(each.harness));
+		if (next === undefined) throw new ReviewOutageError("high", skipped, messages);
 		return next;
 	};
 	// --model or --effort changes only the pick, so a high head still gets its second reviewer; --harness's runs alone.
@@ -2183,12 +2183,11 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 	const secondFor = (routed: Model): Model | null => {
 		if (!high(before) && !unsettledSecond) return null;
 		if (!high(before)) {
-			const own = pool(top).find(
+			const own = secondsTo(routed, avoided).find(
 				(each) =>
 					each.harness === seconded!.reviewer &&
 					each.model === seconded!.last.model &&
-					each.harness !== routed.harness &&
-					!secondOut.has(each.model) &&
+					!out.has(each.model) &&
 					!down.has(each.harness),
 			);
 			if (own !== undefined) return own;
@@ -2208,7 +2207,7 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 			if (error.second && second !== null) {
 				skipped.push({ ...second, reason: error.reason });
 				messages.push(error.message);
-				secondOut.add(second.model);
+				out.add(second.model);
 				second = secondTo(candidates[at]!);
 				planned = plan(candidates[at]!, second);
 				continue;
@@ -2218,7 +2217,7 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 				const seat = planned.seats.find((each) => each.shadow)!;
 				skipped.push({ ...seat.reviewer, reason: error.reason });
 				messages.push(error.message);
-				shadowOut.add(error.shadow);
+				out.add(error.shadow);
 				planned = plan(candidates[at]!, second);
 				continue;
 			}
@@ -2227,7 +2226,7 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 			while (why !== undefined) {
 				skipped.push({ ...candidates[at]!, reason: why.reason });
 				messages.push(why.message);
-				secondOut.add(candidates[at]!.model);
+				out.add(candidates[at]!.model);
 				at++;
 				why = at < candidates.length ? down.get(candidates[at]!.harness) : undefined;
 			}
@@ -2268,7 +2267,7 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 					if (!(error instanceof ReviewLimitError)) down.set(error.harness, error);
 					skipped.push({ ...seat.reviewer, reason: error.reason });
 					messages.push(error.message);
-					secondOut.add(seat.reviewer.model);
+					out.add(seat.reviewer.model);
 				}
 			}
 		} catch (error) {

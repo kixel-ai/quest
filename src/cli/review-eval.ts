@@ -14,7 +14,7 @@ import type { HarnessName } from "./agent";
 import { git } from "./git";
 import { type ClaimDependencies, upstream } from "./claims";
 import { readRemote, remoteRepository, requireRemote } from "./github";
-import { type Model, REVIEWERS, weaker } from "./models";
+import { type Model, unfit } from "./models";
 import { recorded } from "./models-record";
 import {
 	type Assessment,
@@ -28,6 +28,7 @@ import {
 	pickReviewer,
 	reviewSize,
 	listing,
+	secondsTo,
 	shadowOf,
 } from "./review";
 import type { Session } from "./usage";
@@ -399,14 +400,13 @@ export function evalSeats(
 ): { reviewer: Model; shadow?: true; second?: true }[] {
 	const listed = listing(entry.size, entry.tier);
 	if (options.harness !== undefined) return [{ reviewer: pickReviewer(listed, options, () => false) }];
-	const avoided = (model: Model) =>
-		entry.writer !== null && (model.model === entry.writer || weaker(model.model, entry.writer));
+	const avoided = entry.writer === null ? () => false : unfit(entry.writer);
 	const pick = pickReviewer(listed, {}, avoided);
 	const seats: { reviewer: Model; shadow?: true; second?: true }[] = [{ reviewer: pick }];
 	const shadow = entry.tier === "high" ? null : shadowOf(entry.size, pick);
 	if (shadow) seats.push({ reviewer: shadow, shadow: true });
 	if (entry.tier === "high") {
-		const second = REVIEWERS[listed].find((each) => !avoided(each) && each.harness !== pick.harness);
+		const second = secondsTo(pick, avoided)[0];
 		if (second === undefined)
 			throw new ReviewInputError(
 				`#${entry.pull} is high, and no model of the ${listed} list from a vendor other than ${pick.harness}'s may review it`,

@@ -3,7 +3,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, symlinkSync, writeFileS
 import { basename, dirname, join } from "node:path";
 import { afterEach, expect, test, vi } from "vitest";
 
-import { REVIEWERS } from "../src/cli/models";
+import { REVIEWERS, weaker } from "../src/cli/models";
 import { SIZES, recordedRisk } from "../src/core";
 import {
 	type Finding,
@@ -79,24 +79,36 @@ test("each size's reviewer is the first whose model is not the latest writer's",
 	expect(at("S", authored({}, { CLAUDECODE: "1" }, "gpt-6.1-sol"))).toBe("claude claude-opus-5-5 low");
 	// An unknown latest writer is taken to be the running harness, usually the session that just pushed.
 	expect(at("M", authored({}, { CODEX_THREAD_ID: "t" }, "unknown"))).toBe("claude claude-opus-5-5 medium");
-	// --harness then avoids the named latest writer.
+	// --harness then avoids the named latest writer, passing to its next entry.
 	const opus = authored({ harness: "claude" }, {}, "claude-opus-5-5");
-	expect(() => pickReviewer("M", { harness: "claude" }, opus)).toThrow("claude-opus-5-5 is avoided");
+	expect(pickReviewer("M", { harness: "claude" }, opus).model).toBe("claude-fable-5-2");
 	expect(at("S", authored({ exclude: ["claude-opus-5-5"] }, { CLAUDECODE: "1" }))).toBe("codex gpt-6.1-sol medium");
 	expect(at("S", authored({ exclude: ["gpt-6.1-sol"] }, { CLAUDECODE: "1" }))).toBe("claude claude-opus-5-5 low");
 	// No harness need be detected once the implementers are named.
 	expect(at("M", authored({ exclude: ["other-model"] }, {}))).toBe("codex gpt-6.1-sol high");
-	const all = authored({ exclude: ["gpt-6.1-sol", "claude-opus-5-5", "gpt-6.2-astra"] }, {});
+	// --exclude-model avoids every model weaker than one it names too, as the recorded writer does.
+	expect(at("M", authored({ exclude: ["claude-fable-5-2"] }, {}))).toBe("claude claude-opus-5-5 medium");
+	const sonnet = { harness: "claude" as const, model: "claude-sonnet-5-5", effort: "high" };
+	expect(authored({ exclude: ["claude-opus-5-5"] }, {})(sonnet)).toBe(true);
+	const all = authored({ exclude: ["gpt-6.1-sol", "claude-opus-5-5", "gpt-6.2-astra", "claude-fable-5-2"] }, {});
 	expect(() => pickReviewer("M", {}, all)).toThrow("is avoided; pass --harness and --model");
+	// A model name is looked up as data, never as one of an object's inherited keys.
+	expect(weaker("constructor", "claude-opus-5-5")).toBe(false);
 
 	// A run tries every eligible reviewer in rank, or only the one the options name.
 	const ranked = (choice: Parameters<typeof rankedReviewers>[1], wrote: typeof claude) =>
 		rankedReviewers("L", choice, wrote).map(({ harness, model, effort }) => `${harness} ${model} ${effort}`);
 	const byOpus = authored({}, {}, "claude-opus-5-5");
-	expect(ranked({}, byOpus)).toEqual(["codex gpt-6.1-sol xhigh", "codex gpt-6.2-astra xhigh"]);
+	// Fable closes each list, so Opus's work still has a reviewer while all of Codex is out.
+	expect(ranked({}, byOpus)).toEqual([
+		"codex gpt-6.1-sol xhigh",
+		"codex gpt-6.2-astra xhigh",
+		"claude claude-fable-5-2 xhigh",
+	]);
 	expect(ranked({}, authored({}, {}, "gpt-6.1-sol"))).toEqual([
 		"claude claude-opus-5-5 high",
 		"codex gpt-6.2-astra xhigh",
+		"claude claude-fable-5-2 xhigh",
 	]);
 	// An unknown writer under Claude Code avoids every Claude model, so only Codex's models follow.
 	expect(ranked({}, claude)).toEqual(["codex gpt-6.1-sol xhigh", "codex gpt-6.2-astra xhigh"]);
@@ -109,6 +121,7 @@ test("each size's reviewer is the first whose model is not the latest writer's",
 		"gpt-6.1-sol",
 		"claude-opus-5-5",
 		"gpt-6.2-astra",
+		"claude-fable-5-2",
 	]);
 	for (const list of Object.values(REVIEWERS)) expect(list.map((e) => e.model)).not.toContain("claude-sonnet-5-5");
 	expect(ranked({ effort: "high" }, byOpus)).toEqual(["codex gpt-6.1-sol high"]);
@@ -121,8 +134,17 @@ test("each size's reviewer is the first whose model is not the latest writer's",
 		model: "claude-opus-5-5",
 		effort: "high",
 	});
+	// --harness takes its first entry whose model is not avoided, as on the high list after Opus wrote.
+	expect(pickReviewer("high", { harness: "claude" }, byOpus)).toEqual({
+		harness: "claude",
+		model: "claude-fable-5-2",
+		effort: "xhigh",
+	});
 	const sol = authored({ harness: "codex", exclude: ["gpt-6.1-sol"] }, {});
-	expect(() => pickReviewer("M", { harness: "codex" }, sol)).toThrow("gpt-6.1-sol is avoided; pass --model");
+	expect(pickReviewer("M", { harness: "codex" }, sol).model).toBe("gpt-6.2-astra");
+	// Avoiding Astra avoids Sol, which is weaker, so no Codex entry is left.
+	const astra = authored({ harness: "codex", exclude: ["gpt-6.2-astra"] }, {});
+	expect(() => pickReviewer("M", { harness: "codex" }, astra)).toThrow("gpt-6.1-sol is avoided; pass --model");
 	expect(pickReviewer("M", { harness: "codex", model: "gpt-6-astra" }, sol).model).toBe("gpt-6-astra");
 	// Nor does --model bring back an avoided model.
 	expect(() => pickReviewer("M", { harness: "codex", model: "gpt-6.1-sol" }, sol)).toThrow("gpt-6.1-sol is avoided");
@@ -191,10 +213,15 @@ fakes("--exclude-model picks the reviewer from the PR's implementers instead of 
 		"default",
 	]);
 
-	const all = ["gpt-6.1-sol", "claude-opus-5-5", "gpt-6.2-astra"].flatMap((m) => ["--exclude-model", m]);
+	const all = ["gpt-6.1-sol", "claude-opus-5-5", "gpt-6.2-astra", "claude-fable-5-2"].flatMap((m) => [
+		"--exclude-model",
+		m,
+	]);
 	const none = await quest("--root", s.repo, "review", ...all, "--new");
 	expect(none.code).toBe(2);
-	expect(none.stderr).toContain("every M reviewer (gpt-6.1-sol, claude-opus-5-5, gpt-6.2-astra) is avoided");
+	expect(none.stderr).toContain(
+		"every M reviewer (gpt-6.1-sol, claude-opus-5-5, gpt-6.2-astra, claude-fable-5-2) is avoided",
+	);
 });
 
 fakes("an unknown harness is an error, never a same-model review", async () => {
@@ -291,8 +318,17 @@ fakes.for([
 		"unknown",
 		"no eligible M reviewer could run: gpt-6.1-sol high and gpt-6.2-astra high (codex hit its usage limit; resets unknown)",
 	],
-	["CODEX_THREAD_ID", "reset", "claude hit its usage limit; resets 2030-03-17T17:46:40Z"],
-	["CODEX_THREAD_ID", "unknown", "claude hit its usage limit; resets unknown"],
+	// Opus's limit falls through to Fable, which hits it too.
+	[
+		"CODEX_THREAD_ID",
+		"reset",
+		"no eligible M reviewer could run: claude-opus-5-5 medium and claude-fable-5-2 high (claude hit its usage limit; resets 2030-03-17T17:46:40Z)",
+	],
+	[
+		"CODEX_THREAD_ID",
+		"unknown",
+		"no eligible M reviewer could run: claude-opus-5-5 medium and claude-fable-5-2 high (claude hit its usage limit; resets unknown)",
+	],
 ] as const)(
 	"a usage limit with no reviewer left exits 3 with its reset, and records no round (%s, %s)",
 	async ([host, variant, message]) => {
@@ -1726,17 +1762,8 @@ fakes("a raise to high with no other model left prints its saved rounds before t
 	moveBase(s.repo, (dir) => write(dir, "RISK.md", riskFile([])));
 	vi.stubEnv("FAKE_RAISE", "high");
 	try {
-		const out = await quest(
-			"--root",
-			s.repo,
-			"review",
-			"--size",
-			"S",
-			"--exclude-model",
-			"claude-opus-5-5",
-			"--exclude-model",
-			"claude-fable-5-2",
-		);
+		const out = await quest("--root", s.repo, "review", "--size", "S");
+		// With no record under Claude Code, every Claude model is avoided, so Sol has no second reviewer.
 		expect(out.code).toBe(2);
 		expect(out.stderr).toContain("every such model of the high list is avoided");
 		expect(out.stdout).toContain("\nrisk high It rewrites the wire format peers read.\n");
@@ -1853,6 +1880,23 @@ fakes("an old shadow whose model is avoided or cannot run passes its findings to
 			"\nskipped claude claude-opus-5-5 high usage limit, resets 2030-03-17T17:46:40Z\n",
 		);
 		expect(shadowOf(out.stdout)).toEqual(["reviewer codex gpt-6.1-sol medium shadow"]);
+		vi.unstubAllEnvs();
+
+		// Opus wrote an M PR, whose pick, Sol high, and shadow, Sol xhigh, each leave a finding open. Resized to XS, Sol
+		// is at its limit, so the round passes to Astra, and the old shadow settles at Astra too, never retrying Sol.
+		const s = setup();
+		const opus = ["--exclude-model", "claude-opus-5-5"];
+		expect((await quest("--root", s.repo, "review", ...opus)).code).toBe(0);
+		write(s.repo, ".tmp/responses.md", "1. Fixed.\n2. Fixed.\n");
+		vi.stubEnv("FAKE_FAILS", "gpt-6.1-sol");
+		vi.stubEnv("FAKE_LIMITED", "reset");
+		const responses = join(s.repo, ".tmp", "responses.md");
+		const passed = await quest("--root", s.repo, "review", "--size", "XS", ...opus, "--responses", responses);
+		expect(passed.code, passed.stderr).toBe(0);
+		expect(passed.stdout.split("\n").filter((line) => line.startsWith("skipped "))).toEqual([
+			`skipped codex gpt-6.1-sol medium usage limit, resets ${codexReset}`,
+		]);
+		expect(shadowOf(passed.stdout)).toEqual(["reviewer codex gpt-6.2-astra medium shadow"]);
 	} finally {
 		vi.unstubAllGlobals();
 	}
@@ -1885,10 +1929,10 @@ fakes(
 				"\nnext done: the head is low risk, so the online reviewer alone reviews it\n",
 			);
 			// Only the classifier ran, told the classes it may name.
-			const reviewers = ["gpt-6.1-sol", "claude-opus-5-5", "claude-sonnet-5-5"];
-			expect(s.calls().filter((call) => reviewers.some((model) => call.argv.join(" ").includes(model)))).toEqual(
-				[],
-			);
+			const reviewers = new Set(Object.values(REVIEWERS).flatMap((list) => list.map((each) => each.model)));
+			expect(
+				s.calls().filter((call) => [...reviewers].some((model) => call.argv.join(" ").includes(model))),
+			).toEqual([]);
 			const [call] = classifying(s.calls());
 			const schema = JSON.parse(call!.argv[call!.argv.indexOf("--json-schema") + 1]!);
 			expect(schema.properties.class.enum).toEqual(["constants", null]);
@@ -1900,7 +1944,7 @@ fakes(
 			);
 			expect(recordedRisk(pull.body)).toMatchObject({ tier: "low", class: "constants", overridden: null });
 
-			// The maintainer holds it high: the largest size's pick and a second reviewer on another model review it.
+			// The maintainer holds it high: the high list's pick and a second reviewer from another vendor review it.
 			const held = await quest("--root", s.repo, "review", "--override", "high", "--reason", "It ships tonight.");
 			expect(held.code, held.stderr).toBe(0);
 			expect(held.stdout).toContain("\nrisk high It ships tonight.\noverridden low by the maintainer\n");

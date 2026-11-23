@@ -178,8 +178,8 @@ three hosts' saved review rounds:
     found something on 147 of 272 high-tier and 148 of 549 medium-tier
     merged PRs, 93% of its findings accepted, most likely for its model
     differing from the mostly-Sol pick. Once moq-dev/quest#819's second
-    seat runs on high heads (Opus xhigh, or Sonnet high when Opus wrote
-    the branch, never the writer's model), compare what Pullfrog still
+    seat runs on high heads (Sol and Fable xhigh on Opus's work, Opus and
+    Astra xhigh on Fable's, never weaker than the writer), compare what Pullfrog still
     finds behind it per dollar, and recommend retiring it once
     [review seats](/quest/m0/review-seats.md)' one, two, or three vendor
     seats match it, with its tally.

@@ -1504,13 +1504,13 @@ whole branch at the PR's size.
 committed branch before it is pushed for review, at an effort set by the PR's
 size. Each size ranks its reviewers, the same for every repository:
 
-| PR size | Reviewer | When Sol or Fable changed it last | Last |
+| PR size | Reviewer | When Sol or Fable changed it last | Then, while those are out |
 |---|---|---|---|
-| XS | Codex `gpt-6.1-sol` medium | Claude Code `claude-opus-5-5` low | Codex `gpt-6.2-astra` medium |
-| S | Codex `gpt-6.1-sol` medium | Claude Code `claude-opus-5-5` low | Codex `gpt-6.2-astra` medium |
-| M, or none | Codex `gpt-6.1-sol` high | Claude Code `claude-opus-5-5` medium | Codex `gpt-6.2-astra` high |
-| L | Codex `gpt-6.1-sol` xhigh | Claude Code `claude-opus-5-5` high | Codex `gpt-6.2-astra` xhigh |
-| XL | Codex `gpt-6.1-sol` xhigh | Claude Code `claude-opus-5-5` xhigh | Codex `gpt-6.2-astra` xhigh |
+| XS | Codex `gpt-6.1-sol` medium | Claude Code `claude-opus-5-5` low | Codex `gpt-6.2-astra` medium, then Claude Code `claude-fable-5-2` medium |
+| S | Codex `gpt-6.1-sol` medium | Claude Code `claude-opus-5-5` low | Codex `gpt-6.2-astra` medium, then Claude Code `claude-fable-5-2` medium |
+| M, or none | Codex `gpt-6.1-sol` high | Claude Code `claude-opus-5-5` medium | Codex `gpt-6.2-astra` high, then Claude Code `claude-fable-5-2` high |
+| L | Codex `gpt-6.1-sol` xhigh | Claude Code `claude-opus-5-5` high | Codex `gpt-6.2-astra` xhigh, then Claude Code `claude-fable-5-2` xhigh |
+| XL | Codex `gpt-6.1-sol` xhigh | Claude Code `claude-opus-5-5` xhigh | Codex `gpt-6.2-astra` xhigh, then Claude Code `claude-fable-5-2` xhigh |
 
 Beside it, the shadow, the pick's model one effort away on the ladder (low,
 medium, high, xhigh), reviews the same head in its own session, so the routing
@@ -1529,7 +1529,8 @@ the first to fail, such as on a usage limit, stops the others, and the round
 saves none.
 
 A reviewer that cannot run passes the round to the next eligible one, so
-Astra reviews what Opus changed last while Sol is out. That is a failure the CLI or provider reports before any finding is
+Astra reviews what Opus changed last while Sol is out, and Fable while all of
+Codex is. That is a failure the CLI or provider reports before any finding is
 saved, never text in the diff or a reply: a CLI that is not installed, logged
 out, or has its login rejected, or sent to a gateway with no credential,
 passes over every model of that CLI, and a
@@ -1555,7 +1556,8 @@ model is neither the latest writer's nor weaker than it reviews: Sonnet is
 weaker than every other model, so it reviews only Sonnet's work, and Sol is
 weaker than Fable and Astra. The record's last `Implementer:` line
 names the latest writer, since each session moves its line last whenever it pushes, or
-`--exclude-model` names each model to avoid instead. Earlier writers may review.
+`--exclude-model` names each model to avoid instead, with every model weaker
+than it. Earlier writers may review.
 Without a record, or when its last line names an `unknown` model, the harness
 running the command, usually the session that
 just pushed, is taken to be the latest writer, so Codex reviews from Claude Code
@@ -1820,7 +1822,8 @@ with none. A round that raises the tier to high saves its rounds and runs the
 second reviewer at once; when that review
 fails, as when none can run, it prints those rounds before the error, so their
 findings can be answered. When every model of the other vendor is avoided, as
-with no `## Models` record under Claude Code, the run fails as a usage error; when they cannot run, as an outage.
+with no `## Models` record, which avoids every model of the harness running the
+command, the run fails as a usage error; when they cannot run, as an outage.
 
 `--override <tier> --reason <text>` records the maintainer's tier for the
 branch in place of the reviewed one, as `- Risk: <tier>, <reason>` and

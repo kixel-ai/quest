@@ -51,27 +51,33 @@ const astra = (effort: string): Model => ({ harness: "codex", model: "gpt-6.2-as
  * The writers each model is weaker than, so it never reviews their work: Sonnet is weaker than every other model,
  * so it reviews only Sonnet's work, and Sol is weaker than the frontier models.
  */
-const WEAKER_THAN: Readonly<Record<string, readonly string[]>> = {
-	"gpt-6.1-sol": ["claude-fable-5-2", "gpt-6.2-astra"],
-};
+const WEAKER_THAN: ReadonlyMap<string, readonly string[]> = new Map([
+	["gpt-6.1-sol", ["claude-fable-5-2", "gpt-6.2-astra"]],
+]);
 
 /** Whether model `reviewer` is too weak to review what model `writer` wrote. */
 export const weaker = (reviewer: string, writer: string): boolean =>
-	reviewer !== writer && (reviewer === "claude-sonnet-5-5" || (WEAKER_THAN[reviewer]?.includes(writer) ?? false));
+	reviewer !== writer && (reviewer === "claude-sonnet-5-5" || (WEAKER_THAN.get(reviewer)?.includes(writer) ?? false));
+
+/** Whether an entry may not review what model `writer` wrote: it runs the writer's model or a {@link weaker} one. */
+export const unfit =
+	(writer: string) =>
+	(entry: Model): boolean =>
+		entry.model === writer || weaker(entry.model, writer);
 
 /**
  * Each list's reviewers, ranked: the first that is neither the latest writer's model nor {@link weaker} than it
- * reviews the PR, so Opus reviews what Sol changed last, and one that cannot run passes the review to the next.
- * Astra comes last in each size's list, the fallback for Opus's work while Sol is out, now that Sonnet reviews only
- * its own. A high head reviews from `high`, whatever its size: the pick, then a second reviewer from the other
- * vendor, so Sol and Fable review Opus's work, Opus and Astra Sol's or Fable's.
+ * reviews the PR, so Opus reviews what Fable wrote, and one that cannot run passes the review to the next. Now that
+ * Sonnet reviews only its own work, Astra and then Fable close each size's list, so Opus's work still has a reviewer
+ * while Sol, or all of Codex, is out. A high head reviews from `high`, whatever its size: the pick, then a second
+ * reviewer from the other vendor, so Sol and Fable review Opus's work, Opus and Astra Fable's.
  */
 export const REVIEWERS: Record<Listing, readonly Model[]> = {
-	XS: [sol("medium"), opus("low"), astra("medium")],
-	S: [sol("medium"), opus("low"), astra("medium")],
-	M: [sol("high"), opus("medium"), astra("high")],
-	L: [sol("xhigh"), opus("high"), astra("xhigh")],
-	XL: [sol("xhigh"), opus("xhigh"), astra("xhigh")],
+	XS: [sol("medium"), opus("low"), astra("medium"), fable("medium")],
+	S: [sol("medium"), opus("low"), astra("medium"), fable("medium")],
+	M: [sol("high"), opus("medium"), astra("high"), fable("high")],
+	L: [sol("xhigh"), opus("high"), astra("xhigh"), fable("xhigh")],
+	XL: [sol("xhigh"), opus("xhigh"), astra("xhigh"), fable("xhigh")],
 	high: [sol("xhigh"), opus("xhigh"), fable("xhigh"), astra("xhigh")],
 };
 

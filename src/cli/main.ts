@@ -1664,7 +1664,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"no longer that step away; its findings are numbered and settled like any reviewer's, its session carries " +
 				"over to the new shadow, and a pick with no shadow seats the old one as it ran while it still has " +
 				"findings, unless its model is avoided or cannot run, when it seats one at the pick's own effort. " +
-				"--exclude-model names each model to avoid; without it, the " +
+				"--exclude-model names each model to avoid, with every model weaker than it; without it, the " +
 				"latest writer is avoided, with every model weaker than it (Sonnet than any other, Sol than Fable and Astra), " +
 				"so a reviewer is never weaker than the writer: the model the last Implementer line names in the `## Models` record of the body of the branch's open PR. " +
 				"When it names none or an `unknown` model, " +
@@ -1922,7 +1922,10 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		)
 		.option("--set <file>", `The eval set (default: ${EVAL_FILE} at the checkout's root)`)
 		.addOption(
-			new Option("--harness <name>", "The only reviewer, instead of the pick and shadow").choices(HARNESSES),
+			new Option(
+				"--harness <name>",
+				"The only reviewer, instead of the pick and the shadow or second reviewer",
+			).choices(HARNESSES),
 		)
 		.option("--model <model>", "Model --harness's reviewer runs instead of its size's")
 		.option("--effort <level>", "Reasoning effort --harness's reviewer runs at instead of its size's", effortLevel)
