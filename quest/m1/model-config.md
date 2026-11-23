@@ -6,8 +6,10 @@ For each quest size XS to XL, `quest` ships the writer and reviewer models it
 accepts, each at a minimum effort, and reads which of them to run, and in
 what order, from the user's config. `quest models`, `quest unblocked --json`,
 and `quest review` route by that config, and refuse a config naming a model
-off a size's list or below its minimum effort. With no config, each size runs
-the first accepted entry its installed harnesses can run. The maintainer's
+off a size's list or below its minimum effort. With no config, a writer is
+the first accepted entry the installed harnesses can run, and a reviewer the
+first that can run and is not the latest writer's model, the rule
+`quest review` follows today. The maintainer's
 current tables and writer A/B arms live in their config, which
 kixel-ai/dotfiles writes, not in `src/cli/models.ts`.
 
