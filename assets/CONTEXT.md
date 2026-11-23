@@ -81,3 +81,4 @@ Review findings fixed in the same PR are not culprits.
 
 A repository with a `quest/` directory plans work as quests, Markdown files each completed in one PR.
 Before creating, editing, claiming, or finishing one outside a `/quest-*` skill, which carries what it needs, run `quest guide` and follow it, adding follow-ups worth a quest to your PR as it describes, never as GitHub issues or agent-session tasks.
+Before your final summary, unless the user is afk or you cannot ask them, run `/quest-plan` on the follow-ups no quest or open PR owns, each in a checkout of the repository whose quest tree owns it.
