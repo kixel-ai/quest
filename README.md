@@ -1659,8 +1659,15 @@ runs `quest review` with the installed CLIs and copies of your logins, and
 fails if any of it runs, the review trusts a new directory, or the reviewer's
 flags let the planted rule allow a command. A login with no file to copy, such
 as one in the macOS keychain, needs the CLI's credential exported instead:
-`CLAUDE_CODE_OAUTH_TOKEN` from `claude setup-token`, or `CODEX_API_KEY`. It spends real usage, so CI never runs it; run it
-after upgrading either CLI. The base is fetched first, since
+`CLAUDE_CODE_OAUTH_TOKEN` from `claude setup-token`, or `CODEX_API_KEY`. For
+Antigravity it plants hooks, MCP servers, plugins, rules, and skills in every
+directory `agy` reads them from, with `AGENTS.md`, `GEMINI.md`, and helper
+binaries, and a change asking the reviewer to quote a canary it writes beside
+your login in `~/.gemini`; on your own login and home, it fails if a plant
+runs, the checkout's instructions reach the reviewer, or the reviewer quotes
+the canary, after showing that `agy`'s defaults load them all and that quest's
+turn reads the canary without its deny rules. It spends real usage, so CI never
+runs it; run it after upgrading any of the CLIs. The base is fetched first, since
 the sandbox has no network. The reviewer follows the base's `AGENTS.md` and `CLAUDE.md`, at the
 root and in each directory holding a changed path, never the checkout's, so a
 change cannot instruct its own reviewer. The base's `REVIEW.md` is optional,

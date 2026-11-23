@@ -54,7 +54,3 @@ Guidance:
 - Dropping Pullfrog's ruleset is a change to kixel-ai/dotfiles'
   `bin/repo-settings`, not this repository; list it in the PR's
   follow-ups when the readout recommends it.
-
-## Required
-
-- [Gemini reviewer](/quest/m0/gemini-reviewer.md) - the `agy` harness the Gemini seat runs on
