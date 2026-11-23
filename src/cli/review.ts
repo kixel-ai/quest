@@ -615,10 +615,10 @@ const text = (value: unknown) => (typeof value === "string" ? value : undefined)
 /** The cloud providers Claude Code reaches its model through, each with a `CLAUDE_CODE_USE_` switch. */
 const CLAUDE_PROVIDERS = ["BEDROCK", "VERTEX", "FOUNDRY", "MANTLE", "ANTHROPIC_AWS", "ANTHROPIC_GOOGLE_CLOUD"];
 
-/** Claude Code turns a switch on only for `1`, `true`, `yes`, or `on`, so `0` or `false` sets nothing. */
-/** Whether a credential is set: the CLIs trim one and read a blank one as unset, falling back to the stored login. */
+/** Whether a credential is set: Codex trims one and reads a blank one as unset, falling back to its stored login. */
 const set = (value: string | undefined) => Boolean(value?.trim());
 
+/** Claude Code turns a switch on only for `1`, `true`, `yes`, or `on`, so `0` or `false` sets nothing. */
 const enabled = (value: string | undefined) => /^\s*(1|true|yes|on)\s*$/i.test(value ?? "");
 
 /** The `CLAUDE_CODE_USE_` switches `env` turns on. */
