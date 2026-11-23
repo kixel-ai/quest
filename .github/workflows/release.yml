@@ -9,7 +9,8 @@ name: Release
 # without its complete release. A failed or cancelled run needs no recovery:
 # the next run sees the same unreleased range and replaces any draft it left.
 # Pull requests don't run this, so the daily run is where binaries are first
-# built and checked; manual runs on other branches only build and check. scripts/release-plan.sh holds the decision.
+# built and checked; manual runs on other branches only build and check.
+# scripts/release-plan.sh holds the decision.
 on:
   schedule:
     - cron: "17 6 * * *"
