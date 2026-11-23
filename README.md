@@ -1517,10 +1517,12 @@ Beside them, the size's candidate, a model on trial, reviews the same heads,
 so its findings pair with the pick's on every PR: Claude Code
 `claude-fable-5-2` medium for an L PR, and none at other sizes. It reruns as
 the shadow does, and none runs on a branch its model wrote last or in a
-`--harness` run. A candidate that cannot run is passed over while the others
+`--harness` run. A candidate that fails, whether at its usage limit or on a
+provider that does not offer its model, is passed over while the others
 finish, named as skipped. Its findings measure its own model, so no other
-model settles them: when it cannot run, or its model wrote the branch last,
-its open findings are dropped, as `--new` drops them.
+model settles them: when it fails, or its model wrote the branch last, its
+open findings are dropped, as `--new` drops them, and it keeps its rounds
+but never runs on that branch again.
 
 A reviewer that cannot run passes the round to the next whose model is not
 the latest writer's, so Sonnet reviews what Opus changed last while Sol is

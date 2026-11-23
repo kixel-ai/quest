@@ -397,19 +397,41 @@ fakes(
 		vi.stubEnv("FAKE_FAILS", undefined);
 		vi.stubEnv("FAKE_LIMITED", undefined);
 
-		// Once back, Fable reviews the branch again in a new session, so no responses are owed for what was dropped.
-		write(s.repo, ".tmp/responses.md", "4. Fixed.\n5. Fixed.\n");
+		// Once back, Fable stays out: its dropped session keeps its rounds, and owes nothing.
+		write(s.repo, ".tmp/responses.md", "1. Fixed.\n2. Fixed.\n");
 		write(s.repo, "src/lib.ts", "export const x = 4;\n");
 		git(s.repo, "commit", "-qam", "again");
 		const back = await quest("--root", s.repo, "review", ...args);
 		expect(back.code, back.stderr).toBe(0);
-		const again = JSON.parse(back.stdout).rounds;
-		expect(again.map(label)).toEqual([
-			"gpt-6.2-sol xhigh",
-			"gpt-6.2-sol high shadow",
-			"claude-fable-5-2 medium candidate",
-		]);
-		expect(again.map((r: Round) => r.earlier?.findings.length ?? null)).toEqual([1, 1, null]);
+		expect(JSON.parse(back.stdout).rounds.map(label)).toEqual(["gpt-6.2-sol xhigh", "gpt-6.2-sol high shadow"]);
+		const state = JSON.parse(readFileSync(sessionFile(join(s.repo, ".git"), "feature"), "utf8"));
+		expect(state.sessions.filter((each: { dropped?: true }) => each.dropped)).toHaveLength(1);
+
+		// A candidate's raise of the head's tier stands on that head even once it is passed over.
+		const w = setup(null);
+		vi.stubEnv("FAKE_RAISE", "high@medium");
+		const raised = await quest("--root", w.repo, "review", ...OPUS_WROTE, "--size", "L", "--json");
+		expect(raised.code, raised.stderr).toBe(0);
+		expect(JSON.parse(raised.stdout).risk.tier).toBe("high");
+		vi.stubEnv("FAKE_RAISE", undefined);
+		vi.stubEnv("FAKE_FAILS", "claude-fable-5-2");
+		vi.stubEnv("FAKE_LIMITED", "reset");
+		write(w.repo, ".tmp/responses.md", "1. Refuted.\n2. Refuted.\n3. Refuted.\n4. Refuted.\n");
+		const retry = await quest(
+			"--root",
+			w.repo,
+			"review",
+			...OPUS_WROTE,
+			"--size",
+			"L",
+			"--responses",
+			join(w.repo, ".tmp", "responses.md"),
+			"--json",
+		);
+		expect(retry.code, retry.stderr).toBe(0);
+		expect(JSON.parse(retry.stdout).risk.tier).toBe("high");
+		vi.stubEnv("FAKE_FAILS", undefined);
+		vi.stubEnv("FAKE_LIMITED", undefined);
 
 		// Once Fable writes the branch, its candidate's open finding is dropped rather than held or settled by the pick.
 		const v = setup(null);
@@ -2448,6 +2470,7 @@ test("saved sessions are read only in the current format, or refused naming --ne
 		// A shadow session no shadow tally counts, a malformed mark, or two shadows.
 		{ branch: "feature", sessions: [{ ...session, shadow: true }], tallies: [tally] },
 		{ branch: "feature", sessions: [{ ...session, shadow: false }], tallies: [tally] },
+		{ branch: "feature", sessions: [{ ...session, dropped: false }], tallies: [tally] },
 		{ ...shadowed, sessions: [...shadowed.sessions, { ...session, shadow: true }] },
 		// Two candidates, or one seat in two roles.
 		{ ...candidate, sessions: [...candidate.sessions, { ...session, candidate: true }] },
