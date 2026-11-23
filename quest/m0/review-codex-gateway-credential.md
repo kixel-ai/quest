@@ -10,6 +10,10 @@ the variables to set, as the Claude reviewer's bare gateway does.
 
 ## Plan
 
+Kept 2026-11-22 (maintainer, `/quest-run` pick round of
+[moq-dev/quest#823](https://github.com/moq-dev/quest/pull/823#issuecomment-7086772490)):
+✅ keep (rejected: drop).
+
 Found 2026-11-22 while fixing the Claude reviewer's version of this leak.
 Codex 0.167.1, given `-c openai_base_url=http://127.0.0.1:<port>/v1` and no key,
 sent `Authorization: Bearer <ChatGPT JWT>` and `chatgpt-account-id` to a local
