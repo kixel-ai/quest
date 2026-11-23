@@ -27,7 +27,11 @@ table):
   both, so it decides with far fewer PRs than a writer A/B. When Fable wrote
   the branch, the seat stays empty, since a reviewer never shares the latest
   writer's model.
-- XL? ✅ Astra high picks first, then Opus xhigh, then Sonnet high
+- XL? ✅ Astra high picks first, then Opus xhigh, then Sonnet high. Until
+  [review seats](/quest/m0/review-seats.md) lands, this list orders XL's
+  seats; after, it supplies the Codex and Claude seats' models and
+  efforts, and the tier and eval decide how many seats run and in what
+  order.
   (rejected: Astra xhigh, the maintainer's own correction; Sol xhigh). With
   Fable writing every XL quest, a Fable seat there could never run, so XL
   gets none. The step-down shadow stays at XL as at L, one effort below the

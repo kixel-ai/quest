@@ -26,6 +26,14 @@ Decided 2026-11-22 (maintainer, `/quest-plan` follow-up of
   seats Opus xhigh as a second reviewer on high heads. Pullfrog's catches
   behind a mostly-Sol pick (147 of 272 high and 148 of 549 medium merged
   PRs, 93% accepted) suggest vendor diversity is what finds them.
+- What sets each seat's model? The size's reviewer list, as
+  [reviewer table](/quest/m0/reviewer-table.md) orders it, picks the model
+  and effort within each vendor, as today. The tier sets how many vendors
+  review, and the eval their order. An XL head that is high tier gets all
+  three: Astra high, Gemini, and a Claude model other than the writer's,
+  such as Opus xhigh for a Fable-written XL quest. The Claude seat never
+  takes the writer's model: on an Opus-written head it is Sonnet or Fable,
+  as moq-dev/quest#819 already seats Sonnet high when Opus wrote the branch.
 - Pullfrog retires on evidence, as [routing evidence](/quest/m0/routing-evidence/README.md)
   records: compare what it still finds behind these seats per dollar, from
   its run logs' cost tables.
