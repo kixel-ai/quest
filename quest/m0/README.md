@@ -3,7 +3,7 @@
 ## Goal
 
 moq-dev plans and runs its own work through Quest: moq-dev/moq,
-moq-dev/quest, and moq-dev/moq.pro plan in quests, maintainers' own agent
+kixel-ai/quest, and moq-dev/moq.pro plan in quests, maintainers' own agent
 sessions implement them through the skills, and PRs land through GitHub's
 merge queue, with the host's watcher fixing what it drops. moq-bot is the one
 GitHub App the host's daemons act as. The standalone CLI (v0.1.0 shipped on
@@ -27,7 +27,7 @@ kixel-quest, are deleted. moq-bot is the only GitHub App used by the host's daem
   - Keep kix, move it to the host
 
 Decided 2026-11-03 (user, /quest-complete, on
-[moq-dev/quest#455](https://github.com/moq-dev/quest/pull/455)), after the
+[kixel-ai/quest#455](https://github.com/kixel-ai/quest/pull/455)), after the
 native Windows suite moved to m1 with nightly-only coverage:
 
 - Should m0's Goal drop native Windows?
@@ -37,7 +37,7 @@ native Windows suite moved to m1 with nightly-only coverage:
 Decided 2026-10-30 (user, /quest-plan), replacing "First public release":
 
 - Should m0 serve moq-dev's repositories before third parties?
-  - ✅ Yes: m0 is adoption on moq-dev/moq, moq-dev/quest, and moq-dev/moq.pro;
+  - ✅ Yes: m0 is adoption on moq-dev/moq, kixel-ai/quest, and moq-dev/moq.pro;
     a new m1 holds the public release, and the old m1 became m2
   - Fold third-party work into the existing later milestone
 

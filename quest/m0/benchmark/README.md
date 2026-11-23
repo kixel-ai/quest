@@ -46,7 +46,7 @@ maintainer's typed messages since 2026-10-01):
   - ✅ A factory page in Kixel Code plus a pushed digest. Reverses the
     rejected digest.
   - Rejected: the page alone; `quest usage` alone
-- Which repositories get quests? ✅ moq-dev/quest, Kixel Code,
+- Which repositories get quests? ✅ kixel-ai/quest, Kixel Code,
   moq-dev/moq, and moq-dev/moq.pro (rejected: the first two, with the
   others as a follow-up; those plus moq-dev/moq.pro).
 - Must Quest stay generic? ✅ No (user, unprompted): contributors must be
@@ -68,7 +68,7 @@ maintainer's typed messages since 2026-10-01):
   per axis.
 - What does the tier scale?
   - ✅ Review and approval only (maintainer, 2026-11-22, reversing
-    [moq-dev/quest#802](https://github.com/moq-dev/quest/pull/802)'s full
+    [kixel-ai/quest#802](https://github.com/kixel-ai/quest/pull/802)'s full
     suite for high: "we're so CPU starved that we shouldn't waste it on more
     CI unless it actually catches issues. Running the full suite is dumb
     because the next commit (or nightly) can catch the issue anyway. We

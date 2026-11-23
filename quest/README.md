@@ -32,7 +32,7 @@ writers).
 
 Decided 2026-11-21 (maintainer, `/quest-plan` in
 [kixel-ai/kixel.quest#85](https://github.com/kixel-ai/kixel.quest/pull/85)),
-reversing the 2026-11-13 decision below: moq-dev/quest stays a clean,
+reversing the 2026-11-13 decision below: kixel-ai/quest stays a clean,
 generic public tool, keeping the quest-tree contract, the GitHub PR
 workflow, a forge read client at a configurable URL, and harness-agnostic
 skills with no kixel.quest references (rejected: GitHub-only with no
@@ -42,7 +42,7 @@ model routing, and `land` move to kixel.quest, and review pairing, model
 rankings, and local hooks to dotfiles.
 
 Amended 2026-11-22 (maintainer, in the session that planned
-[moq-dev/quest#826](https://github.com/moq-dev/quest/pull/826)): model
+[kixel-ai/quest#826](https://github.com/kixel-ai/quest/pull/826)): model
 routing splits rather than moving out. ✅ For each quest size, Quest lists
 the writer and reviewer models it accepts, each at a minimum effort, and
 the user's config ranks and picks among them, Quest refusing a model off

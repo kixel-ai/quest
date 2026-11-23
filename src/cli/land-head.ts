@@ -390,7 +390,7 @@ export async function mergePinned(
 		if (current !== head) return { reason: "head_moved", detail };
 		const conflict = pull.mergeable === false || pull.mergeable_state === "dirty";
 		// Once GitHub shows the gate's own merge, it can still call it conflicting from the pin's stale
-		// mergeability, in its refusal or in the PR (moq-dev/quest#342). That merge already holds the
+		// mergeability, in its refusal or in the PR (kixel-ai/quest#342). That merge already holds the
 		// base it was checked on, so it cannot conflict with it: wait. Only a base that moved since can
 		// conflict, and then the retries run out and the next round rebuilds on that base.
 		const stale = previous !== head && (conflict || /merge conflict/i.test(String(result.message)));

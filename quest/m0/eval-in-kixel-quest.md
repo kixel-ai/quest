@@ -41,7 +41,7 @@ follow-up). Confirmed 2026-11-20 (maintainer, `/quest-plan` after a
   2026-11-18 run") into Kixel Quest's records the same way, and have each
   audit read its baseline from there.
 - Import the 20-case moq-dev/moq set (11 culprits, 9 clean PRs) that
-  [moq-dev/quest#799](https://github.com/moq-dev/quest/pull/799) built in a
+  [kixel-ai/quest#799](https://github.com/kixel-ai/quest/pull/799) built in a
   clone, from the JSON in that PR's body, tagging its defects
   `review-dependents 2026-11-21`.
 
