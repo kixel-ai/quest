@@ -58,8 +58,9 @@ a day's merges become one release and a day with none cuts nothing. A push to
 `main` cuts no release; an urgent fix ships early once it merges, with
 `gh workflow run release.yml --ref main`. `scripts/release-plan.sh` judges the
 range: everything the binaries and the flake package build from, every file
-Release publishes, and the workflows that build and check them. Its pull
-request runs use the same predicate to decide whether to build. The next version is greater than every
+Release publishes, and the workflows that build and check them. Pull requests
+don't run Release, and a failed run on `main` only emails, as GitHub does by
+default. The next version is greater than every
 `vX.Y.Z` tag: a minor bump (a major one from 1.0) when a commit subject in the
 range has `!` before its colon, a patch bump otherwise.
 
