@@ -8,7 +8,7 @@ import { implementer } from "../src/cli/models-record";
 import { fixes } from "../src/cli/land-fixer";
 import type { Risk, Round, Tally } from "../src/cli/review";
 import { classifierSessions, parseReview, reviewRecord, reviewSessions } from "../src/cli/review-record";
-import { culprits } from "../src/cli/breakage";
+import { culpritOf, culprits } from "../src/cli/breakage";
 import { type Session, causes, fold, parseSessions, share, usage, usageLines } from "../src/cli/usage";
 import type { LoggedWait } from "../src/cli/waits";
 import { SPLIT_CATEGORIES, type TimeSplit } from "../src/core";
@@ -396,6 +396,19 @@ describe("PR records", () => {
 		expect(reviewRecord({ ...at, rounds: [observed], tallies, risk, skipped: [] })).toContain(
 			"\n- Findings, recorded for comparison and never answered:\n",
 		);
+		// A later record restates the candidate's findings with the head they describe.
+		const later = reviewRecord({ ...at, rounds: clean, tallies, risk, skipped: [], observed });
+		expect(later).toContain(
+			`\n- Findings at ${round.head.slice(0, 12)}, recorded for comparison and never answered:\n`,
+		);
+		expect(parseReview(`## Review\n\n${later}\n`).find((each) => each.candidate)!.open.high).toBe(
+			round.findings.filter((f) => f.severity === "high").length,
+		);
+		// The candidate guarded nothing, so a culprit's reviewers leave it out.
+		const pull = { number: 1, state: "merged", closed: null, body: `## Review\n\n${later}\n` };
+		expect(
+			culpritOf(pull as unknown as Parameters<typeof culpritOf>[0]).reviewers.map((each) => each.harness),
+		).toEqual(["Codex", "Codex"]);
 		expect(fixes(body)).toEqual(["codex, gpt-6.2-sol, medium effort"]);
 		// The reviewer sessions read even from a record whose other lines this version cannot parse.
 		const newer = body.replace(/^- Rounds: 3;/m, "- Rounds: 3; first round 1 (medium 1);");

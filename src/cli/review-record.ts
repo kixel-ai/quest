@@ -92,7 +92,7 @@ function classifiedBy({ by }: Risk["classified"]): string {
  * reviewer the run skipped since it could not run, then every tally on the branch, each round's reviewer's beside its
  * round, and a reviewer the run left out on its own.
  */
-export function reviewRecord({ rounds, tallies, risk, skipped, head, base }: Reviewed): string {
+export function reviewRecord({ rounds, tallies, risk, skipped, observed, head, base }: Reviewed): string {
 	// A reviewer the run left out may still hold open findings, which keep the head from passing too.
 	// The candidate's findings are recorded, never answered, so they hold back nothing.
 	const answered = (seat: { candidate?: true }) => !seat.candidate;
@@ -149,6 +149,16 @@ export function reviewRecord({ rounds, tallies, risk, skipped, head, base }: Rev
 				? [`- Raised the risk to ${risk.tier}: ${code(risk.reason)}`]
 				: []),
 			`- Rounds: ${tally.rounds}; ${findingsText(counted(tally))}`,
+			// The candidate's findings stay in every record, since its comparison with the pick's needs their places.
+			...(tally.candidate && observed && observed.findings.length > 0
+				? [
+						`- Findings at ${observed.head.slice(0, 12)}, recorded for comparison and never answered:`,
+						...observed.findings.map(
+							(finding) =>
+								`  - ${capitalized(finding.severity)}, ${code(located(finding))}: ${code(finding.title)}`,
+						),
+					]
+				: []),
 		);
 	return lines.join("\n");
 }

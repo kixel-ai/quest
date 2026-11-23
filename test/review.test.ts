@@ -350,12 +350,14 @@ fakes("a model at its usage limit passes the round to its CLI's next model, whos
 			reason: "usage limit, resets 2030-03-17T17:46:40Z",
 		},
 	]);
-	// Fable's candidate seat runs beside them, since only Opus hit its limit.
+	// Fable's candidate seat runs beside them, since only Opus hit its limit, and only once though the pick moved on.
 	expect(rounds.map((r: Round) => `${r.model} ${r.effort}${seatRole(r) ? ` ${seatRole(r)}` : ""}`)).toEqual([
 		"claude-sonnet-5-5 high",
 		"claude-sonnet-5-5 medium shadow",
 		"claude-fable-5-2 medium candidate",
 	]);
+	const fable = s.calls().filter((c) => c.argv.includes("claude-fable-5-2") && effortOf(c) !== null);
+	expect(fable).toHaveLength(2);
 });
 
 fakes(
@@ -390,6 +392,17 @@ fakes(
 		// Its finding stays recorded, never settled.
 		const tried = tallies.find((each: Tally) => each.candidate);
 		expect([tried.model, tried.rounds, tried.findings.high, tried.fixed]).toEqual(["claude-fable-5-2", 1, 1, 0]);
+		// The state keeps its round for every later record, and no session to resume.
+		const state = () => JSON.parse(readFileSync(sessionFile(join(s.repo, ".git"), "feature"), "utf8"));
+		expect(state().observed.findings).toHaveLength(1);
+		expect(state().sessions.map((each: { reviewer: string }) => each.reviewer)).toEqual(["codex", "codex"]);
+		// A restart with --new still never runs it again, and keeps its finding in its tally.
+		const restarted = await quest("--root", s.repo, "review", ...OPUS_WROTE, "--size", "L", "--new", "--json");
+		expect(restarted.code, restarted.stderr).toBe(0);
+		const fresh = JSON.parse(restarted.stdout);
+		expect(fresh.rounds.map(label)).toEqual(["gpt-6.2-sol xhigh", "gpt-6.2-sol high shadow"]);
+		expect(fresh.tallies.find((each: Tally) => each.candidate).findings.high).toBe(1);
+		expect(fresh.observed.findings).toHaveLength(1);
 
 		// A candidate that fails for any reason is a skip that never retries, its error kept out of the record.
 		const w = setup(null);
@@ -401,6 +414,7 @@ fakes(
 		expect(out.skipped.map((each: Skip) => `${each.model} ${each.reason}`)).toEqual(["claude-fable-5-2 failed"]);
 		expect(out.skipped[0].detail).toBe("claude failed with exit status 1");
 		expect(out.rounds.map(label)).toEqual(["gpt-6.2-sol xhigh", "gpt-6.2-sol high shadow"]);
+		expect(JSON.parse(readFileSync(sessionFile(join(w.repo, ".git"), "feature"), "utf8")).observed).toBeNull();
 		vi.stubEnv("FAKE_QUOTED", undefined);
 		vi.stubEnv("FAKE_FAILS", undefined);
 		write(w.repo, ".tmp/responses.md", "1. Fixed.\n2. Fixed.\n");
@@ -2228,6 +2242,7 @@ test("an Implementer line reads as agents write it", () => {
 	});
 	// A retired GPT version's display name still reads, as older records name it.
 	expect(read("Codex, GPT-6.1 Sol, high effort")?.model).toBe("gpt-6.1-sol");
+	expect(read("Codex, openai/gpt-6.1-sol, high effort")?.model).toBe("gpt-6.1-sol");
 	expect(read("GPT 6.2 Astra")?.model).toBe("gpt-6.2-astra");
 	expect(read("Claude Code, Opus 5.5, low effort (iterate, flow fix)")).toEqual(opus("low"));
 	expect(read("Claude Code, Opus 5.5, high effort (iterate, XS, arm B)")).toEqual({
@@ -2531,12 +2546,16 @@ test("saved sessions are read only in the current format, or refused naming --ne
 		tallies: [tally, { ...tally, shadow: true }],
 	};
 	expect(parseState(shadowed)).toEqual(shadowed);
+	// The candidate keeps its one round, or null once it failed, and a tally, but no session to resume.
+	const observed = { reviewer: "claude", candidate: true, session: "s-1", findings: [finding] };
 	const candidate = {
 		branch: "feature",
-		sessions: [session, { ...session, candidate: true }],
-		tallies: [tally, { ...tally, candidate: true }],
+		sessions: [session],
+		tallies: [tally, { ...tally, reviewer: "claude", candidate: true }],
+		observed,
 	};
 	expect(parseState(candidate)).toEqual(candidate);
+	expect(parseState({ ...candidate, observed: null })).toEqual({ ...candidate, observed: null });
 	// A retired reviewer's tally is dropped so the record never names it; its session stays for the run's numbering.
 	const retired = { ...session, reviewer: "opencode", session: "ses_1" };
 	expect(
@@ -2563,8 +2582,10 @@ test("saved sessions are read only in the current format, or refused naming --ne
 		{ branch: "feature", sessions: [{ ...session, shadow: true }], tallies: [tally] },
 		{ branch: "feature", sessions: [{ ...session, shadow: false }], tallies: [tally] },
 		{ ...shadowed, sessions: [...shadowed.sessions, { ...session, shadow: true }] },
-		// Two candidates, or one seat in two roles.
+		// A candidate's session, a malformed observation, or one seat in two roles.
 		{ ...candidate, sessions: [...candidate.sessions, { ...session, candidate: true }] },
+		{ ...candidate, observed: { ...observed, candidate: undefined } },
+		{ ...candidate, observed: { ...observed, findings: undefined } },
 		{ ...shadowed, tallies: [tally, { ...tally, shadow: true, candidate: true }] },
 		{ ...shadowed, sessions: [session, { ...session, shadow: true, candidate: true }] },
 	])

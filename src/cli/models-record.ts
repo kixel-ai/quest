@@ -76,8 +76,9 @@ function modelId(name: string, harness: string, loose = false): string | null {
 	const listed = KNOWN.get(key(name));
 	if (listed) return listed;
 	if (/^claude\b/i.test(harness) && /^(claude )?[a-z]+ \d+(\.\d+)*$/i.test(name)) return `claude-${key(name)}`;
-	// A GPT display name, as `GPT-6.1 Sol`, reads as its ID even once the tables list a newer version.
-	const gpt = /^gpt[- ](\d+(?:\.\d+)*)[- ]([a-z]+)$/i.exec(name);
+	// A GPT display name or provider-qualified ID, as `GPT-6.1 Sol` or `openai/gpt-6.1-sol`, reads as its ID even once
+	// the tables list a newer version.
+	const gpt = /^(?:[a-z]+\/)?gpt[- ](\d+(?:\.\d+)*)[- ]([a-z]+)$/i.exec(name);
 	if (gpt) return `gpt-${gpt[1]}-${gpt[2]!.toLowerCase()}`;
 	return (loose ? /^(unknown|[a-z][\w./-]*)$/ : /^(unknown|[a-z][\w./-]*\d[\w./-]*)$/).test(name) ? name : null;
 }

@@ -1525,17 +1525,19 @@ answered, and settled like any reviewer's. A pick with no shadow seats one
 at its own effort while the old shadow still has findings, so none
 is left unanswered. The reviewers run at once;
 the first to fail, such as on a usage limit, stops the others, and the round
-saves none.
+saves none. The candidate below is the exception.
 
-On a branch's first run, the size's candidate, a model on trial, observes
-beside them in a new session: Claude Code `claude-fable-5-2` medium for an L
-PR, and none at other sizes. None runs when its model wrote the branch last or
-is the pick's, or in a `--harness` run. It runs once and is never resumed. Its
-findings are listed unnumbered and recorded for comparison with the pick's:
-nothing answers them with `--responses`, they count toward no `next` step, and
-it never raises the risk. A candidate that fails for any reason, such as its
-usage limit or a provider that does not offer its model, is passed over while
-the others finish, named as skipped, and never retried.
+On the first head the pick reviews on a branch, the size's candidate, a model
+on trial, observes beside them: Claude Code `claude-fable-5-2` medium for an L
+PR, and none at other sizes. None runs when its model wrote the branch last, or
+in a run that names its reviewer. It runs once per branch, `--new` included,
+in a session no later run resumes. Its findings are listed unnumbered and
+recorded for comparison with the pick's, and every later record restates them
+with the head they describe. Nothing answers them with `--responses`, they
+count toward no `next` step, and the candidate never raises the risk. A
+candidate that fails for any reason, such as its usage limit or a provider that
+does not offer its model, is passed over while the others finish, named as
+skipped, and never retried.
 
 A reviewer that cannot run passes the round to the next whose model is not
 the latest writer's, so Sonnet reviews what Opus changed last while Sol is
@@ -1870,8 +1872,10 @@ giving the reviewers the first round `quest review` gives, with the base's
 `AGENTS.md` and `CLAUDE.md` and this checkout's committed `REVIEW.md`. A
 finding on any line of a defect's places finds it; every finding on a clean PR
 is noise. It prints defects found and clean findings by severity for the pick,
-its shadow, the candidate, which sits out a case its model wrote, and either, what the seats but the candidate found together, by size and by tier, each case's rounds, and the cost
-token-max prices for the run's sessions.
+its shadow, the candidate, which sits out a case its model wrote and is listed
+as skipped on a case it cannot run while the others still score, and either,
+what the seats but the candidate found together, by size and by tier, each
+case's rounds, and the cost token-max prices for the run's sessions.
 
 ## Audit cost and accuracy
 

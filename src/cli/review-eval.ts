@@ -20,7 +20,9 @@ import {
 	type Assessment,
 	type Finding,
 	ReviewInputError,
+	ReviewerUnavailableError,
 	SEVERITIES,
+	type Skip,
 	type Usage,
 	baseInstructions,
 	classify,
@@ -356,6 +358,8 @@ export interface Seated {
 export interface Scored {
 	case: EvalCase;
 	seats: Seated[];
+	/** The candidate, when it could not run on the case: it only observes, so the other seats still score. */
+	skipped: Skip[];
 }
 
 /** Defects found and noise raised by one group of rounds. */
@@ -414,7 +418,8 @@ export function foundDefects(defects: Defect[], findings: Finding[]): number[] {
 
 /**
  * Review every case of the set at its head, one case at a time with its reviewers at once, and score them. The first
- * failure stops the run and fails it whole, as a partial score would read as the reviewer's.
+ * failure stops the run and fails it whole, as a partial score would read as the reviewer's, except the candidate's,
+ * which skips it on that case, since it only observes.
  */
 export async function evaluate(options: EvalOptions, sessions: (since: Date) => Session[] | null): Promise<EvalReport> {
 	if ((options.model !== undefined || options.effort !== undefined) && options.harness === undefined)
@@ -447,7 +452,7 @@ export async function evaluate(options: EvalOptions, sessions: (since: Date) => 
 	const scored: Scored[] = [];
 	for (const [index, entry] of cases.entries()) {
 		options.progress?.(index + 1, cases.length, entry.pull);
-		scored.push({ case: entry, seats: await reviewCase(root, dir, entry, seats.get(entry)!, rules, options) });
+		scored.push({ case: entry, ...(await reviewCase(root, dir, entry, seats.get(entry)!, rules, options)) });
 	}
 	return {
 		repository,
@@ -466,7 +471,7 @@ async function reviewCase(
 	seats: ReturnType<typeof evalSeats>,
 	rules: { sha: string; text: string } | null,
 	options: EvalOptions,
-): Promise<Seated[]> {
+): Promise<Omit<Scored, "case">> {
 	// Its own name, so a concurrent run of the same case keeps its checkout.
 	const checkout = join(dir, `${entry.pull}-${randomUUID()}`);
 	git(root, ["worktree", "add", "--quiet", "--detach", checkout, entry.head]);
@@ -486,6 +491,7 @@ async function reviewCase(
 		};
 		const controller = new AbortController();
 		const signal = options.signal ? AbortSignal.any([options.signal, controller.signal]) : controller.signal;
+		const skipped: Skip[] = [];
 		const results = await Promise.allSettled(
 			seats.map(({ reviewer, shadow, candidate }) =>
 				firstRound(reviewer, { ...opening, signal }).then(
@@ -502,6 +508,11 @@ async function reviewCase(
 						found: foundDefects(entry.defects ?? [], verdict.findings),
 					}),
 					(error: unknown) => {
+						if (candidate && !signal.aborted && error instanceof Error) {
+							const reason = error instanceof ReviewerUnavailableError ? error.reason : "failed";
+							skipped.push({ ...reviewer, reason, detail: error.message.replace(/\s+/g, " ").trim() });
+							return null;
+						}
 						controller.abort(error);
 						throw error;
 					},
@@ -509,7 +520,8 @@ async function reviewCase(
 			),
 		);
 		if (controller.signal.aborted) throw controller.signal.reason;
-		return results.map((result) => (result as PromiseFulfilledResult<Seated>).value);
+		const done = results.flatMap((result) => (result as PromiseFulfilledResult<Seated | null>).value ?? []);
+		return { seats: done, skipped };
 	} finally {
 		git(root, ["worktree", "remove", "--force", checkout]);
 	}
@@ -609,9 +621,13 @@ export function evalLines(report: EvalReport): string[] {
 	for (const [seat, tally] of Object.entries(report.totals)) lines.push(`${seat}: ${share(tally)}; ${noise(tally)}`);
 	for (const [key, tally] of Object.entries(report.by).sort(([a], [b]) => a.localeCompare(b)))
 		lines.push(`  ${key}: ${share(tally)}; ${noise(tally)}`);
-	for (const { case: entry, seats } of report.scored) {
+	for (const { case: entry, seats, skipped } of report.scored) {
 		const kind = entry.clean ? "clean" : `${entry.defects!.length} defect(s)`;
 		lines.push(`#${entry.pull} ${entry.size} ${entry.tier} ${kind}`);
+		for (const skip of skipped)
+			lines.push(
+				`  ${skip.harness} ${skip.model} ${skip.effort} candidate: skipped, ${skip.reason}: ${skip.detail}`,
+			);
 		for (const seat of seats) {
 			const name = `${seat.reviewer} ${seat.model} ${seat.effort}${seatRole(seat) === null ? "" : ` ${seatRole(seat)}`}`;
 			const result = entry.clean ? "" : ` found ${seat.found.length}/${entry.defects!.length},`;

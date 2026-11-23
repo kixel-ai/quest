@@ -137,13 +137,20 @@ test("tallies count defects found and clean findings per seat, size, and tier, a
 	} as EvalCase;
 	const clean = { pull: 4, ...base, size: "S", tier: "low", clean: true } as EvalCase;
 	const scored: Scored[] = [
-		{ case: culprit, seats: [seat([0], [finding("src/a.ts", 10)]), seat([1], [finding("src/a.ts", 20)], true)] },
+		{
+			case: culprit,
+			seats: [seat([0], [finding("src/a.ts", 10)]), seat([1], [finding("src/a.ts", 20)], true)],
+			skipped: [],
+		},
 		{
 			case: clean,
 			seats: [
 				seat([], [finding("x", 1, "high"), finding("x", 2, "low")]),
 				seat([], [finding("x", 1, "medium")], true),
+				// The candidate only observes, so its findings stay out of either.
+				{ ...seat([], [finding("x", 3, "high")]), candidate: true },
 			],
+			skipped: [],
 		},
 	];
 	const { totals, by } = tallies(scored, true);
@@ -162,25 +169,26 @@ test("tallies count defects found and clean findings per seat, size, and tier, a
 		clean: 1,
 		noise: { high: 1, medium: 1, low: 1 },
 	});
+	expect(totals.candidate).toMatchObject({ clean: 1, noise: { high: 1, medium: 0, low: 0 } });
 	expect(by["pick M"]).toMatchObject({ culprits: 1, found: 1, clean: 0 });
 	expect(by["pick low"]).toMatchObject({ culprits: 0, clean: 1 });
 	expect(Object.keys(by).sort()).toEqual(
 		["either M", "either S", "either low", "either medium", "pick M", "pick S", "pick low", "pick medium"]
-			.concat(["shadow M", "shadow S", "shadow low", "shadow medium"])
+			.concat(["shadow M", "shadow S", "shadow low", "shadow medium", "candidate S", "candidate low"])
 			.sort(),
 	);
 });
 
 test("either counts a case whose pick has no shadow, and a run of one named reviewer has none", () => {
 	const lone = { pull: 5, ...base, defects: [defect] } as EvalCase;
-	const scored: Scored[] = [{ case: lone, seats: [seat([0], [finding("src/a.ts", 11)])] }];
+	const scored: Scored[] = [{ case: lone, seats: [seat([0], [finding("src/a.ts", 11)])], skipped: [] }];
 	expect(tallies(scored, true).totals.either).toMatchObject({ culprits: 1, found: 1, defects: 1 });
 	expect(tallies(scored, false).totals).toEqual({ pick: expect.objectContaining({ found: 1 }) });
 });
 
 test("the cost sums the run's sessions token-max priced, a lower bound when one is missing or incomplete", () => {
 	const scored: Scored[] = [
-		{ case: { pull: 4, ...base, clean: true } as EvalCase, seats: [seat([], []), seat([], [], true)] },
+		{ case: { pull: 4, ...base, clean: true } as EvalCase, seats: [seat([], []), seat([], [], true)], skipped: [] },
 	];
 	const session = (id: string, cost: number, complete = true) =>
 		({ harness: "codex", id, parent: null, cost, complete }) as Session;

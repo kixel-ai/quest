@@ -1706,11 +1706,11 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"no longer that step away; its findings are numbered and settled like any reviewer's, its session carries " +
 				"over to the new shadow, and a pick with no shadow seats one at its own effort while the old " +
 				"shadow still has findings. " +
-				`On the branch's first run, the size's candidate, a model on trial, observes beside them: ${candidates}. ` +
-				"It runs once, in a new session, unless its model is avoided or is the pick's; its findings are listed " +
-				"unnumbered and recorded for comparison, never answered with --responses, counted toward `next`, or used to " +
-				"raise the risk. One that fails for any reason is passed over while the others finish, named as skipped, and " +
-				"never retried. " +
+				`On the first head the pick reviews on the branch, the size's candidate, a model on trial, observes beside them: ${candidates}. ` +
+				"It runs once per branch, --new included, in a session no later run resumes, unless its model is avoided or " +
+				"the run names its reviewer; its findings are listed unnumbered and recorded for comparison, restated in every " +
+				"later record, and never answered with --responses, counted toward `next`, or used to raise the risk. One that " +
+				"fails for any reason is passed over while the others finish, named as skipped, and never retried. " +
 				"--exclude-model names each model to avoid; without it, the " +
 				"latest writer is avoided: the model the last Implementer line names in the `## Models` record of the body of the branch's open PR. " +
 				"When it names none or an `unknown` model, " +
@@ -1719,7 +1719,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"none. " +
 				"--harness names the only reviewer instead of the pick, the shadow, and the candidate, at its entry's model and effort, and --model and " +
 				"--effort override that reviewer's, or without --harness, the size pick's; a repository whose AGENTS.md names other reviewers " +
-				"passes them. A --harness run keeps the other reviewers' sessions for the next run of the pick, and refuses while one has findings to settle, as a run of the pick does while a reviewer only --harness runs has some. When the latest writer changes the size's pick to one with no session on the branch, its first session settles the open findings of the reviewer it replaces. The reviewers run at once, and the first to fail stops the others and fails the " +
+				"passes them. A --harness run keeps the other reviewers' sessions for the next run of the pick, and refuses while one has findings to settle, as a run of the pick does while a reviewer only --harness runs has some. When the latest writer changes the size's pick to one with no session on the branch, its first session settles the open findings of the reviewer it replaces. The reviewers run at once, and the first to fail, the candidate aside, stops the others and fails the " +
 				"run, saving no round. The " +
 				"size is --size, else the size of the quest a quest/ branch names, read from the base's tip so a " +
 				`change cannot lower its own review, else the PR record's Size line, else ${DEFAULT_SIZE}. ` +
@@ -1800,7 +1800,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"`next checkpoint` when a reviewer's every third round reports other findings, to compare the current approach " +
 				"with the best long-term approach worked out from first principles before fixing them, `next respond` to fix or refute the findings, or `next done`, which for a low head no reviewer ran says so. A reply without a valid score " +
 				"fails as any malformed reply does. --json prints " +
-				"one object: `rounds`, one per reviewer, `tallies`, every reviewer's findings across the branch's rounds, `risk`, the head's tier with its classification, `skipped`, each reviewer passed over with its reason, `record`, and `next`.\n\n" +
+				"one object: `rounds`, one per reviewer, `tallies`, every reviewer's findings across the branch's rounds, `risk`, the head's tier with its classification, `skipped`, each reviewer passed over with its reason, `observed`, the candidate's round on an earlier head or null, `record`, and `next`.\n\n" +
 				"After each round, it rewrites the `## Review` section of the branch's open PR into the base, the one from the repository the base's remote pushes to, else the only one from another repository whose pushed head `HEAD` contains, as the " +
 				"user the GitHub token names, keeping the rest of the body, and prints `record <url>`: the reviewed " +
 				"head, named in full only once no reviewer reports a finding, the base, the head's risk tier and reason, " +
@@ -1913,6 +1913,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 									tallies,
 									risk,
 									skipped,
+									observed: reviewed.observed ?? null,
 									record: record ?? null,
 									next: nextStep(rounds),
 								}),
@@ -1953,7 +1954,8 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"reviewer table, the prompts, or REVIEW.md is scored before it lands. The reviewers are the size's pick, " +
 				"avoiding the case's writer, its shadow, and the size's candidate unless its model wrote the case, as quest review runs them, or --harness's alone, at its " +
 				"entry's model and effort unless --model and --effort override them. A reviewer that cannot run fails the run " +
-				"rather than passing the case to the next, so the score measures the reviewers it names. Cases run one at a time, their reviewers " +
+				"rather than passing the case to the next, so the score measures the reviewers it names, except the candidate, " +
+				"which only observes, so the case lists it as skipped and the others still score. Cases run one at a time, their reviewers " +
 				"at once, and the first failure stops the run and fails it.\n\n" +
 				"Prints the set's counts and rules, a line per seat (pick, shadow, candidate, and, without --harness, either: what " +
 				"the case's seats but the candidate found together, as a run of them all finds it) with defects found and clean findings by severity, the same by size and tier, " +
