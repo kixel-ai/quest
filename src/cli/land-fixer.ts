@@ -323,7 +323,7 @@ export async function comment(
 	entry: Pick<Entry, "number" | "enabledAt">,
 	text: string,
 	suffix: string,
-	attribution = "Codex",
+	attribution = "Claude",
 	log = "",
 	reason?: Reason,
 	section?: (room: number) => string,
@@ -558,14 +558,14 @@ export function fixerText(text: string): string {
 }
 /** The fixer's harness, model, and effort, as a PR's `## Models` record names a session. */
 export function author(result?: Pick<FixResult, "agent" | "model" | "effort">): string {
-	const agent = result?.agent ?? "Codex";
+	const agent = result?.agent ?? "Claude";
 	const model = result?.model;
 	return (
 		[agent, model && model !== agent ? model : undefined, result?.effort && `${result.effort} effort`]
 			.filter(Boolean)
 			.join(", ")
 			.replace(/[^a-zA-Z0-9 ,._/-]/g, " ")
-			.slice(0, 100) || "Codex"
+			.slice(0, 100) || "Claude"
 	);
 }
 /** The PR body with the fix recorded in its `## Review` section; the line names the agent, and the author's text stays as written. */

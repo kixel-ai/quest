@@ -51,7 +51,7 @@ Decided 2026-10-30 (user, /quest-plan), replacing "First public release":
 - How do moq-dev's repositories land? Decided 2026-11-01 (maintainer,
   /quest-plan), reversing the 2026-10-26 move to a batched gate:
   - ✅ Through GitHub's merge queue again, one PR at a time, with no batching
-    and no pre-checks. A host watcher runs the Codex land fixer on each PR the
+    and no pre-checks. A host watcher runs the land fixer on each PR the
     queue drops and re-enqueues it, so only decisions reach a person. The
     batched gate was left for GitHub's inability to resolve quest-file
     conflicts (71% of moq's 246 removals); the async fixer now absorbs those.

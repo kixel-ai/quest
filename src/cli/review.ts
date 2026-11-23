@@ -595,6 +595,11 @@ interface Reviewer {
 	managed?(env: NodeJS.ProcessEnv): boolean;
 	/** The error for a gateway in `env` with no credential of its own, to which the CLI would send its stored login. */
 	bareGateway?(env: NodeJS.ProcessEnv): string | undefined;
+	/**
+	 * Whether the status check says nothing about a run through a route, which then skips it: the route's
+	 * credential, which `bareGateway` requires, replaces the stored login, and a turn reports its rejection.
+	 */
+	routeUnchecked?: boolean;
 	/** Matches the CLI's error for a login or credential the API rejected: expired, revoked, or invalid. */
 	unauthorized: RegExp;
 	/** The CLI's own review, given `prompt`'s scope, rules, and responses. */
@@ -621,6 +626,9 @@ const text = (value: unknown) => (typeof value === "string" ? value : undefined)
 
 /** The cloud providers Claude Code reaches its model through, each with a `CLAUDE_CODE_USE_` switch. */
 const CLAUDE_PROVIDERS = ["BEDROCK", "VERTEX", "FOUNDRY", "MANTLE", "ANTHROPIC_AWS", "ANTHROPIC_GOOGLE_CLOUD"];
+
+/** Whether a credential is set: Codex trims one and reads a blank one as unset, falling back to its stored login. */
+const set = (value: string | undefined) => Boolean(value?.trim());
 
 /** Claude Code turns a switch on only for `1`, `true`, `yes`, or `on`, so `0` or `false` sets nothing. */
 const enabled = (value: string | undefined) => /^\s*(1|true|yes|on)\s*$/i.test(value ?? "");
@@ -686,8 +694,8 @@ const claude: Reviewer = {
 	bareGateway: (env) =>
 		env.ANTHROPIC_BASE_URL &&
 		claudeProviders(env).length === 0 &&
-		!env.ANTHROPIC_API_KEY &&
-		!env.ANTHROPIC_AUTH_TOKEN &&
+		!set(env.ANTHROPIC_API_KEY) &&
+		!set(env.ANTHROPIC_AUTH_TOKEN) &&
 		!authorizes(env.ANTHROPIC_CUSTOM_HEADERS)
 			? "claude would send its stored login to the gateway ANTHROPIC_BASE_URL names, which has no credential; " +
 				"set ANTHROPIC_API_KEY, ANTHROPIC_AUTH_TOKEN, or an Authorization header in ANTHROPIC_CUSTOM_HEADERS " +
@@ -818,10 +826,19 @@ const codex: Reviewer = {
 	credentials: ["CODEX_API_KEY", "CODEX_ACCESS_TOKEN"],
 	routeCredentials: [],
 	// A gateway that intercepts TLS needs its CA. OPENAI_BASE_URL is never stripped, and reaches Codex as
-	// `openai_base_url`. It is no route: `codex login status` ignores CODEX_API_KEY, so a gateway's key
-	// passes as any key does, while Codex has no stored login.
+	// `openai_base_url`.
 	connection: ["CODEX_CA_CERTIFICATE"],
-	routes: () => [],
+	routes: (env) => (env.OPENAI_BASE_URL ? ["OPENAI_BASE_URL"] : []),
+	// `codex login status` ignores CODEX_API_KEY and checks CODEX_ACCESS_TOKEN with OpenAI, never the gateway.
+	routeUnchecked: true,
+	// Codex sends its stored ChatGPT login, with its account ID, to `openai_base_url` unless CODEX_API_KEY or
+	// CODEX_ACCESS_TOKEN replaces it.
+	bareGateway: (env) =>
+		env.OPENAI_BASE_URL && !set(env.CODEX_API_KEY) && !set(env.CODEX_ACCESS_TOKEN)
+			? "codex would send its stored login to the gateway OPENAI_BASE_URL names, which has no credential; " +
+				"set CODEX_API_KEY (any value, for a gateway that needs none) or CODEX_ACCESS_TOKEN for the gateway, " +
+				"or unset OPENAI_BASE_URL"
+			: undefined,
 	unauthorized: LOGINS.codex.unauthorized,
 	// Custom instructions replace `--base`, so the prompt names the range. Review mode ignores
 	// `--output-schema`, so the schema waits for the next turn.
@@ -1051,6 +1068,8 @@ const pick = (env: NodeJS.ProcessEnv, names: string[]) =>
  * shell's API key never overrides a stored subscription login, so a review is
  * billed as the user's own CLI sessions are. A gateway with no credential of
  * its own would receive the stored login, so it is refused before the CLI runs.
+ * A route's status check runs unless `routeUnchecked` says it never sees the
+ * gateway, which then judges the credential on the first turn.
  */
 async function prepare(
 	harness: HarnessName,
@@ -1072,12 +1091,13 @@ async function prepare(
 	const loggedIn = async (env: NodeJS.ProcessEnv) =>
 		(await run(reviewer.status, cwd, env, "", undefined, signal)).code === 0;
 	const credentials = [...reviewer.credentials, ...(routes.length > 0 ? reviewer.routeCredentials : [])].filter(
-		(name) => env[name],
+		(name) => set(env[name]),
 	);
 	const withCredentials = { ...connected, ...pick(env, credentials) };
 	const rejected = `${harness} rejected ${names(credentials)}${through}; replace it, or run \`${reviewer.login}\``;
 	if (routes.length > 0) {
-		if (!(await loggedIn(withCredentials))) throw new ReviewerUnavailableError(harness, "logged out", loggedOut);
+		if (!reviewer.routeUnchecked && !(await loggedIn(withCredentials)))
+			throw new ReviewerUnavailableError(harness, "logged out", loggedOut);
 		return {
 			harness,
 			reviewer,
