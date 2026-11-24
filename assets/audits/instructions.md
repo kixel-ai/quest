@@ -1,0 +1,31 @@
+# Agent instructions audit
+
+The goal is instructions agents load that are short, agree with each other, follow the current official guidance of every harness and model the repository's agents run, and change what agents do.
+The scope is every file an agent loads as context from the repository: `AGENTS.md` and `CLAUDE.md` at every depth, `GEMINI.md`, `CONTRIBUTING.md`, `REVIEW.md`, skills with their descriptions, path-scoped rules, the context hooks inject, and the prompts and instructions its code plants or sends to agents.
+Machine-level files, such as `~/.claude/CLAUDE.md`, belong to the repository that holds them, and files another repository ships or syncs, such as `quest`'s rules and skill stubs, are fixed at their source: plan a follow-up there instead of editing the copy.
+Turning new mistakes into new rules is not this audit's work, and which models run is not either.
+
+Gather first:
+
+- Harnesses and models: the ones the repository's agents ran since the last run, from the `## Models` lines of its PRs and `quest usage`.
+- Guidance: every page `quest guide prompting` links, checked to resolve, then read, along with the current pages for each harness and model found above that it lacks.
+- Evidence: review findings and `## Caused by` escapes from `quest usage`, corrections people typed from `quest messages --repo <owner/name>`, and the transcripts of sessions whose working directory was one of the repository's checkouts, on each host that runs its agents. Read no other repository's messages or transcripts, and quote none in the PR or the stub: give counts and paraphrase.
+
+Look for:
+
+- Load budgets: each harness's loaded set, joined as it joins them from the root to the deepest working directory agents use, measured against the limits its pages give, such as Codex's `project_doc_max_bytes` and skill-list budget, Claude Code's per-file size target and skill-description cap, and Antigravity's per-rule-file and always-on caps. Text past a limit is cut silently.
+- Files a harness never loads, such as an `AGENTS.md` that Claude Code skips beside a `CLAUDE.md` that does not import it.
+- Contradictions between files, which models resolve arbitrarily, and a rule said in more than one place.
+- Rules the code, a hook, or a check already enforces, and caution written for older models.
+- Capitals, emphasis, and an absolute "never" or "always" where the rule has exceptions.
+- Commands, flags, paths, and links in instruction files that no longer work.
+- Rules the evidence shows agents ignore, misread, or never need, and mistakes recurring under a rule meant to stop them.
+- Guidance the pages give that the files miss or contradict.
+- Risk tiers: whether `RISK.md` rates a change to these files at least medium; propose that line where one could land as low or through an `## Automatic` class.
+
+Split the reading across parallel sub-agents, such as one per harness's loaded set and one for the evidence, each returning findings with a path and line, or a count of sessions.
+
+Cut, consolidate, and rewrite in the run's PR, as `quest guide prompting` describes.
+Add a rule only where cutting or merging others cannot fix a finding; that replaces the running steps' `AGENTS.md` proposal for this audit.
+List each edit under the PR's `## Waiting` as its own `Maintainer:` item, to keep or revert with a recommendation, so the maintainer drops one without rejecting the rest; the PR lands only on those answers, and the reverts they ask for make a new head that gets a new review.
+Record as the next stub's baseline the commit this run read, each harness's loaded size as measured, the date each guidance page was read, and each rule kept against the evidence with why, so the next run reads what changed since.

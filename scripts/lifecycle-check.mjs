@@ -106,7 +106,7 @@ try {
 		run(root, "check");
 		assert.equal(
 			run(root, "unblocked"),
-			"1\tquest/m0/one.md\n0\tquest/m1/audit-code.md\n0\tquest/m1/audit-cost.md\n0\tquest/m1/audit-deps.md\n0\tquest/m1/audit-docs.md\n0\tquest/m1/audit-tests.md\n0\tquest/m1/audit-tree.md\n",
+			"1\tquest/m0/one.md\n0\tquest/m1/audit-code.md\n0\tquest/m1/audit-cost.md\n0\tquest/m1/audit-deps.md\n0\tquest/m1/audit-docs.md\n0\tquest/m1/audit-instructions.md\n0\tquest/m1/audit-tests.md\n0\tquest/m1/audit-tree.md\n",
 		);
 		assert.equal(run(root, "unblocked", join(root, "quest", "m0", "one.md")), "");
 		assert.equal(run(root, "unblocked", join("quest", "m0", "one.md")), "");

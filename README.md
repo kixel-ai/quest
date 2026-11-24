@@ -186,12 +186,13 @@ Quest ships a pack of audits every repository runs once per milestone:
 
 ```console
 $ quest audit
-tree - Audit the quest tree
-deps - Audit dependencies
-code - Audit the code
-cost - Audit build and CI cost
-docs - Audit the docs
-tests - Audit test coverage
+tree - [M] Audit the quest tree
+deps - [M] Audit dependencies
+code - [L] Audit the code
+cost - [L] Audit build and CI cost
+docs - [M] Audit the docs
+tests - [M] Audit test coverage
+instructions - [XL] Audit agent instructions
 ```
 
 `tree` finds quests that disagree, conflict, sit in the wrong milestone, or
@@ -199,8 +200,10 @@ plan stale work; `deps` reviews new releases, upstream health, held-back
 majors, and dependencies worth dropping; `code` deletes dead code, simplifies
 overbuilt code, and prunes stale lint suppressions; `cost` weighs each CI job,
 gate step, test, build second, and artifact byte against what it earns; `docs`
-checks claims, examples, links, and exports against the code; and `tests`
-finds untested behavior and tests CI never runs. `quest audit <name>` prints
+checks claims, examples, links, and exports against the code; `tests`
+finds untested behavior and tests CI never runs; and `instructions` cuts,
+consolidates, and rewrites the files agents load against each harness's and
+model's official guidance and how agents followed them. `quest audit <name>` prints
 what one checks, what each finding becomes, and how its run plans the next
 one.
 
@@ -227,7 +230,7 @@ Run the `deps` audit: `quest audit deps` prints what it checks, what each findin
 after the lowest one with work left, requiring it, and creates that milestone
 when missing; with no work left, the stubs are ready at once. It never edits a
 stub afterwards. The run's PR deletes the stub and creates the next one a
-milestone later, scheduled a week out, so improving a definition reaches every
+milestone later, titled and sized as `quest audit` lists it, scheduled a week out, so improving a definition reaches every
 repository on its next run. To opt out, list the audit in the root
 `quest/README.md`:
 
@@ -2231,7 +2234,9 @@ session's next stop labels the steps still unlabeled.
 
 `quest messages` prints the messages a person typed to agents on this host
 since `--since` (a local `YYYY-MM-DD`, by default 7 days ago), oldest first,
-for a periodic audit of what agents keep getting wrong:
+for a periodic audit of what agents keep getting wrong. `--repo` prints only
+one repository's, named as the output names it, so an audit of one repository
+reads no other's:
 
 ```console
 $ quest messages --since 2026-11-10

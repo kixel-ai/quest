@@ -92,7 +92,7 @@ test("init and uninstall print each changed path and nothing else", () => {
 	expect(init.code).toBe(0);
 	expect(init.stdout).toMatch(/^(\S+\n)+$/);
 	expect(init.stdout).toContain(
-		"quest/README.md\nAGENTS.md\n.gitattributes\nquest/m0/README.md\nquest/m1/README.md\nquest/m1/audit-tree.md\nquest/m1/audit-deps.md\nquest/m1/audit-code.md\nquest/m1/audit-cost.md\nquest/m1/audit-docs.md\nquest/m1/audit-tests.md\n",
+		"quest/README.md\nAGENTS.md\n.gitattributes\nquest/m0/README.md\nquest/m1/README.md\nquest/m1/audit-tree.md\nquest/m1/audit-deps.md\nquest/m1/audit-code.md\nquest/m1/audit-cost.md\nquest/m1/audit-docs.md\nquest/m1/audit-tests.md\nquest/m1/audit-instructions.md\n",
 	);
 	expect(run("--root", root, "init").stdout).toBe("");
 	expect(run("--root", root, "uninstall").stdout).toMatch(/^(\S+\n)+$/);
@@ -131,14 +131,16 @@ test("skill rejects an unknown name", () => {
 
 test("audit lists the pack, and prints a definition with how every run plans the next", () => {
 	expect(run("audit").stdout).toBe(
-		"tree - Audit the quest tree\ndeps - Audit dependencies\ncode - Audit the code\ncost - Audit build and CI cost\ndocs - Audit the docs\ntests - Audit test coverage\n",
+		"tree - [M] Audit the quest tree\ndeps - [M] Audit dependencies\ncode - [L] Audit the code\ncost - [L] Audit build and CI cost\ndocs - [M] Audit the docs\ntests - [M] Audit test coverage\ninstructions - [XL] Audit agent instructions\n",
 	);
 	const out = run("audit", "deps");
 	expect(out.code).toBe(0);
 	expect(out.stdout).toMatch(/^# Dependency audit\n[\s\S]*\n# Running an audit\n[\s\S]*\n## Next run\n/);
 	const missing = run("audit", "perf");
 	expect(missing.code).toBe(1);
-	expect(missing.stderr).toBe("quest: no audit named perf (have: tree, deps, code, cost, docs, tests)\n");
+	expect(missing.stderr).toBe(
+		"quest: no audit named perf (have: tree, deps, code, cost, docs, tests, instructions)\n",
+	);
 });
 
 test("usage errors exit 2", () => {

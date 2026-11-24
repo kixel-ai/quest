@@ -900,7 +900,7 @@ describe("audits", () => {
 		tree()
 			.append("quest/m0/epic/one.md", audit("dep"))
 			.rejects(
-				"one.md:9: '## Audit' item must be the name of an audit quest ships (tree, deps, code, cost, docs, tests)",
+				"one.md:9: '## Audit' item must be the name of an audit quest ships (tree, deps, code, cost, docs, tests, instructions)",
 			);
 		tree()
 			.append("quest/README.md", skipped("perf - not shipped"))

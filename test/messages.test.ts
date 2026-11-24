@@ -613,7 +613,7 @@ describe("readT3Messages", () => {
 });
 
 describe("messages", () => {
-	test("gathers every source once, oldest first, naming each checkout's GitHub origin", () => {
+	test("gathers every source once, oldest first, naming each checkout's GitHub origin, filtered by repository on request", () => {
 		const home = tempDir();
 		const checkout = join(home, "proj");
 		mkdirSync(checkout);
@@ -645,7 +645,7 @@ describe("messages", () => {
 		]);
 
 		const notes: string[] = [];
-		const found = messages("2026-11-01", { env: {}, home, warn: (line) => notes.push(line) });
+		const found = messages({ since: "2026-11-01" }, { env: {}, home, warn: (line) => notes.push(line) });
 		expect(notes).toEqual([]);
 		expect(found).toEqual([
 			{
@@ -674,6 +674,9 @@ describe("messages", () => {
 			},
 		]);
 		expect(messageLines(found.slice(2))).toEqual([`2026-11-06T11:00:00.000Z codex /gone ${THREAD}`, "  and test"]);
+		const mine = messages({ since: "2026-11-01", repository: "acme/proj" }, { env: {}, home });
+		expect(mine.map((m) => m.repository)).toEqual(["acme/proj", "acme/proj"]);
+		expect(messages({ since: "2026-11-01", repository: "/gone" }, { env: {}, home })).toEqual([found[2]]);
 	});
 
 	test("prints an answer with its skill, question, recommendation, and pick", () => {
@@ -704,6 +707,6 @@ describe("messages", () => {
 	test("fails when T3 Code is installed but its state is elsewhere", () => {
 		const home = tempDir();
 		mkdirSync(join(home, ".t3"));
-		expect(() => messages("2026-11-01", { env: {}, home })).toThrow(/keeps no state/);
+		expect(() => messages({ since: "2026-11-01" }, { env: {}, home })).toThrow(/keeps no state/);
 	});
 });

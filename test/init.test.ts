@@ -575,7 +575,7 @@ test("init plants no audit a quest names or the root skips, and never edits a pl
 	write(
 		dir,
 		"quest/README.md",
-		"# Quests\n\n## Goal\n\nWork.\n\n## Skipped audits\n\n- deps - nothing to depend on\n- code\n- cost\n- docs\n- tests\n",
+		"# Quests\n\n## Goal\n\nWork.\n\n## Skipped audits\n\n- deps - nothing to depend on\n- code\n- cost\n- docs\n- tests\n- instructions\n",
 	);
 	write(dir, "quest/m0/README.md", "# Now\n\n## Goal\n\nNow.\n");
 	write(dir, "quest/m0/tree.md", `${QUEST}\n## Audit\n\n- tree\n`);
@@ -585,7 +585,7 @@ test("init plants no audit a quest names or the root skips, and never edits a pl
 	write(
 		dir,
 		"quest/README.md",
-		"# Quests\n\n## Goal\n\nWork.\n\n## Skipped audits\n\n- code\n- cost\n- docs\n- tests\n",
+		"# Quests\n\n## Goal\n\nWork.\n\n## Skipped audits\n\n- code\n- cost\n- docs\n- tests\n- instructions\n",
 	);
 	expect(init(dir)).toEqual(["quest/m1/README.md", "quest/m1/audit-deps.md"]);
 	write(dir, "quest/m1/audit-deps.md", "# [L] Edited\n\n## Goal\n\nOurs.\n\n## Audit\n\n- deps\n");

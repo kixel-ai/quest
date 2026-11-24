@@ -114,6 +114,13 @@ export interface Answer {
 /** What `quest messages` prints. */
 export type Entry = Message | Answer;
 
+/** Which messages `messages` returns: those since a local `YYYY-MM-DD`, and only one repository's when `repository` names it. */
+export interface MessagesQuery {
+	since: string;
+	/** A repository as the output names it: `owner/name` for a GitHub checkout, else its directory. */
+	repository?: string;
+}
+
 export interface MessagesDependencies {
 	env: NodeJS.ProcessEnv;
 	home: string;
@@ -588,8 +595,8 @@ export function readT3Messages(path: string, since: number, repository: (dir: st
  * Every message a person typed to an agent on this host since `since`, a `YYYY-MM-DD` local date, and every answer
  * they gave an agent's question, oldest first.
  */
-export function messages(since: string, deps: MessagesDependencies): Entry[] {
-	const from = new Date(`${since}T00:00:00`).getTime();
+export function messages(query: MessagesQuery, deps: MessagesDependencies): Entry[] {
+	const from = new Date(`${query.since}T00:00:00`).getTime();
 	const repository = repositories();
 	const found: Entry[] = [];
 	for (const [session, path] of claudeLogs(deps)) {
@@ -620,7 +627,9 @@ export function messages(since: string, deps: MessagesDependencies): Entry[] {
 			);
 		found.push(...readT3Messages(state, from, repository));
 	}
-	return found.sort((a, b) => a.time.localeCompare(b.time));
+	return found
+		.filter((m) => query.repository === undefined || m.repository === query.repository)
+		.sort((a, b) => a.time.localeCompare(b.time));
 }
 
 /** The entries as plain lines: a header per entry, then its text, or an answer's question and picks, indented. */
