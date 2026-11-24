@@ -74,7 +74,7 @@ test("each size's reviewer is the first whose model is not the latest writer's",
 	expect(at("L", codex)).toBe("claude claude-opus-5-5 high");
 	expect(at("XL", codex)).toBe("claude claude-opus-5-5 xhigh");
 
-	// The PR's latest recorded implementer replaces the running harness, and only it is avoided.
+	// The PR's latest recorded implementer replaces the running harness, and only it and the models weaker than it are avoided.
 	expect(at("S", authored({}, { CLAUDECODE: "1" }, "claude-opus-5-5"))).toBe("codex gpt-6.1-sol medium");
 	expect(at("S", authored({}, { CLAUDECODE: "1" }, "gpt-6.1-sol"))).toBe("claude claude-opus-5-5 low");
 	// An unknown latest writer is taken to be the running harness, usually the session that just pushed.
@@ -151,7 +151,9 @@ test("each size's reviewer is the first whose model is not the latest writer's",
 	expect(pickReviewer("M", { harness: "codex" }, sol).model).toBe("gpt-6.2-astra");
 	// Avoiding Astra avoids Sol, which is weaker, so no Codex entry is left.
 	const astra = authored({ harness: "codex", exclude: ["gpt-6.2-astra"] }, {});
-	expect(() => pickReviewer("M", { harness: "codex" }, astra)).toThrow("gpt-6.1-sol is avoided; pass --model");
+	expect(() => pickReviewer("M", { harness: "codex" }, astra)).toThrow(
+		"gpt-6.1-sol is avoided, as the latest writer's or weaker than it; pass --model",
+	);
 	expect(pickReviewer("M", { harness: "codex", model: "gpt-6-astra" }, sol).model).toBe("gpt-6-astra");
 	// Nor does --model bring back an avoided model.
 	expect(() => pickReviewer("M", { harness: "codex", model: "gpt-6.1-sol" }, sol)).toThrow("gpt-6.1-sol is avoided");
@@ -1502,6 +1504,55 @@ fakes(
 	20_000,
 );
 
+const reviewersOf = (out: string) => out.split("\n").filter((line) => line.startsWith("reviewer "));
+
+fakes("a high head's pick that cannot run passes down the high list, and each model is skipped once", async () => {
+	const s = setup();
+	moveBase(s.repo, (dir) => write(dir, "RISK.md", riskFile(["- `src/` - customers' averages run on it"])));
+	const skips = (out: string) =>
+		out
+			.split("\n")
+			.filter((line) => line.startsWith("skipped "))
+			.sort();
+	try {
+		// Opus wrote it and Sol is at its limit: Fable picks, and Astra, the other vendor's next, is second.
+		vi.stubEnv("FAKE_FAILS", "gpt-6.1-sol");
+		vi.stubEnv("FAKE_LIMITED", "reset");
+		const passed = await quest("--root", s.repo, "review", "--exclude-model", "claude-opus-5-5");
+		expect(passed.code, passed.stderr).toBe(0);
+		expect(reviewersOf(passed.stdout)).toEqual([
+			"reviewer claude claude-fable-5-2 xhigh",
+			"reviewer codex gpt-6.2-astra xhigh second",
+		]);
+		// Sonnet wrote it, and Sol, its pick, and Opus, its second, are both at their limits: each is named once, and
+		// Fable picks with Astra second.
+		vi.stubEnv("FAKE_FAILS", "gpt-6.1-sol,claude-opus-5-5");
+		const both = await quest("--root", s.repo, "review", "--new", "--exclude-model", "claude-sonnet-5-5");
+		expect(both.code, both.stderr).toBe(0);
+		expect(skips(both.stdout)).toEqual([
+			"skipped claude claude-opus-5-5 xhigh usage limit, resets 2030-03-17T17:46:40Z",
+			`skipped codex gpt-6.1-sol xhigh usage limit, resets ${codexReset}`,
+		]);
+		expect(reviewersOf(both.stdout)).toEqual([
+			"reviewer claude claude-fable-5-2 xhigh",
+			"reviewer codex gpt-6.2-astra xhigh second",
+		]);
+	} finally {
+		vi.unstubAllGlobals();
+	}
+});
+
+fakes("a high head Fable wrote is reviewed by Opus with Astra second, never Sol", async () => {
+	const s = setup();
+	moveBase(s.repo, (dir) => write(dir, "RISK.md", riskFile(["- `src/` - customers' averages run on it"])));
+	const fable = await quest("--root", s.repo, "review", "--exclude-model", "claude-fable-5-2");
+	expect(fable.code, fable.stderr).toBe(0);
+	expect(reviewersOf(fable.stdout)).toEqual([
+		"reviewer claude claude-opus-5-5 xhigh",
+		"reviewer codex gpt-6.2-astra xhigh second",
+	]);
+});
+
 fakes(
 	"the classifier sets the tier from the diff and the base's risk file, once per head",
 	async () => {
@@ -1752,7 +1803,7 @@ fakes(
 			expect(seconds(again.stdout)).toEqual(["reviewer claude claude-fable-5-2 xhigh second"]);
 
 			// A run naming the pick's effort still seats the second reviewer to settle its findings, from the
-			// size's whole list rather than the one reviewer --effort narrows the pick to.
+			// high list rather than the one reviewer --effort narrows the pick to.
 			write(s.repo, "src/lib.ts", "export const x = 4;\n");
 			git(s.repo, "commit", "-qam", "a third constant");
 			const named = await quest("--root", s.repo, "review", "--effort", "high", "--responses", responses);
@@ -1764,7 +1815,7 @@ fakes(
 	},
 );
 
-fakes("a raise to high with no other model left prints its saved rounds before the usage error", async () => {
+fakes("a raise to high with no other vendor's model left prints its saved rounds before the usage error", async () => {
 	const s = setup();
 	moveBase(s.repo, (dir) => write(dir, "RISK.md", riskFile([])));
 	vi.stubEnv("FAKE_RAISE", "high");
@@ -2010,6 +2061,38 @@ fakes(
 		}
 	},
 );
+
+fakes("a raise to the override's own tier agrees with it, so the override and the high list's pick hold", async () => {
+	const s = setup();
+	vi.stubEnv("FAKE_REPLY", JSON.stringify({ score: 10, rationale: "Lands as is.", findings: [] }));
+	try {
+		// Classified medium, held high by the maintainer, and judged high by its reviewers too.
+		const opus = ["--exclude-model", "claude-opus-5-5"];
+		vi.stubEnv("FAKE_RAISE", "high");
+		const held = await quest(
+			"--root",
+			s.repo,
+			"review",
+			...opus,
+			"--override",
+			"high",
+			"--reason",
+			"It ships tonight.",
+		);
+		expect(held.code, held.stderr).toBe(0);
+		expect(held.stdout).toContain("\nreviewer codex gpt-6.1-sol xhigh\n");
+		vi.stubEnv("FAKE_RAISE", undefined);
+		// The next head is classified medium and raised by no one, and the override still holds it high.
+		write(s.repo, "src/lib.ts", "export const x = 9;\n");
+		git(s.repo, "commit", "-qam", "another constant");
+		const next = await quest("--root", s.repo, "review", ...opus);
+		expect(next.code, next.stderr).toBe(0);
+		expect(next.stdout).toContain("\noverridden medium by the maintainer\n");
+		expect(next.stdout).toContain("\nreviewer codex gpt-6.1-sol xhigh\n");
+	} finally {
+		vi.unstubAllGlobals();
+	}
+});
 
 fakes("a malformed risk file on the base fails before any model runs", async () => {
 	const s = setup();
@@ -2506,6 +2589,8 @@ test("the shadow steps up from the pick at S and M, down at L and XL, and not at
 	expect(shadowOf("M", { harness: "claude", model: "m", effort: "xhigh" })).toBeNull();
 	expect(shadowOf("L", { harness: "claude", model: "m", effort: "low" })).toBeNull();
 	expect(shadowOf("S", { harness: "codex", model: "m", effort: "minimal" })).toBeNull();
+	// A Fable pick, the last fallback, runs none.
+	expect(shadowOf("M", { harness: "claude", model: "claude-fable-5-2", effort: "high" })).toBeNull();
 });
 
 fakes("no shadow runs for an XS PR, though one settles a shadow's findings the pick left behind", async () => {

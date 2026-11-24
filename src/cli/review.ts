@@ -352,7 +352,9 @@ export function pickReviewer(size: Listing, choice: Choice, avoided: (entry: Mod
 	}
 	const picked = { harness, model, effort };
 	if (avoided(picked))
-		throw new ReviewInputError(`${model} is avoided; pass --model to name another ${harness} model`);
+		throw new ReviewInputError(
+			`${model} is avoided, as the latest writer's or weaker than it; pass --model to name another ${harness} model, or, when the writer was guessed from the running harness, name it in the PR's ## Models record or with --exclude-model`,
+		);
 	return picked;
 }
 
@@ -1657,9 +1659,11 @@ const SHADOW_STEPS: Record<Size, -1 | 1 | null> = { XS: null, S: 1, M: 1, L: -1,
 /**
  * The shadow of `routed`, the pick for a PR of `size`: its model one effort away by `SHADOW_STEPS`, or null when the
  * size runs none or no effort is known there, as below Opus low, above xhigh, or off the ladder, such as Codex's
- * `minimal`.
+ * `minimal`. A Fable pick, the last fallback, runs none, since its limit also writes XL quests and seats the second
+ * reviewer of Opus's high heads.
  */
 export function shadowOf(size: Size, routed: Model): Model | null {
+	if (routed.model === "claude-fable-5-2") return null;
 	const step = SHADOW_STEPS[size];
 	const at = EFFORTS.indexOf(routed.effort);
 	const effort = step === null || at < 0 ? undefined : EFFORTS[at + step];
@@ -2074,7 +2078,7 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 	// A login or a missing CLI rules out its harness's every model; a usage limit only the model that hit it.
 	const down = new Map<HarnessName, ReviewerUnavailableError>();
 	// Models passed over this run, which no later seat falls to: an old shadow's findings pass to the pick's model.
-	const out = new Set<string>();
+	const out = new Map<string, ReviewerUnavailableError>();
 	const usable = (model: Model) => !avoided(model) && !down.has(model.harness) && !out.has(model.model);
 	const plan = (routed: Model, second: Model | null = null) =>
 		seatsFor({
@@ -2145,8 +2149,12 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 		sessions: kept,
 		tallies,
 		classified: { key: classified.key, value },
-		// A riskier change than the one the maintainer judged ends their override.
-		...(override !== undefined && !riskier(risk.overridden ?? risk.tier, override.from) && { override }),
+		// A riskier change than the one the maintainer judged ends their override, unless it is riskier only up to the
+		// override's own tier, which agrees with it: ending it then would move a high head's pick off the high list.
+		...(override !== undefined &&
+			!(
+				riskier(risk.overridden ?? risk.tier, override.from) && (risk.overridden ?? risk.tier) !== override.tier
+			) && { override }),
 	});
 	const named = !auto || options.model !== undefined || options.effort !== undefined;
 	const settling =
@@ -2161,7 +2169,7 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 	// the second reviewer, so the pick, and its session, never flip between lists on the same head.
 	const listed = listing(sized.size, overridden(settle(classified.value, []), override).tier);
 	if (listed !== sized.size) candidates = rankedReviewers(listed, options, avoided);
-	// A high head gets its two reviewers on different models and no shadow.
+	// A high head gets its two reviewers from different vendors and no shadow.
 	unshadowed = overridden(before, override).tier === "high";
 	const skipped: Skip[] = [];
 	const messages: string[] = [];
@@ -2211,7 +2219,7 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 			if (error.second && second !== null) {
 				skipped.push({ ...second, reason: error.reason });
 				messages.push(error.message);
-				out.add(second.model);
+				out.set(second.model, error);
 				second = secondTo(candidates[at]!);
 				planned = plan(candidates[at]!, second);
 				continue;
@@ -2221,18 +2229,28 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 				const seat = planned.seats.find((each) => each.shadow)!;
 				skipped.push({ ...seat.reviewer, reason: error.reason });
 				messages.push(error.message);
-				out.add(error.shadow);
+				out.set(error.shadow, error);
 				planned = plan(candidates[at]!, second);
 				continue;
 			}
 			if (candidates.length === 1) throw error;
 			let why: ReviewerUnavailableError | undefined = error;
+			// A candidate whose harness is down, or whose model failed this run in another seat, is passed over too,
+			// named once in the report.
 			while (why !== undefined) {
-				skipped.push({ ...candidates[at]!, reason: why.reason });
-				messages.push(why.message);
-				out.add(candidates[at]!.model);
+				const passed = candidates[at]!;
+				const same = (each: Skip) =>
+					each.harness === passed.harness && each.model === passed.model && each.effort === passed.effort;
+				if (!skipped.some(same)) {
+					skipped.push({ ...passed, reason: why.reason });
+					messages.push(why.message);
+				}
+				out.set(passed.model, why);
 				at++;
-				why = at < candidates.length ? down.get(candidates[at]!.harness) : undefined;
+				why =
+					at < candidates.length
+						? (down.get(candidates[at]!.harness) ?? out.get(candidates[at]!.model))
+						: undefined;
 			}
 			if (at === candidates.length) throw new ReviewOutageError(listed, skipped, messages);
 			if (second !== null) second = secondFor(candidates[at]!);
@@ -2271,7 +2289,7 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 					if (!(error instanceof ReviewLimitError)) down.set(error.harness, error);
 					skipped.push({ ...seat.reviewer, reason: error.reason });
 					messages.push(error.message);
-					out.add(seat.reviewer.model);
+					out.set(seat.reviewer.model, error);
 				}
 			}
 		} catch (error) {

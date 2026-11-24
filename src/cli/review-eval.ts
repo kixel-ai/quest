@@ -383,7 +383,7 @@ export interface EvalReport {
 	 * the case's seats found together, as a run of all of them finds it.
 	 */
 	totals: Record<string, Tally>;
-	/** Each seat by the case's size and tier, as `pick M` or `shadow high`. */
+	/** Each seat by the case's size and tier, as `pick M`, `shadow medium`, or `second high`. */
 	by: Record<string, Tally>;
 	/** The cost of the run's sessions at API list price, as token-max prices them, or null when it is not installed. */
 	cost: { usd: number; complete: boolean; priced: number; sessions: number } | null;

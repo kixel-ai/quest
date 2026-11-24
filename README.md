@@ -1516,7 +1516,8 @@ Beside it, the shadow, the pick's model one effort away on the ladder (low,
 medium, high, xhigh), reviews the same head in its own session, so the routing
 can be retuned from what each effort step finds over its neighbor. It runs one
 effort above the pick for an S or M PR (Sol high for S), one below for an L or
-XL PR, and not at all for an XS PR, and is skipped when no such effort is on
+XL PR, and not at all for an XS PR or a Fable pick, whose limit also writes XL
+quests and seats high heads' second reviewer, and is skipped when no such effort is on
 the ladder, as above xhigh or for an `--effort` off it.
 
 It runs on the branch's first run of the pick, then reruns only while it has findings to settle, or once the pick
@@ -1833,7 +1834,8 @@ command, the run fails as a usage error; when they cannot run, as an outage.
 `--override <tier> --reason <text>` records the maintainer's tier for the
 branch in place of the reviewed one, as `- Risk: <tier>, <reason>` and
 `- Overridden: from <tier> by the maintainer`. It holds across heads until
-the reviewed tier grows riskier than the one overridden, and `quest usage`
+the reviewed tier grows riskier than the one overridden, other than to the
+override's own tier, which agrees with it, and `quest usage`
 counts overrides as a reading of the tier's accuracy.
 
 ### Score the reviewer

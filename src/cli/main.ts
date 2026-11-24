@@ -1658,7 +1658,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"or --effort names never passes the round on. Beside the reviewer, on the same head in its own session, runs the shadow, " +
 				"which follows the round to the reviewer it passes to: " +
 				"the pick's model one effort (low, medium, high, xhigh) above it for an S or M PR, below it for an L or XL " +
-				"PR, and none for an XS PR, skipped when no such effort is on that ladder, so each effort step can be " +
+				"PR, and none for an XS PR or a Fable pick, skipped when no such effort is on that ladder, so each effort step can be " +
 				"compared with its neighbor. The shadow runs on a " +
 				"branch's first run of the pick, then only while it has findings to settle or once the pick changed so it is " +
 				"no longer that step away; its findings are numbered and settled like any reviewer's, its session carries " +
@@ -1743,7 +1743,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"alone, at its entry in the pick's list, with none. A round that raises the tier to high saves its rounds and " +
 				"runs the second reviewer at once, printing those rounds before the error when that review fails, as when no second reviewer can run. " +
 				"--override and --reason record the maintainer's tier for the branch, which holds until the reviewed " +
-				"tier grows riskier than the one overridden.\n\n" +
+				"tier grows riskier than the one overridden, other than to the override's own tier.\n\n" +
 				"Prints the size and where it came from, base, and head, its risk tier and reason, the classifier's tier, " +
 				"an overridden line with the tier the maintainer overrode, " +
 				"how it was set (model, paths, or default), and reason, a class line naming the class, and for a model a classifier line (harness, model, " +
@@ -1910,7 +1910,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"reviewer table, the prompts, or REVIEW.md is scored before it lands. The reviewers are the size's pick, " +
 				"avoiding the case's writer, and its shadow, or for a high case no shadow but a second reviewer from another vendor, " +
 				"both from the high list, as quest review runs them, or --harness's alone, at its tier's " +
-				"entry's model and effort unless --model and --effort override them. A reviewer that cannot run fails the run " +
+				"entry's model and effort unless --model and --effort override them; a --model its list names runs at its own entry's effort. A reviewer that cannot run fails the run " +
 				"rather than passing the case to the next, so the score measures the reviewers it names. Cases run one at a time, their reviewers " +
 				"at once, and the first failure stops the run and fails it.\n\n" +
 				"Prints the set's counts and rules, a line per seat (pick, shadow, second, and, without --harness, " +
