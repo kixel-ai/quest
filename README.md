@@ -994,10 +994,13 @@ output, so the wait for a slot does not use up the run. Waiting counts against
 a total of 120 minutes from the spawn, which is also the deadline of a wrapper
 that prints no such line. A wrapper that fails for its own reasons, such as a
 launcher refusing the upload, writes its error as a line to file descriptor 3
-before it exits nonzero, and passes that descriptor to no payload, so no agent
-or check can forge it. The handback names the last such line, redacted and cut
-to 200 characters, and recommends repairing the wrapper instead of running
-`/quest-iterate`. On timeout the daemon sends SIGTERM, allows at
+before it exits nonzero, and passes that descriptor to no payload; with the
+payload under another user, as above, no agent or check can forge it. On a
+crash, but not a timeout, a signal, or a daemon restart, the handback names the
+last such line, redacted and clipped with its summary, and recommends repairing
+the wrapper instead of running `/quest-iterate`, as it does when the wrapper is
+missing, not executable, or fails to launch. The line stays beside the log as
+`<job>.error`. On timeout the daemon sends SIGTERM, allows at
 least 10 seconds for container cleanup, then sends SIGKILL on a later collection. The payload defaults
 to `claude -p` in bare mode, loading no user or checkout configuration, hooks,
 skills, or MCP servers, and limited to the shell and file tools; `--agent <executable>` and repeatable `--agent-arg <argument>`

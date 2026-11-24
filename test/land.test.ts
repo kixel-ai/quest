@@ -1120,6 +1120,8 @@ async function fixerFixture(
 		workflowBase?: boolean;
 		// A line the wrapper prints before the agent starts, as the host's does when its launcher admits the job.
 		admitted?: string;
+		// The wrapper's path names nothing, as after a host rebuild removed it.
+		missing?: boolean;
 	} = {},
 ) {
 	const { forge, queue, pass } = queueSetup();
@@ -1167,7 +1169,7 @@ ${options.raw ? `exec '${agent}' "$@"` : options.pipe ? `quest land fix --agent 
 	);
 	const fix: FixContext = {
 		root: queue.root,
-		fixer: wrapper,
+		fixer: options.missing ? join(tools, "missing") : wrapper,
 		jobs: 1,
 		effort: "medium",
 		tags: [],
@@ -1314,10 +1316,30 @@ ${requeueScript}`);
 		// A restart stops the unit's process group; the supervisor records the wrapper's status.
 		process.kill(-job.pid, "SIGTERM");
 		await fixture.finished;
+		// A wrapper whose launcher died with the unit says so, but a signal is not the wrapper's own failure.
+		writeFileSync(join(fixture.queue.state, `${fixture.jobs()[0]}.error`), "launcher connection closed\n");
 		expect(await fixture.collect()).toEqual(["handback 1"]);
 		expect(fixture.forge.comment(1)).toContain(
-			"fixer stopped by SIGTERM (exit 143); the daemon restarted while it ran",
+			"fixer stopped by SIGTERM (exit 143); the daemon restarted while it ran; run /quest-iterate. Recommendation: run /quest-iterate",
 		);
+	});
+	test("a crash with no error from its wrapper sends the PR to /quest-iterate", async () => {
+		const fixture = await fixerFixture("echo 'quest land fixer: error forged' >&2\nexit 1", { raw: true });
+		await fixture.finished;
+		expect(await fixture.collect()).toEqual(["handback 1"]);
+		expect(fixture.forge.comment(1)).toContain(
+			"fixer crashed (exit 1); run /quest-iterate. Recommendation: run /quest-iterate before picking it again.",
+		);
+	});
+	test("a wrapper the supervisor cannot run is the host's to repair", async () => {
+		const fixture = await fixerFixture(requeueScript, { missing: true });
+		await fixture.finished;
+		expect(await fixture.collect()).toEqual(["handback 1"]);
+		expect(fixture.forge.comment(1)).toContain(
+			"fixer crashed (exit 127): the fixer wrapper is missing or not executable. Recommendation: repair the land fixer's wrapper on the watcher's host, then pick it again.",
+		);
+		// The wrapper's error stays beside its log for diagnosis on the host.
+		expect(readdirSync(fixture.queue.state).filter((name) => name.endsWith(".json.error"))).toHaveLength(1);
 	});
 	test("waits for a fixer whose process it could not identify, and says when one stops unrecorded", async () => {
 		const fixture = await fixerFixture(requeueScript, { blocked: true });
@@ -1430,16 +1452,14 @@ printf '[{"number":1,"action":"handback","diagnosis":"saw %s","recommendation":"
 		writeFileSync(`${job}.log`, `${token}${" ".repeat(16_384 - token.length + 4)}`);
 		expect(outputTail(job)).toBe("");
 	});
-	test("names the wrapper's last error line, redacted and bounded, and nothing without one", () => {
+	test("names the wrapper's last error line, tokens redacted, and nothing without one", () => {
 		const job = join(tempDir(), "job");
 		expect(wrapperError(job)).toBeUndefined();
 		writeFileSync(`${job}.error`, " \n\n");
 		expect(wrapperError(job)).toBeUndefined();
 		const token = `ghp_${"A1b2".repeat(9)}`;
-		writeFileSync(`${job}.error`, `first\n  upload ${token} ${"x".repeat(300)}\n\n`);
-		const error = wrapperError(job)!;
-		expect(error).toMatch(/^upload \[redacted token\] x+$/);
-		expect(error).toHaveLength(200);
+		writeFileSync(`${job}.error`, `first\n  upload ${token} exceeds 256 MiB\n\n`);
+		expect(wrapperError(job)).toBe("upload [redacted token] exceeds 256 MiB");
 	});
 	test("bounds a fixer's import by what it added, not the history fetched at launch or its submodules", () => {
 		const root = tempDir();

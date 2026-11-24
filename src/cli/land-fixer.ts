@@ -123,8 +123,8 @@ export interface Process {
 	error?: string;
 	/** The tail of a failed fixer's own output, which its handback quotes so the failure names its cause. */
 	output?: string;
-	/** The error a failed wrapper reported for itself, so its handback recommends repairing the wrapper, not the PR. */
-	wrapper?: string;
+	/** The error a crashed wrapper reported for itself, so its handback recommends repairing the wrapper, not the PR. */
+	wrapperError?: string;
 }
 
 /**
@@ -358,7 +358,8 @@ export function prepare(root: string, checkout: string, refs: string[], base: { 
 /**
  * Save `job`, then start the fixer wrapper on it under a supervisor that survives a daemon restart
  * and atomically records the wrapper's exit status. Its state path is never passed to the wrapper
- * or mounted in its container; the wrapper reports its own failure on descriptor 3.
+ * or mounted in its container; the wrapper reports its own failure on descriptor 3, as does the
+ * supervisor for a wrapper it cannot run.
  */
 export async function launch(
 	path: string,
@@ -368,7 +369,6 @@ export async function launch(
 	numbers: number[],
 	env: NodeJS.ProcessEnv = {},
 ): Promise<void> {
-	save(path, job);
 	const output = openSync(
 		`${path}.log`,
 		constants.O_WRONLY | constants.O_CREAT | constants.O_APPEND | constants.O_NOFOLLOW,
@@ -379,20 +379,21 @@ export async function launch(
 	try {
 		channel = openSync(
 			`${path}.error`,
-			constants.O_WRONLY | constants.O_CREAT | constants.O_TRUNC | constants.O_NOFOLLOW,
+			constants.O_WRONLY | constants.O_CREAT | constants.O_TRUNC | constants.O_APPEND | constants.O_NOFOLLOW,
 			0o600,
 		);
 	} catch (failure) {
 		closeSync(output);
 		throw failure;
 	}
+	save(path, job);
 	let child: ReturnType<typeof spawn>;
 	try {
 		child = spawn(
 			"sh",
 			[
 				"-c",
-				`trap ':' TERM; status=$1; shift; "$@"; code=$?; printf "%s" "$code" > "$status.new"; mv "$status.new" "$status"`,
+				`trap ':' TERM; status=$1; shift; if [ -x "$1" ]; then "$@"; code=$?; else echo "the fixer wrapper is missing or not executable" >&3; code=127; fi; printf "%s" "$code" > "$status.new"; mv "$status.new" "$status"`,
 				"quest-fixer",
 				`${path}.exit`,
 				fixer,
@@ -418,7 +419,8 @@ export async function launch(
 		job.pid = child.pid;
 		job.identity = identity(child.pid!);
 	} catch (error) {
-		job.error = `fixer launch failed: ${String(error)}`;
+		job.wrapperError = `launch failed: ${String(error)}`;
+		job.error = `fixer ${job.wrapperError}`;
 	}
 	save(path, job);
 	child.unref();
@@ -445,13 +447,18 @@ export function settle(
 				job.error = `invalid fixer result: ${String(error)}; run /quest-iterate`;
 			}
 		else {
-			job.wrapper = job.terminating === undefined ? wrapperError(path) : undefined;
+			const cause = exited(code);
+			// Only a plain crash is the wrapper's own: a signal or a restart stopped a wrapper that may be fine.
+			job.wrapperError =
+				job.terminating === undefined && !restarted && cause.startsWith("crashed")
+					? wrapperError(path)
+					: undefined;
 			job.error =
 				job.terminating !== undefined
 					? "fixer timed out; run /quest-iterate"
-					: job.wrapper
-						? `fixer ${exited(code)}${restarted}: ${job.wrapper}`
-						: `fixer ${exited(code)}${restarted}; run /quest-iterate`;
+					: job.wrapperError
+						? `fixer ${cause}: ${job.wrapperError}`
+						: `fixer ${cause}${restarted}; run /quest-iterate`;
 			job.output = outputTail(path);
 		}
 	} else if (deps.now() > deadline(path, job, deps.now(), timeout)) {
@@ -497,17 +504,14 @@ export function outputTail(path: string): string {
 	return tail.length > OUTPUT_LIMIT ? tail.slice(-OUTPUT_LIMIT) : tail;
 }
 
-/** The most of a wrapper's error a handback's summary names: one line, not a dump. */
-const WRAPPER_LIMIT = 200;
-
-/** The last line the fixer wrapper at job `path` wrote to its error descriptor, tokens redacted and bounded, or undefined. */
+/** The last line the fixer wrapper at job `path` wrote to its error descriptor, tokens redacted, or undefined; the handback clips it. */
 export function wrapperError(path: string): string | undefined {
 	const line = readLog(`${path}.error`, "tail")
 		.split("\n")
 		.map((item) => item.trim())
 		.filter(Boolean)
 		.at(-1);
-	return line ? redactTokens(line).slice(0, WRAPPER_LIMIT) : undefined;
+	return line ? redactTokens(line) : undefined;
 }
 
 /**

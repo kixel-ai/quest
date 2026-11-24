@@ -902,7 +902,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		.requiredOption("--app-id <id>", "GitHub App id")
 		.option(
 			"--fixer <command>",
-			"Credential-free fixer wrapper executable, called with the failure log and the PR number (60 minutes from its admission line, 120 in total)",
+			"Credential-free fixer wrapper executable, called with the failure log and the PR number (60 minutes from its admission line, 120 in total), reporting its own failure on descriptor 3",
 		)
 		.option("--fixer-jobs <count>", "Most fixer jobs to run at once", positiveInteger("fixer-jobs"), 2)
 		.addOption(
