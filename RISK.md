@@ -11,8 +11,8 @@ medium covers it, including a bug in a record, comment, or upload `quest`
 already writes. What a revert cannot undo is what a change newly makes
 `quest` or its agents do beyond the repository: merge, post, upload, or
 spend where they did not before. The agent instructions `quest` ships
-are the exception: every repository's agents act on their wording at once,
-so the `## High` list below holds them.
+are the exception: every agent session in every repository acts on their
+wording, so the `## High` list below holds them.
 
 What others rely on here:
 

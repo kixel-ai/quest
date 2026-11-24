@@ -34,9 +34,8 @@ Agent's choices, for the implementer to revisit:
 
 - The name `instructions`, not `context`, which `quest context` already means.
 - Recurrence: `assets/audit.md`'s Next run follows the definition's own trigger where it names one, and README's audit section says so, so a run never meets two cadences.
-  Each run deletes its stub and re-creates it in the highest-numbered milestone, which holds no earlier milestone open: `finishedMilestone` (`src/core/rules.ts`) waits for a milestone to hold no quest, so a stub re-created in place would keep it open forever and hold back the next audits that require it.
-  A milestone created later takes the stub on its next run, up to two weeks on; until then the new milestone's audits wait on the one the stub sits in.
-  Check that milestone's README has no `Required` or `Scheduled` that would gate the stub, and create m(N+1) when the run sat in the highest.
+  Each run deletes its stub and re-creates it in the highest-numbered milestone whose README has no `Required` or `Scheduled`, which holds no earlier milestone open: `finishedMilestone` (`src/core/rules.ts`) waits for a milestone to hold no quest, so a stub re-created in an earlier one would keep it open forever and hold back the next audits that require it.
+  Nothing requires the highest milestone, so later runs stay at the same path there and create no milestone; a milestone added later takes the stub on its next run, up to two weeks on.
 - The guide's Prompting section stays the one list of official guidance links; the definition points at it, and each run refreshes it, so writers outside a run read the same sources.
   This quest's PR extends that list: the per-model Claude prompting pages, Codex's skills and prompting pages and its guide for the newest GPT model, Antigravity's rules page (Antigravity CLI, `agy`, replaced Gemini CLI for most users on 2026-06-18, and [the Gemini reviewer](/quest/m0/gemini-reviewer.md) runs it), Gemini CLI's `GEMINI.md` page for those still on it, and the Agent Skills specification.
   Read the pages, don't only link them: fold what they newly say into the guide's Prompting bullets.
