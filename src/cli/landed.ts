@@ -102,9 +102,16 @@ export function landingCheck(root: string): LandingCheck {
 				[`GIT_CONFIG_KEY_${count + 1}`]: "http.https://github.com/.extraheader",
 				[`GIT_CONFIG_VALUE_${count + 1}`]: `Authorization: basic ${basic}`,
 			});
-			// `-z` keeps Git from quoting a path it would escape, such as a non-ASCII one.
+			// Quest documents as `committedSources` reads them: regular files, not symlinks. `-z` keeps Git
+			// from quoting a path it would escape, such as a non-ASCII one.
 			const quests = (ref: string) =>
-				run(["ls-tree", "-r", "-z", "--name-only", ref, "quest"]).split("\0").some(isQuest);
+				run(["ls-tree", "-r", "-z", ref, "quest"])
+					.split("\0")
+					.some((line) => {
+						const [meta, path = ""] = line.split("\t");
+						const [mode, type] = meta.split(" ");
+						return type === "blob" && mode !== "120000" && isQuest(path);
+					});
 			const [based, headed] = [quests(base), quests(tip)];
 			if (!based && !headed) return [];
 			let fork: string;
@@ -161,7 +168,10 @@ function writable(dir: string): boolean {
 	}
 }
 
-/** A finding, keyed by its file, message, and the text of its line, which survive edits elsewhere. */
+/**
+ * A finding, keyed by its file, its message, and the source it points at: the whole entry its line
+ * opens, continuation lines included, or else that line. The key survives edits elsewhere.
+ */
 interface Keyed {
 	finding: Finding;
 	key: string;
@@ -170,10 +180,23 @@ interface Keyed {
 /** `quest check`'s findings on `commit`, failing on a tree it cannot read, such as one with no quests. */
 function treeCheck(dir: string, commit: string): Keyed[] {
 	const { sources, exists } = committedSources(dir, commit, null);
-	const lines = new Map(sources.map((source) => [source.path, source.text.split("\n")]));
 	const docs = sources.map((source) => parse(source.path, source.text));
+	const files = new Map(
+		sources.map((source, index) => [
+			source.path,
+			{
+				lines: source.text.split("\n"),
+				ends: new Map(docs[index].entries.map((entry) => [entry.line, entry.end])),
+			},
+		]),
+	);
 	return check(docs, exists).map((finding) => {
-		const text = finding.line === null ? "" : (lines.get(finding.path)?.[finding.line - 1] ?? "");
+		const file = files.get(finding.path);
+		const line = finding.line;
+		const text =
+			line === null || file === undefined
+				? ""
+				: file.lines.slice(line - 1, file.ends.get(line) ?? line).join("\n");
 		return { finding, key: `${finding.path}\0${finding.message}\0${text}` };
 	});
 }

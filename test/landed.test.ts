@@ -2,7 +2,7 @@
 
 import { execFileSync } from "node:child_process";
 
-import { chmodSync, readdirSync, writeFileSync } from "node:fs";
+import { chmodSync, readdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -213,6 +213,17 @@ describe("quest merge's landing check", () => {
 		expect((await inspect(tree, "fix/swap")).map((finding) => finding.path)).toEqual(["quest/m0/epic/two.md"]);
 	});
 
+	test("reports an entry the head changed below its opening line", async () => {
+		const tree = Tree.committed();
+		tree.append("quest/m0/epic/two.md", "\n## Waiting\n\n- nobody named\n  for one reason\n");
+		commit(tree, "unattributed wait on main");
+		git(tree, "switch", "--quiet", "-c", "fix/continued");
+		tree.write("quest/m0/epic/two.md", tree.read("quest/m0/epic/two.md").replace("one reason", "another"));
+		commit(tree, "reword the wait");
+		fixMain(tree, "fix/continued");
+		expect((await inspect(tree, "fix/continued")).map((finding) => finding.path)).toEqual(["quest/m0/epic/two.md"]);
+	});
+
 	test("skips a finding the base tip has that the head carries without merging it", async () => {
 		const tree = repo("fix/stacked");
 		git(tree, "switch", "--quiet", "main");
@@ -249,8 +260,9 @@ describe("quest merge's landing check", () => {
 	test("passes a head that branched before the base adopted quests", async () => {
 		const tree = new Tree(initRepository());
 		tree.write("README.md", "hi\n");
-		// A placeholder directory holds no quest documents.
+		// A placeholder file or a symlink is no quest document.
 		tree.write("quest/.gitkeep", "");
+		symlinkSync("../README.md", join(tree.path, "quest/roadmap.md"));
 		commit(tree, "init");
 		git(tree, "switch", "--quiet", "-c", "fix/early");
 		tree.write("src.ts", "work\n");
