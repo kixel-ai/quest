@@ -666,8 +666,9 @@ describe("usage", () => {
 			"- Reviewer: Claude Code, claude-opus-5-5, high effort",
 			"- Rounds: 1; findings 1 (medium 1): fixed 1, refuted 0, open 0",
 			"",
-			// The shadow, which measures an effort step and so stays out of the writer's accuracy.
-			"- Reviewer: Codex, gpt-6.2-sol, medium effort, shadow",
+			// The shadow, which measures an effort step and so stays out of the writer's accuracy, spelled as a gateway
+			// names it, which the reviewer rows fold into its listed ID.
+			"- Reviewer: Codex, openai/gpt-6.2-sol, medium effort, shadow",
 			"- Rounds: 1; findings 3 (high 3): fixed 2, refuted 1, open 0",
 		].join("\n");
 		// #9's record and #10's tally the same branch, so the rollup counts the tally once, from #10. Only #10 has a tier.
@@ -1051,7 +1052,7 @@ describe("usage", () => {
 			["medium", true],
 		]);
 		expect(text).toContain(
-			"  review: Codex, gpt-6.2-sol, medium effort, shadow; not in the latest run; rounds 1, findings 3 (high 3): fixed 2, refuted 1, open 0\n",
+			"  review: Codex, openai/gpt-6.2-sol, medium effort, shadow; not in the latest run; rounds 1, findings 3 (high 3): fixed 2, refuted 1, open 0\n",
 		);
 		expect(text).toContain(
 			"#10 L high merged: PR 10 (quest/m0/a)\n  risk: high, It rewrites the wire format.; raised from medium by a reviewer; class tests\n",
