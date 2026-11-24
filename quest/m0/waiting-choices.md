@@ -46,10 +46,17 @@ Decided by the planning agent, 2026-11-24, with the maintainer away:
   `action`; reading every unmarked `Maintainer:` item as an action, which
   turns legacy prose decisions into Done buttons).
 - ✅ A nested list is a choice list only when one of its bullets carries
-  `(Recommended)`, matched case-insensitively anywhere in the bullet, so
-  `quest check` still sees, and rejects, a marker that does not end its label (rejected:
-  any nested list, which would turn checklists such as moq-dev/moq's deploy
-  steps into choices). An item may hold detail lists beside it.
+  `(Recommended)` (rejected: any nested list, which would turn checklists
+  such as moq-dev/moq's deploy steps into choices). Under a plain
+  `Maintainer:` item the marker is matched case-insensitively anywhere in the
+  bullet, so `quest check` still sees, and rejects, one that does not end its
+  label; under any other item only `(Recommended)` ending a label counts, so
+  `quest check` rejects a real choice list there while an outside party's or
+  an action's detail bullet such as `Review logs (recommended) before release`
+  stays prose (rejected: matching anywhere under every item, which rejects
+  such legacy detail lists; found by CodeRabbit on
+  [kixel-ai/quest#854](https://github.com/kixel-ai/quest/pull/854#discussion_r4677583501)).
+  An item may hold detail lists beside its choice list.
 - ✅ Only the `(Recommended)` marker makes a nested list a choice list; a
   `Maintainer:` item stays prose when none of its nested lists is marked, and
   one with a marked list beside unmarked detail lists is a decision; the guide and
@@ -72,7 +79,11 @@ Decided by the planning agent, 2026-11-24, with the maintainer away:
   failing the whole listing on one PR body).
 - ✅ JSON: each wait keeps `line`, `party`, and `text`, and adds `kind`; a
   decision adds `choices: [{label, description, recommended}]`, `description`
-  `null` when absent, and its `text` is the question alone; an action keeps
+  `null` when absent, and its `text` is the item without its choice list: the
+  question and any detail lists beside it, which may hold what the choice
+  needs (found by CodeRabbit on
+  [kixel-ai/quest#854](https://github.com/kixel-ai/quest/pull/854#discussion_r4677583507));
+  an action keeps
   `pc` (rejected: `options`, the name Kixel Quest's rows use, which collides
   with `WaitingOptions` and the CLI's options here; `choices` and `pc` on every
   kind, which lets a decision claim `pc`). Nothing is in production, so this
@@ -103,7 +114,9 @@ Agent's recommendations, for the implementer to revisit:
   match.
 
 Tests: a decision parses its question and choices, the recommended one
-flagged, from a quest and from a draft; a choice list beside a detail list;
+flagged, from a quest and from a draft; a choice list beside a detail list,
+the detail kept in `text`; an outside party's detail bullet with a
+mid-sentence `(recommended)` stays prose;
 a detail list alone stays prose; each `quest check` rejection by line; a
 broken hand-back list reads as prose with a warning; `(action)` and `(PC)`
 are actions, only `(PC)` dropped by `--no-pc`; an unknown qualifier still
