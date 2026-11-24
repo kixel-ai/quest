@@ -2,10 +2,9 @@
 // names, and the commit that disables a test seen flaking twice, which the watcher opens as a PR.
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { matches } from "../core";
 import { git, tryGit } from "./land";
 import { FLAKY_INPUT, type FixResult, type KnownFlaky, signature } from "./land-fix";
-import { highPaths, validateFix } from "./land-fixer";
+import { validateFix } from "./land-fixer";
 import { importFixer } from "./land-fixer-repository";
 import { save } from "./land-daemon";
 
@@ -232,8 +231,7 @@ export function recordFlaky(root: string, state: string, round: FlakyRound): str
 /**
  * Import the fixer's `disable` branch at `head` and check it: new commits on the base it was given,
  * leaving every protected path and the quest tree as the base has them. Then commit the follow-up
- * `quest` on top, with the flaky epic's README when the base keeps none, unless the base holds either high.
- * Returns that commit.
+ * `quest` on top, with the flaky epic's README when the base keeps none. Returns that commit.
  */
 function disabling(root: string, state: string, round: FlakyRound, head: string, quest: string, body: string): string {
 	importFixer(root, state, round.checkout, "disable", head, round.packs);
@@ -243,11 +241,6 @@ function disabling(root: string, state: string, round: FlakyRound, head: string,
 	if (tryGit(root, ["cat-file", "-e", `${head}:quest/m0/README.md`]).status !== 0)
 		throw new Error("the base keeps no quest/m0/ for the follow-up quest");
 	if (tryGit(root, ["cat-file", "-e", `${head}:${quest}`]).status === 0) throw new Error(`${quest} already exists`);
-	// Its own commit lands with the disable unread, so it may add no file the base holds high.
-	const held = highPaths(root, round.base.sha);
-	const high = [quest, EPIC].find((path) => held.some(({ pattern }) => matches(pattern, path)));
-	if (high !== undefined)
-		throw new Error(`the base holds ${high} high, so quest land watch cannot add it unreviewed`);
 	const index = resolve(root, git(root, ["rev-parse", "--git-path", `quest-land-flaky-${process.pid}.index`]));
 	const env = { GIT_INDEX_FILE: index };
 	try {

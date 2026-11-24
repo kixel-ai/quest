@@ -538,25 +538,8 @@ function paths(root: string, args: string[]): string[] {
 	return result.stdout.split("\0").filter(Boolean);
 }
 
-/**
- * Whether the quest merge driver may merge `base` into `head` with no fixer: no conflict of the plain merge lies in a
- * path {@link validateFix} protects on a PR that is not high, which the driver would resolve unread. False when the
- * base's risk file cannot be read, so the fixer's validation reports it.
- */
-export function driverMerges(root: string, head: string, base: string): boolean {
-	let held: HighPath[];
-	try {
-		held = highPaths(root, base);
-	} catch {
-		return false;
-	}
-	const merged = tryGit(root, ["merge-tree", "--write-tree", "--name-only", "-z", head, base]);
-	if (merged.status !== 0 && merged.status !== 1) throw new Error("cannot compute protected merge result");
-	return !mergeResult(merged.stdout).conflicts.some((path) => guarded(held, path));
-}
-
 /** The paths `quest review` holds high from `base`'s risk file: a fixer's edit to one never lands unread. */
-export function highPaths(root: string, base: string): HighPath[] {
+function highPaths(root: string, base: string): HighPath[] {
 	if (tryGit(root, ["cat-file", "-e", `${base}:${RISK_FILE}`]).status !== 0) return heldHigh(null);
 	const file = parseRiskFile(git(root, ["show", `${base}:${RISK_FILE}`]));
 	if (file.problems.length > 0)
