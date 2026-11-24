@@ -1318,6 +1318,14 @@ ${requeueScript}`);
 			"fixer stopped by SIGTERM (exit 143); the daemon restarted while it ran",
 		);
 	});
+	test("reads a fixer's exit 124 as timed out, keeping its output", async () => {
+		const fixture = await fixerFixture("echo 'runtime limit 30m reached' >&2; exit 124", { raw: true });
+		await fixture.finished;
+		expect(await fixture.collect()).toEqual(["handback 1"]);
+		const comment = fixture.forge.comment(1);
+		expect(comment).toContain("fixer timed out (exit 124); run /quest-iterate");
+		expect(comment).toContain("runtime limit 30m reached");
+	});
 	test("waits for a fixer whose process it could not identify, and says when one stops unrecorded", async () => {
 		const fixture = await fixerFixture(requeueScript, { blocked: true });
 		await fixture.ready;
