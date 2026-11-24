@@ -27,6 +27,7 @@ export const RULES = {
 	rewrite:
 		"Never rebase or force-push, even a branch only you hold; merge the base instead, when the branch conflicts with it or a landing step refuses the head.",
 	tmp: "Put scratch files, such as PR bodies, logs, patches, helper scripts, and temporary clones, in the checkout's `.tmp/`, never `/tmp`, so they disappear with the worktree.",
+	pkill: "Stop a process you started by its PID or process group, never by name with `pkill` or `killall`: other agents share the host.",
 	recommend:
 		"In a question dialog, end each option you recommend with `(Recommended)`, and recommend one in every question with two or more options.",
 	kixel: "On a repository Kixel Quest hosts, `gh` cannot reach its PRs: use `quest pr view`, `list`, `create`, `edit`, `comment`, and `resolve`, and `quest status`, `ready`, and `merge`.",
@@ -339,6 +340,7 @@ function unwrap(argv: string[], env: Set<string>): string[] | null {
 		else if (["command", "exec", "nohup", "time", "builtin", "env", "nice"].includes(name))
 			rest = dropOptions(args);
 		else if (name === "timeout") rest = dropOptions(args).slice(1);
+		else if (name === "xargs") rest = dropXargsOptions(args);
 		else if (name === "direnv" && args[0] === "exec") rest = args.slice(2);
 		else if (name === "bun" && args[0] === "run" && basename(dropOptions(args.slice(1))[0] ?? "") === "quest")
 			rest = dropOptions(args.slice(1));
@@ -368,6 +370,41 @@ function dropOptions(args: string[]): string[] {
 	let i = 0;
 	while (i < args.length && args[i]!.startsWith("-")) i += /^-[nskuC]$/.test(args[i]!) ? 2 : 1;
 	return args.slice(i);
+}
+
+/** `args` past `xargs`'s leading options, stopping at `--` or the launched command. */
+function dropXargsOptions(args: string[]): string[] {
+	let i = 0;
+	while (i < args.length) {
+		const arg = args[i]!;
+		if (arg === "--") return args.slice(i + 1);
+		if (!arg.startsWith("-") || arg === "-") break;
+		if (
+			/^-[adEILnPsJR]$/.test(arg) ||
+			/^--(arg-file|delimiter|max-args|max-procs|max-chars|process-slot-var)$/.test(arg)
+		)
+			i += 2;
+		else i += 1;
+	}
+	return args.slice(i);
+}
+
+/** Unwrapped, ungated command argvs executed by a shell command line, recursing into `sh -c`. */
+export function shellCommands(line: string): string[][] {
+	const out: string[][] = [];
+	for (const simple of parse(line)) {
+		const env = new Set<string>();
+		const argv = ungate(unwrap([...simple.argv], env), env);
+		if (argv === null) continue;
+		const [name, ...args] = argv;
+		if (SHELLS.has(basename(name!))) {
+			const flag = args.findIndex((arg) => /^-[a-z]*c[a-z]*$/.test(arg));
+			if (flag !== -1 && args[flag + 1] !== undefined) out.push(...shellCommands(args[flag + 1]!));
+			continue;
+		}
+		out.push(argv);
+	}
+	return out;
 }
 
 /**
@@ -434,7 +471,9 @@ function shell(
 		} else if (name === "mkdir") {
 			if (positionals(args, new Set(["-m", "--mode"])).some(scratch)) found.add("tmp");
 		} else if (name === "mktemp") mktemp(args, env, check);
-		else if (name === "git") git(args, asked, input, check);
+		else if (["pkill", "killall"].includes(basename(name!))) {
+			if (!args.some((arg) => arg === "--help" || arg === "-h")) found.add("pkill");
+		} else if (name === "git") git(args, asked, input, check);
 		else if (name === "gh") {
 			const command = ghCommand(args);
 			gh(command, input, check);
@@ -608,7 +647,7 @@ function ghCommand(args: string[]): string[] {
 }
 
 /** `quest`'s arguments past its global options: `--root <path>` or `--root=<path>`. */
-function questCommand(args: string[]): string[] {
+export function questCommand(args: string[]): string[] {
 	let i = 0;
 	while (args[i] === "--root" || args[i]?.startsWith("--root=")) i += args[i] === "--root" ? 2 : 1;
 	return args.slice(i);
