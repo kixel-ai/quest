@@ -318,10 +318,15 @@ export interface Choice {
  * reviewer, which then avoids nothing.
  */
 export function authored(choice: Choice, env: NodeJS.ProcessEnv, latest?: string): (entry: Model) => boolean {
-	// A record may spell a model another way, such as `openai/gpt-6.2-sol`; `quest review` passes flags canonical.
+	// Another spelling of a model, such as `openai/gpt-6.2-sol` from a flag, a record, or a saved session, is that
+	// model; the CLI still gets the spelling given, which a gateway may need.
+	const as = (entry: Model): Model => ({ ...entry, model: canonicalModel(entry.model) });
 	const exclude = (choice.exclude ?? []).map((model) => unfit(canonicalModel(model)));
-	if (exclude.length > 0) return (entry) => exclude.some((each) => each(entry));
-	if (latest !== undefined && latest !== "unknown") return unfit(canonicalModel(latest));
+	if (exclude.length > 0) return (entry) => exclude.some((each) => each(as(entry)));
+	if (latest !== undefined && latest !== "unknown") {
+		const avoid = unfit(canonicalModel(latest));
+		return (entry) => avoid(as(entry));
+	}
 	if (choice.harness !== undefined) return () => false;
 	const running = runningHarness(env);
 	return (entry) => entry.harness === running;
@@ -338,7 +343,7 @@ export function authored(choice: Choice, env: NodeJS.ProcessEnv, latest?: string
 export function pickReviewer(size: Listing, choice: Choice, avoided: (entry: Model) => boolean): Model {
 	const list = REVIEWERS[size];
 	const ours = list.filter((e) => choice.harness === undefined || e.harness === choice.harness);
-	const named = choice.model === undefined ? undefined : ours.find((e) => e.model === choice.model);
+	const named = choice.model === undefined ? undefined : ours.find((e) => sameModel(e.model, choice.model!));
 	const first = choice.harness === undefined ? undefined : ours[0];
 	const entry = named ?? (choice.model === undefined ? undefined : first) ?? ours.find((e) => !avoided(e)) ?? first;
 	if (entry === undefined && choice.harness === undefined) {
@@ -1670,7 +1675,7 @@ const SHADOW_STEPS: Record<Size, -1 | 1 | null> = { XS: null, S: 1, M: 1, L: -1,
  * reviewer of Opus's high heads.
  */
 export function shadowOf(size: Size, routed: Model): Model | null {
-	if (routed.model === "claude-fable-5-2") return null;
+	if (sameModel(routed.model, "claude-fable-5-2")) return null;
 	const step = SHADOW_STEPS[size];
 	const at = EFFORTS.indexOf(routed.effort);
 	const effort = step === null || at < 0 ? undefined : EFFORTS[at + step];
@@ -2381,7 +2386,7 @@ function seatsFor({ routed, second, usable, size, auto, sessions, firsts, respon
 		shadowed !== undefined &&
 		!(
 			shadowed.reviewer === shadow.harness &&
-			shadowed.last.model === shadow.model &&
+			sameModel(shadowed.last.model, shadow.model) &&
 			shadowed.last.effort === shadow.effort
 		);
 	if (auto && (shadowed === undefined ? shadow !== null : open || stale)) {
@@ -2592,7 +2597,7 @@ async function reviewWith(shared: Shared, seat: Seat, responses: string | undefi
 		sameSeat(stored!, { reviewer: harness, shadow, second }) &&
 		stored!.given.instructions === given.instructions &&
 		stored!.given.rules === given.rules &&
-		last.model === picked.model &&
+		sameModel(last.model, picked.model) &&
 		last.effort === picked.effort &&
 		last.base.ref === shared.base.ref &&
 		covers(root, previous.mergeBase, change.mergeBase);

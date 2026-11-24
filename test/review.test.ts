@@ -89,6 +89,17 @@ test("each size's reviewer is the first whose model is not the latest writer's",
 	expect(at("S", authored({ exclude: ["openai/gpt-6.2-sol"] }, {}))).toBe("claude claude-opus-5-5 low");
 	// A qualified spelling of Fable still avoids Sol, which is weaker, and so does retired Sol 6.1.
 	expect(weaker("gpt-6.1-sol", "claude-fable-5-2")).toBe(true);
+	// A qualified --model keeps its spelling yet matches its entry, and a qualified Fable pick runs no shadow.
+	expect(pickReviewer("XL", { harness: "codex", model: "openai/gpt-6.2-sol" }, () => false)).toEqual({
+		harness: "codex",
+		model: "openai/gpt-6.2-sol",
+		effort: "xhigh",
+	});
+	expect(shadowOf("L", { harness: "claude", model: "anthropic/claude-fable-5-2", effort: "xhigh" })).toBeNull();
+	// A saved session spelled another way is still the writer's model.
+	expect(
+		authored({}, {}, "gpt-6.2-astra")({ harness: "codex", model: "openai/gpt-6.2-astra", effort: "medium" }),
+	).toBe(true);
 	expect(at("M", authored({ exclude: ["anthropic/claude-fable-5-2"] }, {}))).toBe("claude claude-opus-5-5 medium");
 	// No harness need be detected once the implementers are named.
 	expect(at("M", authored({ exclude: ["other-model"] }, {}))).toBe("codex gpt-6.2-sol high");
@@ -228,7 +239,8 @@ fakes("--exclude-model picks the reviewer from the PR's implementers instead of 
 		"default",
 	]);
 
-	// Qualified flags run and compare as the listed model: Astra on its own M entry's effort, with Opus avoided.
+	// Qualified flags compare as the listed model, Astra on its own M entry's effort with Opus avoided, and the CLI
+	// still gets the spelling given.
 	const qualified = await quest(
 		"--root",
 		s.repo,
@@ -242,7 +254,7 @@ fakes("--exclude-model picks the reviewer from the PR's implementers instead of 
 	);
 	expect(qualified.stderr).toBe("");
 	const [astra] = JSON.parse(qualified.stdout).rounds;
-	expect([astra.reviewer, astra.model, astra.effort]).toEqual(["codex", "gpt-6.2-astra", "high"]);
+	expect([astra.reviewer, astra.model, astra.effort]).toEqual(["codex", "openai/gpt-6.2-astra", "high"]);
 
 	const all = ["gpt-6.2-sol", "claude-opus-5-5", "gpt-6.2-astra", "claude-fable-5-2"].flatMap((m) => [
 		"--exclude-model",

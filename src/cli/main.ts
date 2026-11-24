@@ -82,7 +82,6 @@ import {
 	questWriters,
 	writerAt,
 } from "./models";
-import { canonicalModel } from "./models-record";
 import {
 	ReviewInputError,
 	ReviewOutageError,
@@ -1843,9 +1842,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 					{
 						...options,
 						root: root(),
-						// Any spelling of a listed model, such as `openai/gpt-6.2-astra`, runs and compares as its ID.
-						model: options.model === undefined ? undefined : canonicalModel(options.model),
-						exclude: options.excludeModel?.map(canonicalModel),
+						exclude: options.excludeModel,
 						responses,
 						fresh: options.new,
 						override,
@@ -1955,7 +1952,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 						root: root(),
 						set: options.set,
 						harness: options.harness,
-						model: options.model === undefined ? undefined : canonicalModel(options.model),
+						model: options.model,
 						effort: options.effort,
 						only: options.pr,
 						env: process.env,

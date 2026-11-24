@@ -1513,8 +1513,8 @@ size. Each size ranks its reviewers, the same for every repository:
 | XL | Codex `gpt-6.2-astra` high | Claude Code `claude-opus-5-5` xhigh | Codex `gpt-6.2-sol` xhigh, then Claude Code `claude-fable-5-2` xhigh |
 
 Sol is weaker than Fable and Astra, so Opus reviews what either wrote below XL.
-XL starts on Astra, which may review Fable's and Sol's work, so Opus takes only
-Astra's, and Sol and then Fable follow only behind an Opus-written head.
+XL starts on Astra, which may review Fable's and Sol's work, so Opus takes
+Astra's; the rest of the row follows in order while those before it are out.
 
 Beside it, the shadow, the pick's model one effort away on the ladder (low,
 medium, high, xhigh), reviews the same head in its own session, so the routing

@@ -74,7 +74,8 @@ Recommendations, the implementer's to revisit:
   [on kixel-ai/quest#838](https://github.com/kixel-ai/quest/pull/838#issuecomment-7119762070)),
   at Neon medium on the M rung, beside Sol high and Opus medium, and Neon
   high on the L rung, beside Sol xhigh, Opus high, and Astra medium. Neon
-  low and xhigh stay out. From the Artificial Analysis Intelligence Index
+  low and xhigh stay out. This seats Astra medium on the L rung, replacing
+  the Rungs decision's example of Astra high there. From the Artificial Analysis Intelligence Index
   v5.0.1, cost per task at API list price, 2026-11-18 to 11-23:
 
   | Model, effort | Index | Cost per task | Rung |
