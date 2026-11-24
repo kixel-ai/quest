@@ -32,8 +32,11 @@ A change is high when it:
   what a consumer must now supply, such as a required member of an
   interface it implements or an argument it passes. Such a change marks
   its title with `!`, though a `!` for a CLI flag alone is not this.
+- changes anything under `assets/`: its rules, guide, skills, and audits
+  load in every agent session of every repository running `quest`, about
+  2k a week, so one bad line misleads them all before a revert ships.
 - changes when an agent may push, merge, post, or spend without asking,
-  in `assets/` or in the code that acts on it.
+  in the code that acts on `assets/`.
 - changes the reviewer's sandbox or the credentials an agent gets, or
   sends a new kind of data off the host or into a public comment, such as
   a new upload destination or command output it now posts. New fields in
@@ -42,8 +45,7 @@ A change is high when it:
 A change is medium when behavior others rely on changes and a revert
 undoes it, such as an export, an optional field, or an output line that
 existing consumers keep parsing, a new or changed command or option, a bug
-fix, a skill or audit's instructions that leave remote-write authority
-alone, or a routine dependency or pin bump.
+fix, or a routine dependency or pin bump.
 
 Tests, plans under `quest/`, and documentation change nothing others rely
 on, so they are low.
