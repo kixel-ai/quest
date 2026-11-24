@@ -2457,10 +2457,15 @@ agyFakes("a raise to high seats the third reviewer at once, and a run that fails
 		// The run is whole or nothing: no round of it is printed or saved, so the next is the branch's first again.
 		expect(out.stdout).toBe("");
 
+		// Its raise holds on the head, though no reviewer of the retry raises it.
 		vi.stubEnv("FAKE_LIMITED", undefined);
 		vi.stubEnv("FAKE_FAILS", undefined);
+		vi.stubEnv("FAKE_RAISE", undefined);
 		const both = await quest("--root", s.repo, "review", ...OPUS);
 		expect(both.code, both.stderr).toBe(0);
+		expect(both.stdout).toContain("\nrisk high It rewrites the wire format peers read.\n");
+		expect(both.stdout).not.toContain("\nraised ");
+		vi.stubEnv("FAKE_RAISE", "high");
 		expect(reviewersOf(both.stdout)).toEqual([
 			"reviewer codex gpt-6.2-sol medium",
 			"reviewer agy gemini-4-neon medium",

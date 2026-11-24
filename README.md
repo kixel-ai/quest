@@ -1557,8 +1557,9 @@ Without a record, or when its last line names an `unknown` model, the harness
 running the command, usually the session that
 just pushed, detected from the variables Claude Code, Codex, and Antigravity
 each set, is taken to be the latest writer, so Codex reviews from Claude Code
-and Claude Code from Codex. `--harness`, `--model`, or `--effort` names one reviewer, which runs alone, outside the draw, as a run of its
-own; `--model` or `--effort` names only the first seat, and the rest are drawn on other vendors, while the reviewer `--harness` names runs alone: the first entry the flags fit from the size's rung outward, in the order the rungs
+and Claude Code from Codex. `--harness`, `--model`, or `--effort` names one reviewer, outside the draw: with `--harness` it runs
+alone, as a run of its own, and with only `--model` or `--effort` it takes the first seat, the rest drawn on other
+vendors. It is the first entry the flags fit from the size's rung outward, in the order the rungs
 list, so the same flags name the same reviewer on every run. `--harness` alone is that CLI's first entry whose
 model is not avoided, `--model` its own entry in any spelling such as `openai/gpt-6.2-astra`, passed to the CLI
 as given, and `--effort` alone the first entry whose model is not avoided; `--model` and `--effort` then

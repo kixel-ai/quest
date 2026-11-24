@@ -414,8 +414,8 @@ export function drawSeat(
 }
 
 /**
- * The one reviewer `--harness`, `--model`, or `--effort` names, which runs alone, outside the draw, and never passes
- * its run on. It is the first entry the flags fit, from the size's rung outward in the rungs' listed order, so the
+ * The one reviewer `--harness`, `--model`, or `--effort` names, outside the draw, which never passes its run on: with
+ * `--harness` it runs alone, and with only `--model` or `--effort` it takes the first seat. It is the first entry the flags fit, from the size's rung outward in the rungs' listed order, so the
  * same flags name the same reviewer on every run: `--harness` that CLI's first entry whose model is not avoided,
  * `--model` its own entry, and `--effort` alone the first whose model is not avoided. `--model` and `--effort` then
  * override that entry's. A `--model` no rung lists needs `--harness`, at whose first entry's effort it runs.
@@ -590,6 +590,14 @@ interface State {
 	classified?: { key: string; value: Omit<Classified, "usage"> };
 	/** The maintainer's override of the branch's tier. */
 	override?: Override;
+	/** A raise on `head` by a round of a run that then failed, which still judges that head's tier. */
+	raised?: Raise;
+}
+
+/** A reviewer's raise of a head's tier, kept apart from its round. */
+export interface Raise extends Assessment {
+	head: string;
+	by: Reviewing;
 }
 
 /** What a turn needs to build its command line. */
@@ -2244,7 +2252,14 @@ export function parseState(value: unknown): State {
 		(state.override === undefined ||
 			(TIERS.includes(state.override?.tier) &&
 				TIERS.includes(state.override.from) &&
-				typeof state.override.reason === "string"));
+				typeof state.override.reason === "string")) &&
+		(state.raised === undefined ||
+			(typeof state.raised?.head === "string" &&
+				TIERS.includes(state.raised.tier) &&
+				typeof state.raised.reason === "string" &&
+				harness(state.raised.by?.reviewer) &&
+				typeof state.raised.by.model === "string" &&
+				typeof state.raised.by.effort === "string"));
 	if (!valid) throw new ReviewInputError("the saved review rounds are not ones quest review reads; pass --new");
 	return state as State;
 }
@@ -2527,8 +2542,10 @@ function unanswered(
  * The head's risk after `rounds`, each of the head: the classifier's tier, raised to the riskiest a round judged it,
  * the first on a tie.
  */
-export function settle(classified: Classified, rounds: Round[]): Risk {
+export function settle(classified: Classified, rounds: Round[], held?: Raise): Risk {
 	let risk: Risk = { tier: classified.tier, reason: classified.reason, classified };
+	if (held && riskier(held.tier, risk.tier))
+		risk = { tier: held.tier, reason: held.reason, classified, raisedBy: held.by };
 	for (const round of rounds)
 		if (round.raised && riskier(round.raised.tier, risk.tier))
 			risk = {
@@ -2702,7 +2719,9 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 	const base = { ref: baseRef, sha: baseSha };
 	// Each earlier round on this head still judges its tier, as does the maintainer's override.
 	const onHead = (prior?.rounds ?? []).filter((round) => round.head === head);
-	const before = settle(classified.value, onHead);
+	// So does a raise a failed run met, so retrying the run cannot drop the tier it set.
+	const held = saved?.raised?.head === head ? saved.raised : undefined;
+	const before = settle(classified.value, onHead, held);
 	const override = options.override === undefined ? saved?.override : { ...options.override, from: before.tier };
 	const { usage: _, ...value } = classified.value;
 	// Every round the saved state held that `reviewed` leaves out, as of an earlier head or dropped by --new.
@@ -2710,9 +2729,10 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 		...(saved?.past ?? []),
 		...(saved?.reviewed?.rounds ?? []).filter((round) => !(reviewed?.rounds ?? []).includes(round)),
 	];
-	const state = (reviewed: State["reviewed"], runs: number, tallies: Tally[], risk: Risk): State => ({
+	const state = (reviewed: State["reviewed"], runs: number, tallies: Tally[], risk: Risk, raised = held): State => ({
 		branch,
 		runs,
+		...(raised !== undefined && { raised }),
 		...(since > 0 && { since }),
 		...(reviewed !== undefined && { reviewed }),
 		...(past(reviewed).length > 0 && { past: past(reviewed) }),
@@ -2776,40 +2796,59 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 	let done: Round[] = [];
 	// The last run's findings this run already carried over, by number.
 	const open = new Set<number>();
-	const judged = () => settle(classified.value, [...onHead, ...done]);
+	const judged = () => settle(classified.value, [...onHead, ...done], held);
 	// A round that raises the tier gets the seats the lower tier left out in a further pass, at once. The run
-	// is saved whole or not at all, so one that fails leaves the last run's findings and responses as they were.
-	for (;;) {
-		const taken = [...new Set(done.map((round) => round.reviewer))];
-		const count = seats(judged()) - taken.length;
-		if (count <= 0) break;
-		const passed = skipped.length;
-		// A flag's reviewer takes the run's first seat, and any further seat is drawn on another vendor.
-		const seated = (): Seat[] =>
-			lead === undefined || taken.length > 0
-				? plan(count, taken)
-				: [{ reviewer: lead }, ...plan(count - 1, [lead.harness])];
-		let planned = seated();
+	// is saved whole or not at all, so one that fails leaves the last run's findings and responses as they were, but
+	// keeps a raise its rounds made.
+	try {
 		for (;;) {
-			try {
-				done = [...done, ...carried(await runSeats(shared, planned, options.signal), earlier, raisers, open)];
-				break;
-			} catch (error) {
-				// A reviewer a flag named never passes its run on.
-				if (!(error instanceof ReviewerUnavailableError) || error.seat === undefined || error.seat === lead)
-					throw error;
-				if (error.model === null) down.add(error.harness);
-				out.add(canonicalModel(error.seat.model));
-				skipped.push({ ...error.seat, reason: error.reason });
-				messages.push(error.message);
+			const taken = [...new Set(done.map((round) => round.reviewer))];
+			const count = seats(judged()) - taken.length;
+			if (count <= 0) break;
+			const passed = skipped.length;
+			// A flag's reviewer takes the run's first seat, and any further seat is drawn on another vendor.
+			const seated = (): Seat[] =>
+				lead === undefined || taken.length > 0
+					? plan(count, taken)
+					: [{ reviewer: lead }, ...plan(count - 1, [lead.harness])];
+			let planned = seated();
+			for (;;) {
 				try {
-					planned = seated();
-				} catch (outage) {
-					// The only reviewer that could take the seat fails as itself, rather than as an outage of one.
-					throw outage instanceof ReviewOutageError && skipped.length - passed === 1 ? error : outage;
+					done = [
+						...done,
+						...carried(await runSeats(shared, planned, options.signal), earlier, raisers, open),
+					];
+					break;
+				} catch (error) {
+					// A reviewer a flag named never passes its run on.
+					if (!(error instanceof ReviewerUnavailableError) || error.seat === undefined || error.seat === lead)
+						throw error;
+					if (error.model === null) down.add(error.harness);
+					out.add(canonicalModel(error.seat.model));
+					skipped.push({ ...error.seat, reason: error.reason });
+					messages.push(error.message);
+					try {
+						planned = seated();
+					} catch (outage) {
+						// The only reviewer that could take the seat fails as itself, rather than as an outage of one.
+						throw outage instanceof ReviewOutageError && skipped.length - passed === 1 ? error : outage;
+					}
 				}
 			}
 		}
+	} catch (error) {
+		const raised = judged();
+		if (raised.raisedBy !== undefined && riskier(raised.tier, before.tier))
+			save(
+				statePath,
+				state(prior, runs, tallies, overridden(raised, override), {
+					head,
+					tier: raised.tier,
+					reason: raised.reason,
+					by: raised.raisedBy,
+				}),
+			);
+		throw error;
 	}
 	const after = tallied(tallies, done, raisers);
 	const risk = overridden(judged(), override);
