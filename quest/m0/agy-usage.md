@@ -17,9 +17,18 @@ or not, since token-max reads no Antigravity session today, and whose
 `quest usage` marks an Antigravity reviewer's spend incomplete. Both are
 right only while token-max reads none.
 
+- Bring Antigravity sessions into the PR's rows. A review turn runs in a
+  temporary workspace outside the checkout, so token-max may report no
+  repository or branch for it: attach such a session to the PR whose
+  `## Review` record names its ID. Teach `transcriptFacts` in
+  `src/cli/transcript.ts` token-max's Antigravity harness, which it throws
+  on today.
 - Match a session to a seat by harness as well as model, using token-max's
   name for Antigravity sessions, so a gateway's session on a Gemini model
-  stays off an Antigravity seat without the blanket exclusion.
+  stays off an Antigravity seat without the blanket exclusion. Keep `share`'s
+  fallback for spend no seat's model matches within the session's harness, so
+  unmatched Antigravity spend goes to an Antigravity seat, never to an Opus or
+  Sol one, and stays uncounted where the PR has none.
 - Remove the `read` exclusion in `share` and the `complete: false` mark on
   Antigravity rows, and flip `test/usage.test.ts`'s Antigravity rows: a named
   session goes to its seat, and a gateway's same-model session does not.
@@ -29,7 +38,7 @@ right only while token-max reads none.
 
 ## Waiting
 
-- kixel-ai/token-max: `token-max sessions` reads and prices `agy` sessions, which [kixel-ai/token-max#206](https://github.com/kixel-ai/token-max/pull/206) plans. Check that an `agy` review session shows there with a nonzero cost.
+- kixel-ai/token-max: `token-max sessions` reads `agy` sessions, priced or not, which [kixel-ai/token-max#206](https://github.com/kixel-ai/token-max/pull/206) plans. Check that an `agy` review session shows there with its session ID and usage.
 
 ## Related
 
