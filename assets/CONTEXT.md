@@ -61,7 +61,7 @@ Language and PR topic packs (`pr`, `rust`, `ts`, `uniffi`) load lazily via hooks
 ## Pull requests
 
 - Merge the base only when the branch conflicts with it or a landing step (`quest merge` or a merge queue) refuses the head. Before each push to a PR's branch, confirm it is still open (a push after merge restores the deleted branch).
-- Before marking a PR ready for review, exercise the change on its real surface, record `## Validation` and `## Models` (`Size: M` and `Implementer: <harness>, <model-id>, <effort>` per session, newest last), and run `/quest-review` (a model other than the latest writer reviews the committed head). See `quest context pr` for online review threads, CI rules, and `## Caused by`.
+- Before marking a PR ready for review, exercise the change on its real surface, record `## Validation` and `## Models` (`Size: M` matching its quest or a quest-sized skill PR, plus `Implementer: <harness>, <model-id>, <effort>` per session, newest last, `unknown` if unreported), and run `/quest-review` (a model other than the latest writer reviews the committed head; a later push needs a new review unless `/quest-merge` exempts it). See `quest context pr` for online review threads, CI rules, and `## Caused by`.
 
 ## Quests
 

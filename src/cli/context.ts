@@ -9,7 +9,7 @@ import review from "../../assets/REVIEW.md";
 import rust from "../../assets/context/rust.md";
 import ts from "../../assets/context/ts.md";
 import uniffi from "../../assets/context/uniffi.md";
-import { parse } from "./shell";
+import { questCommand, shellCommands } from "./rules";
 import { logDirectory } from "./waits";
 
 /** Shared base review rules loaded by `quest review` before a repository's own `REVIEW.md`. */
@@ -73,22 +73,11 @@ function patchPaths(patch: string): string[] {
 
 /** Whether a shell command interacts with pull requests (`gh pr`, `quest pr|ready|merge|review`). */
 function touchesPr(command: string): boolean {
-	for (const simple of parse(command)) {
-		let words = simple.argv.filter((word) => !/^[A-Za-z_][A-Za-z0-9_]*=/.test(word));
-		if (words.length === 0) continue;
-		// Normalize `bun run [--silent] quest ...`, the launcher used inside the quest checkout itself.
-		if (basename(words[0]!) === "bun" && words[1] === "run") {
-			let i = 2;
-			while (words[i]?.startsWith("-")) i++;
-			if (words[i] === "quest") words = words.slice(i);
-		}
-		const name = basename(words[0]!);
-		if (name === "gh" && words[1] === "pr") return true;
-		if (name === "quest") {
-			let i = 1;
-			while (words[i] === "--root" || words[i]?.startsWith("--root=")) i += words[i] === "--root" ? 2 : 1;
-			if (["pr", "ready", "merge", "review"].includes(words[i] ?? "")) return true;
-		}
+	for (const argv of shellCommands(command)) {
+		const [cmd, ...args] = argv;
+		const name = basename(cmd!);
+		if (name === "gh" && args[0] === "pr") return true;
+		if (name === "quest" && ["pr", "ready", "merge", "review"].includes(questCommand(args)[0] ?? "")) return true;
 	}
 	return false;
 }

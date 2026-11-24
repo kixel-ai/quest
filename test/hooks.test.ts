@@ -487,6 +487,15 @@ test("PreToolUse lazily injects matching topic packs once per session and resets
 		hookSpecificOutput: { hookEventName: "PreToolUse", additionalContext: contextPacks(["pr"]) },
 	});
 	expect(hook(prCall, deps)).toBe("");
+	// Wrapped PR commands (`nix develop --command`, `bash -c`, `env`) also inject the pr pack once.
+	for (const [session_id, command] of [
+		["s-nix-pr", "nix develop --command quest pr list"],
+		["s-sh-pr", "env FOO=1 bash -c 'gh pr list'"],
+	] as const) {
+		expect(JSON.parse(hook({ ...prCall, session_id, tool_input: { command } }, deps))).toEqual({
+			hookSpecificOutput: { hookEventName: "PreToolUse", additionalContext: contextPacks(["pr"]) },
+		});
+	}
 	// Codex apply_patch injects ts on TypeScript files.
 	expect(
 		JSON.parse(

@@ -381,12 +381,30 @@ function dropXargsOptions(args: string[]): string[] {
 		if (!arg.startsWith("-") || arg === "-") break;
 		if (
 			/^-[adEILnPsJR]$/.test(arg) ||
-			/^--(arg-file|delimiter|eof|replace|max-lines|max-args|max-procs|max-chars|process-slot-var)$/.test(arg)
+			/^--(arg-file|delimiter|max-args|max-procs|max-chars|process-slot-var)$/.test(arg)
 		)
 			i += 2;
 		else i += 1;
 	}
 	return args.slice(i);
+}
+
+/** Unwrapped, ungated command argvs executed by a shell command line, recursing into `sh -c`. */
+export function shellCommands(line: string): string[][] {
+	const out: string[][] = [];
+	for (const simple of parse(line)) {
+		const env = new Set<string>();
+		const argv = ungate(unwrap([...simple.argv], env), env);
+		if (argv === null) continue;
+		const [name, ...args] = argv;
+		if (SHELLS.has(basename(name!))) {
+			const flag = args.findIndex((arg) => /^-[a-z]*c[a-z]*$/.test(arg));
+			if (flag !== -1 && args[flag + 1] !== undefined) out.push(...shellCommands(args[flag + 1]!));
+			continue;
+		}
+		out.push(argv);
+	}
+	return out;
 }
 
 /**
@@ -629,7 +647,7 @@ function ghCommand(args: string[]): string[] {
 }
 
 /** `quest`'s arguments past its global options: `--root <path>` or `--root=<path>`. */
-function questCommand(args: string[]): string[] {
+export function questCommand(args: string[]): string[] {
 	let i = 0;
 	while (args[i] === "--root" || args[i]?.startsWith("--root=")) i += args[i] === "--root" ? 2 : 1;
 	return args.slice(i);
