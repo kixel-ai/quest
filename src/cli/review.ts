@@ -13,6 +13,7 @@ import { execFile, spawn, spawnSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import {
 	existsSync,
+	lstatSync,
 	mkdirSync,
 	mkdtempSync,
 	readdirSync,
@@ -614,6 +615,11 @@ interface Reviewer {
 	status: string[];
 	/** Whether the status check runs in an empty workspace, as a CLI that loads the checkout's configuration needs. */
 	isolated?: true;
+	/**
+	 * Whether the status check asks the service, so a failure is a missing login only when its output matches
+	 * `unauthorized`, and any other, as of the network, fails as it is.
+	 */
+	remoteStatus?: true;
 	/** How the user logs in. */
 	login: string;
 	/** The variable naming the configuration directory, and so the stored login, the status check reads, if any. */
@@ -1002,6 +1008,12 @@ export function codexFlags(context: Context): string[] {
 /** The agent every Antigravity turn runs as, which its workspace defines. */
 const AGY_AGENT = "quest-reviewer";
 
+/** The settings file in a turn's directory, which holds its deny rules. */
+const AGY_SETTINGS = "settings.json";
+
+/** The empty tree in `root`'s object format, whose attributes are none. */
+const emptyTree = (root: string) => git(root, ["hash-object", "-t", "tree", "--stdin"], "");
+
 /**
  * Where, under the home directory, CLIs and tools keep a login or key, denied even before one exists: the rules hold
  * only what a turn's start lists, so a sign-in while the turn runs, as to Codex, would otherwise be readable where
@@ -1035,8 +1047,35 @@ export function beside(root: string, later: string[] = []): string[] {
 	const through: string[] = [];
 	for (let up = dirname(root); !through.includes(up); up = dirname(up)) through.push(up);
 	const outside = (path: string) => !through.includes(path) && path !== root && !path.startsWith(`${root}/`);
-	const listed = through.flatMap((dir) => entries(dir).map((name) => join(dir, name)));
+	const listed = through.flatMap((dir) => {
+		const names = entries(dir);
+		caseSensitive(dir, names);
+		return names.map((name) => join(dir, name));
+	});
 	return [...new Set([...listed, ...later].filter(outside))].sort();
+}
+
+/** `name` with each letter's case swapped, as `Users` to `uSERS`. */
+const swapped = (name: string) =>
+	[...name].map((c) => (c === c.toUpperCase() ? c.toLowerCase() : c.toUpperCase())).join("");
+
+/**
+ * Refuse a directory whose names match case-insensitively, as on macOS's default volume: agy compares its read rules
+ * with a path's case as written, so a read of `/USERS/...` passes a rule naming `/Users`. One of `names` shows it, by
+ * reaching the same entry with its case swapped.
+ */
+function caseSensitive(dir: string, names: string[]): void {
+	const name = [...names].sort().find((each) => swapped(each) !== each);
+	if (name === undefined) return;
+	const variant = lstatSync(join(dir, swapped(name)), { throwIfNoEntry: false });
+	const entry = lstatSync(join(dir, name));
+	if (variant !== undefined && variant.ino === entry.ino && variant.dev === entry.dev)
+		throw new ReviewerUnavailableError(
+			"agy",
+			"not supported",
+			`agy cannot be kept to its workspace, since ${dir} matches names case-insensitively and agy matches its ` +
+				"read rules case-sensitively; review with agy only where every directory leading to quest's agent directory is case-sensitive, as on Linux",
+		);
 }
 
 /** The names in `dir`, which must be listed, since a path in it that no rule names could be read. */
@@ -1061,6 +1100,7 @@ function entries(dir: string): string[] {
  */
 function agySettings(dir: string): string {
 	const home = existsSync(homedir()) ? realpathSync(homedir()) : undefined;
+	// The rules name what lies beside the turn's directory, which no finding should quote.
 	return JSON.stringify({
 		permissions: {
 			deny: [
@@ -1070,9 +1110,10 @@ function agySettings(dir: string): string {
 				"execute_url(*)",
 				"download_url(*)",
 				"mcp(*)",
-				...beside(dir, home ? HOME_CREDENTIALS.map((name) => join(home, name)) : []).map(
-					(path) => `read_file(${path})`,
-				),
+				...[
+					join(dir, AGY_SETTINGS),
+					...beside(dir, home ? HOME_CREDENTIALS.map((name) => join(home, name)) : []),
+				].map((path) => `read_file(${path})`),
 			],
 		},
 	});
@@ -1085,7 +1126,7 @@ function agySettings(dir: string): string {
  * `export-ignore`. A symlink becomes a file holding its target, so no read follows one.
  */
 function exportHead(root: string, head: string, into: string): void {
-	const empty = git(root, ["hash-object", "-t", "tree", "--stdin"], "");
+	const empty = emptyTree(root);
 	const index = `${into}.index`;
 	const env = { ...discoveryEnv(), GIT_TERMINAL_PROMPT: "0", GIT_INDEX_FILE: index };
 	const scratch = (command: string, args: string[]) => {
@@ -1154,10 +1195,22 @@ function agyAgent(context: Context): string {
  */
 export function agyTurn(context: Context, prompt: string, flags: string[]): Turn {
 	const files: Record<string, string> = { [`workspace/.agents/agents/${AGY_AGENT}.md`]: agyAgent(context) };
+	// Unquoted, since the reviewer reads each path as listed, and with no attributes, so the head can mark none of its
+	// own hunks binary.
 	if (context.head !== undefined)
-		files["files.txt"] = git(context.root, ["ls-tree", "-r", "--name-only", "--full-tree", context.head]);
+		files["files.txt"] = git(context.root, [
+			"-c",
+			"core.quotePath=false",
+			"ls-tree",
+			"-r",
+			"--name-only",
+			"--full-tree",
+			context.head,
+		]);
+	const empty = context.ranges.length > 0 ? emptyTree(context.root) : "";
 	for (const [index, range] of context.ranges.entries())
 		files[`diff-${index + 1}.diff`] = git(context.root, [
+			`--attr-source=${empty}`,
 			"diff",
 			"--no-ext-diff",
 			"--no-textconv",
@@ -1167,7 +1220,7 @@ export function agyTurn(context: Context, prompt: string, flags: string[]): Turn
 	// Created last, since a turn that is never run leaves its directory behind.
 	const dir = workspace(files);
 	// A file, since the rules can outgrow the 128 KiB an argument holds on Linux, as beside a crowded /tmp.
-	const settings = join(dir, "settings.json");
+	const settings = join(dir, AGY_SETTINGS);
 	try {
 		if (context.head !== undefined) exportHead(context.root, context.head, join(dir, "head"));
 		writeFileSync(settings, agySettings(dir), { mode: 0o600 });
@@ -1217,11 +1270,13 @@ export function agyTurn(context: Context, prompt: string, flags: string[]): Turn
  * Google's Antigravity CLI, which only reviews. It runs on the user's own login and configuration directory, where
  * it keeps its login when no keyring holds it, as over ssh; the reviewer agent keeps the user's customizations out,
  * except their skills' text and their MCP servers' processes, whose tools it cannot call. Its status check lists the
- * account's models, which fails while it is logged out. Environment credentials never replace the login, so none pass.
+ * account's models, which fails while it is logged out, and over the network otherwise. It ignores GEMINI_API_KEY and
+ * GOOGLE_API_KEY in favor of the login, so no credential is added.
  */
 const agy: Reviewer = {
 	status: ["agy", "models"],
 	isolated: true,
+	remoteStatus: true,
 	login: "agy",
 	credentials: [],
 	routeCredentials: [],
@@ -1458,8 +1513,19 @@ async function prepare(
 		// A CLI that is not installed passes the round on before its workspace can fail the run.
 		if (reviewer.isolated) installed(reviewer.status[0]!, env);
 		const dir = reviewer.isolated ? workspace({}) : cwd;
+		let printed = "";
+		const reader: Reader = {
+			line: (line) => {
+				printed = `${printed}${line}\n`.slice(-TAIL);
+			},
+			reply: () => ({}),
+		};
 		try {
-			return (await run(reviewer.status, dir, env, "", undefined, signal)).code === 0;
+			const { code, stderr } = await run(reviewer.status, dir, env, "", reader, signal);
+			const output = `${printed}${stderr}`.trim();
+			if (code !== 0 && reviewer.remoteStatus && !reviewer.unauthorized.test(output))
+				throw new Error(`\`${reviewer.status.join(" ")}\` failed: ${output || `exit ${code}`}`);
+			return code === 0;
 		} finally {
 			if (dir !== cwd) rmSync(dir, { recursive: true, force: true });
 		}
@@ -2380,9 +2446,14 @@ function unanswered(
 	spent: Answer<unknown>["spent"],
 ): Error {
 	const limits = failures.filter((each) => each instanceof ReviewLimitError);
-	// A CLI the user never installed is no reason the question went unanswered, so only the rest count.
+	// A CLI the user never installed, or one this host cannot run, is no reason the question went unanswered, so only
+	// the rest count.
 	const blocking = failures.filter(
-		(each) => !(each instanceof ReviewerUnavailableError && each.reason === "not installed"),
+		(each) =>
+			!(
+				each instanceof ReviewerUnavailableError &&
+				(each.reason === "not installed" || each.reason === "not supported")
+			),
 	);
 	// Every model at its limit replied to nothing, so nothing was spent.
 	if (limits.length > 0 && limits.length === blocking.length)
@@ -3100,7 +3171,9 @@ async function open(
 	const opened = await turn(cli, cli.reviewer.review(context, randomUUID(), prompts.review), root, context.model);
 	if (opened.session === undefined) throw new Error(`${cli.harness} did not report its session`);
 	const session = opened.session;
-	const reply = await turn(cli, cli.reviewer.resume(context, session, prompts.report), root, context.model);
+	// The report turn reads nothing, so it gets no export of the head.
+	const { head: _, ...reporting } = context;
+	const reply = await turn(cli, cli.reviewer.resume(reporting, session, prompts.report), root, context.model);
 	return { session, reply, usage: reported(opened.usage) ? [{ turn: "review", ...opened.usage }] : [] };
 }
 

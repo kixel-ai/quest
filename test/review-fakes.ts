@@ -264,6 +264,10 @@ if (argv[0] === "models") {
 		console.log("Error: Please sign in to view available models. Launch the CLI without arguments to sign in.");
 		process.exit(1);
 	}
+	if (fake("FAKE_OFFLINE")) {
+		console.log("Error: dial tcp: lookup cloudcode-pa.googleapis.com: no such host");
+		process.exit(1);
+	}
 	console.log("gemini-4-neon-xhigh\\tGemini 4 Neon (XHigh)");
 	process.exit(0);
 }

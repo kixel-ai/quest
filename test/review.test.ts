@@ -2,10 +2,12 @@ import { execFileSync } from "node:child_process";
 import {
 	chmodSync,
 	existsSync,
+	linkSync,
 	mkdirSync,
 	readdirSync,
 	readFileSync,
 	realpathSync,
+	rmSync,
 	symlinkSync,
 	writeFileSync,
 } from "node:fs";
@@ -1126,6 +1128,19 @@ test("agy's read rules leave every path outside the turn's directory under a den
 	for (const name of readdirSync("/").filter((name) => name !== top)) expect(blocked(`/${name}`), name).toBe(true);
 });
 
+test("agy's read rules refuse a directory that matches names case-insensitively, since agy's rules do not", () => {
+	const dir = realpathSync(tempDir());
+	write(dir, "a/x/in.txt", "");
+	write(dir, "a/Name", "");
+	// A link reaching the same entry with the case swapped, as a case-insensitive volume resolves any name.
+	linkSync(join(dir, "a", "Name"), join(dir, "a", "nAME"));
+	expect(() => beside(join(dir, "a", "x"))).toThrow(`since ${join(dir, "a")} matches names case-insensitively`);
+	// Two entries that differ only in case are a case-sensitive directory.
+	rmSync(join(dir, "a", "nAME"));
+	write(dir, "a/nAME", "");
+	expect(beside(join(dir, "a", "x"))).toContain(join(dir, "a", "nAME"));
+});
+
 // Root lists any directory, so the refusal only shows for another user.
 test.skipIf(process.getuid?.() === 0)("agy's read rules refuse a parent they cannot list", () => {
 	const dir = realpathSync(tempDir());
@@ -1196,12 +1211,13 @@ fakes(
 	"agy reviews from a directory of its own, reading an export of the head, then reports in the schema",
 	async () => {
 		const s = setup("CLAUDECODE");
-		// A head that would hide a file from an archive, run one of the user's filter drivers, and link out of the
-		// export, beside a file the checkout ignores.
+		// A head that would hide a file from an archive or its hunks from the diff, run one of the user's filter drivers,
+		// and link out of the export, with a path git would quote, beside a file the checkout ignores.
 		const login = join(realpathSync(homedir()), ".codex");
-		write(s.repo, ".gitattributes", "src/lib.ts export-ignore\n* filter=plant\n");
+		write(s.repo, ".gitattributes", "src/lib.ts export-ignore -diff\n* filter=plant\n");
 		symlinkSync(login, join(s.repo, "link"));
-		git(s.repo, "add", ".gitattributes", "link");
+		write(s.repo, "docs/café.md", "Accented.\n");
+		git(s.repo, "add", ".gitattributes", "link", "docs");
 		git(s.repo, "commit", "-qm", "attributes");
 		const smudged = join(s.repo, ".tmp", "smudged");
 		git(s.repo, "config", "filter.plant.smudge", `touch ${smudged}; cat`);
@@ -1235,7 +1251,12 @@ fakes(
 		expect(JSON.parse(readFileSync(schemaFile, "utf8")).required).toContain("risk");
 		const repo = realpathSync(s.repo);
 		// What the head tracks, apart from what the checkout ignores or keeps in .git.
-		const tracked = git(s.repo, "ls-tree", "-r", "--name-only", "HEAD").split("\n").sort();
+		const tracked = git(s.repo, "ls-tree", "-r", "-z", "--name-only", "HEAD").split("\0").filter(Boolean).sort();
+		expect(tracked).toContain("docs/café.md");
+		// The report turn reads nothing, so only the review turn gets the head's export.
+		expect(
+			Object.keys(second!.workspace!).filter((name) => name.startsWith("head/") || name === "files.txt"),
+		).toEqual([]);
 		for (const call of [first!, second!]) {
 			const flag = (name: string) => call.argv[call.argv.indexOf(name) + 1];
 			// The turn runs in a workspace inside its own directory, which holds the head's export beside it.
@@ -1249,15 +1270,17 @@ fakes(
 			const deny: string[] = JSON.parse(call.workspace!["settings.json"]!).permissions.deny;
 			expect(deny).toEqual(expect.arrayContaining(["command(*)", "write_file(*)", "read_url(*)", "mcp(*)"]));
 			// Reads stay in the turn's directory: the checkout and what lies beside it are denied, and nothing in it.
-			const blocked = (path: string) =>
-				deny.some((rule) => rule === `read_file(${path})` || path.startsWith(`${rule.slice(10, -1)}/`));
+			const reads = deny.filter((rule) => rule.startsWith("read_file(")).map((rule) => rule.slice(10, -1));
+			const blocked = (path: string) => reads.some((rule) => path === rule || path.startsWith(`${rule}/`));
 			for (const path of [repo, join(repo, ".git", "config"), join(dirname(repo), "origin.git")])
 				expect(blocked(path), path).toBe(true);
 			// A login created while the turn runs, as by signing in to Codex, is denied before it exists.
 			expect(blocked(join(realpathSync(homedir()), ".codex"))).toBe(true);
-			expect(deny.filter((rule) => rule === `read_file(${dir})` || rule.startsWith(`read_file(${dir}/`))).toEqual(
-				[],
-			);
+			// The rules list what lies beside the directory, so its settings file is denied too, and nothing else in it.
+			expect(reads.filter((rule) => rule === dir || rule.startsWith(`${dir}/`))).toEqual([
+				join(dir, "settings.json"),
+			]);
+			expect(blocked(join(dir, "head", "src", "lib.ts"))).toBe(false);
 			expect(flag("--model")).toBe("gemini-4-neon");
 			expect(flag("--effort")).toBe("high");
 			// It runs outside the checkout, in a directory removed after the turn.
@@ -1268,7 +1291,8 @@ fakes(
 			expect(agent).toContain("inheritCustomizations: false");
 			expect(agent).toContain("BASE-ROOT rule");
 			expect(agent).not.toContain("HEAD-ROOT rule");
-			// The export holds exactly the head's tracked files, as committed, and the list names each.
+			if (call === second) continue;
+			// The export holds exactly the head's tracked files, as committed, and the list names each, unquoted.
 			const exported = Object.keys(call.workspace!)
 				.filter((name) => name.startsWith("head/"))
 				.map((name) => name.slice("head/".length))
@@ -1279,10 +1303,14 @@ fakes(
 			// A link is a file holding its target, which no filter driver touched.
 			expect(call.workspace!["head/link"]).toBe(login);
 			expect(existsSync(smudged)).toBe(false);
-			expect(call.workspace!["diff-1.diff"]).toContain("+export const x = 2;");
 			expect(call.stdin).not.toContain(s.repo);
 			// A resumed conversation still names the first turn's removed directory, so each file is named in full.
 			expect(call.stdin).toContain(`tracked files are in \`${dir}/head\`, which \`${dir}/files.txt\` lists`);
+		}
+		for (const call of [first!, second!]) {
+			const dir = dirname(call.cwd);
+			// The head's `-diff` hides none of its hunks.
+			expect(call.workspace!["diff-1.diff"]).toContain("+export const x = 2;");
 			expect(call.stdin).toContain(`\`${dir}/diff-1.diff\` holds \`git diff ${mergeBase}..${head}\``);
 			expect(Object.keys(call.env).filter((name) => /^(ANTIGRAVITY|AGY)_/.test(name))).toEqual([]);
 		}
@@ -1337,6 +1365,28 @@ fakes.for([
 		expect(result.code).toBe(flag === "FAKE_DENIED" ? 1 : 3);
 	},
 );
+
+fakes("agy is refused where a directory leading to its workspace matches names case-insensitively", async () => {
+	const s = setup("CLAUDECODE");
+	// A link reaching the same entry with the case swapped, as a case-insensitive volume resolves any name.
+	const parent = join(s.bin, "..", "insensitive");
+	write(parent, "Name", "");
+	linkSync(join(parent, "Name"), join(parent, "nAME"));
+	vi.stubEnv("XDG_RUNTIME_DIR", join(parent, "run"));
+	const result = await quest("--root", s.repo, "review", ...AGY);
+	expect(result.code, result.stderr).toBe(3);
+	expect(result.stderr).toContain(`since ${realpathSync(parent)} matches names case-insensitively`);
+	expect(s.calls().filter((call) => call.argv[0] !== "models")).toEqual([]);
+});
+
+fakes("agy's status check failing other than on its login fails as it is, rather than as logged out", async () => {
+	const s = setup("CLAUDECODE");
+	vi.stubEnv("FAKE_OFFLINE", "1");
+	const result = await quest("--root", s.repo, "review", ...AGY);
+	expect(result.code).toBe(1);
+	expect(result.stderr).toContain("`agy models` failed: Fetching available models...\nError: dial tcp: lookup");
+	expect(result.stderr).not.toContain("not logged in");
+});
 
 fakes(
 	"a workspace inside a repository is refused before agy runs, since agy would load its configuration",
@@ -1919,9 +1969,10 @@ fakes(
 		symlinkSync(execFileSync("which", ["git"], { encoding: "utf8" }).trim(), join(without, "git"));
 		vi.stubEnv("PATH", without);
 		// Even where its workspace would be refused, as inside a repository, before it is found missing.
+		const runtime = process.env.XDG_RUNTIME_DIR;
 		vi.stubEnv("XDG_RUNTIME_DIR", join(s.repo, ".tmp", "run"));
 		expect(await run("claude-limited,codex-limited")).toMatchObject({ code: 3, stdout: "" });
-		vi.stubEnv("XDG_RUNTIME_DIR", undefined);
+		vi.stubEnv("XDG_RUNTIME_DIR", runtime);
 		vi.stubEnv("PATH", path);
 		// Otherwise it names why each failed.
 		const failed = await run("claude-rejected,codex-limited,agy-rejected");

@@ -1623,8 +1623,9 @@ and their refutations still decide when the loop ends. Later rounds take
 reported findings requires. A later round resumes the session and checks only
 what changed since the last round's head and its findings when nothing but the
 head changed: the same model, effort, and base, a merge base the last round's
-covers, as when the base moved on, and the same applicable `AGENTS.md`,
-`CLAUDE.md`, and `REVIEW.md`. Otherwise it starts a new session that reviews
+covers, as when the base moved on, the same applicable `AGENTS.md`,
+`CLAUDE.md`, and `REVIEW.md`, and the last round's head still in the clone,
+which an amend and a prune can remove. Otherwise it starts a new session that reviews
 the whole change and still weighs the responses. A round that would resume on
 the head the last round reviewed, when that round found nothing, runs no
 reviewer and repeats that round, marked `unchanged`. A refutation stands only
@@ -1693,11 +1694,12 @@ rules, plugins, or MCP tools. Print mode cannot approve a read outside that
 directory, so permissions are skipped, and deny rules on commands, writes, web
 requests, and MCP calls back up the tool list. With no shell, the turn's
 directory holds what `git` would show: an export of the reviewed head's tracked
-files as committed, beside the directory `agy` runs in so none of its
-configuration loads, `files.txt` listing them, and each reviewed range's diff;
-`agy` 1.5.14 gives an agent no search tool. The export ignores every
-`.gitattributes`, so a head can neither hide a file from it nor run a filter
-driver, and writes each symlink as a file holding its target. `agy` has no rule
+files, beside the directory `agy` runs in so none of its configuration loads,
+`files.txt` listing them, and each reviewed range's diff; `agy` 1.5.14 gives an
+agent no search tool. The export and the diffs ignore the head's
+`.gitattributes`, so a head can neither hide a file or its hunks nor run a
+filter driver, and the export writes each symlink as a file holding its target.
+The review turn alone gets the export, since the report turn reads nothing. `agy` has no rule
 that allows only some paths, so a read rule denies each path beside the
 directories leading to the turn's directory, and nothing outside it, such as the
 checkout's untracked files, its `.git`, or another CLI's login, can be read. The
@@ -1705,7 +1707,12 @@ rules hold what each turn's start lists, so the usual login and key paths under
 your home, such as `~/.codex` and `~/.ssh`, are denied even before they exist,
 and a parent that cannot be listed is a usage error; anything else created
 beside those directories while a turn runs, such as in the runtime directory, is
-not covered. Your skills' text
+not covered. The rules' own file is denied too. `agy` compares its rules with a
+path's case as written, so on a volume that matches names case-insensitively,
+such as macOS's default, `/USERS/...` passes a rule naming `/Users`: quest
+refuses to run `agy` where any directory leading to its agent directory is on
+one, which passes a classifier turn to the next and exits 3 for `--harness agy`.
+An `agy models` that fails other than on the login fails as it is. Your skills' text
 still reaches it, and your MCP servers start, with no tool it can call. A
 `RESOURCE_EXHAUSTED` quota error counts as its usage limit, resetting at the
 time it names.
@@ -1762,7 +1769,7 @@ own PRs with your own token. A record GitHub refuses fails the command after the
 round's report, with exit status 1. It exits 0 once the round
 finishes, whatever it found, 2 for invalid arguments or a checkout that
 cannot be reviewed, 3 when no eligible reviewer could run, each not installed,
-logged out, its login rejected, or at its usage limit, and 1 for other
+logged out, its login rejected, at its usage limit, or unable to run on this host, and 1 for other
 failures. The only eligible reviewer's usage limit prints one line,
 `error: <harness> hit its usage limit; resets <time>`, where `<time>` is the
 reset as an ISO 8601 UTC timestamp, or `unknown` when the CLI named none; with

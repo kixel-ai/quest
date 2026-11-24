@@ -667,6 +667,11 @@ describe("agy", () => {
 		if (canary) rmSync(canary, { force: true });
 	});
 
+	// agy compares its read rules case-sensitively, so on a volume that does not, such as macOS's default, a
+	// case-changed path passes every rule and quest refuses to run it; the clone's path in capitals shows such a volume.
+	const insensitive = () => existsSync(realpathSync(clone).toUpperCase());
+	const REFUSED = "matches names case-insensitively and agy matches its read rules case-sensitively";
+
 	const recordedAgy = () => readdirSync(markers).sort();
 	const clearAgy = () => {
 		rmSync(markers, { recursive: true });
@@ -741,6 +746,10 @@ describe("agy", () => {
 	});
 
 	test("quest's turn loads none of it, runs no command, and reads nothing outside the head's export", async () => {
+		if (insensitive()) {
+			await expect(turn(hostile())).rejects.toThrow(REFUSED);
+			return;
+		}
 		// Without the read rules the same turn quotes every canary, so the checks below are not vacuous.
 		const open = agyRun(await turn(hostile(), (rules) => rules.filter((rule) => !rule.startsWith("read_file("))));
 		expect(open.response, `the canary was not read without the read rules\n${open.output}`).toContain(secret);
@@ -776,6 +785,11 @@ describe("agy", () => {
 			{ env: process.env },
 		).catch((error: unknown) => error);
 		expect(recordedAgy(), "planted configuration ran during the review").toEqual([]);
+		if (insensitive()) {
+			expect(outcome).toBeInstanceOf(Error);
+			expect((outcome as Error).message).toContain(REFUSED);
+			return;
+		}
 		if (outcome instanceof Error) throw outcome;
 		expect(JSON.stringify(outcome), "the review quoted the store's canary").not.toContain(secret);
 		expect(JSON.stringify(outcome), "the review quoted the file beside the checkout").not.toContain(otherSecret);

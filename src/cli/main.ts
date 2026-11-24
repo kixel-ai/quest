@@ -1700,7 +1700,8 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"--responses only when it has some. A later round resumes the " +
 				"session and checks only what changed since the last round's head and those findings when nothing " +
 				"but the head changed: the same model, effort, and base, a merge base the last round's covers, as " +
-				"when the base moved on, and the same applicable AGENTS.md, CLAUDE.md, and REVIEW.md. Otherwise it " +
+				"when the base moved on, the same applicable AGENTS.md, CLAUDE.md, and REVIEW.md, and the last round's head " +
+				"still in the clone, which an amend and a prune can remove. Otherwise it " +
 				"starts a new session that reviews the whole change and still weighs --responses. A round that would " +
 				"resume on the head the last round reviewed, when that round found nothing, runs no reviewer and " +
 				"repeats that round, marked unchanged, so on the same head only a reviewer with findings to settle runs. " +
@@ -1725,9 +1726,11 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"MCP tools, with permissions skipped, since print mode cannot approve a read outside its directory, and deny " +
 				"rules on commands, writes, web requests, MCP calls, and a read of any path outside the turn's directory, " +
 				"such as the checkout's untracked files or another CLI's login. With no shell, that directory holds an " +
-				"export of the reviewed head's tracked files as committed, ignoring every .gitattributes and writing a " +
-				"symlink as a file holding its target, beside the directory agy runs in, files.txt listing them, and the " +
-				"diff of each range it reviews. The user's skills' text still reaches it, and their MCP servers start, with no tool it can call. A " +
+				"export of the reviewed head's tracked files, for the review turn alone, writing a symlink as a file holding " +
+				"its target, beside the directory agy runs in, files.txt listing them, and the diff of each range it reviews, " +
+				"both ignoring the head's .gitattributes. agy compares its read rules case-sensitively, so quest refuses to " +
+				"run it where a directory leading to its agent directory matches names case-insensitively, as on macOS's " +
+				"default volume. The user's skills' text still reaches it, and their MCP servers start, with no tool it can call. A " +
 				"RESOURCE_EXHAUSTED quota error is its usage limit.\n\n" +
 				"Before the reviewers run, the head gets a risk tier, low, medium, or high, from its change alone, never " +
 				"from who wrote it. A changed path, either side of a rename, that a pattern holds makes it high: RISK.md, " +
@@ -1776,7 +1779,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"such PR, several from other repositories that `HEAD` contains, or a remote off GitHub, it prints `record skipped: <why>` and changes nothing.\n\n" +
 				"Exits 0 once the round finishes, whatever it found, 2 for invalid arguments " +
 				"or a checkout that cannot be reviewed, 3 when no eligible reviewer could run, each not installed, logged " +
-				"out, its login rejected, or at its usage limit, and 1 for other failures, including a PR GitHub will not show or a record it " +
+				"out, its login rejected, at its usage limit, or unable to run on this host, and 1 for other failures, including a PR GitHub will not show or a record it " +
 				"refuses. A malformed `## Models` field the round reads, such as a Size line naming no size or an " +
 				"Implementer line naming no model it can read, is a usage error, unless --size or --exclude-model replaces it. A usage limit of the only " +
 				"eligible reviewer prints one line, " +
