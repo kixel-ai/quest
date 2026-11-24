@@ -1678,9 +1678,15 @@ fakes(
 		expect(inside.prompt).toContain("already holds every changed path");
 		expect(inside.prompt).toContain("\n\n- `code` (`src/**`, `AGENTS.md`) - only code\n- `any` - anything");
 
-		// A rename out of src/ counts its old path too, so `docs` holds only the new one and is not offered.
+		// A rename out of src/ counts its old path too, so `docs` holds only the new one and is not offered. The file
+		// keeps the base's content, so git would report it as a rename.
+		write(s.repo, "src/lib.ts", "export const x = 1;\n");
+		git(s.repo, "add", "src/lib.ts");
 		git(s.repo, "mv", "src/lib.ts", "docs/lib.md");
 		git(s.repo, "commit", "-qm", "move the library to the docs");
+		expect(git(s.repo, "diff", "--name-status", "-M", "origin/main", "HEAD", "--", "src", "docs")).toBe(
+			"R100\tsrc/lib.ts\tdocs/lib.md",
+		);
 		expect((await offered()).names).toEqual(["any", null]);
 	},
 	20_000,

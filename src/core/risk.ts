@@ -39,8 +39,9 @@ export const ALWAYS_HIGH: readonly HighPath[] = [
 export function patternError(pattern: string): string | null {
 	if (pattern.trim() === "") return "it is empty";
 	if (pattern.startsWith("/")) return "it starts with /, but a pattern is a path from the repository root";
-	if (/[[\]{}\\!\s]/.test(pattern))
-		return "it holds whitespace or one of [ ] { } \\ !, which patterns do not support";
+	// A backtick would end the code span that holds the pattern in RISK.md.
+	if (/[[\]{}\\!`\s]/.test(pattern))
+		return "it holds whitespace or one of [ ] { } \\ ! `, which patterns do not support";
 	const segments = (pattern.endsWith("/") ? pattern.slice(0, -1) : pattern).split("/");
 	if (segments.some((segment) => segment === "" || segment === "." || segment === ".."))
 		return "it has an empty, `.`, or `..` segment";
@@ -53,6 +54,20 @@ const segmentSource = (segment: string) => escape(segment).replace(/\*/g, "[^/]*
 
 /** Whether `path` matches `pattern`, as {@link patternError} defines one, or lies under a directory it matches. */
 export function matches(pattern: string, path: string): boolean {
+	// `s`, so a path holding a line break matches like any other.
+	return new RegExp(`^${patternSource(pattern)}(?:/.*)?$`, "s").test(path);
+}
+
+/**
+ * Whether `pattern` names `path` itself, or a directory holding it when the pattern ends in `/`: unlike
+ * {@link matches}, a file pattern such as `*.md` never covers a directory whose name happens to fit it.
+ */
+function names(pattern: string, path: string): boolean {
+	return new RegExp(`^${patternSource(pattern)}${pattern.endsWith("/") ? "(?:/.*)?" : ""}$`, "s").test(path);
+}
+
+/** A regular expression's source for the paths `pattern` matches, not counting what lies under them. */
+function patternSource(pattern: string): string {
 	// Adjacent `**` segments match what one does.
 	const segments = (pattern.endsWith("/") ? pattern.slice(0, -1) : pattern)
 		.split("/")
@@ -63,23 +78,28 @@ export function matches(pattern: string, path: string): boolean {
 		if (segment === "**") source += index === 0 ? (last ? ".*" : "(?:[^/]+/)*") : last ? "(?:/.*)?" : "(?:/[^/]+)*";
 		else source += (index === 0 || (index === 1 && segments[0] === "**") ? "" : "/") + segmentSource(segment);
 	});
-	// `s`, so a path holding a line break matches like any other.
-	return new RegExp(`^${source}(?:/.*)?$`, "s").test(path);
+	return source;
 }
 
 /** A class of change that may land without the maintainer's pick, and the rule over the diff that defines it. */
 export interface Class {
 	name: string;
-	/** Patterns one of which every changed path must match, checked before a model judges the rule; null for any path. */
+	/**
+	 * Patterns one of which names every changed path, checked before a model judges the rule; null for any path. A
+	 * pattern names a whole path, and everything under a directory only when it ends in `/` or `/**`.
+	 */
 	scope: string[] | null;
 	rule: string;
 }
 
-/** The classes a change to `paths` may fall in: each whose scope holds every path, and none when no path changed. */
+/**
+ * The classes a change may fall in: each whose scope holds every path in `paths`, which must list both sides of a
+ * rename so a move out of a scope leaves it, and none when no path changed.
+ */
 export function classesFor(classes: readonly Class[], paths: readonly string[]): Class[] {
 	if (paths.length === 0) return [];
 	return classes.filter(
-		({ scope }) => scope === null || paths.every((path) => scope.some((pattern) => matches(pattern, path))),
+		({ scope }) => scope === null || paths.every((path) => scope.some((pattern) => names(pattern, path))),
 	);
 }
 
@@ -177,7 +197,7 @@ function automaticClass(text: string, item: ListItem): Class | string {
 	const name = parsed.code;
 	if (!CLASS_NAME.test(name)) return `\`${name}\` is no class name: use lowercase words joined by hyphens`;
 	// Parentheses around anything but backticked spans, so a pattern may hold one.
-	const scoped = /^[ \t]+\(((?:[^`)]|`[^`]*`)*)\)/.exec(parsed.after);
+	const scoped = /^\s*\(((?:[^`)]|`[^`]*`)*)\)/.exec(parsed.after);
 	const scope = scoped ? scopeOf(name, scoped[1]!) : null;
 	if (typeof scope === "string") return scope;
 	const rule = dashed(scoped ? parsed.after.slice(scoped[0].length) : parsed.after);
@@ -185,6 +205,8 @@ function automaticClass(text: string, item: ListItem): Class | string {
 		return scoped
 			? `\`${name}\`'s scope must be followed by \` - \` and the rule, with nothing between`
 			: `\`${name}\` must be followed by its optional scope in parentheses, \` - \`, and the rule over the diff`;
+	// A scope after the dash would read as prose the classifier judges, not a scope the code checks.
+	if (rule.startsWith("(`")) return `\`${name}\`'s scope goes before \` - \`, not at the start of its rule`;
 	return { name, scope, rule };
 }
 

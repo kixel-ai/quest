@@ -51,21 +51,17 @@ on, so they are low.
 ## Automatic
 
 A low PR whose author has write access lands without the maintainer's pick
-when its whole diff falls in one class below: every changed path matches
-the class's scope in parentheses, and the change meets its rule. Only a PR
-the maintainer picks changes this list, proposed with `quest usage`'s
-numbers for the class: its PRs merged, the culprits among them, and their
-wait on a person.
+when its whole diff falls in one class below. Each is named for the
+commit type a PR in it is titled with. Only a PR the maintainer picks
+changes this list, proposed with `quest usage`'s numbers for the class: its
+PRs merged, the culprits among them, and their wait on a person.
 
-- `test` (`test/**`, `scripts/*.test.sh`) - only tests or their fixtures
-  change
-- `docs` (`quest/**`) - only plans change, which no user or other
+- `test` - only tests, their fixtures, or benchmarks change
+- `quest` - only plans under `quest/` change, which no user or other
   repository reads
-- `refactor` (`src/**`, `test/**`) - code changes that keep every behavior
-  and output the same, such as a rename inside a module, a simplification,
-  or a comment-only change
-- `chore` (`package.json`, `bun.lock`, `flake.lock`) - a dependency or pin
-  bump
+- `refactor` - code changes that keep every behavior and output the same,
+  such as a rename inside a module, a simplification, or a comment-only
+  change
 
 ## High
 

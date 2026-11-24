@@ -1872,8 +1872,11 @@ export async function classify(input: Classifying): Promise<{ key: string; value
 	if (file !== null && file.problems.length > 0)
 		throw new ReviewInputError(`the base's ${RISK_FILE} cannot be read: ${file.problems.join("; ")}`);
 	const range = `${change.mergeBase}..${change.head}`;
-	// Both sides of a rename, so moving a file out of a high path is high too.
-	const changed = git(root, ["diff", "--name-only", "--no-renames", "-z", range]).split("\0").filter(Boolean);
+	// Both sides of a rename, so moving a file out of a high path or a class's scope counts, and every submodule
+	// update, whatever the local config hides.
+	const changed = git(root, ["diff", "--name-only", "--no-renames", "--ignore-submodules=none", "-z", range])
+		.split("\0")
+		.filter(Boolean);
 	const held = [...ALWAYS_HIGH, ...(file?.high ?? [])];
 	const hits = changed.flatMap((path) => {
 		const rule = held.find((each) => matches(each.pattern, path));
@@ -1894,7 +1897,7 @@ export async function classify(input: Classifying): Promise<{ key: string; value
 	const classes = offered.map((each) => each.name);
 
 	const diff = (args: string[]) =>
-		git(root, ["diff", "--no-ext-diff", "--no-textconv", "--no-color", ...args, range]);
+		git(root, ["diff", "--no-ext-diff", "--no-textconv", "--no-color", "--ignore-submodules=none", ...args, range]);
 	const prompt = classifyPrompt(change, { sha: baseSha, text }, diff(["--stat=160"]), diff(["--patch"]), offered);
 	const answer = await ask(CLASSIFIERS, {
 		cwd: root,

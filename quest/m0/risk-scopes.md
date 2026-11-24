@@ -1,0 +1,37 @@
+# [S] Path scopes on this repository's automatic classes
+
+## Goal
+
+Each `## Automatic` class in this repository's `RISK.md` that can name the
+paths it covers carries a path scope, so `quest review` offers it only to a
+change inside it.
+
+## Plan
+
+The parser landed without scopes in this repository's own `RISK.md`. The
+merge queue checks the merged tree with a `quest` built from the base
+(`.github/workflows/queue-build.yml`), and a base from before the parser
+reports every scoped class as malformed. Once `main` carries the parser,
+the scopes can land.
+
+Recommended lines, for the implementer to check against the tree and
+`quest usage`'s per-class numbers:
+
+- `test` (`test/**`, `scripts/*.test.sh`) - only tests, their fixtures, or
+  benchmarks. The only benchmark, `scripts/gate-bench.sh`, lies outside
+  the scope, so drop "benchmarks" from the rule or add it.
+- `quest` (`quest/**`) - only plans. `README.md`, `docs/`, and `assets/`
+  are read by users and every agent, so they stay out.
+- `refactor` (`src/**`, `test/**`) - behavior and output unchanged.
+
+A scope pattern names whole paths, so a directory needs a trailing `/` or
+`/**`.
+
+Leave out a `chore` class for dependency and pin bumps. `RISK.md` rates
+them medium, a class needs low to land, and `/quest-run`'s trivial-PR rule
+already lands them once Pullfrog approves.
+
+Validate by replaying recent merged PRs' changed files, both sides of
+each rename, through `classesFor` against the new file. The PRs classed
+`internal-docs` since 2026-10-01 were all plan-only, so each should still
+be offered `quest`.

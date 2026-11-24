@@ -56,6 +56,7 @@ test("a pattern is a path from the root whose * stays in a segment and whose ** 
 		["{a,b}", "do not support"],
 		["src/[ab]", "do not support"],
 		["has space", "do not support"],
+		["a`b", "do not support"],
 	] as const)
 		expect(patternError(pattern), pattern).toContain(why);
 });
@@ -190,6 +191,8 @@ test("a risk file's ## Automatic list names each class, its scope, and its rule"
 		"- `internal-docs` (`docs/**`, `**/*.md`,",
 		"  `notes(old)/`) - documentation no user reads,",
 		"  such as plans (under `quest/`)",
+		"- `refactor`",
+		"  (`src/**`) - code that behaves the same",
 	].join("\n");
 	expect(parseRiskFile(text)).toEqual({
 		high: [],
@@ -200,6 +203,7 @@ test("a risk file's ## Automatic list names each class, its scope, and its rule"
 				scope: ["docs/**", "**/*.md", "notes(old)/"],
 				rule: "documentation no user reads, such as plans (under `quest/`)",
 			},
+			{ name: "refactor", scope: ["src/**"], rule: "code that behaves the same" },
 		],
 		problems: [],
 	});
@@ -218,6 +222,8 @@ test("a risk file's ## Automatic list names each class, its scope, and its rule"
 			"- `rooted` (`docs/**`, `/src`) - a pattern patternError refuses",
 			"- `between` (`docs/**`) and more - text after the scope",
 			"- `dashless`: a colon",
+			"- `late` - (`quest/**`) a scope after the dash",
+			"- `ticked` (``a`b``) - a pattern holding a backtick",
 		].join("\n"),
 	);
 	expect(broken.classes).toEqual([
@@ -233,6 +239,8 @@ test("a risk file's ## Automatic list names each class, its scope, and its rule"
 		"RISK.md:10: `/src` in `rooted`'s scope is no pattern: it starts with /, but a pattern is a path from the repository root",
 		"RISK.md:11: `between`'s scope must be followed by ` - ` and the rule, with nothing between",
 		"RISK.md:12: `dashless` must be followed by its optional scope in parentheses, ` - `, and the rule over the diff",
+		"RISK.md:13: `late`'s scope goes before ` - `, not at the start of its rule",
+		"RISK.md:14: `ticked` must be followed by its optional scope in parentheses, ` - `, and the rule over the diff",
 		"RISK.md lists the class `docs` twice",
 	]);
 });
@@ -246,6 +254,9 @@ test("a change may fall only in the classes whose scope holds every path it chan
 	expect(classesFor(classes, ["src/a/b.ts"])).toEqual([any, code]);
 	// One path outside a scope rules its class out, however many fit.
 	expect(classesFor(classes, ["docs/guide.txt", "src/main.ts"])).toEqual([any]);
+	// A scope names whole paths: a file pattern never covers a directory that fits it, and `src/` covers what it holds.
+	expect(classesFor(classes, ["tools.md/build.sh"])).toEqual([any]);
+	expect(classesFor([{ ...code, scope: ["src"] }], ["src/main.ts"])).toEqual([]);
 	// A change that touches no path falls in no class, not even an unscoped one.
 	expect(classesFor(classes, [])).toEqual([]);
 });

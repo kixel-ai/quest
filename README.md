@@ -1782,8 +1782,9 @@ file is prose for the classifier, such as what is customer-facing, except
 `## Automatic`, whose items are each a backticked class name of lowercase
 words joined by hyphens, such as a commit type so a PR title's type reads
 beside the class it claims; optionally a scope, backticked patterns joined by
-`, ` in parentheses, one of which every changed path must match; ` - `; and
-the rule over the diff a change meets to fall in it. Each section appears at
+`, ` in parentheses, one of which must match every changed path whole, so a
+scope covers everything under a directory only through a pattern ending in
+`/` or `/**`; ` - `; and the rule over the diff a change meets to fall in it. Each section appears at
 most once. `quest review` reads the file
 from the base's tip, so a change cannot lower its own tier, and fails on one
 it cannot read, which the repository's own `quest check`
