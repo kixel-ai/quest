@@ -1652,6 +1652,40 @@ fakes(
 	20_000,
 );
 
+fakes(
+	"the classifier is offered only the classes whose scope holds every changed path",
+	async () => {
+		const s = setup();
+		const classes = [
+			"- `code` (`src/**`, `AGENTS.md`) - only code",
+			"- `docs` (`docs/**`, `**/*.md`) - only documentation",
+			"- `any` - anything",
+		];
+		moveBase(s.repo, (dir) => write(dir, "RISK.md", `${riskFile([])}\n## Automatic\n\n${classes.join("\n")}\n`));
+		vi.stubEnv("FAKE_RISK", JSON.stringify({ tier: "medium", reason: "It changes the output.", class: null }));
+		vi.stubEnv("FAKE_REPLY", JSON.stringify({ score: 10, rationale: "Lands as is.", findings: [] }));
+		const offered = async () => {
+			const result = await quest("--root", s.repo, "review");
+			expect(result.code, result.stderr).toBe(0);
+			const call = classifying(s.calls()).at(-1)!;
+			const schema = JSON.parse(call.argv[call.argv.indexOf("--json-schema") + 1]!);
+			return { names: schema.properties.class?.enum, prompt: call.stdin };
+		};
+
+		// The change touches src/lib.ts, so `docs` is never offered, and each offered class shows its scope.
+		const inside = await offered();
+		expect(inside.names).toEqual(["code", "any", null]);
+		expect(inside.prompt).toContain("already holds every changed path");
+		expect(inside.prompt).toContain("\n\n- `code` (`src/**`, `AGENTS.md`) - only code\n- `any` - anything");
+
+		// A rename out of src/ counts its old path too, so `docs` holds only the new one and is not offered.
+		git(s.repo, "mv", "src/lib.ts", "docs/lib.md");
+		git(s.repo, "commit", "-qm", "move the library to the docs");
+		expect((await offered()).names).toEqual(["any", null]);
+	},
+	20_000,
+);
+
 fakes("without a logged-in Claude Code, Codex classifies", async () => {
 	const s = setup();
 	moveBase(s.repo, (dir) => write(dir, "RISK.md", riskFile([])));

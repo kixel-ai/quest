@@ -17,12 +17,14 @@ import { promisify } from "node:util";
 
 import {
 	ALWAYS_HIGH,
+	type Class,
 	RISK_FILE,
 	SIZES,
 	type Size,
 	TIERS,
 	type Tier,
 	branchQuest,
+	classesFor,
 	matches,
 	parse,
 	parseRiskFile,
@@ -1258,7 +1260,7 @@ function classSchema(classes: string[]) {
 export function classed(value: unknown, classes: string[], what: string): Assessment & { class: string | null } {
 	const named = record(value)?.class ?? null;
 	if (named !== null && !classes.includes(named as string))
-		throw new Error(`${what} names ${JSON.stringify(named)}, which is no class the risk file lists`);
+		throw new Error(`${what} names ${JSON.stringify(named)}, which is no class the risk file offers this change`);
 	return { ...assessment(value, what), class: named as string | null };
 }
 
@@ -1546,7 +1548,7 @@ export function classifyPrompt(
 	file: { sha: string; text: string },
 	stat: string,
 	patch: string,
-	classes: string[] = [],
+	classes: readonly Class[] = [],
 ): string {
 	const range = `${change.mergeBase}..${change.head}`;
 	const whole = stat.length + patch.length <= DIFF_BUDGET;
@@ -1564,10 +1566,18 @@ export function classifyPrompt(
 			"whom, and how hard it is to undo.",
 		...(classes.length > 0
 			? [
-					"Also report as `class` the one class from the risk file's `## Automatic` list whose rule every " +
-						"changed file meets, judged by what the diff does rather than its title or description, or null " +
-						"when no single class covers the whole change or you are unsure. A class lets a low change land " +
-						"without a person, so between a class and null, pick null.",
+					"Also report as `class` the one class below whose rule every changed file meets, judged by what the " +
+						"diff does rather than its title or description, or null when no single class covers the whole " +
+						"change or you are unsure. These are the risk file's `## Automatic` classes whose path scope, in " +
+						"parentheses where a class has one, already holds every changed path, so judge only the rule. A " +
+						"class lets a low change land without a person, so between a class and null, pick null.\n\n" +
+						classes
+							.map(({ name, scope, rule }) => {
+								const within =
+									scope === null ? "" : ` (${scope.map((each) => `\`${each}\``).join(", ")})`;
+								return `- \`${name}\`${within} - ${rule}`;
+							})
+							.join("\n"),
 				]
 			: []),
 	].join("\n\n");
@@ -1879,11 +1889,13 @@ export async function classify(input: Classifying): Promise<{ key: string; value
 		const reason = `the base has no ${RISK_FILE} to name what is always high or customer-facing, so every change is medium`;
 		return set({ tier: "medium", reason, by: { kind: "default" }, class: null });
 	}
-	const classes = file!.classes.map((each) => each.name);
+	// Only the classes whose scope holds every changed path, so the classifier cannot widen one.
+	const offered = classesFor(file!.classes, changed);
+	const classes = offered.map((each) => each.name);
 
 	const diff = (args: string[]) =>
 		git(root, ["diff", "--no-ext-diff", "--no-textconv", "--no-color", ...args, range]);
-	const prompt = classifyPrompt(change, { sha: baseSha, text }, diff(["--stat=160"]), diff(["--patch"]), classes);
+	const prompt = classifyPrompt(change, { sha: baseSha, text }, diff(["--stat=160"]), diff(["--patch"]), offered);
 	const answer = await ask(CLASSIFIERS, {
 		cwd: root,
 		dir: input.dir,

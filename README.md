@@ -357,8 +357,8 @@ checks a PR with a binary built from the base passes `--no-stubs`, since that
 binary's skills would reject a PR that changes a stub; the PR's own binary
 checks them in its own `quest check`. This repository's merge queue and
 `quest merge` do so. It also reads the repository's [`RISK.md`](#risk-tiers),
-if any, and reports each `## High` item it cannot read, which would otherwise
-fail the next `quest review` on a branch from it.
+if any, and reports each `## High` or `## Automatic` item it cannot read,
+which would otherwise fail the next `quest review` on a branch from it.
 
 A link into a submodule that is not checked out, as in a fresh worktree or
 `actions/checkout` by default, resolves at the commit its gitlink pins when a
@@ -1766,7 +1766,8 @@ Customers run the relay and the player; the CLI is for contributors.
 
 ## Automatic
 
-- `tests` - only tests and their fixtures change
+- `docs` (`docs/**`, `**/*.md`) - only documentation no other repository reads
+- `test` - only tests and their fixtures change
 
 ## High
 
@@ -1779,8 +1780,11 @@ segment, a whole `**` segment spans any number, and a matched directory covers
 everything under it, then ` - ` and why changing it is high. The rest of the
 file is prose for the classifier, such as what is customer-facing, except
 `## Automatic`, whose items are each a backticked class name of lowercase
-words joined by hyphens, ` - `, and the rule over the diff a change meets to
-fall in it. Each section appears at most once. `quest review` reads the file
+words joined by hyphens, such as a commit type so a PR title's type reads
+beside the class it claims; optionally a scope, backticked patterns joined by
+`, ` in parentheses, one of which every changed path must match; ` - `; and
+the rule over the diff a change meets to fall in it. Each section appears at
+most once. `quest review` reads the file
 from the base's tip, so a change cannot lower its own tier, and fails on one
 it cannot read, which the repository's own `quest check`
 reports first. A base with no `RISK.md` makes every change no path holds high
@@ -1788,7 +1792,10 @@ reports first. A base with no `RISK.md` makes every change no path holds high
 
 Otherwise a classifier reads the diff and the base's `RISK.md` in one read-only
 turn and replies with a tier, one sentence on why, and the `## Automatic`
-class every changed file falls in, or none: Claude Code
+class every changed file falls in, or none. It is offered only the classes
+whose scope holds every changed path, either side of a rename, checked
+before it runs so it judges just the rule and cannot widen a scope; a change
+that touches no path falls in none. It runs as Claude Code
 `claude-haiku-5-5` at low effort, or Codex `gpt-6.2-sol` at low when Claude
 Code is missing, logged out, has its login rejected, or hit its usage limit.
 When neither can run, the review fails on the limit that resets first if both

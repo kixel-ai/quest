@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 
-import { ALWAYS_HIGH, matches, parseRiskFile, patternError, recordedRisk, riskier } from "../src/core";
+import { ALWAYS_HIGH, classesFor, matches, parseRiskFile, patternError, recordedRisk, riskier } from "../src/core";
 
 test("a pattern is a path from the root whose * stays in a segment and whose ** spans segments", () => {
 	const cases: [string, string, boolean][] = [
@@ -178,7 +178,7 @@ test("the review record's risk reads back, and a record without one names none",
 	});
 });
 
-test("a risk file's ## Automatic list names each class and its rule", () => {
+test("a risk file's ## Automatic list names each class, its scope, and its rule", () => {
 	const text = [
 		"# Risk",
 		"",
@@ -186,15 +186,20 @@ test("a risk file's ## Automatic list names each class and its rule", () => {
 		"",
 		"Each class below lands without a pick once low.",
 		"",
-		"- `tests` - only tests and their fixtures",
-		"- `internal-docs` - documentation no user reads,",
-		"  such as plans",
+		"- `test` - only tests and their fixtures",
+		"- `internal-docs` (`docs/**`, `**/*.md`,",
+		"  `notes(old)/`) - documentation no user reads,",
+		"  such as plans (under `quest/`)",
 	].join("\n");
 	expect(parseRiskFile(text)).toEqual({
 		high: [],
 		classes: [
-			{ name: "tests", rule: "only tests and their fixtures" },
-			{ name: "internal-docs", rule: "documentation no user reads, such as plans" },
+			{ name: "test", scope: null, rule: "only tests and their fixtures" },
+			{
+				name: "internal-docs",
+				scope: ["docs/**", "**/*.md", "notes(old)/"],
+				rule: "documentation no user reads, such as plans (under `quest/`)",
+			},
 		],
 		problems: [],
 	});
@@ -207,17 +212,42 @@ test("a risk file's ## Automatic list names each class and its rule", () => {
 			"- tests - not backticked",
 			"- `docs` - one",
 			"- `docs` - twice",
+			"- `empty` () - no patterns",
+			"- `bare` (docs/**) - unbackticked",
+			"- `spaced` (`a/**` `b/**`) - no comma",
+			"- `rooted` (`docs/**`, `/src`) - a pattern patternError refuses",
+			"- `between` (`docs/**`) and more - text after the scope",
+			"- `dashless`: a colon",
 		].join("\n"),
 	);
 	expect(broken.classes).toEqual([
-		{ name: "docs", rule: "one" },
-		{ name: "docs", rule: "twice" },
+		{ name: "docs", scope: null, rule: "one" },
+		{ name: "docs", scope: null, rule: "twice" },
 	]);
 	expect(broken.problems).toEqual([
 		"RISK.md:3: `Tests` is no class name: use lowercase words joined by hyphens",
-		"RISK.md:4: an `## Automatic` item is a backticked class name, ` - `, and the rule over the diff",
+		"RISK.md:4: an `## Automatic` item is a backticked class name, optionally a scope of backticked path patterns in parentheses, ` - `, and the rule over the diff",
+		"RISK.md:7: `empty`'s scope is empty: list its patterns, or drop the parentheses",
+		"RISK.md:8: `bare`'s scope is not backticked path patterns joined by `, `: (docs/**)",
+		"RISK.md:9: `spaced`'s scope is not backticked path patterns joined by `, `: (`a/**` `b/**`)",
+		"RISK.md:10: `/src` in `rooted`'s scope is no pattern: it starts with /, but a pattern is a path from the repository root",
+		"RISK.md:11: `between`'s scope must be followed by ` - ` and the rule, with nothing between",
+		"RISK.md:12: `dashless` must be followed by its optional scope in parentheses, ` - `, and the rule over the diff",
 		"RISK.md lists the class `docs` twice",
 	]);
+});
+
+test("a change may fall only in the classes whose scope holds every path it changes", () => {
+	const any = { name: "any", scope: null, rule: "anything" };
+	const docs = { name: "docs", scope: ["docs/**", "**/*.md"], rule: "only documentation" };
+	const code = { name: "code", scope: ["src/"], rule: "only code" };
+	const classes = [any, docs, code];
+	expect(classesFor(classes, ["docs/guide.txt", "src/README.md"])).toEqual([any, docs]);
+	expect(classesFor(classes, ["src/a/b.ts"])).toEqual([any, code]);
+	// One path outside a scope rules its class out, however many fit.
+	expect(classesFor(classes, ["docs/guide.txt", "src/main.ts"])).toEqual([any]);
+	// A change that touches no path falls in no class, not even an unscoped one.
+	expect(classesFor(classes, [])).toEqual([]);
 });
 
 test("the review record's class and override read back", () => {

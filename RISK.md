@@ -51,17 +51,21 @@ on, so they are low.
 ## Automatic
 
 A low PR whose author has write access lands without the maintainer's pick
-when its whole diff falls in one class below. Only a PR the maintainer
-picks changes this list, proposed with `quest usage`'s numbers for the
-class: its PRs merged, the culprits among them, and their wait on a person.
+when its whole diff falls in one class below: every changed path matches
+the class's scope in parentheses, and the change meets its rule. Only a PR
+the maintainer picks changes this list, proposed with `quest usage`'s
+numbers for the class: its PRs merged, the culprits among them, and their
+wait on a person.
 
-- `tests` - only tests, their fixtures, or benchmarks change
-- `internal-docs` - only comments, plans under `quest/`, or documentation
-  no user, contributor, or other repository reads change
-- `refactor` - code changes that keep every behavior and output the same,
-  such as a rename inside a module or a simplification
-- `trivial` - a dependency or pin bump, or another change as small, from
-  any author, which lands at any tier once Pullfrog approves its head
+- `test` (`test/**`, `scripts/*.test.sh`) - only tests or their fixtures
+  change
+- `docs` (`quest/**`) - only plans change, which no user or other
+  repository reads
+- `refactor` (`src/**`, `test/**`) - code changes that keep every behavior
+  and output the same, such as a rename inside a module, a simplification,
+  or a comment-only change
+- `chore` (`package.json`, `bun.lock`, `flake.lock`) - a dependency or pin
+  bump
 
 ## High
 

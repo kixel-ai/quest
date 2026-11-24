@@ -70,7 +70,17 @@ export function matches(pattern: string, path: string): boolean {
 /** A class of change that may land without the maintainer's pick, and the rule over the diff that defines it. */
 export interface Class {
 	name: string;
+	/** Patterns one of which every changed path must match, checked before a model judges the rule; null for any path. */
+	scope: string[] | null;
 	rule: string;
+}
+
+/** The classes a change to `paths` may fall in: each whose scope holds every path, and none when no path changed. */
+export function classesFor(classes: readonly Class[], paths: readonly string[]): Class[] {
+	if (paths.length === 0) return [];
+	return classes.filter(
+		({ scope }) => scope === null || paths.every((path) => scope.some((pattern) => matches(pattern, path))),
+	);
 }
 
 /** What a risk file holds: its always-high paths and automatic classes, and what keeps it from being read. */
@@ -85,7 +95,8 @@ export interface RiskFile {
  *
  * - `## High`: each item a backticked {@link patternError} pattern, ` - `, and why changing what it matches is always
  *   high.
- * - `## Automatic`: each item a backticked class name, ` - `, and the rule over the diff a change meets to fall in it.
+ * - `## Automatic`: each item a backticked class name; optionally its scope, backticked {@link patternError} patterns
+ *   joined by `, ` in parentheses; ` - `; and the rule over the diff a change meets to fall in it.
  *
  * The rest of the file is prose the classifier reads, such as what is customer-facing.
  */
@@ -128,24 +139,28 @@ function headingText(text: string, node: RootContent): string {
 		.trim();
 }
 
-/** A list item's backticked code and the text after its ` - `, or null when it has not that shape. */
-function codeItem(text: string, item: ListItem): { code: string; rest: string } | null {
+/** A list item's leading backticked code and its source after that, or null when it has not that shape. */
+function codeItem(text: string, item: ListItem): { code: string; after: string } | null {
 	const [first, ...rest] = item.children;
 	if (first?.type !== "paragraph" || rest.length > 0) return null;
 	const [code] = (first as Paragraph).children;
 	if (code?.type !== "inlineCode") return null;
-	const after = text.slice(code.position!.end.offset!, first.position!.end.offset!);
-	const tail = /^[ \t]+-[ \t]+(\S[\s\S]*)$/.exec(after)?.[1]?.replace(/\s+/g, " ").trim();
-	return tail === undefined ? null : { code: code.value, rest: tail };
+	return { code: code.value, after: text.slice(code.position!.end.offset!, first.position!.end.offset!) };
+}
+
+/** The text after the ` - ` that opens `after`, on one line, or null when `after` does not open with one. */
+function dashed(after: string): string | null {
+	return /^[ \t]+-[ \t]+(\S[\s\S]*)$/.exec(after)?.[1]?.replace(/\s+/g, " ").trim() ?? null;
 }
 
 /** One `## High` item, or why it is not one. */
 function highPath(text: string, item: ListItem): HighPath | string {
 	const parsed = codeItem(text, item);
-	if (parsed === null) return "a `## High` item is a backticked pattern, ` - `, and why its change is high";
+	const reason = parsed && dashed(parsed.after);
+	if (!parsed || !reason) return "a `## High` item is a backticked pattern, ` - `, and why its change is high";
 	const problem = patternError(parsed.code);
 	if (problem !== null) return `\`${parsed.code}\` is no pattern: ${problem}`;
-	return { pattern: parsed.code, reason: parsed.rest };
+	return { pattern: parsed.code, reason };
 }
 
 /** A class name: lowercase words joined by hyphens, so a record names it as one token. */
@@ -154,10 +169,36 @@ const CLASS_NAME = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 /** One `## Automatic` item, or why it is not one. */
 function automaticClass(text: string, item: ListItem): Class | string {
 	const parsed = codeItem(text, item);
-	if (parsed === null) return "an `## Automatic` item is a backticked class name, ` - `, and the rule over the diff";
-	if (!CLASS_NAME.test(parsed.code))
-		return `\`${parsed.code}\` is no class name: use lowercase words joined by hyphens`;
-	return { name: parsed.code, rule: parsed.rest };
+	if (parsed === null)
+		return (
+			"an `## Automatic` item is a backticked class name, optionally a scope of backticked path patterns in " +
+			"parentheses, ` - `, and the rule over the diff"
+		);
+	const name = parsed.code;
+	if (!CLASS_NAME.test(name)) return `\`${name}\` is no class name: use lowercase words joined by hyphens`;
+	// Parentheses around anything but backticked spans, so a pattern may hold one.
+	const scoped = /^[ \t]+\(((?:[^`)]|`[^`]*`)*)\)/.exec(parsed.after);
+	const scope = scoped ? scopeOf(name, scoped[1]!) : null;
+	if (typeof scope === "string") return scope;
+	const rule = dashed(scoped ? parsed.after.slice(scoped[0].length) : parsed.after);
+	if (rule === null)
+		return scoped
+			? `\`${name}\`'s scope must be followed by \` - \` and the rule, with nothing between`
+			: `\`${name}\` must be followed by its optional scope in parentheses, \` - \`, and the rule over the diff`;
+	return { name, scope, rule };
+}
+
+/** The patterns in class `name`'s parenthesized scope `inside`, or why it holds none. */
+function scopeOf(name: string, inside: string): string[] | string {
+	if (inside.trim() === "") return `\`${name}\`'s scope is empty: list its patterns, or drop the parentheses`;
+	if (!/^`[^`]+`(?:,\s+`[^`]+`)*$/.test(inside))
+		return `\`${name}\`'s scope is not backticked path patterns joined by \`, \`: (${inside.replace(/\s+/g, " ")})`;
+	const patterns = [...inside.matchAll(/`([^`]+)`/g)].map((match) => match[1]!);
+	for (const pattern of patterns) {
+		const problem = patternError(pattern);
+		if (problem !== null) return `\`${pattern}\` in \`${name}\`'s scope is no pattern: ${problem}`;
+	}
+	return patterns;
 }
 
 /** The risk the PR body's `## Review` record names for its head. */

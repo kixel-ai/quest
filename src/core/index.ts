@@ -39,6 +39,7 @@ export { reviewSection } from "./review";
 export {
 	ALWAYS_HIGH,
 	type Class,
+	classesFor,
 	DEFAULT,
 	type HighPath,
 	PATHS,
