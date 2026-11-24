@@ -45,8 +45,8 @@ export const WRITERS: Record<Size, readonly Model[]> = {
 /**
  * Each PR size's reviewers, ranked: the first whose model is not the latest
  * writer's reviews it, and one that cannot run passes the review to the next. Sonnet comes last so Opus-written
- * work still has a reviewer when Sol is out; at low it found none of the eval
- * set's M defects, so it runs no lower than medium.
+ * work still has a reviewer when Sol is out; at low it found none of the M
+ * defects it was scored on, so it runs no lower than medium.
  */
 export const REVIEWERS: Record<Size, readonly Model[]> = {
 	XS: [sol("medium"), opus("low"), sonnet("medium")],

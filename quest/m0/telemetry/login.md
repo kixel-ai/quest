@@ -3,7 +3,7 @@
 ## Goal
 
 `quest login` shows a code, the person approves it at kixel.quest, and the machine holds a posting token named after its host; it also asks once whether to upload transcripts.
-Every command that posts or reads Kixel Quest (the record sender, `quest review`, `quest eval`, forge reads) uses that token, and fails with "run `quest login`" when there is none.
+Every command that posts or reads Kixel Quest (the record sender, `quest review`, forge reads) uses that token, and fails with "run `quest login`" when there is none.
 `quest logout` removes it.
 
 ## Plan

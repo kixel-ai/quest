@@ -93,7 +93,6 @@ import {
 	roundLines,
 	savedReview,
 } from "./review";
-import { EVAL_FILE, addCase, evalLines, evaluate } from "./review-eval";
 import { type Recorded, pullModels, recordRounds } from "./review-record";
 import {
 	BASH_MAX_TIMEOUT_MS,
@@ -1921,125 +1920,6 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 					},
 					(error) => reviewFailure(error, options.json),
 				);
-			},
-		);
-
-	const evalCommand = program
-		.command("eval")
-		.summary("Score the reviewer on the repository's past culprits and clean PRs");
-	evalCommand
-		.command("run")
-		.summary("Review every case of the eval set and score the reviewers")
-		.description(
-			`Review each case of the eval set, ${EVAL_FILE} at the checkout's root unless --set names another, at its PR's ` +
-				"last head, fetched from the set's repository (a remote that names it, else its GitHub URL in origin's " +
-				"scheme, so a fork's clone scores its upstream's set), in a detached checkout under the clone's common Git " +
-				"directory that is removed afterwards, and " +
-				"score the reviewers. A culprit is a PR a later fix named under ## Caused by, with each defect's places, a " +
-				"file's lines at its head; a finding on any of them finds it, and one naming no line finds nothing. A clean " +
-				"PR broke nothing, and every finding on it is noise. Each case gets the first round quest review gives a new " +
-				"session: the base's AGENTS.md and CLAUDE.md at the case's merge base, its classified tier, and the prompts of " +
-				"this build, with the review rules of this checkout, its committed REVIEW.md at HEAD, so a change to the " +
-				"reviewer table, the prompts, or REVIEW.md is scored before it lands. The reviewers are the size's pick, " +
-				"avoiding the case's writer, and its shadow, as quest review runs them, or --harness's alone, at its " +
-				"entry's model and effort unless --model and --effort override them. A reviewer that cannot run fails the run " +
-				"rather than passing the case to the next, so the score measures the reviewers it names. Cases run one at a time, their reviewers " +
-				"at once, and the first failure stops the run and fails it.\n\n" +
-				"Prints the set's counts and rules, a line per seat (pick, shadow, and, without --harness, either: what " +
-				"the case's seats found together, as a run of the pick and its shadow finds it) with defects found and clean findings by severity, the same by size and tier, " +
-				"each case's rounds with score, defects found, findings, tokens the CLI reported, and session, and the " +
-				"run's cost at API list price as token-max prices its sessions, or unpriced without token-max. --json prints " +
-				"one object. Exits as quest review does: 2 for invalid arguments or a set that cannot be read, 3 for a " +
-				"reviewer that is not installed, logged out, or at its usage limit, 1 for other failures.",
-		)
-		.option("--set <file>", `The eval set (default: ${EVAL_FILE} at the checkout's root)`)
-		.addOption(
-			new Option("--harness <name>", "The only reviewer, instead of the pick and shadow").choices(HARNESSES),
-		)
-		.option("--model <model>", "Model --harness's reviewer runs instead of its size's")
-		.option("--effort <level>", "Reasoning effort --harness's reviewer runs at instead of its size's", effortLevel)
-		.option("--pr <number>", "Only this case; repeat for each", (value: string, previous: number[] = []) => [
-			...previous,
-			positiveInteger("--pr")(value),
-		])
-		.option("--json", "Print one JSON object")
-		.action(
-			(options: {
-				set?: string;
-				harness?: HarnessName;
-				model?: string;
-				effort?: string;
-				pr?: number[];
-				json?: boolean;
-			}) => {
-				const run = evaluate(
-					{
-						root: root(),
-						set: options.set,
-						harness: options.harness,
-						model: options.model,
-						effort: options.effort,
-						only: options.pr,
-						env: process.env,
-						progress: (index, total, pull) => warn(`case ${index}/${total}: #${pull}`),
-					},
-					(since) => runTokenMax(since, []),
-				);
-				pending = run.then((report) => {
-					if (options.json) print(JSON.stringify(report));
-					else for (const line of evalLines(report)) print(line);
-					if (report.cost === null) warn(TOKEN_MAX_MISSING);
-					return 0;
-				}, reviewFailure);
-			},
-		);
-	evalCommand
-		.command("add")
-		.summary("Add a culprit's defect or a clean PR to the eval set")
-		.argument("<pr>", "The merged PR", positiveInteger("<pr>"))
-		.description(
-			"Add a merged PR of the set's repository, or for a new set the one origin's fork chain leads to as quest " +
-				"start finds it, to the eval set: --clean for one that broke nothing, or --defect with " +
-				"--fix and --what for a culprit's defect, which a culprit already in the set gains, repeating --defect for each " +
-				"place the one defect is. Locate a defect at the culprit's last head from the diff of the fix that repaired " +
-				"it. The first time, it reads the PR's last head " +
-				"and base from GitHub, fetches them, and records the merge base, the size and latest writer its ## Models " +
-				"record names (the size as quest review picks it), and the tier the classifier sets, which may run a model " +
-				"as quest review's does. Prints the case as JSON.\n\nUses GH_TOKEN, GITHUB_TOKEN, or gh auth token. Exits 2 " +
-				"for invalid arguments, a PR not in or already in the set as asked, or lines past the file's end.",
-		)
-		.option("--set <file>", `The eval set (default: ${EVAL_FILE} at the checkout's root)`)
-		.option("--clean", "Record a PR that broke nothing")
-		.option(
-			"--defect <path:from-to>",
-			"Where a defect is at the PR's last head, as path:from-to or path:line; repeat for each place it is",
-			(value: string, previous: string[] = []) => [...previous, value],
-		)
-		.option("--fix <number>", "The PR whose ## Caused by names it", positiveInteger("--fix"))
-		.option("--what <text>", "One sentence on what was wrong", nonEmpty)
-		.action(
-			(
-				pr: number,
-				options: { set?: string; clean?: boolean; defect?: string[]; fix?: number; what?: string },
-			) => {
-				const given = [options.defect, options.fix, options.what].filter((each) => each !== undefined).length;
-				if (given !== 0 && given !== 3) throw new UsageError("--defect, --fix, and --what go together");
-				const run = addCase(
-					{
-						root: root(),
-						set: options.set,
-						pull: pr,
-						clean: options.clean,
-						defect:
-							given === 3 ? { at: options.defect!, fix: options.fix!, what: options.what! } : undefined,
-						env: process.env,
-					},
-					claimDependencies(),
-				);
-				pending = run.then((entry) => {
-					print(JSON.stringify(entry));
-					return 0;
-				}, reviewFailure);
 			},
 		);
 

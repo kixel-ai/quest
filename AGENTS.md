@@ -25,10 +25,6 @@ Do not edit `CONTRIBUTING.md`, `assets/CONTEXT.md`, `assets/AGENTS.md`, or
   `RISK.md` lists under `## Automatic` that adds or expands no quests, or a
   trivial PR such as a dependency bump once Pullfrog approves its head; and
   only after repository checks and reviews pass.
-- A change to the reviewers in `src/cli/models.ts`, the review prompts in
-  `src/cli/review.ts`, or a `REVIEW.md` runs `quest eval run` with the base's
-  build and the head's, and puts both scores and their cost in its PR's
-  `## Validation`.
 - Pull requests land as squash merges.
 - Do not comment on repositories outside kixelated, moq-dev, and kixel-ai without approval.
 

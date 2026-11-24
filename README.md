@@ -1544,8 +1544,7 @@ header:
 The new reviewer settles the open findings of the one it replaces, and the
 shadow follows it. Only when every eligible reviewer is out does the run fail,
 exiting 3 with each one's error. A reviewer `--harness`, `--model`, or
-`--effort` names never passes the round on, so a controlled run, such as
-`quest eval run`'s, measures the reviewer it names.
+`--effort` names never passes the round on.
 
 A quest branch takes its quest's size, read from the base branch's tip so a
 change cannot lower its own review; any other PR, such as a skill's own, takes
@@ -1834,33 +1833,6 @@ prints beside its scoped checks. The tier is the PR body's, which its author
 writes, so a gate runs the full suite itself for an author without write
 access. `--base` names the branch whose `RISK.md` it reads, fetched first,
 by default origin's default branch.
-
-### Score the reviewer
-
-`quest eval` scores the reviewer on the repository's past PRs, kept in
-`review-eval.json` at its root: culprits, each with the places at its last head
-of the defect a later fix's `## Caused by` named, and clean PRs that broke
-nothing. Score a change to the reviewer table, the prompts, or `REVIEW.md`
-before it lands, and put the score and its cost in its PR.
-
-```sh
-quest eval add 570 --fix 704 --what "It counts every link as a culprit." \
-  --defect src/cli/usage.ts:395-399 --defect src/cli/usage.ts:408-410
-quest eval add 503 --clean
-quest eval run                          # the size's pick and its shadow on every case
-quest eval run --harness claude --effort high --pr 570
-```
-
-`add` reads the PR's last head and base from GitHub and records its merge base,
-size, latest writer, and tier, and a culprit already in the set gains each
-further defect. `run` fetches each case from the set's repository, so a fork's
-clone scores its upstream's set, and reviews it at its head in a detached checkout,
-giving the reviewers the first round `quest review` gives, with the base's
-`AGENTS.md` and `CLAUDE.md` and this checkout's committed `REVIEW.md`. A
-finding on any line of a defect's places finds it; every finding on a clean PR
-is noise. It prints defects found and clean findings by severity for the pick,
-its shadow, and either, by size and by tier, each case's rounds, and the cost
-token-max prices for the run's sessions.
 
 ## Audit cost and accuracy
 

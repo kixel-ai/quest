@@ -13,6 +13,6 @@ Decided 2026-11-22 (maintainer, `/quest-plan` from kixel-ai/kixel.quest's run), 
 - ✅ Medium keeps one reviewer at the size's pick (rejected: a second reviewer, since medium is the default for every repository without a `RISK.md`; revisit once the factory report shows medium PRs causing breakage). Low is unchanged.
 - Delete `src/cli/suite.ts`, its command and test, the `suite` field and `## Full suite` section in `src/core/risk.ts`'s risk-file parser (a base listing the section then fails as an unknown section, like any other), and the README's Full suite and Run the full suite sections and the CI column's high row.
 - The maintainer asked for this work, which covers the `assets/skills/` edits it needs, such as `run.md`'s "both reviews and the full suite's result".
-- Changing how `src/cli/review.ts` routes a high head's reviewers falls under `AGENTS.md`'s `quest eval run` rule: put both builds' scores and cost in `## Validation`.
+- Judge the high tier's two reviewers from real PRs once they land, by the `second` row and `## Caused by` escapes `quest usage` reports, as the [root plan](/quest/README.md) decided on 2026-11-23.
 
 Tests: a high head seats two reviewers on different models from the ranking's top entries, whatever its size; a medium head one at the size's pick; and a `RISK.md` with `## Full suite` is refused.
