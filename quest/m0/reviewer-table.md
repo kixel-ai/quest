@@ -6,10 +6,8 @@
 `gpt-6.1-sol`, picks `gpt-6.2-astra` high first for XL PRs, and seats Fable
 5.2 medium on L PRs as a candidate seat. Like the shadow, that seat reviews
 each branch beside the pick, and its findings are compared, not acted on
-alone. `quest usage` tallies it as its own reviewer row, and `quest eval run`
-seats it as `quest review` does. The PR's `## Validation` carries the base's
-and head's `quest eval run` scores and cost, as `AGENTS.md` requires for a
-reviewer change.
+alone. `quest usage` tallies it as its own reviewer row, which judges it
+from real PRs.
 
 Non-goals: what risk tiers buy in review, which
 [kixel-ai/quest#819](https://github.com/kixel-ai/quest/pull/819) changes; the
@@ -30,8 +28,8 @@ table):
 - XL? ✅ Astra high picks first, then Opus xhigh, then Sonnet high. Until
   [review seats](/quest/m0/review-seats.md) lands, this list orders XL's
   seats; after, it supplies the Codex and Claude seats' models and
-  efforts, and the tier and eval decide how many seats run and in what
-  order.
+  efforts, and the tier decides how many seats run, in review seats'
+  shipped order.
   (rejected: Astra xhigh, the maintainer's own correction; Sol xhigh). With
   Fable writing every XL quest, a Fable seat there could never run, so XL
   gets none. The step-down shadow stays at XL as at L, one effort below the
