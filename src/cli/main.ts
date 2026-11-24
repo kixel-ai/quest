@@ -106,7 +106,7 @@ import {
 	targets,
 } from "./hooks";
 import { CHECKED_CONTEXT, USER_ASKED, questRoot } from "./rules";
-import { messageLines, messages } from "./messages";
+import { messageLines, messages, repositories } from "./messages";
 import { logWait, pullWaitKind, readWaits } from "./waits";
 import { readCalls } from "./calls";
 import { SEND_INTERVAL, background, parseInstant, reportIncident, runSender } from "./send";
@@ -1598,7 +1598,10 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"Claude Code marks as a human's; other Codex sessions, from $CODEX_HOME (or ~/.codex), count the " +
 				"content Codex marks as the user's (before 0.162, which marks none, the parts but its environment, shell commands, and " +
 				"AGENTS.md instructions), outside headless and sub-agent sessions. The repository is the " +
-				"checkout's GitHub origin, else the directory, and --repo prints only one repository's, so an audit reads no other's. Output goes to stdout only, except a note on stderr " +
+				"checkout's origin on GitHub or Kixel Quest, else the directory; a removed worktree under a checkout's .worktrees/ " +
+				"or .claude/worktrees/ is named by that checkout, and one elsewhere, such as T3 Code's, by its directory. It prints only the repository of the checkout it runs in, " +
+				"comparing owner/name without case, and reads no further than the name of any other's sessions, unless --all " +
+				"prints every repository's. Output goes to stdout only, except a note on stderr " +
 				"naming each Claude Code session whose malformed lines, such as a partial record a crashed write left, " +
 				"were skipped and how many; nothing is stored or posted. Each answer a person gave an agent's blocking question (Claude Code's AskUserQuestion, " +
 				"Codex's request_user_input) prints too, from the harness's own log in every session, T3 Code's " +
@@ -1610,13 +1613,18 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"record in a shape quest does not know.",
 		)
 		.option("--since <date>", "First local date to print, as YYYY-MM-DD (default: 7 days ago)", date)
-		.option(
-			"--repo <repository>",
-			"Print only this repository's, as the output names it: owner/name, else a directory",
-		)
+		.option("--all", "Print every repository's, not only this checkout's")
 		.option("--json", "Print a JSON array")
-		.action((options: { since?: string; repo?: string; json?: boolean }) => {
-			const query = { since: options.since ?? daysBefore(new Date(), 7), repository: options.repo };
+		.action((options: { since?: string; all?: boolean; json?: boolean }) => {
+			let repository: string | null = null;
+			if (!options.all) {
+				repository = repositories(process.env, null).name(root());
+				if (repository === root())
+					throw new UsageError(
+						"this checkout's origin names no repository on GitHub or Kixel Quest; pass --all for every repository's",
+					);
+			}
+			const query = { since: options.since ?? daysBefore(new Date(), 7), repository };
 			const found = messages(query, {
 				env: process.env,
 				home: homedir(),

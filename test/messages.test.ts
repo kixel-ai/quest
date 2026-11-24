@@ -20,7 +20,7 @@ const THREAD = "01a1b8e8-8fca-7793-99d1-062f41f8a7b0";
 const SINCE = Date.parse("2026-11-01T00:00:00");
 
 const lines = (...records: unknown[]) => `${records.map((r) => JSON.stringify(r)).join("\n")}\n`;
-const plain = (dir: string) => dir;
+const plain = { name: (dir: string) => dir, keep: () => true };
 
 /** A Claude Code user turn. */
 const turn = (timestamp: string, content: unknown, extra: object = {}) => ({
@@ -613,7 +613,7 @@ describe("readT3Messages", () => {
 });
 
 describe("messages", () => {
-	test("gathers every source once, oldest first, naming each checkout's GitHub origin, filtered by repository on request", () => {
+	test("gathers every source once, oldest first, naming each checkout's GitHub origin, one repository's on request", () => {
 		const home = tempDir();
 		const checkout = join(home, "proj");
 		mkdirSync(checkout);
@@ -645,7 +645,10 @@ describe("messages", () => {
 		]);
 
 		const notes: string[] = [];
-		const found = messages({ since: "2026-11-01" }, { env: {}, home, warn: (line) => notes.push(line) });
+		const found = messages(
+			{ since: "2026-11-01", repository: null },
+			{ env: {}, home, warn: (line) => notes.push(line) },
+		);
 		expect(notes).toEqual([]);
 		expect(found).toEqual([
 			{
@@ -674,9 +677,43 @@ describe("messages", () => {
 			},
 		]);
 		expect(messageLines(found.slice(2))).toEqual([`2026-11-06T11:00:00.000Z codex /gone ${THREAD}`, "  and test"]);
-		const mine = messages({ since: "2026-11-01", repository: "acme/proj" }, { env: {}, home });
-		expect(mine.map((m) => m.repository)).toEqual(["acme/proj", "acme/proj"]);
+		expect(messages({ since: "2026-11-01", repository: "Acme/Proj" }, { env: {}, home })).toEqual(
+			found.slice(0, 2),
+		);
 		expect(messages({ since: "2026-11-01", repository: "/gone" }, { env: {}, home })).toEqual([found[2]]);
+	});
+
+	test("names a removed worktree by its checkout, and reads no further into another repository's session", () => {
+		const home = tempDir();
+		const checkout = join(home, "proj");
+		mkdirSync(checkout);
+		execFileSync("git", ["init", "-q", checkout]);
+		execFileSync("git", ["-C", checkout, "remote", "add", "origin", "https://github.com/acme/proj.git"]);
+		mkdirSync(join(home, ".claude", "projects", "p"), { recursive: true });
+		writeFileSync(
+			join(home, ".claude", "projects", "p", `${SESSION}.jsonl`),
+			lines(
+				turn("2026-11-06T09:00:00Z", "from a worktree", {
+					cwd: join(checkout, ".claude", "worktrees", "gone"),
+				}),
+				turn("2026-11-06T09:01:00Z", "from a quest worktree", {
+					cwd: join(checkout, ".worktrees", "x", "src"),
+				}),
+				turn("2026-11-06T09:02:00Z", "elsewhere", { cwd: join(home, "gone", "sub") }),
+			),
+		);
+		// Another repository's session in a shape quest does not know fails only a read that includes it.
+		mkdirSync(join(home, ".codex", "sessions"), { recursive: true });
+		writeFileSync(
+			join(home, ".codex", "sessions", `rollout-2026-11-06T10-00-00-${THREAD}.jsonl`),
+			lines(codexMeta({ cwd: "/other" }), codexTurn("2026-11-06T11:00:00Z", [["x", "plugins.mystery"]])),
+		);
+		const mine = messages({ since: "2026-11-01", repository: "acme/proj" }, { env: {}, home });
+		expect(mine.map((m) => m.kind === "message" && [m.repository, m.text])).toEqual([
+			["acme/proj", "from a worktree"],
+			["acme/proj", "from a quest worktree"],
+		]);
+		expect(() => messages({ since: "2026-11-01", repository: null }, { env: {}, home })).toThrow(/plugins.mystery/);
 	});
 
 	test("prints an answer with its skill, question, recommendation, and pick", () => {
@@ -707,6 +744,6 @@ describe("messages", () => {
 	test("fails when T3 Code is installed but its state is elsewhere", () => {
 		const home = tempDir();
 		mkdirSync(join(home, ".t3"));
-		expect(() => messages({ since: "2026-11-01" }, { env: {}, home })).toThrow(/keeps no state/);
+		expect(() => messages({ since: "2026-11-01", repository: null }, { env: {}, home })).toThrow(/keeps no state/);
 	});
 });

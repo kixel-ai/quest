@@ -91,7 +91,10 @@ try {
 		// What the stubs call prints from the bundled assets.
 		for (const skill of skills) assert.match(run(root, "skill", skill), /\n# Quest guide\n\n## /);
 		// Init plants a stub per audit, and the stub names a definition the binary prints.
-		for (const audit of ["tree", "deps", "code", "cost", "docs", "tests"]) {
+		for (const audit of run(root, "audit")
+			.trim()
+			.split("\n")
+			.map((line) => line.split(" - ")[0])) {
 			assert.match(read(root, `quest/m1/audit-${audit}.md`), new RegExp(`\n## Audit\n\n- ${audit}\n`));
 			assert.match(run(root, "audit", audit), /\n# Running an audit\n/);
 		}

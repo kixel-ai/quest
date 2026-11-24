@@ -2,7 +2,7 @@
 
 The goal is CI, tests, builds, and shipped artifacts that each earn what they cost, with growth since the last run explained, fixed, or planned.
 The scope is every CI workflow and job, the merge gate and its suites, build time, and the size of every artifact the repository ships.
-Dependencies belong to the `deps` audit, and what tests cover to the `tests` audit.
+Dependencies belong to the `deps` audit, what tests cover to the `tests` audit, and the size of instructions agents load to the `instructions` audit.
 
 Look for:
 
@@ -10,7 +10,7 @@ Look for:
 - The gate: its slowest, flakiest, and least valuable steps, compile time included, changes that run steps they cannot affect, and any PR check that is optional or not a hard failure. Classify a failure before calling it a flake, and fix a flake at its cause rather than deleting its test.
 - Tests: each test's time from one invocation, recording the test count, profile, and threads. Weigh each test's bug-catching value against its runtime, flake, and maintenance cost.
 - Build time: the crates, packages, or modules that cost the most, cold and after a typical edit. Repeat an edit before timing it, since the first only records incremental state.
-- Dev & agent loop: edit-to-signal latency (local stack boot, incremental rebuild, test startup), recurring flake retries, and instruction/context bloat that wastes agent turns or tokens.
+- Dev & agent loop: edit-to-signal latency (local stack boot, incremental rebuild, test startup) and recurring flake retries.
 - Artifact size: growth in every shipped binary, library, bundle, image, and closure since the last run, attributed by package or symbol namespace.
 
 Compare like with like: recorded commits, the same target, profile, and cache state, and the host's load noted; never an archive against a binary, or a stripped build against one with symbols.

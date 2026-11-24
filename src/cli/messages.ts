@@ -7,8 +7,10 @@ import { closeSync, existsSync, openSync, readdirSync, readSync, statSync } from
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { discoveryEnv } from "./git";
+import { hostedRepository } from "./forge";
 import { githubRepository } from "./github";
 import { RECOMMENDED } from "./rules";
+import { kixelUrl } from "./tokens";
 
 /**
  * Visit each line of the file at `path`, reading it in bounded chunks since logs reach gigabytes. The last line is
@@ -114,11 +116,19 @@ export interface Answer {
 /** What `quest messages` prints. */
 export type Entry = Message | Answer;
 
-/** Which messages `messages` returns: those since a local `YYYY-MM-DD`, and only one repository's when `repository` names it. */
+/** Which messages `messages` returns: those since a local `YYYY-MM-DD`, from one repository or, when null, every one. */
 export interface MessagesQuery {
 	since: string;
-	/** A repository as the output names it: `owner/name` for a GitHub checkout, else its directory. */
-	repository?: string;
+	/** A repository as the output names it, `owner/name` on GitHub or Kixel Quest, else its directory; null for all. */
+	repository: string | null;
+}
+
+/** How the readers name the repository a session ran in, and whether the query reads it. */
+export interface Repositories {
+	/** The repository the directory `dir` belongs to, as the output names it. */
+	name(dir: string): string;
+	/** Whether the query reads this repository's sessions; the readers parse no further record of one it does not. */
+	keep(name: string): boolean;
 }
 
 export interface MessagesDependencies {
@@ -157,23 +167,42 @@ export function claudeText(content: unknown): string | null {
 	return text === "" || CLAUDE_OUTPUT.test(text) ? null : text;
 }
 
-/** The repository of the directory `dir`: its checkout's GitHub `origin`, else the directory itself. */
-function repositories(): (dir: string) => string {
+/**
+ * Worktrees Claude Code and quest keep inside the checkout they belong to, so a removed one is named by that checkout.
+ * No other missing directory is: its nearest existing ancestor can be an unrelated checkout, such as a home directory.
+ */
+const WORKTREE = /^(.+?)[/\\](?:\.claude[/\\]worktrees|\.worktrees)[/\\][^/\\]+(?:[/\\].*)?$/;
+
+/** A repository's name as `keep` compares it: GitHub and Kixel Quest ignore case in `owner/name`. */
+const folded = (name: string) => (/^[\w.-]+\/[\w.-]+$/.test(name) ? name.toLowerCase() : name);
+
+/**
+ * Names each directory's repository by its checkout's `origin` on GitHub or Kixel Quest, else the directory itself,
+ * and keeps only `wanted`'s sessions, or every one when it is null.
+ */
+export function repositories(env: NodeJS.ProcessEnv, wanted: string | null): Repositories {
 	const cache = new Map<string, string>();
-	return (dir) => {
-		let name = cache.get(dir);
-		if (name === undefined) {
-			const url = existsSync(dir)
-				? spawnSync("git", ["-C", dir, "remote", "get-url", "origin"], {
-						encoding: "utf8",
-						env: discoveryEnv(),
-					})
-				: null;
-			const repo = url?.status === 0 ? githubRepository(url.stdout.trim()) : null;
-			name = repo ? `${repo.owner}/${repo.repo}` : dir;
-			cache.set(dir, name);
-		}
-		return name;
+	const kixel = kixelUrl(env);
+	return {
+		name(dir) {
+			let name = cache.get(dir);
+			if (name === undefined) {
+				const checkout = existsSync(dir) ? dir : WORKTREE.exec(dir)?.[1];
+				const url =
+					checkout !== undefined && existsSync(checkout)
+						? spawnSync("git", ["-C", checkout, "remote", "get-url", "origin"], {
+								encoding: "utf8",
+								env: discoveryEnv(),
+							})
+						: null;
+				const origin = url?.status === 0 ? url.stdout.trim() : null;
+				const repo = origin === null ? null : (hostedRepository(kixel, origin) ?? githubRepository(origin));
+				name = repo ? `${repo.owner}/${repo.repo}` : dir;
+				cache.set(dir, name);
+			}
+			return name;
+		},
+		keep: (name) => wanted === null || folded(name) === folded(wanted),
 	};
 }
 
@@ -228,7 +257,7 @@ export function readClaudeMessages(
 	path: string,
 	session: string,
 	since: number,
-	repository: (dir: string) => string,
+	repositories: Repositories,
 	skip?: () => void,
 ): Entry[] {
 	const entries: Entry[] = [];
@@ -250,14 +279,16 @@ export function readClaudeMessages(
 		skill = claudeSkill(record) ?? skill;
 		const asked = record.type === "user" && Array.isArray(result?.questions) && result.answers !== undefined;
 		if (!asked && (record.type !== "user" || !human)) return;
+		if (typeof record.cwd !== "string") throw new Error(`${path} has a user record without a directory`);
+		const repository = repositories.name(record.cwd);
+		if (!repositories.keep(repository)) return;
 		const at = typeof record.timestamp === "string" ? Date.parse(record.timestamp) : NaN;
 		if (Number.isNaN(at)) throw new Error(`${path} has a user record without a timestamp`);
 		if (at < since) return;
-		if (typeof record.cwd !== "string") throw new Error(`${path} has a user record without a directory`);
 		const base = {
 			time: new Date(at).toISOString(),
 			harness: "claude",
-			repository: repository(record.cwd),
+			repository,
 			session,
 		};
 		if (asked) {
@@ -334,7 +365,7 @@ function codexQuestions(path: string, args: unknown): CodexQuestion[] {
  * and the sessions T3 Code drives, since T3 Code keeps no question's options. Headless (`exec`) sessions and
  * sub-agents take only machine-written prompts.
  */
-export function readCodexMessages(path: string, since: number, repository: (dir: string) => string): Entry[] {
+export function readCodexMessages(path: string, since: number, repositories: Repositories): Entry[] {
 	const entries: Entry[] = [];
 	let session: string | undefined;
 	let typed = false;
@@ -357,9 +388,9 @@ export function readCodexMessages(path: string, since: number, repository: (dir:
 			const url = (payload.git as Record<string, unknown> | undefined)?.repository_url;
 			const repo = typeof url === "string" ? githubRepository(url) : null;
 			if (repo) where = `${repo.owner}/${repo.repo}`;
-			else if (typeof payload.cwd === "string") where = repository(payload.cwd);
+			else if (typeof payload.cwd === "string") where = repositories.name(payload.cwd);
 			else throw new Error(`${path} names no directory`);
-			return true;
+			return repositories.keep(where);
 		}
 		const output = /"call_id"\s*:\s*"([^"]+)"/.exec(line)?.[1];
 		const user = /"role"\s*:\s*"user"/.test(line);
@@ -536,7 +567,7 @@ const T3_DRIVERS: Record<string, string> = { claudeAgent: "claude", codex: "code
  * client. Agents' relays, notifications, and scheduled prompts are created by an agent or carry their task, and a
  * structured question's answer comes from its server.
  */
-export function readT3Messages(path: string, since: number, repository: (dir: string) => string): Message[] {
+export function readT3Messages(path: string, since: number, repositories: Repositories): Message[] {
 	const db = new DatabaseSync(path, { readOnly: true });
 	try {
 		const rows = db
@@ -559,6 +590,9 @@ export function readT3Messages(path: string, since: number, repository: (dir: st
 			root: string | null;
 		}[];
 		return rows.flatMap((row) => {
+			if (row.root === null) throw new Error(`T3 Code message ${row.id} belongs to no project`);
+			const repository = repositories.name(row.root);
+			if (!repositories.keep(repository)) return [];
 			const payload = JSON.parse(row.payload) as Record<string, unknown>;
 			if (payload.createdBy === "agent") return [];
 			if (payload.createdBy !== "user")
@@ -569,7 +603,6 @@ export function readT3Messages(path: string, since: number, repository: (dir: st
 					`T3 Code message ${row.id} comes from an unknown client: ${String(payload.creationSource)}`,
 				);
 			if (typeof payload.text !== "string") throw new Error(`T3 Code message ${row.id} has no text`);
-			if (row.root === null) throw new Error(`T3 Code message ${row.id} belongs to no project`);
 			const native = row.provider === null ? null : (JSON.parse(row.provider) as Record<string, unknown>);
 			const ref = native?.nativeThreadRef as { nativeId?: unknown } | null | undefined;
 			const driver = typeof native?.driver === "string" ? native.driver : null;
@@ -580,7 +613,7 @@ export function readT3Messages(path: string, since: number, repository: (dir: st
 					kind: "message" as const,
 					time: new Date(row.at).toISOString(),
 					harness: driver === null ? null : (T3_DRIVERS[driver] ?? driver),
-					repository: repository(row.root),
+					repository,
 					session: typeof ref?.nativeId === "string" ? ref.nativeId : null,
 					text,
 				},
@@ -597,12 +630,12 @@ export function readT3Messages(path: string, since: number, repository: (dir: st
  */
 export function messages(query: MessagesQuery, deps: MessagesDependencies): Entry[] {
 	const from = new Date(`${query.since}T00:00:00`).getTime();
-	const repository = repositories();
+	const scope = repositories(deps.env, query.repository);
 	const found: Entry[] = [];
 	for (const [session, path] of claudeLogs(deps)) {
 		if (statSync(path).mtimeMs < from) continue;
 		let skipped = 0;
-		found.push(...readClaudeMessages(path, session, from, repository, () => skipped++));
+		found.push(...readClaudeMessages(path, session, from, scope, () => skipped++));
 		if (skipped)
 			deps.warn?.(`skipped ${skipped} malformed line${skipped === 1 ? "" : "s"} in session ${session} (${path})`);
 	}
@@ -616,7 +649,7 @@ export function messages(query: MessagesQuery, deps: MessagesDependencies): Entr
 		const thread = /([0-9a-f-]{36})\.jsonl$/.exec(path)?.[1] ?? path;
 		if (threads.has(thread)) continue;
 		threads.add(thread);
-		found.push(...readCodexMessages(path, from, repository));
+		found.push(...readCodexMessages(path, from, scope));
 	}
 	const t3 = deps.env.T3CODE_HOME || join(deps.home, ".t3");
 	if (existsSync(t3)) {
@@ -625,11 +658,9 @@ export function messages(query: MessagesQuery, deps: MessagesDependencies): Entr
 			throw new Error(
 				`T3 Code is installed at ${t3} but keeps no state at ${state}, where quest reads its messages`,
 			);
-		found.push(...readT3Messages(state, from, repository));
+		found.push(...readT3Messages(state, from, scope));
 	}
-	return found
-		.filter((m) => query.repository === undefined || m.repository === query.repository)
-		.sort((a, b) => a.time.localeCompare(b.time));
+	return found.sort((a, b) => a.time.localeCompare(b.time));
 }
 
 /** The entries as plain lines: a header per entry, then its text, or an answer's question and picks, indented. */

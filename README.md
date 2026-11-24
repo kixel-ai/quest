@@ -2234,9 +2234,9 @@ session's next stop labels the steps still unlabeled.
 
 `quest messages` prints the messages a person typed to agents on this host
 since `--since` (a local `YYYY-MM-DD`, by default 7 days ago), oldest first,
-for a periodic audit of what agents keep getting wrong. `--repo` prints only
-one repository's, named as the output names it, so an audit of one repository
-reads no other's:
+for a periodic audit of what agents keep getting wrong. It prints only the
+repository of the checkout it runs in, and reads another repository's sessions
+no further than what names them; `--all` prints every repository's:
 
 ```console
 $ quest messages --since 2026-11-10
@@ -2244,8 +2244,11 @@ $ quest messages --since 2026-11-10
   quest-run
 ```
 
-Each message shows its time, harness, repository (the checkout's GitHub
-`origin`, else its directory), and session, then its text. It also prints each
+Each message shows its time, harness, repository (the checkout's `origin` on
+GitHub or Kixel Quest, comparing `owner/name` without case, else its
+directory; a removed worktree under a checkout's `.worktrees/` or
+`.claude/worktrees/` takes that checkout's, while one elsewhere, such as T3 Code's,
+keeps its directory), and session, then its text. It also prints each
 answer a person gave an agent's blocking question, such as Claude Code's
 `AskUserQuestion` or Codex's `request_user_input`, marked `answer` with the
 skill the session last ran, then the question, the options the agent marked
