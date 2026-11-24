@@ -49,11 +49,12 @@ Language and PR topic packs (`pr`, `rust`, `ts`, `uniffi`) load lazily via hooks
 - Work in your own worktree, reusing a suitable one you already own; read-only discovery needs no new checkout. Finish with a clean checkout (intended changes committed and pushed, incidental changes restored, unrelated changes preserved). Before ending a task, pausing, or handing off, commit a checkpoint and report what remains and which checks passed or did not run.
 - Gate by CPU, not run time: run builds, tests, and model checkers through `quest gate <command>` in the foreground, reading the exit code directly, never through a pipe. Leave `quest review`, servers, and formatters ungated. Never work around the queue by polling the load or capping agents (`quest agent admit`'s job); cancel a gated command only once its result is unneeded.
 - Never end a turn with your background work running, and never poll with `sleep` or status loops: block on the harness's wait or `quest wait` (re-running on timeout with the `--since` it printed). A gate's queue or a long command still running is not a stall; back out only if progress genuinely stalls.
-- A sub-agent ends its turn only with a final result or a question, reporting only what its caller acts on (PR URL, state, head, open decisions with recommendations).
+- A sub-agent ends its turn only with a final result or a question, such as its PR URL, state, head, and open decisions with recommendations.
 
-## Questions
+## Communication
 
-- Link every issue, PR, and commit you show the user by full URL (`[owner/repo#123](https://github.com/owner/repo/pull/123)`), never a bare `#123`; sub-agents report the URLs for the parent to link.
+- Write everything people read for what they act on or need to trust the result: lead with the outcome, say it once plainly, and cut narration, restated context, hedges, recaps, and what went as expected.
+- Link every issue, PR, and commit you show the user by full URL, never a bare `#123`; sub-agents report the URLs for the parent to link.
 - Block on user decisions with context and a recommendation (`quest guide questions`). An agent that cannot prompt puts each decision in its report and under `## Waiting` in its PR.
 - A plan is a starting point: when a finding undercuts it, say what changed and propose alternatives with your recommendation. When recorded decisions conflict, follow the newest and note it in the PR body.
 - Confirm closing an open PR as its own question, and comment on the PR before or with it.
@@ -61,7 +62,7 @@ Language and PR topic packs (`pr`, `rust`, `ts`, `uniffi`) load lazily via hooks
 ## Pull requests
 
 - Merge the base only when the branch conflicts with it or a landing step (`quest merge` or a merge queue) refuses the head. Before each push to a PR's branch, confirm it is still open (a push after merge restores the deleted branch).
-- Before marking a PR ready for review, exercise the change on its real surface, record `## Validation` and `## Models` (`Size: M` matching its quest or a quest-sized skill PR, plus `Implementer: <harness>, <model-id>, <effort>` per session, newest last, `unknown` if unreported), and run `/quest-review` (a model other than the latest writer reviews the committed head; a later push needs a new review unless `/quest-merge` exempts it). See `quest context pr` for online review threads, CI rules, and `## Caused by`.
+- Before marking a PR ready for review, record `## Validation` and `## Models` (`Size: M` matching its quest or a quest-sized skill PR, plus `Implementer: <harness>, <model-id>, <effort>` per session, newest last, `unknown` if unreported), and run `/quest-review` (a model other than the latest writer reviews the committed head; a later push needs a new review unless `/quest-merge` exempts it). See `quest context pr` for online review threads, CI rules, and `## Caused by`.
 
 ## Quests
 
