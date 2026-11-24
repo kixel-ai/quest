@@ -1341,6 +1341,19 @@ ${requeueScript}`);
 		// The wrapper's error stays beside its log for diagnosis on the host.
 		expect(readdirSync(fixture.queue.state).filter((name) => name.endsWith(".json.error"))).toHaveLength(1);
 	});
+	test("reads a fixer's exit 124 as timed out, keeping its output", async () => {
+		// A run that hit its limit is no wrapper failure, even when the wrapper says so on descriptor 3.
+		const fixture = await fixerFixture("echo 'runtime limit 30m reached' >&2; echo 'runtime limit' >&3; exit 124", {
+			raw: true,
+		});
+		await fixture.finished;
+		expect(await fixture.collect()).toEqual(["handback 1"]);
+		const comment = fixture.forge.comment(1);
+		expect(comment).toContain(
+			"fixer timed out (exit 124); run /quest-iterate. Recommendation: run /quest-iterate before picking it again.",
+		);
+		expect(comment).toContain("runtime limit 30m reached");
+	});
 	test("waits for a fixer whose process it could not identify, and says when one stops unrecorded", async () => {
 		const fixture = await fixerFixture(requeueScript, { blocked: true });
 		await fixture.ready;
