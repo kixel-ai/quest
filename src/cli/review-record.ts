@@ -306,7 +306,7 @@ export type Recorded = { url: string } | { skipped: string };
 /**
  * The open PR from `branch` into the base `<remote>/<branch>` names, or why there is none: the one from the repository
  * the base's remote pushes to, else the only one from any repository whose head `HEAD` contains, as a maintainer's
- * checkout of a contributor's fork PR finds it. It reads the forge itself, never an index that may lag, since its body is rewritten.
+ * checkout of a contributor's fork PR finds it. It reads the PR list from GitHub itself, never an index, since its body is rewritten.
  */
 async function openPull(
 	root: string,
@@ -322,7 +322,7 @@ async function openPull(
 	if (hosting === null) return { skipped: `${remote} is not on GitHub or Kixel Quest` };
 	const { repository, head } = hosting;
 	const name = `${head.owner}/${head.repo}`.toLowerCase();
-	const candidates = pullsFrom((await (await hosting.live()).pulls(repository)).value, branch).filter(
+	const candidates = pullsFrom((await (await hosting.forge()).pulls(repository)).value, branch).filter(
 		(each) => each.base === base,
 	);
 	const own = candidates.find((each) => each.head?.toLowerCase() === name);

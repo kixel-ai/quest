@@ -649,20 +649,14 @@ command fails too, naming `QUEST_FORGE=github`, which reads GitHub instead.
 `QUEST_KIXEL_URL` names another Kixel Quest, such as one running locally, whose
 token the same file pairs with its URL.
 
-A read that must come from GitHub itself, such as `quest pr view` or the
-open-PR checks of `quest start`, uses a read-only App installation token Kixel
-Quest mints for that repository, so it draws on the installation's rate limit,
-not the person's. `POST /installation-token` takes `{"repository":
-"owner/repo"}` and answers `{token, expiresAt, repository, login}`; a 404 means
-Kixel Quest does not serve the repository, and `quest` reads it with the
-person's own token. `quest` keeps each token in
-`$XDG_CACHE_HOME/quest/installation` (else `~/.cache/quest/installation`) until
-five minutes before it expires, since a person may mint only so many an hour,
-and a 429 or any other failure fails the command, naming `QUEST_FORGE=github`.
-Writes, such as comments, pushes, and merges, always use the person's own token,
-so they are made in their name. A forge reading on a minted token takes the
-person from the mint's `login`, because on an installation token GitHub names
-the App as the viewer.
+A read that must not lag the index, such as `quest pr view`, `quest pr list`,
+or the open-PR checks of `quest start`, goes to Kixel Quest's `pulls`, `files`,
+or `view`, which answer from GitHub itself and share an answer between callers
+until a webhook touches its PR or repository, so these reads draw on Kixel
+Quest's installation rather than the person's quota. A 429 means the person has
+spent their share of those reads, and fails the command, naming its
+`Retry-After`. Writes, such as comments, pushes, and merges, always use the
+person's own token, so they are made in their name.
 
 Its read API lives under `/forge`, with the token as a bearer token:
 `GET /forge` answers `{"login", "repositories"}`, the person the token names

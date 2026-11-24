@@ -1,5 +1,5 @@
-// A fake Kixel Quest hosting one repository: its PRs, holds, picks, and review threads in memory, served over the
-// forge wire. It parses every request with quest's own wire parsers, so a request the CLI shapes wrongly fails here
+// A fake Kixel Quest hosting one repository, or serving it from GitHub: its PRs, holds, picks, and review threads in
+// memory, served over the forge wire. It parses every request with quest's own wire parsers, so a request the CLI shapes wrongly fails here
 // as it would on Kixel Quest, and answers refusals with 409 as Kixel Quest does.
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -57,8 +57,12 @@ export class FakeKixelQuest {
 	readonly pulls: KixelPull[] = [];
 	/** Each call served, by name, with its request. */
 	readonly calls: { call: string; request: unknown }[] = [];
-	/** What a call, or every call without `call`, answers instead, such as an outage. */
-	fail: { status: number; error: string; call?: ForgeCall } | undefined;
+	/** Every request's method and path, so a test sees none went anywhere but `/forge`. */
+	readonly requests: string[] = [];
+	/** The repositories on GitHub `GET /forge` says it serves, whose reads it answers as it does its own. */
+	served: string[] = [];
+	/** What a call, or every call without `call`, answers instead, such as an outage, with its `Retry-After`. */
+	fail: { status: number; error: string; call?: ForgeCall; retryAfter?: string } | undefined;
 	#holds = 0;
 	#released = new Set<string>();
 	#clock = Date.parse("2026-11-17T00:00:00Z");
@@ -95,9 +99,10 @@ export class FakeKixelQuest {
 	readonly fetch = async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
 		const url = new URL(String(input));
 		if (url.origin !== KIXEL) throw new Error(`unexpected request to ${url.origin}${url.pathname}`);
+		this.requests.push(`${init?.method ?? "GET"} ${url.pathname}`);
 		if (new Headers(init?.headers).get("authorization") !== `Bearer ${KIXEL_TOKEN}`)
 			return Response.json({ error: "unknown token" }, { status: 401 });
-		if (url.pathname === "/forge") return Response.json({ login: "agent", repositories: [] });
+		if (url.pathname === "/forge") return Response.json({ login: "agent", repositories: this.served });
 		const call = /^\/forge\/(\w+)$/.exec(url.pathname)?.[1] as ForgeCall | undefined;
 		if (init?.method !== "POST" || call === undefined || !FORGE_CALLS.includes(call))
 			return Response.json({ error: "no such call" }, { status: 404 });
@@ -109,7 +114,13 @@ export class FakeKixelQuest {
 		}
 		this.calls.push({ call, request });
 		if (this.fail && (this.fail.call ?? call) === call)
-			return Response.json({ error: this.fail.error }, { status: this.fail.status });
+			return Response.json(
+				{ error: this.fail.error },
+				{
+					status: this.fail.status,
+					headers: this.fail.retryAfter === undefined ? {} : { "retry-after": this.fail.retryAfter },
+				},
+			);
 		try {
 			const value = this.#serve(call, request);
 			return new Response(forgeJson({ value, asOf: null }), { headers: { "content-type": "application/json" } });

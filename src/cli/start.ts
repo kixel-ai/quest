@@ -264,10 +264,10 @@ async function openDraft(
 	const body = link === null ? `Claims \`${path}\`.` : `Claims [${path}](${link}).`;
 	const writes = hosting.writes();
 	let created: OpenPull;
-	let live: Awaited<ReturnType<Hosting["live"]>>;
+	let forge: Awaited<ReturnType<Hosting["forge"]>>;
 	try {
-		// Before the PR exists, so a failed mint takes the branch back rather than leaving a PR behind.
-		live = await hosting.live();
+		// Before the PR exists, so a forge that cannot be chosen takes the branch back rather than leaving a PR behind.
+		forge = await hosting.forge();
 		created = await writes.open({
 			repository,
 			head,
@@ -283,8 +283,18 @@ async function openDraft(
 		throw error;
 	}
 
-	// Two claimers on different repositories, such as forks, both push; the earliest PR wins.
-	const open = pullsFrom((await live.pulls(repository)).value, branch);
+	// Two claimers on different repositories, such as forks, both push; the earliest PR wins. The list may predate
+	// this PR's webhook, so the created PR joins it here rather than being looked for.
+	let listed: OpenPull[];
+	try {
+		listed = (await forge.pulls(repository)).value;
+	} catch (error) {
+		// Unchecked, the claim may be a later one's, so take it back whole, as a refused open does.
+		deleteBranch(root, remote, branch, sha);
+		await writes.close({ ...repository, number: created.number });
+		throw error;
+	}
+	const open = pullsFrom(listed, branch);
 	const first = pullsFrom([...open.filter((pull) => pull.number !== created.number), created], branch)[0];
 	if (first.number !== created.number) {
 		deleteBranch(root, remote, branch, sha);
@@ -332,7 +342,7 @@ export async function releaseQuest(
 	const hosting = up.hosting;
 	if (hosting) {
 		const head = `${hosting.head.owner}/${hosting.head.repo}`.toLowerCase();
-		const open = (await (await hosting.live()).pulls(hosting.repository)).value;
+		const open = (await (await hosting.forge()).pulls(hosting.repository)).value;
 		pulls.push(...pullsFrom(open, branch).filter((pull) => pull.head?.toLowerCase() === head));
 	}
 	// Deleting first means the lease decides: a push since the check keeps both the branch and its PR.

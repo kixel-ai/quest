@@ -114,6 +114,30 @@ describe("quest pr view on a repository Kixel Quest hosts", () => {
 	});
 });
 
+describe("quest pr view on a GitHub repository Kixel Quest serves", () => {
+	const url = "https://github.com/example/project/pull/1";
+
+	test("reads the view through the forge, with no GitHub token and no minted one", async () => {
+		kixel.served = ["example/project"];
+		kixel.add({ branch: "feature", title: "Feature" });
+		const out = await cli("pr", "view", url, "--json");
+		expect(out.code, out.stderr).toBe(0);
+		expect(JSON.parse(out.stdout)).toMatchObject({ title: "Feature" });
+		expect(kixel.requests).toEqual(["GET /forge", "POST /forge/view"]);
+	});
+
+	test("a rate-limited read fails, naming when to retry", async () => {
+		kixel.served = ["example/project"];
+		kixel.add({ branch: "feature" });
+		kixel.fail = { status: 429, error: "read budget spent", call: "view", retryAfter: "30" };
+		expect(await cli("pr", "view", url)).toEqual({
+			code: 1,
+			stdout: "",
+			stderr: `quest: Kixel Quest (${KIXEL}) failed POST /forge/view: it is rate limiting your reads (HTTP 429, read budget spent); try again in 30 seconds; set QUEST_FORGE=github to read GitHub\n`,
+		});
+	});
+});
+
 describe("the view wire", () => {
 	const pull = { ...REPOSITORY, number: 3 };
 	const view: PullView = {

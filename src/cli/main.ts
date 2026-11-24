@@ -51,7 +51,6 @@ import {
 	type ForgeDependencies,
 	type Located,
 	forgeFor,
-	liveFor,
 	hostedForge,
 	hostedRepository,
 	locate as locatePull,
@@ -157,7 +156,6 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 	const claimDependencies = (): ClaimDependencies => ({
 		github: () => gitHubDependencies(warn),
 		forge: (repository) => forgeFor(repository, forgeDependencies()),
-		live: (repository) => liveFor(repository, forgeDependencies()),
 		kixel: {
 			hosted: (url) => hostedRepository(kixelUrl(process.env), url),
 			forge: (repository) => hostedForge(repository, forgeDependencies()),
@@ -1012,18 +1010,15 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"line, as a header line and its text: the body under a body line, each comment " +
 				"(comment <author> <time> <url>) and review (review <state> <reviewer> <time> <url>) by time, and each " +
 				"review thread (thread <id> current|outdated resolved|unresolved <path>:<line>) followed by its " +
-				"comments. --json prints the same as one deterministic object. It reads the forge itself, never Kixel " +
-				"Quest's index, so a comment just posted shows.",
+				"comments. --json prints the same as one deterministic object. It reads GitHub itself, through Kixel " +
+				"Quest where it serves the repository, never its index, so a comment shows once GitHub's webhook for it arrives.",
 		)
 		.argument("<pr>", PR_ARGUMENT)
 		.option("--json", "Print a deterministic JSON object")
 		.action((value: string, options: { json?: boolean }) => {
 			const { pull, hosted } = locatePull(value, root(), process.env);
 			settle(
-				(async () =>
-					(hosted ? hostedForge(pull, forgeDependencies()) : await liveFor(pull, forgeDependencies())).view(
-						pull,
-					))(),
+				(async () => (await forgeFor(pull, forgeDependencies(), Infinity, hosted)).view(pull))(),
 				({ value: view }) => {
 					if (options.json) print(JSON.stringify(view));
 					else for (const line of viewLines(view)) print(line);
@@ -1045,8 +1040,8 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 					const up = await upstream(root(), requireRemote(root(), "origin"), claimDependencies());
 					if (up.hosting === null)
 						throw new InputError("origin names neither a github.com repository nor one on Kixel Quest");
-					// Verifies a search, so it reads GitHub itself, never an index that may lag.
-					return (await up.hosting.live()).files(up.hosting.repository);
+					// Verifies a search, so it reads GitHub itself, through Kixel Quest where it serves the repository, never an index.
+					return (await up.hosting.forge()).files(up.hosting.repository);
 				})(),
 				({ value: pulls }) => {
 					if (options.json) print(JSON.stringify(pulls));
