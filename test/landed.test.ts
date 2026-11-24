@@ -224,6 +224,19 @@ describe("quest merge's landing check", () => {
 		expect((await inspect(tree, "fix/continued")).map((finding) => finding.path)).toEqual(["quest/m0/epic/two.md"]);
 	});
 
+	test("reports a link below an entry's opening line once the head edits the entry", async () => {
+		const tree = Tree.committed();
+		tree.append("quest/m0/epic/two.md", "\n## Plan\n\n- first step\n  after [Gone](/quest/m0/gone.md)\n");
+		commit(tree, "dangling link on main");
+		git(tree, "switch", "--quiet", "-c", "fix/entry");
+		tree.write("quest/m0/epic/two.md", tree.read("quest/m0/epic/two.md").replace("first step", "next step"));
+		commit(tree, "reword the step");
+		fixMain(tree, "fix/entry");
+		expect((await inspect(tree, "fix/entry")).map((finding) => finding.message)).toEqual([
+			"link does not resolve: /quest/m0/gone.md",
+		]);
+	});
+
 	test("skips a finding the base tip has that the head carries without merging it", async () => {
 		const tree = repo("fix/stacked");
 		git(tree, "switch", "--quiet", "main");
