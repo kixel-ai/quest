@@ -32,6 +32,7 @@ import {
 	history,
 	type History,
 	carriedBy,
+	driverMerges,
 	historyPath,
 	identity,
 	importFix,
@@ -395,7 +396,8 @@ async function take(
 	if (conflict) {
 		const name = `job-${Date.now().toString(36)}-${number}`;
 		const path = join(state, `conflict-${number}-${base.sha.slice(0, 12)}.log`);
-		if (removal.unmerged !== base.sha) {
+		// The driver resolves a conflict unread, so one in a protected path goes to the fixer, whose fix is handed back.
+		if (removal.unmerged !== base.sha && driverMerges(context.root, removal.head, base.sha)) {
 			const merged = mergeBase(context.root, removal.head, base.sha);
 			if ("head" in merged) {
 				const job: WatchJob = {

@@ -2070,11 +2070,13 @@ ${requeueScript}
 		git(root, "checkout", "--quiet", "--detach", entry.head);
 		git(root, "merge", "--quiet", "--no-edit", forge.main());
 		const head = () => git(root, "rev-parse", "HEAD");
-		expect(() => validateFix(root, entry, head(), forge.main(), true)).not.toThrow();
+		expect(() => validateFix(root, entry, head(), forge.main(), "recorded high")).not.toThrow();
 		writeFileSync(join(root, "one.txt"), "fixer");
 		git(root, "commit", "-qam", "fix the PR's own file");
 		expect(() => validateFix(root, entry, head(), forge.main())).not.toThrow();
-		expect(() => validateFix(root, entry, head(), forge.main(), true)).toThrow("protected set");
+		expect(() => validateFix(root, entry, head(), forge.main(), "recorded high")).toThrow(
+			"protected set must equal the base merge result's, at one.txt; every path is protected, since recorded high",
+		);
 	});
 });
 

@@ -1642,6 +1642,36 @@ describe.skipIf(process.platform === "win32")("the watcher's land fixer", () => 
 		expect(github.comments[5].at(-1)!.body).toContain("off-limits fixer edit");
 	});
 
+	test("a quest-file conflict in a path the base holds high goes to the fixer, not the quest driver", async () => {
+		const { repo, state, fix, context } = setup();
+		const quests = repo.pull(3, {
+			"quest/m0/launch.md": LAUNCH(["a", "c"]),
+			"quest/m0/c.md": "# [S] C\n\n## Goal\n\nC.\n",
+		});
+		repo.advance({
+			"RISK.md": "# Risk\n\n## High\n\n- `quest/` - its plans gate releases\n",
+			"quest/m0/launch.md": LAUNCH(["a", "b"]),
+			"quest/m0/b.md": "# [S] B\n\n## Goal\n\nB.\n",
+		});
+		const pull: Pull = {
+			number: 3,
+			head: quests,
+			enqueues: [{ createdAt: at(1), actor: "maintainer" }],
+			removals: [
+				{ id: "R3", createdAt: at(4), reason: "merge_conflict", actor: "github-merge-queue", before: quests },
+			],
+		};
+		const github = { ...world([pull]), origin: repo.origin };
+		github.now = Date.parse(at(7));
+		fix.round(3, requeueScript());
+		expect(await watchPass(REPOSITORY, { state }, deps(github), context)).toEqual([
+			"removed 3 merge_conflict fix",
+			"fixing 3",
+		]);
+		expect(git(repo.origin, "rev-parse", "refs/heads/branch-3")).toBe(quests);
+		await exited(state);
+	});
+
 	test("a quest-file conflict is merged with the quest driver, and a code conflict goes to the fixer", async () => {
 		const { repo, state, fix, context } = setup(1);
 		const quests = repo.pull(3, {
