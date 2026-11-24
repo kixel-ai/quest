@@ -21,7 +21,8 @@ Decided 2026-11-23 (maintainer, `/quest-plan`):
   Change its `AUDITS` title and this repository's stub title; a stub already planted elsewhere is that repository's own, as `quest init` never edits one.
 - How a run changes files? ✅ It edits them in its PR, and lists each edit under `## Waiting` as a `Maintainer:` keep-or-revert item, so the maintainer drops one without rejecting the rest (rejected: proposals only, which the `docs` audit uses and which need a second PR; one approval for the whole PR).
   Nothing changes until the PR lands on those answers, which is the user's agreement `quest context` asks for before a rule changes.
-- Cadence? ✅ Every two weeks by date, with `## Scheduled` 14 days on and no milestone gate (rejected: monthly; once per milestone, which here would leave months between runs; on each model-table change, which only this repository has).
+- Cadence? ✅ The other audits' recurrence, each run re-created in m(N+1) requiring the milestone it sat in, with `## Scheduled` two weeks on instead of one (rejected: every two weeks by date with no milestone gate, which the interview first picked; monthly; on each model-table change, which only this repository has).
+  Amended at the review checkpoint, after three rounds found that a stub recurring at a fixed path keeps its milestone from ever finishing (`finishedMilestone` in `src/core/rules.ts` waits for a milestone to hold no quest): "do the same as the other audits. I'm fine with n+1" (rejected: teaching `finishedMilestone` to skip date-recurring stubs; patching where the stub goes).
   Nothing ends it while the repository runs `quest`; `## Skipped audits` opts out.
 - First run? ✅ The pack's default: `quest init` plants it in m(N+1) with `Required` on mN, like the other six (rejected: ready at once with no gate; dropping every stub's gate, which the 2026-11-15 pack decision rejected).
 - Evidence? ✅ Review findings and `## Caused by` escapes from `quest usage`, the corrections people typed from `quest messages`, and session transcripts on the hosts that run the repository's agents (rejected: PRs and messages only; official guidance only).
@@ -33,9 +34,7 @@ Decided 2026-11-23 (maintainer, `/quest-plan`):
 Agent's choices, for the implementer to revisit:
 
 - The name `instructions`, not `context`, which `quest context` already means.
-- Recurrence: `assets/audit.md`'s Next run follows the definition's own trigger where it names one, and README's audit section says so, so a run never meets two cadences.
-  Each run deletes its stub and re-creates it in the highest-numbered milestone whose README has no `Required` or `Scheduled`, which holds no earlier milestone open: `finishedMilestone` (`src/core/rules.ts`) waits for a milestone to hold no quest, so a stub re-created in an earlier one would keep it open forever and hold back the next audits that require it.
-  Nothing requires the highest milestone, so later runs stay at the same path there and create no milestone; a milestone added later takes the stub on its next run, up to two weeks on.
+- Recurrence: `assets/audit.md`'s Next run takes its delay from a definition that names one, and README's audit section says so, so a run never meets two delays.
 - The guide's Prompting section stays the one list of official guidance links; the definition points at it, and each run refreshes it, so writers outside a run read the same sources.
   This quest's PR extends that list: the per-model Claude prompting pages, Codex's skills and prompting pages and its guide for the newest GPT model, Antigravity's rules page (Antigravity CLI, `agy`, replaced Gemini CLI for most users on 2026-06-18, and [the Gemini reviewer](/quest/m0/gemini-reviewer.md) runs it), Gemini CLI's `GEMINI.md` page for those still on it, and the Agent Skills specification.
   Read the pages, don't only link them: fold what they newly say into the guide's Prompting bullets.
