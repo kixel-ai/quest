@@ -1868,6 +1868,7 @@ token-max prices for the run's sessions.
 `YYYY-MM-DD`, by default 7 days ago) and the agent sessions this host, and
 each host `--ssh` names, ran since then: which harness, model, and effort
 worked on each PR, in which role, at what token cost, and how the work went.
+This report is of a PR merged before Sol 6.2, so it names the models that ran.
 
 ```console
 $ quest usage --pr 569
