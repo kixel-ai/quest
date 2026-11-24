@@ -1696,7 +1696,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"or --effort names never passes the round on. Beside the reviewer, on the same head in its own session, runs the shadow, " +
 				"which follows the round to the reviewer it passes to: " +
 				"the pick's model one effort (low, medium, high, xhigh) above it for an S or M PR, below it for an L or XL " +
-				"PR, and none for an XS PR, skipped when no such effort is on that ladder or the model offers none past its own, as Carbon past high, so each effort step can be " +
+				"PR, and none for an XS PR, skipped when no such effort is on that ladder, so each effort step can be " +
 				"compared with its neighbor. The shadow runs on a " +
 				"branch's first run of the pick, then only while it has findings to settle or once the pick changed so it is " +
 				"no longer that step away; its findings are numbered and settled like any reviewer's, its session carries " +
@@ -1706,7 +1706,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"latest writer is avoided: the model the last Implementer line names in the `## Models` record of the body of the branch's open PR. " +
 				"When it names none or an `unknown` model, " +
 				"it is any model of the harness running this command, usually the session that just pushed, detected from the " +
-				"variables Claude Code, Codex, and Antigravity each set, so Codex reviews from Claude Code and Claude Code from Codex where Sol leads the size, and Carbon from either at M; with --harness it is " +
+				"variables Claude Code, Codex, and Antigravity each set, so Codex reviews from Claude Code and Claude Code from Codex; with --harness it is " +
 				"none. " +
 				"--harness names the only reviewer instead of the pick and the shadow, at its entry's model and effort, and --model and " +
 				"--effort override that reviewer's, or without --harness, the size pick's; a repository whose AGENTS.md names other reviewers " +

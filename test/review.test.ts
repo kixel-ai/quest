@@ -44,16 +44,6 @@ import {
 	write,
 } from "./review-fakes";
 
-// These tests run the review flow on Claude Code and Codex, so M ranks them as it did before Gemini Carbon led it;
-// test/ranking.test.ts checks the shipped table, Carbon included.
-vi.mock("../src/cli/models", async (importOriginal) => {
-	const actual = await importOriginal<typeof import("../src/cli/models")>();
-	return {
-		...actual,
-		REVIEWERS: { ...actual.REVIEWERS, M: actual.REVIEWERS.M.filter((entry) => entry.harness !== "agy") },
-	};
-});
-
 afterEach(() => {
 	vi.unstubAllEnvs();
 });
@@ -1694,7 +1684,10 @@ fakes(
 		for (const name of ["claude", "codex"]) symlinkSync(join(s.bin, name), join(without, name));
 		symlinkSync(execFileSync("which", ["git"], { encoding: "utf8" }).trim(), join(without, "git"));
 		vi.stubEnv("PATH", without);
+		// Even where its workspace would be refused, as inside a repository, before it is found missing.
+		vi.stubEnv("XDG_RUNTIME_DIR", join(s.repo, ".tmp", "run"));
 		expect(await run("claude-limited,codex-limited")).toMatchObject({ code: 3, stdout: "" });
+		vi.stubEnv("XDG_RUNTIME_DIR", undefined);
 		vi.stubEnv("PATH", path);
 		// Otherwise it names why each failed.
 		const failed = await run("claude-rejected,codex-limited,agy-rejected");
