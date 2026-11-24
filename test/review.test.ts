@@ -2142,16 +2142,14 @@ test("an Implementer line reads as agents write it", () => {
 		size: "XS",
 		arm: null,
 	});
-	// A retired GPT version's display name still reads, as older records name it; an unlisted ID reads as written.
-	expect(read("Codex, GPT-6.1 Sol, high effort")?.model).toBe("gpt-6.1-sol");
-	expect(read("Codex, GPT 6.1  Sol, high effort")?.model).toBe("gpt-6.1-sol");
-	expect(read("Codex, GPT-6.1-SOL, high effort")?.model).toBe("gpt-6.1-sol");
-	expect(read("Codex, openai/gpt-6.1-sol, high effort")?.model).toBe("openai/gpt-6.1-sol");
-	// Comparisons fold the spellings of one model, retired GPT versions included.
-	expect(sameModel("openai/gpt-6.1-sol", "GPT-6.1 Sol")).toBe(true);
+	// A retired model's spellings still read as its ID, as older records name it; an unlisted ID reads as written.
+	for (const name of ["GPT-6.1 Sol", "GPT 6.1  Sol", "GPT-6.1-SOL", "openai/gpt-6.1-sol"])
+		expect(read(`Codex, ${name}, high effort`)?.model).toBe("gpt-6.1-sol");
+	expect(read("Codex, openrouter/gpt-5-mini, high effort")?.model).toBe("openrouter/gpt-5-mini");
+	// Comparisons fold the spellings of a listed or retired model, and keep an unlisted one's namespace.
 	expect(sameModel("openai/gpt-6.2-astra", "gpt-6.2-astra")).toBe(true);
 	expect(sameModel("gpt-6.1-sol", "gpt-6.2-sol")).toBe(false);
-	expect(read("Codex, openrouter/gpt-5-mini, high effort")?.model).toBe("openrouter/gpt-5-mini");
+	expect(sameModel("internal/gpt-5-mini", "openai/gpt-5-mini")).toBe(false);
 	expect(read("GPT 6.2 Astra")?.model).toBe("gpt-6.2-astra");
 	expect(read("Claude Code, Opus 5.5, low effort (iterate, flow fix)")).toEqual(opus("low"));
 	expect(read("Claude Code, Opus 5.5, high effort (iterate, XS, arm B)")).toEqual({

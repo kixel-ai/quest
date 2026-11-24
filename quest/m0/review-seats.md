@@ -4,8 +4,8 @@
 
 `quest review` seats one local reviewer on a low-tier head, two on medium,
 and three on high, each from a different vendor, each drawn from the
-round's [reviewer rung](/quest/m0/reviewer-rungs.md), or a neighboring rung
-when it is short of vendors that can run, with Gemini through
+round's [reviewer rung](/quest/m0/reviewer-rungs.md), or the rungs outward
+from the size's when it is short of vendors that can run, with Gemini through
 `agy` among the vendors and never the writer's model. Low-tier heads get a
 local review for the first time. Once these seats find what Pullfrog finds
 behind them, per dollar, Pullfrog and its required-approval ruleset retire.

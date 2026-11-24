@@ -56,39 +56,32 @@ const key = (name: string) =>
 		.replace(/^.*\//, "")
 		.replace(/[\s.]+/g, "-")
 		.replace(/^claude-/, "");
+// Models the tables no longer list, which older records still name.
+const RETIRED = ["gpt-6.1-sol"];
 const KNOWN = new Map(
-	[...Object.values(WRITERS), ...Object.values(REVIEWERS), ...Object.values(ARMS).flatMap(Object.values)]
-		.flat()
-		.map(({ model }) => [key(model), model]),
+	[
+		...[...Object.values(WRITERS), ...Object.values(REVIEWERS), ...Object.values(ARMS).flatMap(Object.values)]
+			.flat()
+			.map(({ model }) => model),
+		...RETIRED,
+	].map((model) => [key(model), model]),
 );
 
-/**
- * The ID a model name compares by: a listed model's ID, as for `openai/gpt-6.2-astra`, a GPT ID or display name with
- * its provider dropped, as `gpt-6.1-sol` for `openai/gpt-6.1-sol` or `GPT-6.1 Sol`, else the name as written.
- */
-export function canonicalModel(name: string): string {
-	const listed = KNOWN.get(key(name));
-	if (listed) return listed;
-	const gpt = /^(?:[\w.-]+\/)?gpt[-\s]+(\d+(?:\.\d+)*)[-\s]+([a-z]+)$/i.exec(name);
-	return gpt ? `gpt-${gpt[1]}-${gpt[2]!.toLowerCase()}` : name;
-}
+/** A listed or retired model's ID for any spelling of it, as `openai/gpt-6.2-astra` or `GPT-6.1 Sol`, else the name. */
+export const canonicalModel = (name: string): string => KNOWN.get(key(name)) ?? name;
 
 /** Whether two model names mean the same model, however each is spelled. */
 export const sameModel = (a: string, b: string): boolean => canonicalModel(a) === canonicalModel(b);
 
 /**
  * The model ID `name` means: a listed model by its ID or display name, a Claude harness's `<Family> <version>` as
- * its `claude-` ID, a `GPT <version> <name>` display name as its `gpt-` ID, else `name` itself when it reads as an ID: one with a version digit, or, where the line's three
+ * its `claude-` ID, else `name` itself when it reads as an ID: one with a version digit, or, where the line's three
  * fields place the model (`loose`), any lowercase token, such as `openrouter/kimi`.
  */
 function modelId(name: string, harness: string, loose = false): string | null {
 	const listed = KNOWN.get(key(name));
 	if (listed) return listed;
 	if (/^claude\b/i.test(harness) && /^(claude )?[a-z]+ \d+(\.\d+)*$/i.test(name)) return `claude-${key(name)}`;
-	// A GPT display name, as `GPT-6.1 Sol`, reads as its ID even once the tables list a newer version. An unlisted ID,
-	// provider-qualified or not, reads as written below, as `--model` and session exports name it.
-	const gpt = /^gpt[-\s]+(\d+(?:\.\d+)*)[-\s]+([a-z]+)$/i.exec(name);
-	if (gpt) return `gpt-${gpt[1]}-${gpt[2]!.toLowerCase()}`;
 	return (loose ? /^(unknown|[a-z][\w./-]*)$/ : /^(unknown|[a-z][\w./-]*\d[\w./-]*)$/).test(name) ? name : null;
 }
 
