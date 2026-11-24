@@ -128,7 +128,7 @@ export function reviewRecord({ rounds, tallies, risk, skipped, head, base }: Rev
 			...earlierSessions(tally, round.session),
 			`- Score: ${round.score}/10, ${code(round.rationale)}`,
 			...(round.raised ? [`- Raised the risk to ${round.raised.tier}: ${code(round.raised.reason)}`] : []),
-			`- Rounds: ${tally.rounds}; ${findingsText(counted(tally))}`,
+			`- Rounds: ${tally.rounds}, runs ${tally.debut} to ${tally.last}; ${findingsText(counted(tally))}`,
 		);
 		if (round.findings.length === 0) lines.push("- Findings: none");
 		else lines.push("- Findings, open until the next round settles them:");
@@ -150,7 +150,7 @@ export function reviewRecord({ rounds, tallies, risk, skipped, head, base }: Rev
 			...(risk.raisedBy && sameReviewer(risk.raisedBy, tally)
 				? [`- Raised the risk to ${risk.tier}: ${code(risk.reason)}`]
 				: []),
-			`- Rounds: ${tally.rounds}; ${findingsText(counted(tally))}`,
+			`- Rounds: ${tally.rounds}, runs ${tally.debut} to ${tally.last}; ${findingsText(counted(tally))}`,
 		);
 	return lines.join("\n");
 }
@@ -182,6 +182,8 @@ export interface ReviewSummary {
 	score: number | null;
 	/** Its findings across every round on the branch, null on a record written before tallies. */
 	tally: Counts | null;
+	/** The branch's runs of its first and latest rounds, null on a record that names none. */
+	runs: { debut: number; last: number } | null;
 	/** The severity of each finding its latest round left open. */
 	open: Tally["findings"];
 }
@@ -240,6 +242,7 @@ export function parseReview(body: string): ReviewSummary[] {
 			),
 		);
 		const tally = parseCounts(text);
+		const runs = /^- Rounds: \d+, runs (\d+) to (\d+);/m.exec(text);
 		// A reviewer the latest run left out has its tally, and its session with no round once tallies name it.
 		const session =
 			tally !== null && !/^- Session: /m.test(text)
@@ -269,6 +272,7 @@ export function parseReview(body: string): ReviewSummary[] {
 			round: session?.[3] === undefined ? null : Number(session[3]),
 			score: score ? Number(score[1]) : null,
 			tally,
+			runs: runs && { debut: Number(runs[1]), last: Number(runs[2]) },
 			open,
 		};
 	});
@@ -279,7 +283,7 @@ function parseCounts(text: string): Counts | null {
 	const line = /^- Rounds: (.*?)\r?$/m.exec(text);
 	if (!line) return null;
 	const found =
-		/^(\d+); (?:first round (\d+)(?: \(([^)]*)\))?; )?findings (\d+)(?: \(([^)]*)\))?: fixed (\d+), refuted (\d+)(?:, settled (\d+))?, open (\d+)$/.exec(
+		/^(\d+)(?:, runs \d+ to \d+)?; (?:first round (\d+)(?: \(([^)]*)\))?; )?findings (\d+)(?: \(([^)]*)\))?: fixed (\d+), refuted (\d+)(?:, settled (\d+))?, open (\d+)$/.exec(
 			line[1]!,
 		);
 	const malformed = () => new Error(`the ## Review record's Rounds line is malformed: ${line[1]}`);

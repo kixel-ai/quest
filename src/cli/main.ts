@@ -1668,7 +1668,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"variables Claude Code, Codex, and Antigravity each set, so Codex reviews from Claude Code and Claude Code from Codex; with --harness it is " +
 				"none. " +
 				"--harness names the only reviewer instead of the draw, taking that CLI's own draw, and --model and " +
-				"--effort override that reviewer's, or without --harness, the first seat's; a --model a rung lists, in any spelling such as openai/gpt-6.2-astra, runs on its entry's harness and effort, passed to the CLI as given, and one no rung lists at --harness's first entry, or without it in place of the first seat's draw; a repository whose AGENTS.md names other reviewers " +
+				"--effort override that reviewer's, or without --harness, the first seat's; a --model a rung lists, in any spelling such as openai/gpt-6.2-astra, runs on its entry's harness and effort on the size's rung or the nearest that lists it, passed to the CLI as given, and one no rung lists at --harness's first entry, or without it in place of the first seat's draw; a repository whose AGENTS.md names other reviewers " +
 				"passes them. The seats run at once, each CLI's login checked before any turn starts, and the first to fail stops the others and fails the " +
 				"run, saving no round. The " +
 				"size is --size, else the size of the quest a quest/ branch names, read from the base's tip so a " +
@@ -1760,7 +1760,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"its one-sentence rationale, a raised line with the tier and reason when it raised the classifier's, the finding count, each finding by its number, then the last round's findings with " +
 				"their numbers and dispositions; then the `record` line below and a last `next` line naming the author's next step: " +
 				"`next finish` when every finding is low severity, to fix or refute them without another round, " +
-				"`next checkpoint` when the branch's every third run reports other findings, to compare the current approach " +
+				"`next checkpoint` when every third run of the branch since the last --new reports other findings, to compare the current approach " +
 				"with the best long-term approach worked out from first principles before fixing them, `next respond` to fix or refute the findings, or `next done`, which for a low head no reviewer ran says so. A reply without a valid score " +
 				"fails as any malformed reply does. --json prints " +
 				"one object: `rounds`, one per reviewer, `tallies`, every reviewer's findings across the branch's rounds, `risk`, the head's tier with its classification, `skipped`, each reviewer passed over with its reason, `record`, and `next`.\n\n" +
@@ -1859,7 +1859,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				);
 				pending = run.then(
 					async (reviewed) => {
-						const { rounds, tallies, risk, skipped } = reviewed;
+						const { rounds, tallies, risk, skipped, since } = reviewed;
 						// The rounds are saved in their sessions either way, so their report prints before a failed record.
 						let record: Recorded | undefined;
 						let failure: unknown;
@@ -1876,14 +1876,14 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 									risk,
 									skipped,
 									record: record ?? null,
-									next: nextStep(rounds),
+									next: nextStep(rounds, since),
 								}),
 							);
 						else {
 							for (const line of roundLines(reviewed)) print(line);
 							if (record !== undefined)
 								print("url" in record ? `record ${record.url}` : `record skipped: ${record.skipped}`);
-							print(nextStep(rounds));
+							print(nextStep(rounds, since));
 						}
 						if (failure === undefined) return 0;
 						warn(

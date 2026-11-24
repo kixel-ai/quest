@@ -1556,7 +1556,7 @@ the draw, taking that CLI's own draw, and
 first seat's, as a
 repository whose `AGENTS.md` names other reviewers needs; a `--model` a rung
 lists, in any spelling such as `openai/gpt-6.2-astra`, runs on its own entry's
-harness and effort, passed to the CLI as given, and one no rung lists at
+harness and effort on the size's rung or the nearest that lists it, whatever the run drew, passed to the CLI as given, and one no rung lists at
 `--harness`'s first entry, or without it in place of the first seat's draw.
 `--exclude-model`, records, and `quest usage` match
 a listed model by any spelling too. A reviewer a flag names records no rung.
@@ -1742,12 +1742,12 @@ it was drawn from the size's, as `, deep rung (up)`, unless a flag named it,
 its every session, the latest session and round, the score and rationale, the tier it raised the
 risk to and why, its tally, each finding with
 its location, and the last round's findings with their dispositions. The
-tally, as `- Rounds: 3; first round 2 (medium 2); findings 4 (high 1, medium 3): fixed 3, refuted 1, open 0`,
-counts the rounds on the branch of that model at that effort, its first round's findings as that
+tally, as `- Rounds: 3, runs 1 to 5; first round 2 (medium 2); findings 4 (high 1, medium 3): fixed 3, refuted 1, open 0`,
+counts the rounds on the branch of that model at that effort, the branch's runs of its first and latest, its first round's findings as that
 round graded them, and each finding it raised once,
 by its latest severity, however many rounds keep it open. A finding counts
 for the reviewer that raised it when a later run's reviewer fixes or
-refutes it, as the run's first round settled it, but one that reviewer keeps open becomes its own, since its round
+refutes it, as the run's first round settled it, but one any seat of the run keeps open becomes that seat's, since its round
 reports it again. `--new` drops the findings it leaves unsettled from the
 tallies. A reviewer of an earlier run keeps a block with only its sessions and
 tally. `quest status` takes the last full SHA the section names as the
@@ -1944,9 +1944,9 @@ a bot resolving its own thread or a later review leaving it out, and as
 unanswered otherwise.
 
 Rollups follow: spend by size, role, harness, model, and effort; accuracy
-by size and implementer, which sums every reviewer's tally and their
-first rounds, so it counts
-every finding the reviewers caught before merge. Since a branch's tallies span every PR from it, only the
+by size and implementer, which sums every reviewer's tally, so it counts
+every finding the reviewers caught before merge, and as first rounds those of the branch's first run alone, since a
+later model's first round reports again what an earlier one left open. Since a branch's tallies span every PR from it, only the
 PR whose record holds its latest tally, by the most rounds and then the newest,
 counts them, and a record written before tallies
 counts as unreviewed. An `Implementer:` line's own size, as

@@ -826,6 +826,7 @@ function count(
 	to: { tally: Omit<Counts, "first">; firstRounds: FirstRounds },
 	tallies: Counts[],
 	rounds = Math.max(...tallies.map((tally) => tally.rounds)),
+	firsts = tallies,
 ) {
 	to.tally.rounds += rounds;
 	for (const tally of tallies) {
@@ -835,9 +836,9 @@ function count(
 		to.tally.settled += tally.settled;
 		to.tally.open += tally.open;
 	}
-	if (tallies.every((tally) => tally.first !== null)) {
+	if (firsts.every((tally) => tally.first !== null)) {
 		to.firstRounds.pulls++;
-		for (const tally of tallies)
+		for (const tally of firsts)
 			for (const severity of SEVERITIES) to.firstRounds.findings[severity] += tally.first![severity];
 	}
 }
@@ -943,11 +944,15 @@ function outcome(row: ReturnType<typeof noOutcomes>, each: PullRow, latest: Set<
 			row.scored++;
 			row.score += score;
 		}
-	// Each run seats other models, so the PR's runs are the latest's number, not any one reviewer's rounds.
+	// Each run seats other models, so the PR's runs are the latest's number, not any one reviewer's rounds, and its
+	// first round is the branch's first run's, not each later model's first, which would count a finding kept open
+	// once per model.
+	const debut = Math.min(...counted.map((review) => review.runs?.debut ?? 1));
 	count(
 		row,
 		counted.map((review) => review.tally!),
-		Math.max(...counted.map((review) => Math.max(review.round ?? 0, review.tally!.rounds))),
+		Math.max(...counted.map((review) => review.runs?.last ?? Math.max(review.round ?? 0, review.tally!.rounds))),
+		counted.filter((review) => (review.runs?.debut ?? 1) === debut).map((review) => review.tally!),
 	);
 }
 

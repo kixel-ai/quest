@@ -192,6 +192,15 @@ test("each seat takes a model of the round's rung the branch has not had, never 
 
 	const pick = (size: Size, choice: Parameters<typeof namedReviewer>[0], wrote: Avoided) =>
 		namedReviewer(choice, drawOf(size, wrote), wrote);
+	// A model a flag pins runs at its effort on the size's rung, whichever rung the run drew.
+	for (const roll of [0, 0.6, 0.9])
+		expect(
+			namedReviewer(
+				{ model: "gpt-6.2-sol" },
+				drawOf("M", () => false, {}, roll),
+				() => false,
+			).effort,
+		).toBe("high");
 	// --harness takes that CLI's own draw, passing to the next rung that lists one it may seat.
 	expect(pick("L", { harness: "claude" }, authored({ harness: "claude" }, { CLAUDECODE: "1" }))).toEqual({
 		harness: "claude",
@@ -521,6 +530,11 @@ fakes("a model its login does not serve passes the round on, recorded as a skip"
 	// Only Sol is out, so Codex's other model still takes the seat.
 	expect(skipped).toEqual([{ harness: "codex", model: "gpt-6.2-sol", effort: "high", reason: "model not served" }]);
 	expect(rounds.map((r: Round) => `${r.model} ${r.effort}`)).toEqual(["gpt-6.2-astra medium"]);
+	// So does one whose CLI says so only on stderr.
+	vi.stubEnv("FAKE_LIMITED", "unserved-stderr");
+	const quiet = JSON.parse((await quest("--root", s.repo, "review", ...OPUS_WROTE, "--new", "--json")).stdout);
+	expect(quiet.skipped.map((skip: { reason: string }) => skip.reason)).toEqual(["model not served"]);
+	vi.stubEnv("FAKE_LIMITED", "unserved");
 	// Named, it fails as itself.
 	const named = await quest("--root", s.repo, "review", ...OPUS_WROTE, "--model", "gpt-6.2-sol", "--new");
 	expect(named.code).toBe(3);
@@ -1632,14 +1646,18 @@ fakes("a later round seats a model the branch has not had, which settles the fin
 	const head = git(s.repo, "rev-parse", "HEAD");
 	const prompt = review!.argv.at(-1) + review!.stdin;
 	expect(prompt).toContain("Fixed at src/lib.ts:1.");
-	expect(prompt).toContain("<earlier-findings>\n1. high src/lib.ts:2 Off by one\n</earlier-findings>");
+	expect(prompt).toContain(
+		"<earlier-findings>\n1. high src/lib.ts:2 Off by one\n   average([3]) is 0.\n</earlier-findings>",
+	);
 	expect(prompt).toContain("by another reviewer in another session");
 	expect(prompt).toContain("Then review the whole change anew");
 	expect(prompt).toContain("BASE-REVIEW rule");
 	expect(prompt).toContain(`\`git diff ${git(s.repo, "rev-parse", "origin/main")}..${head}\``);
 	// The new head is classified again before the round, which gives it to the reviewer.
 	expect(report!.stdin).toContain("the change was classified medium risk");
-	expect(report!.stdin).toContain("<earlier-findings>\n1. high src/lib.ts:2 Off by one\n</earlier-findings>");
+	expect(report!.stdin).toContain(
+		"<earlier-findings>\n1. high src/lib.ts:2 Off by one\n   average([3]) is 0.\n</earlier-findings>",
+	);
 
 	// The rung has no model left that the branch has not had, so the one whose round is the oldest reviews again.
 	write(s.repo, "src/lib.ts", "export const x = 5;\n");
@@ -1814,7 +1832,7 @@ fakes("each round rewrites the Review section of the branch's open PR, keeping t
 				"- Reviewer: Codex, gpt-6.2-sol, medium effort, light rung (size)",
 				"- Session: `thread-1`, round 1",
 				"- Score: 8/10, `Lands once the off-by-one is fixed.`",
-				"- Rounds: 1; first round 1 (high 1); findings 1 (high 1): fixed 0, refuted 0, open 1",
+				"- Rounds: 1, runs 1 to 1; first round 1 (high 1); findings 1 (high 1): fixed 0, refuted 0, open 1",
 				"- Findings, open until the next round settles them:",
 				"  - High, `src/lib.ts:2`: `Off by one`",
 				"",
@@ -1848,7 +1866,7 @@ fakes("each round rewrites the Review section of the branch's open PR, keeping t
 		expect(record).toContain("- Score: 9/10, `Fixes #3.`\n");
 		// The refuted finding counts beside the new one, across both rounds.
 		expect(record).toContain(
-			"- Rounds: 2; first round 1 (high 1); findings 2 (high 2): fixed 0, refuted 1, open 1\n",
+			"- Rounds: 2, runs 1 to 2; first round 1 (high 1); findings 2 (high 2): fixed 0, refuted 1, open 1\n",
 		);
 		expect(record).toContain(
 			`  - High, \`src/lib.ts\`: \`\`Ping @someone about \`${base.slice(0, 12)}\` in #12\`\`\n`,
@@ -2269,7 +2287,7 @@ fakes("a raise to high saves its rounds before the second seat, which the next r
 		// Every seat settles the one finding, which its raiser's tally counts once.
 		expect(both.stdout.match(/\n1\. fixed high /g)).toHaveLength(2);
 		expect(pull.body).toContain(
-			"- Rounds: 2; first round 1 (high 1); findings 2 (high 2): fixed 1, refuted 0, open 1\n",
+			"- Rounds: 2, runs 1 to 2; first round 1 (high 1); findings 2 (high 2): fixed 1, refuted 0, open 1\n",
 		);
 
 		// On a new head the tier starts at medium with one seat; when its round raises the tier again, the second
@@ -2332,7 +2350,7 @@ fakes("a raise by an earlier run's reviewer holds while the head is the one it r
 		"- Reviewer: Codex, gpt-6.2-sol, xhigh effort, deep rung (size)",
 		"- Session: `thread-1`",
 		"- Raised the risk to high: `It rewrites the wire format peers read.`",
-		"- Rounds: 1;",
+		"- Rounds: 1, runs 1 to 1;",
 	].join("\n");
 	write(s.repo, ".tmp/responses.md", "1. Refuted.\n2. Refuted.\n");
 	const responses = ["--responses", join(s.repo, ".tmp", "responses.md")];
@@ -2649,6 +2667,12 @@ fakes("a round on the head the last round passed runs no reviewer and repeats th
 		["high", true],
 	]);
 	expect(s.calls()).toHaveLength(ran);
+
+	// Its reviewer since avoided, the passed head needs another: Sol's round no longer counts for it.
+	const avoided = JSON.parse(
+		(await quest("--root", s.repo, "review", "--json", "--size", "S", "--exclude-model", "gpt-6.2-sol")).stdout,
+	);
+	expect(avoided.rounds.map((r: Round) => [r.model, r.unchanged])).toEqual([["claude-opus-5-5", false]]);
 
 	// A round with findings to settle runs on the same head, since a refutation needs no new commit.
 	vi.stubEnv("FAKE_REPLY", undefined);
@@ -3012,6 +3036,9 @@ test("the next step stops for the design checkpoint when a reviewer's every thir
 	);
 	expect(nextStep([round(6, 2)])).toMatch(/^next checkpoint: .*best long-term approach from first principles/);
 	expect(nextStep([round(4, 1)])).toMatch(/^next respond: /);
+	// --new restarts the count: the third run after it is the checkpoint, not the branch's third.
+	expect(nextStep([round(3, 1)], 2)).toMatch(/^next respond: /);
+	expect(nextStep([round(5, 1)], 2)).toMatch(/^next checkpoint: /);
 	expect(nextStep([round(3, 0)])).toMatch(/^next done: /);
 	expect(nextStep([round(3, 2, "low")])).toMatch(/^next finish: /);
 	expect(nextStep([round(4, 1, "low")])).toMatch(/^next finish: /);
@@ -3033,6 +3060,7 @@ test("saved rounds are read only in the current format, or refused naming --new"
 		effort: "e",
 		sessions: ["thread-1"],
 		rounds: 1,
+		debut: 1,
 		last: 1,
 		findings: { high: 0, medium: 0, low: 1 },
 		first: { high: 0, medium: 0, low: 1 },
@@ -3169,6 +3197,7 @@ test("a tally counts each finding once, for the model that raised it, through ev
 			rung: { name: "standard", drawn: "size" },
 			sessions: ["s1"],
 			rounds: 1,
+			debut: 1,
 			last: 1,
 			findings: { high: 1, medium: 1, low: 1 },
 			first: { high: 1, medium: 1, low: 1 },
@@ -3214,6 +3243,13 @@ test("a tally counts each finding once, for the model that raised it, through ev
 		["gpt-6.2-sol", 1, 1, 1],
 		["claude-opus-5-5", 1, 0, 0],
 		["gemini-4-neon", 1, 0, 0],
+	]);
+	// A finding any seat keeps open is open, whichever seat printed first: only the first's other verdicts count.
+	const reversed = tallied(first, [beside, two], [one, one, one]);
+	expect(reversed.map((t) => [t.model, t.fixed, t.refuted, t.debut])).toEqual([
+		["gemini-4-neon", 0, 0, 2],
+		["claude-opus-5-5", 0, 0, 2],
+		["gpt-6.2-sol", 1, 1, 1],
 	]);
 	// The same model at the same effort, in any spelling, continues its tally and names each session; a round a
 	// flag named drops the rung its last one recorded.

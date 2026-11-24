@@ -275,6 +275,7 @@ describe("PR records", () => {
 		effort,
 		sessions,
 		rounds,
+		debut: 1,
 		last: rounds,
 		findings,
 		first: { high: 0, medium: 0, low: 0 },
@@ -289,6 +290,7 @@ describe("PR records", () => {
 		classified: { tier: "medium", reason, by: { kind: "paths" }, class: null, usage: [] },
 	};
 	const at = {
+		since: 0,
 		branch: round.branch,
 		head: round.head,
 		base: round.base,
@@ -318,7 +320,7 @@ describe("PR records", () => {
 	test("reads back each reviewer's round and tally quest review records, after the land fixer's lines", () => {
 		const body = `Summary.\n\n## Review\n\nmechanical fix by codex, gpt-6.2-sol, medium effort: \`merged\` (head ${"d".repeat(40)})\n\n${reviewRecord({ ...at, rounds: [round, second], tallies, risk, skipped: [SKIP] })}\n\n## Models\n\n- Size: L\n`;
 		expect(body).toContain(
-			"\n- Rounds: 3; first round 2 (high 1, low 1); findings 4 (high 1, medium 1, low 2): fixed 2, refuted 1, open 1\n",
+			"\n- Rounds: 3, runs 1 to 3; first round 2 (high 1, low 1); findings 4 (high 1, medium 1, low 2): fixed 2, refuted 1, open 1\n",
 		);
 		// A reviewer the run skipped is named in the header, outside the blocks parseReview reads.
 		expect(body).toContain(
@@ -335,6 +337,7 @@ describe("PR records", () => {
 				rung: { name: "deep", drawn: "down" },
 				session: THREAD,
 				sessions: [THREAD, "thread-0"],
+				runs: { debut: 1, last: 3 },
 				round: 3,
 				score: 7,
 				tally: {
@@ -355,6 +358,7 @@ describe("PR records", () => {
 				rung: null,
 				session: "thread-2",
 				sessions: ["thread-2"],
+				runs: { debut: 1, last: 1 },
 				round: 1,
 				score: 10,
 				tally: {
@@ -376,6 +380,7 @@ describe("PR records", () => {
 				rung: { name: "frontier", drawn: "up" },
 				session: CLAUDE,
 				sessions: [CLAUDE],
+				runs: { debut: 1, last: 2 },
 				round: null,
 				score: null,
 				tally: {
@@ -401,7 +406,10 @@ describe("PR records", () => {
 		);
 		expect(fixes(body)).toEqual(["codex, gpt-6.2-sol, medium effort"]);
 		// The reviewer sessions read even from a record whose other lines this version cannot parse.
-		const newer = body.replace(/^- Rounds: 3;/m, "- Rounds: 3; first round 1 (medium 1);");
+		const newer = body.replace(
+			/^- Rounds: 3, runs 1 to 3;/m,
+			"- Rounds: 3, runs 1 to 3; first round 1 (medium 1);",
+		);
 		expect(() => parseReview(newer)).toThrow("Rounds line is malformed");
 		expect(reviewSessions(newer)).toEqual([THREAD, "thread-0", "thread-2", CLAUDE]);
 		expect(classifierSessions(body)).toEqual([]);
@@ -529,7 +537,7 @@ describe("share", () => {
 				),
 			),
 		).toEqual([[0, 3, 0]]);
-		// A routed and a shadow reviewer at one effort: a session the record names goes to its seat, and the rest is
+		// Two reviewers on one model at one effort: a session the record names goes to its seat, and the rest is
 		// split evenly and counted as split.
 		const reviewers = seats.map(() => ({ model: "gpt-6.2-sol", effort: "low" }));
 		expect(

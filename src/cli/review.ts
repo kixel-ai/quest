@@ -422,7 +422,8 @@ export function drawSeat(
  */
 export function namedReviewer(choice: Choice, draw: Draw, avoided: (entry: ReviewModel) => boolean): ReviewModel {
 	const ours = (entry: ReviewModel) => choice.harness === undefined || entry.harness === choice.harness;
-	const pool = rungOrder(draw.size, draw.rung)
+	// From the size's rung outward, whatever the run drew, so a model a flag pins runs at one effort on a size.
+	const pool = rungOrder(draw.size, SIZE_RUNGS[draw.size])
 		.flatMap((rung) => draw.order[rung])
 		.filter(ours);
 	const seat = () => drawSeat({ ...draw, usable: (each) => ours(each) && draw.usable(each) }, [])?.reviewer;
@@ -533,6 +534,8 @@ export interface Tally extends Reviewing {
 	/** Every session it ran on the branch, oldest first, so `quest usage` counts what each spent. */
 	sessions: string[];
 	rounds: number;
+	/** The run of its first round, so the branch's first run is told from a later model's first. */
+	debut: number;
 	/** The run of its latest round, which orders the reviewers a rung has no new model left to seat instead of. */
 	last: number;
 	/**
@@ -554,6 +557,8 @@ export interface Reviewed {
 	risk: Risk;
 	/** The reviewers the run drew before those that ran, which could not run, in the order they were tried. */
 	skipped: Skip[];
+	/** The branch's run the last `--new` followed, 0 with none, which the design checkpoint counts from. */
+	since: number;
 	/** The branch whose rounds the run continued, and the head, base, and size it reviewed. */
 	branch: string;
 	head: string;
@@ -575,6 +580,8 @@ interface State {
 	branch: string;
 	/** The runs that seated a reviewer so far: the number of the latest. */
 	runs: number;
+	/** The run the last `--new` followed, which the design checkpoint counts from; none before any. */
+	since?: number;
 	/**
 	 * Every round on the head reviewed last, oldest first, each still judging its tier. Those of the latest run are
 	 * in the order it printed them, which numbers their findings: the open ones, which the next run settles.
@@ -1697,7 +1704,7 @@ async function turn(cli: Cli, call: Turn, cwd: string, model: string): Promise<R
 			throw new ReviewerUnavailableError(cli.harness, "login rejected", cli.unauthorized);
 		}
 		if (reply.limited) throw new ReviewLimitError(cli.harness, reply.limited.until, model);
-		if (UNSERVED.test(reply.error ?? ""))
+		if (UNSERVED.test(`${reply.error ?? ""}\n${stderr}`))
 			throw new ReviewerUnavailableError(
 				cli.harness,
 				"model not served",
@@ -1908,7 +1915,10 @@ export const located = (finding: Finding) => (finding.line === null ? finding.fi
 
 /** The last run's findings, numbered across its reviewers in the order it printed them, which a round settles. */
 function earlierList(earlier: Finding[]): string {
-	const list = earlier.map((f, i) => `${i + 1}. ${f.severity} ${located(f)} ${f.title}`).join("\n");
+	// The body holds the scenario, which a reviewer that never saw the finding needs to check a response to it.
+	const list = earlier
+		.map((f, i) => `${i + 1}. ${f.severity} ${located(f)} ${f.title}\n   ${f.body.replace(/\s+/g, " ").trim()}`)
+		.join("\n");
 	return (
 		"An earlier review of this branch, by another reviewer in another session, reported these findings, " +
 		`numbered:\n\n<earlier-findings>\n${list}\n</earlier-findings>`
@@ -1920,7 +1930,8 @@ const settling = (where: string) =>
 	`Settle each ${where} by its number: \`fixed\` when the head fixes it, \`refuted\` when the author's ` +
 	"refutation holds, or `open` when it still holds, reporting it as a finding again. Give each a one-sentence " +
 	"reason citing the fix, the refutation's evidence, or why it still holds. Then review the whole change anew, " +
-	"as if no one had reviewed it: those findings are no limit on what you look at.";
+	"as if no one had reviewed it: those findings are no limit on what you look at, and this is your first round on " +
+	"the branch, so no rule that limits a later round to what changed since the last one applies to you.";
 
 /** The author's responses to the last run's findings, and how a refutation stands. */
 function responseParts(responses: string | undefined): string[] {
@@ -2173,6 +2184,7 @@ export function parseState(value: unknown): State {
 		typeof state === "object" &&
 		state !== null &&
 		Number.isSafeInteger(state.runs) &&
+		(state.since === undefined || Number.isSafeInteger(state.since)) &&
 		Array.isArray(state.tallies) &&
 		state.tallies.every(
 			(tally) =>
@@ -2182,6 +2194,7 @@ export function parseState(value: unknown): State {
 				Array.isArray(tally.sessions) &&
 				tally.sessions.every((session) => typeof session === "string") &&
 				typeof tally.rounds === "number" &&
+				typeof tally.debut === "number" &&
 				typeof tally.last === "number" &&
 				typeof tally.fixed === "number" &&
 				typeof tally.refuted === "number" &&
@@ -2556,6 +2569,8 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 	const saved = savedState(statePath, options.fresh);
 	const prior = options.fresh ? undefined : saved?.reviewed;
 	const runs = saved?.runs ?? 0;
+	// The design checkpoint counts from the last --new, which a rethink starts over with.
+	const since = options.fresh ? runs : (saved?.since ?? 0);
 	// The last run's rounds, whose findings are the open ones, numbered across them as that run printed them.
 	const latest = (prior?.rounds ?? []).filter((round) => round.round === runs);
 	const earlier = latest.flatMap((round) => round.findings);
@@ -2644,6 +2659,7 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 	const state = (reviewed: State["reviewed"], runs: number, tallies: Tally[], risk: Risk): State => ({
 		branch,
 		runs,
+		...(since > 0 && { since }),
 		...(reviewed !== undefined && { reviewed }),
 		tallies,
 		classified: { key: classified.key, value },
@@ -2657,7 +2673,7 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 	const low = overridden(before, override);
 	if (!named && earlier.length === 0 && low.tier === "low") {
 		save(statePath, state(prior, runs, tallies, low));
-		return { rounds: [], tallies, risk: low, skipped: [], branch, head, base, sized };
+		return { rounds: [], tallies, risk: low, skipped: [], since, branch, head, base, sized };
 	}
 
 	// The head the last run passed with no finding, under the same base, instructions, and rules: its rounds stand,
@@ -2670,7 +2686,10 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 		prior.mergeBase === mergeBase &&
 		prior.given.instructions === given.instructions &&
 		prior.given.rules === given.rules
-			? latest
+			? // A reviewer now avoided, as the writer the record has since named, fills no seat.
+				latest.filter(
+					(round) => !avoided({ harness: round.reviewer, model: round.model, effort: round.effort }),
+				)
 			: [];
 	const number = kept.length > 0 ? runs : runs + 1;
 	const stood = kept.map((round): Round => ({
@@ -2725,6 +2744,7 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 		if (count === 0) break;
 		try {
 			let planned = plan(count, taken, first);
+			const passed = skipped.length;
 			for (;;) {
 				try {
 					done = [...done, ...(await runSeats(shared, planned, options.signal))];
@@ -2745,7 +2765,7 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 						planned = plan(count, taken, first);
 					} catch (outage) {
 						// The only reviewer that could take the seat fails as itself, rather than as an outage of one.
-						throw outage instanceof ReviewOutageError && skipped.length === 1 ? error : outage;
+						throw outage instanceof ReviewOutageError && skipped.length - passed === 1 ? error : outage;
 					}
 				}
 			}
@@ -2758,6 +2778,7 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 					tallies: after,
 					risk,
 					skipped,
+					since,
 					branch,
 					head,
 					base,
@@ -2769,7 +2790,7 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 	}
 	// A run that seated no one still saves the head's classification.
 	if (done.length === 0) ({ after, risk } = persist());
-	return { rounds: [...stood, ...done], tallies: after, risk, skipped, branch, head, base, sized };
+	return { rounds: [...stood, ...done], tallies: after, risk, skipped, since, branch, head, base, sized };
 }
 
 /** Every seat's round at once, the first failure stopping the others and failing the whole. */
@@ -2829,8 +2850,9 @@ function dropped(saved: State | undefined): Tally[] {
 /**
  * `tallies` after a run's `rounds`, the run's reviewers first. A round counts its findings for its own model and
  * effort. The last run's findings, each raised by the reviewer at its number in `raisers`, are settled for that
- * reviewer as the run's first round judged them, since every seat settles them all and each counts once; one kept
- * open moves to the count of the round that reports it again.
+ * reviewer once, since every seat settles them all: open when any seat keeps it open, which moves it to the count
+ * of each round that reports it again, else as the run's first round judged it. Each tally keeps the branch's run
+ * of its first round as `debut`.
  */
 export function tallied(tallies: Tally[], rounds: Round[], raisers: Reviewing[] = []): Tally[] {
 	const none = () => ({ high: 0, medium: 0, low: 0 });
@@ -2845,9 +2867,12 @@ export function tallied(tallies: Tally[], rounds: Round[], raisers: Reviewing[] 
 		const by_ = raisers[finding.number - 1];
 		const raiser = by_ === undefined ? undefined : by.get(tallyKey(by_));
 		if (raiser === undefined) throw new Error(`no tally holds finding ${finding.number}, which this round settles`);
-		if (finding.disposition === "fixed") raiser.fixed++;
-		else if (finding.disposition === "refuted") raiser.refuted++;
-		else raiser.findings[finding.severity]--;
+		const open = ran.some((round) =>
+			round.earlier?.findings.some((each) => each.number === finding.number && each.disposition === "open"),
+		);
+		if (open) raiser.findings[finding.severity]--;
+		else if (finding.disposition === "fixed") raiser.fixed++;
+		else raiser.refuted++;
 	}
 	for (const round of ran) {
 		const { rung: _, ...own } = by.get(tallyKey(round)) ?? {
@@ -2856,6 +2881,7 @@ export function tallied(tallies: Tally[], rounds: Round[], raisers: Reviewing[] 
 			effort: round.effort,
 			sessions: [],
 			rounds: 0,
+			debut: round.round,
 			last: 0,
 			findings: none(),
 			first: none(),
@@ -2986,15 +3012,16 @@ async function open(
  * The author's next step after a run's `rounds`, printed last so each step of the
  * procedure arrives when it applies: handling findings that are all low
  * severity without another round, the design checkpoint when the branch's
- * every third run reports others, else answering them, or nothing left to do.
+ * every third run since `since`, the run the last `--new` followed, reports others, else answering them, or
+ * nothing left to do.
  */
-export function nextStep(rounds: Round[]): string {
+export function nextStep(rounds: Round[], since = 0): string {
 	if (rounds.length === 0) return "next done: the head is low risk, so the online reviewer alone reviews it";
 	const findings = rounds.flatMap((round) => round.findings);
 	if (findings.length === 0) return "next done: no findings remain on this head";
 	if (findings.every((finding) => finding.severity === "low"))
 		return "next finish: fix or refute each finding, commit, rerun the checks, then add a line after the PR body's review record naming the new head's full SHA and each finding's disposition; run no further round";
-	if (rounds.some((round) => round.findings.length > 0 && round.round % 3 === 0))
+	if (rounds.some((round) => round.findings.length > 0 && (round.round - since) % 3 === 0))
 		return "next checkpoint: before fixing these findings, step back: work out the best long-term approach from first principles, compare it with the current one, and let the user decide, as /quest-review describes";
 	return "next respond: fix each finding or refute it with evidence the reviewer cannot rebut, commit, rerun the checks, then run the next round with --responses, one response per finding by its number";
 }

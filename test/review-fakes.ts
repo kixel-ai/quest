@@ -211,6 +211,11 @@ if (rejected) {
 	console.error("Error: Your access token could not be refreshed because your refresh token was revoked. Please log out and sign in again.");
 	process.exit(1);
 }
+// A CLI may name a model it does not serve only on stderr, with no event.
+if (fake("FAKE_LIMITED") === "unserved-stderr") {
+	console.error("The '" + model + "' model is not supported when using Codex with a ChatGPT account.");
+	process.exit(1);
+}
 if (fake("FAKE_LIMITED")) {
 	const message = fake("FAKE_LIMITED") === "retried"
 		? "exceeded retry limit, last status: 429 Too Many Requests"
@@ -464,7 +469,7 @@ export function effortOf(call: Call): string | null {
 	return setting ? JSON.parse(setting.slice("model_reasoning_effort=".length)) : null;
 }
 
-/** The turns at `effort`, so the size's pick and its shadow, which run at once on the same CLI, read apart. */
+/** The turns at `effort`, so each seat of a run, which run at once on the same CLI, read apart. */
 export const at = (calls: Call[], effort: string) => calls.filter((call) => effortOf(call) === effort);
 
 export async function quest(...args: string[]): Promise<{ code: number; stdout: string; stderr: string }> {

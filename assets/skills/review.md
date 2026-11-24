@@ -29,7 +29,7 @@ Pass `--exclude-model` or `--size` only for a PR whose body cannot hold the reco
 Where the repository's root instructions name other reviewers, pass them with `--harness`, `--model`, and `--effort`, which runs that reviewer alone.
 Each round rewrites the PR body's `## Review` section, so add context only after it, and write a round's record by hand only when it printed `record skipped`.
 
-`quest review` sets the head's risk tier before any reviewer runs: a low head gets no local reviewer, only a record saying so, and a high one gets a second reviewer from another vendor on the high list, which a round that raises the tier runs at once; a head classified high also takes its pick from that list.
+`quest review` sets the head's risk tier before any reviewer runs: a low head gets no local reviewer, only a record saying so, and a high one gets two reviewers of different vendors, the second of which a round that raises the tier seats at once.
 When the user overrides the tier, pass it with `--override <tier> --reason <their reason>`.
 
 Each round ends with a `next` line: follow it until a round of the head reports no finding you have not refuted; never block on the score.
@@ -38,13 +38,13 @@ Refute a finding only with evidence the reviewer cannot rebut: a `path:line`, a 
 A finding the reviewer keeps against such a refutation is a decision for the user.
 Write each round's `--responses` file in the checkout's `.tmp/`.
 
-At a `next checkpoint` line, which a reviewer's every third round prints when it reports findings, stop before fixing them and reconsider the approach; `quest status <pr>` prints a `checkpoint` line when an online reviewer's round is due the same way.
+At a `next checkpoint` line, which the branch's every third run since the last `--new` prints when it reports findings, stop before fixing them and reconsider the approach; `quest status <pr>` prints a `checkpoint` line when an online reviewer's round is due the same way.
 Findings that keep coming usually mean the approach is wrong, not the last fix.
 Step back before another patch: state the problem the PR solves without reference to its current code, work out the best long-term design you would build if starting today, favoring simpler ones that avoid the whole class of findings, and compare it with the current approach and the remaining findings.
 Report that comparison, recommending to continue, rethink the approach, merge as is, or drop the PR, and let the user decide.
 Record each design change, including a rethink the user picks, in a PR comment that starts with `Design change:`, and start the next review with `quest review --new`, which restarts the count.
 
-`quest review` passes a round from a reviewer that is out of quota, logged out, or not installed to the size's next eligible one, and records the skip.
+`quest review` passes a round from a reviewer that is out of quota, logged out, or not installed to the next eligible one, on its rung and then the rungs outward from the size's, and records the skip.
 Once it exits 3, every eligible reviewer is out, an outage rather than a skip: stop reviewing, keep the PR a draft, hand it back, and report the outage.
 Its `## Waiting` item names each reviewer, its error, and the check, such as `Codex: out of quota until 2026-11-03 15:00 UTC; check that quest review runs`, with the reset time `quest review` prints; a logged-out or missing reviewer waits on `Maintainer (PC):`, with the login command `quest review` prints, since the login runs on the reviewer's host.
 Once the reset passes or the login is restored, the item has cleared: whoever finds it runs `/quest-review` on the PR.
