@@ -144,7 +144,12 @@ three hosts' saved review rounds:
   Detecting 0.25 first-round findings per PR needs 26 PRs per arm at XS,
   115 at S, and 292 at M. At the week's rate XS reaches it about 11-26, S
   about 12-01, and M about 2027-01-03, so the 12-01 readout decides XS and
-  S and asks the maintainer whether M runs to January.
+  S and asks the maintainer whether M runs to January. Since
+  [kixel-ai/quest#819](https://github.com/kixel-ai/quest/pull/819), Sol never
+  reviews Fable's work, so L's arm B is reviewed by Opus high while arm A
+  keeps Sol xhigh: compare L's reviewer-derived measures, such as
+  first-round findings and rounds, within one reviewer, or leave them out
+  of L's readout.
 - Decided 2026-11-22 (maintainer, `/quest-plan`, from an audit of the
   1,082 PRs merged 11-14 to 11-22 in the three repositories, every cell
   charted by size, tier, writer, and arm), superseding the M question
@@ -178,8 +183,8 @@ three hosts' saved review rounds:
     found something on 147 of 272 high-tier and 148 of 549 medium-tier
     merged PRs, 93% of its findings accepted, most likely for its model
     differing from the mostly-Sol pick. Once kixel-ai/quest#819's second
-    seat runs on high heads (Opus xhigh, or Sonnet high when Opus wrote
-    the branch, never the writer's model), compare what Pullfrog still
+    seat runs on high heads (Sol and Fable xhigh on Opus's work, Opus and
+    Astra xhigh on Fable's, never weaker than the writer), compare what Pullfrog still
     finds behind it per dollar, and recommend retiring it once
     [review seats](/quest/m0/review-seats.md)' one, two, or three vendor
     seats match it, with its tally.

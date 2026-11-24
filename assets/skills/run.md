@@ -45,7 +45,7 @@ Leave a PR whose required checks are still running for a later round; an automat
 A PR whose author has write access carries a standing `/quest-merge` pick, unless the repository's `CONTRIBUTING.md` opts out, when `quest status` shows it low for the head, in a class the base `RISK.md` lists under `## Automatic`, adding or expanding no quests: run `/quest-merge` on it without asking, and name it as auto-picked in the summary.
 A trivial PR, such as a dependency bump, carries it too whatever its author and tier, under the same opt-out, but merges only once Pullfrog has approved its head; in a repository without Pullfrog, it needs the user's pick.
 Judge the diff against the class's rule before every `/quest-merge` run, and ask when unsure: the standing pick ends at the first head that does not qualify, or once a person takes the PR out of the queue.
-Ask about a high PR with both reviews and the full suite's result.
+Ask about a high PR with both reviews' results.
 
 Ask about every other PR in a question of its own that summarizes it and picks only the action, with `/quest-merge`'s pick options; none covers several PRs.
 Ask about each of its follow-ups in a question of its own beside it, as the guide's Creation section describes; the answers count only on a `/quest-merge` pick, and go in the brief of the `/quest-iterate` it dispatches.

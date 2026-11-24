@@ -1504,32 +1504,34 @@ whole branch at the PR's size.
 committed branch before it is pushed for review, at an effort set by the PR's
 size. Each size ranks its reviewers, the same for every repository:
 
-| PR size | Reviewer | When Sol changed it last | Last |
+| PR size | Reviewer | When Sol, Fable, or Astra changed it last | Then, while those are out |
 |---|---|---|---|
-| XS | Codex `gpt-6.1-sol` medium | Claude Code `claude-opus-5-5` low | Claude Code `claude-sonnet-5-5` medium |
-| S | Codex `gpt-6.1-sol` medium | Claude Code `claude-opus-5-5` low | Claude Code `claude-sonnet-5-5` medium |
-| M, or none | Codex `gpt-6.1-sol` high | Claude Code `claude-opus-5-5` medium | Claude Code `claude-sonnet-5-5` medium |
-| L | Codex `gpt-6.1-sol` xhigh | Claude Code `claude-opus-5-5` high | Claude Code `claude-sonnet-5-5` high |
-| XL | Codex `gpt-6.1-sol` xhigh | Claude Code `claude-opus-5-5` xhigh | Claude Code `claude-sonnet-5-5` high |
+| XS | Codex `gpt-6.1-sol` medium | Claude Code `claude-opus-5-5` low | Codex `gpt-6.2-astra` medium, then Claude Code `claude-fable-5-2` medium |
+| S | Codex `gpt-6.1-sol` medium | Claude Code `claude-opus-5-5` low | Codex `gpt-6.2-astra` medium, then Claude Code `claude-fable-5-2` medium |
+| M, or none | Codex `gpt-6.1-sol` high | Claude Code `claude-opus-5-5` medium | Codex `gpt-6.2-astra` high, then Claude Code `claude-fable-5-2` high |
+| L | Codex `gpt-6.1-sol` xhigh | Claude Code `claude-opus-5-5` high | Codex `gpt-6.2-astra` xhigh, then Claude Code `claude-fable-5-2` xhigh |
+| XL | Codex `gpt-6.1-sol` xhigh | Claude Code `claude-opus-5-5` xhigh | Codex `gpt-6.2-astra` xhigh, then Claude Code `claude-fable-5-2` xhigh |
 
 Beside it, the shadow, the pick's model one effort away on the ladder (low,
 medium, high, xhigh), reviews the same head in its own session, so the routing
 can be retuned from what each effort step finds over its neighbor. It runs one
 effort above the pick for an S or M PR (Sol high for S), one below for an L or
-XL PR, and not at all for an XS PR, and is skipped when no such effort is on
+XL PR, and not at all for an XS PR or a Fable pick, whose limit also writes XL
+quests and seats high heads' second reviewer, and is skipped when no such effort is on
 the ladder, as above xhigh or for an `--effort` off it.
 
 It runs on the branch's first run of the pick, then reruns only while it has findings to settle, or once the pick
 changed so that it is no longer that step away; its findings are numbered,
-answered, and settled like any reviewer's. A pick with no shadow seats one
-at its own effort while the old shadow still has findings, so none
-is left unanswered. The reviewers run at once;
+answered, and settled like any reviewer's. A pick with no shadow, as at XS or on a high
+head, seats the old shadow as it ran while it still has findings, so none is
+left unanswered and its session carries on, unless its model is avoided or
+cannot run, when one at the pick's effort settles them. The reviewers run at once;
 the first to fail, such as on a usage limit, stops the others, and the round
 saves none.
 
-A reviewer that cannot run passes the round to the next whose model is not
-the latest writer's, so Sonnet reviews what Opus changed last while Sol is
-out. That is a failure the CLI or provider reports before any finding is
+A reviewer that cannot run passes the round to the next eligible one, so
+Astra reviews what Opus changed last while Sol is out, and Fable while all of
+Codex is. That is a failure the CLI or provider reports before any finding is
 saved, never text in the diff or a reply: a CLI that is not installed, logged
 out, or has its login rejected, or sent to a gateway with no credential,
 passes over every model of that CLI, and a
@@ -1550,16 +1552,23 @@ A quest branch takes its quest's size, read from the base branch's tip so a
 change cannot lower its own review; any other PR, such as a skill's own, takes
 the `Size:` line of the `## Models` record in its open PR's body, and a PR with
 neither gets M's reviewers. `--size` overrides both. The first reviewer whose
-model is not the latest writer's reviews: the record's last `Implementer:` line
-names it, since each session moves its line last whenever it pushes, or
-`--exclude-model` names each model to avoid instead. Earlier writers may review.
+model is neither the latest writer's nor weaker than it reviews: Sonnet is
+weaker than every other model and never reviews its own work, so it reviews
+nothing and no list names it, and Sol is
+weaker than Fable and Astra. The record's last `Implementer:` line
+names the latest writer, since each session moves its line last whenever it pushes, or
+`--exclude-model` names each model to avoid instead, with every model weaker
+than it. Earlier writers may review.
 Without a record, or when its last line names an `unknown` model, the harness
 running the command, usually the session that
 just pushed, is taken to be the latest writer, so Codex reviews from Claude Code
-and Claude Code from Codex. `--harness` names the only reviewer instead of
-the pick and the shadow, at its entry's model and effort, and `--model` and `--effort`
-override the size pick's or that reviewer's, as a repository whose `AGENTS.md`
-names other reviewers needs. A `--harness` run keeps the other
+and Claude Code from Codex; with no model known, no weaker one is avoided, so
+the never-weaker rule needs the record. `--harness` names the only reviewer instead of
+the pick and the shadow, at the model and effort of its first entry whose model is not avoided, and
+`--model` and `--effort` override the size pick's or that reviewer's, as a
+repository whose `AGENTS.md` names other reviewers needs; a `--model` the list
+names runs on its own entry's harness and effort, and one it does not at
+`--harness`'s first entry. A `--harness` run keeps the other
 reviewers' sessions for the pick's next run, and refuses while one has
 findings to settle, so a head never passes one reviewer alone while the other's
 findings are open. When the latest writer changes the size's pick to one with
@@ -1720,8 +1729,9 @@ logged out, its login rejected, or at its usage limit, and 1 for other
 failures. The only eligible reviewer's usage limit prints one line,
 `error: <harness> hit its usage limit; resets <time>`, where `<time>` is the
 reset as an ISO 8601 UTC timestamp, or `unknown` when the CLI named none; with
-several, it prints `error: no eligible <size> reviewer could run: <model>
-<effort> (<error>), ...`.
+several, it prints `error: no eligible <list> reviewer could run: <model>
+<effort> (<error>), ...`, where `<list>` is the PR's size, or `high` for a high
+head's list.
 Through a gateway that pools accounts, such as CLIProxyAPI, the limit is the
 pool's: Claude Code shows its "All credentials for model ... are cooling down",
 and Codex, sent to `OPENAI_BASE_URL`, gives up on the gateway's 429 after its
@@ -1732,13 +1742,15 @@ own retries, which also counts as the limit there.
 
 Each head also gets a risk tier, `low`, `medium`, or `high`: what could break,
 for whom, and how hard it is to undo, set from the change and never from who
-wrote it. The tier scales the PR's guardrails:
+wrote it. The tier scales the PR's review and approval, never its CI: every
+tier runs the checks its diff reaches, and the next commit's CI or the nightly
+run catches what those miss.
 
-| Tier | Local review | CI | Lands on |
-|---|---|---|---|
-| Low | None; the online reviewer only | The checks its diff reaches | Its own, once its class is in `RISK.md`'s `## Automatic` list; else the maintainer's pick |
-| Medium | The size's pick | The checks its diff reaches | The maintainer's pick |
-| High | The size's pick and a second reviewer on another model | The full suite [`quest suite`](#run-the-full-suite) names | The maintainer's pick, with the full brief |
+| Tier | Local review | Lands on |
+|---|---|---|
+| Low | None; the online reviewer only | Its own, once its class is in `RISK.md`'s `## Automatic` list; else the maintainer's pick |
+| Medium | The size's pick | The maintainer's pick |
+| High | No shadow, but a second reviewer from another vendor on the high list; the pick comes from that list too when the classifier or an override set the tier | The maintainer's pick, with the full brief |
 
 `/quest-run` carries the picks.
 
@@ -1760,12 +1772,6 @@ Customers run the relay and the player; the CLI is for contributors.
 
 - `src/billing/` - charges customers, and refunds are manual
 - `**/*.proto` - peers on older releases read the wire format
-
-## Full suite
-
-```sh
-just gate --all
-```
 ````
 
 Each item is a backticked path from the root, where `*` and `?` stay within one
@@ -1774,10 +1780,9 @@ everything under it, then ` - ` and why changing it is high. The rest of the
 file is prose for the classifier, such as what is customer-facing, except
 `## Automatic`, whose items are each a backticked class name of lowercase
 words joined by hyphens, ` - `, and the rule over the diff a change meets to
-fall in it, and `## Full suite`, one fenced block holding the command that
-runs the whole test suite. Each section appears at most once. `quest
-review` reads the file from the base's tip, so a change cannot lower its own
-tier, and fails on one it cannot read, which the repository's own `quest check`
+fall in it. Each section appears at most once. `quest review` reads the file
+from the base's tip, so a change cannot lower its own tier, and fails on one
+it cannot read, which the repository's own `quest check`
 reports first. A base with no `RISK.md` makes every change no path holds high
 `medium`.
 
@@ -1806,33 +1811,34 @@ to its block. A `- Class:` line follows when the classifier named a class.
 A low head with no finding left to settle runs no local reviewer, unless
 `--harness`, `--model`, or `--effort` names one: the record names the head in
 full, adds `- Local review: none, since a low-risk head needs only the online
-reviewer`, and `next done` says so. A high head also gets a second reviewer:
-the first of the size's list on a model other than the pick's that can run,
-marked `second`, in a session of its own that reviews every head while the
-tier is high and settles its findings after. `--model` and `--effort` change
-only the pick, so the second reviewer still runs; the one reviewer `--harness`
-names runs alone, with none. A round that raises the tier to
-high saves its rounds and runs the second reviewer at once; when that review
+reviewer`, and `next done` says so. A high head runs no shadow but gets a
+second reviewer: the first of the `high` list (Codex `gpt-6.1-sol` xhigh,
+Claude Code `claude-opus-5-5` xhigh, Claude Code `claude-fable-5-2` xhigh,
+Codex `gpt-6.2-astra` xhigh) from a vendor other than the pick's that can
+run, so Sol and Fable review Opus's work, and Opus and Astra Sol's or
+Fable's. It is marked `second`, in a session of its own that
+reviews every head while the tier is high and settles its findings after. A
+head the classifier or `--override` holds high also takes its pick from that
+list, whatever the PR's size; a reviewer's raise changes only the second
+reviewer, so the pick, and its session, stay the same on the head, unless that
+raise ends an override, as below. `--model`
+and `--effort` change only the pick, so the second reviewer still runs; the
+one reviewer `--harness` names runs alone, at its entry in the pick's list,
+with none. A round that raises the tier to high saves its rounds and runs the
+second reviewer at once; when that review
 fails, as when none can run, it prints those rounds before the error, so their
-findings can be answered. When every other model is avoided, as
-with no `## Models` record under a harness the list has one model of, the run
-fails as a usage error; when they cannot run, as an outage.
+findings can be answered. When every model of the other vendor is avoided, as
+with no `## Models` record, which avoids every model of the harness running the
+command, the run fails as a usage error; when they cannot run, as an outage.
 
 `--override <tier> --reason <text>` records the maintainer's tier for the
 branch in place of the reviewed one, as `- Risk: <tier>, <reason>` and
 `- Overridden: from <tier> by the maintainer`. It holds across heads until
-the reviewed tier grows riskier than the one overridden, and `quest usage`
-counts overrides as a reading of the tier's accuracy.
-
-### Run the full suite
-
-`quest suite <pr>` prints the base's `## Full suite` command when the PR's
-head needs it: its record names it high, or names no tier that covers the
-head. It prints nothing otherwise, so a repository's gate runs the command it
-prints beside its scoped checks. The tier is the PR body's, which its author
-writes, so a gate runs the full suite itself for an author without write
-access. `--base` names the branch whose `RISK.md` it reads, fetched first,
-by default origin's default branch.
+the reviewed tier grows riskier than the one overridden, other than to the
+override's own tier, which agrees with it, and `quest usage`
+counts overrides as a reading of the tier's accuracy. So a raise to medium on
+a head overridden from low to high ends the override, and the next run on that
+head picks from the PR's size list again.
 
 ## Audit cost and accuracy
 

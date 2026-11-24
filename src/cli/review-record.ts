@@ -156,7 +156,7 @@ export interface ReviewSummary {
 	effort: string;
 	/** Whether it is the shadow: the size's pick one effort away, beside it on the same heads. */
 	shadow: boolean;
-	/** Whether it is the second reviewer a high-risk head gets, on a model other than the pick's. */
+	/** Whether it is the second reviewer a high-risk head gets, from a vendor other than the pick's. */
 	second: boolean;
 	/** Its latest session, null when the record names none; its round, null when the latest run left it out. */
 	session: string | null;
