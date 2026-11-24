@@ -388,7 +388,7 @@ export function rankedReviewers(size: Listing, choice: Choice, avoided: (entry: 
  * lower its own review, or else the size the PR's `## Models` record names
  * (`recorded`), or else the default.
  */
-export function reviewSize(
+function reviewSize(
 	root: string,
 	baseSha: string,
 	branch: string,
@@ -2712,45 +2712,6 @@ async function open(
 	const session = opened.session;
 	const reply = await turn(cli, cli.reviewer.resume(context, session, prompts.report), root, context.model);
 	return { session, reply, usage: reported(opened.usage) ? [{ turn: "review", ...opened.usage }] : [] };
-}
-
-/** What a lone first round reads: a checkout at the head, the change, the base's instructions, the rules, and the tier. */
-export interface Opening {
-	root: string;
-	change: Change;
-	files: { path: string; text: string }[];
-	rules: Rules | null;
-	/** The head's tier as classified before review. */
-	risk: Assessment;
-	/** Where the reply schema is saved. */
-	dir: string;
-	env: NodeJS.ProcessEnv;
-	signal?: AbortSignal;
-}
-
-/** One reviewer's first round on a change, in a new session no branch keeps, with the prompts `quest review` gives. */
-export async function firstRound(
-	reviewer: Model,
-	opening: Opening,
-): Promise<{ session: string; usage: Usage[]; verdict: Verdict }> {
-	const { root, change } = opening;
-	const cli = await prepare(reviewer.harness, root, opening.env, opening.signal);
-	const replySchema = schema(0);
-	const context: Context = {
-		mergeBase: change.mergeBase,
-		instructions: instructionsPrompt(change.mergeBase, opening.files),
-		model: reviewer.model,
-		effort: reviewer.effort,
-		schema: replySchema,
-		schemaFile: saveSchema(opening.dir, replySchema),
-		...(cli.env.OPENAI_BASE_URL && { openaiBaseUrl: cli.env.OPENAI_BASE_URL }),
-	};
-	const { session, reply, usage } = await open(cli, context, root, {
-		review: reviewPrompt(change, opening.rules),
-		report: reportPrompt(change.head, opening.risk),
-	});
-	if (reported(reply.usage)) usage.push({ turn: "findings", ...reply.usage });
-	return { session, usage, verdict: verdict(reply, 0) };
 }
 
 /**

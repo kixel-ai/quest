@@ -65,8 +65,8 @@ and [for eval](https://github.com/kixel-ai/quest/pull/831#issuecomment-711801176
 - Measure rungs how? ✅ From real PRs' stats in `quest usage`, with no
   `quest eval` run (rejected: score each rung change with `quest eval
   run`). The maintainer: "we don't want to waste tokens on throw-away
-  reviews/code". This overrides `AGENTS.md`'s rule that a reviewer change
-  runs `quest eval run`, which a separate PR deletes with `quest eval`.
+  reviews/code". [kixel-ai/quest#850](https://github.com/kixel-ai/quest/pull/850)
+  deleted `quest eval` and `AGENTS.md`'s eval rule.
 
 Recommendations, the implementer's to revisit:
 

@@ -24,19 +24,13 @@ export interface GitHubReadDependencies {
 	quota: "wait" | "fail";
 	/** Where GET answers are kept to revalidate by ETag, so an unchanged read costs no quota; none when absent. */
 	cache?: ResponseCache;
-	/**
-	 * Where to read a repository's name by its id when the read token cannot see that repository, such as the person's
-	 * own dependencies behind an installation token scoped to one repository: a ruleset names a required workflow's
-	 * repository only by id. None when the read token is the person's.
-	 */
-	names?: GitHubReadDependencies;
 }
 
 /**
  * What a client that writes needs: the same, with the person's own token, so what it writes is in their
  * name. It has no `readToken`, so it never stands in for read dependencies built on another token.
  */
-export interface GitHubDependencies extends Omit<GitHubReadDependencies, "readToken" | "names"> {
+export interface GitHubDependencies extends Omit<GitHubReadDependencies, "readToken"> {
 	token: string;
 }
 
@@ -172,16 +166,10 @@ export class GitHubReader {
 		this.cache = deps.cache;
 	}
 
-	/**
-	 * The `owner/name` of the repository with `id`, read on {@link GitHubReadDependencies.names} when the read token
-	 * cannot see it; null when neither can.
-	 */
+	/** The `owner/name` of the repository with `id`, or null when the read token cannot see it. */
 	async repositoryName(id: number): Promise<string | null> {
-		for (const github of [this, ...(this.deps.names ? [new GitHubReader(this.deps.names, this.deadline)] : [])]) {
-			const response = await github.request(`/repositories/${id}`, { allow: [404] });
-			if (response.ok) return string(object(await response.json()).full_name);
-		}
-		return null;
+		const response = await this.request(`/repositories/${id}`, { allow: [404] });
+		return response.ok ? string(object(await response.json()).full_name) : null;
 	}
 
 	/**

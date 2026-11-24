@@ -649,20 +649,14 @@ command fails too, naming `QUEST_FORGE=github`, which reads GitHub instead.
 `QUEST_KIXEL_URL` names another Kixel Quest, such as one running locally, whose
 token the same file pairs with its URL.
 
-A read that must come from GitHub itself, such as `quest pr view` or the
-open-PR checks of `quest start`, uses a read-only App installation token Kixel
-Quest mints for that repository, so it draws on the installation's rate limit,
-not the person's. `POST /installation-token` takes `{"repository":
-"owner/repo"}` and answers `{token, expiresAt, repository, login}`; a 404 means
-Kixel Quest does not serve the repository, and `quest` reads it with the
-person's own token. `quest` keeps each token in
-`$XDG_CACHE_HOME/quest/installation` (else `~/.cache/quest/installation`) until
-five minutes before it expires, since a person may mint only so many an hour,
-and a 429 or any other failure fails the command, naming `QUEST_FORGE=github`.
-Writes, such as comments, pushes, and merges, always use the person's own token,
-so they are made in their name. A forge reading on a minted token takes the
-person from the mint's `login`, because on an installation token GitHub names
-the App as the viewer.
+A read that must not lag the index, such as `quest pr view`, `quest pr list`,
+or the open-PR checks of `quest start`, goes to Kixel Quest's `pulls`, `files`,
+or `view`, which answer from GitHub itself and share an answer between callers
+until a webhook touches its PR or repository, so these reads draw on Kixel
+Quest's installation rather than the person's quota. A 429 means the person has
+spent their share of those reads, and fails the command, naming its
+`Retry-After`. Writes, such as comments, pushes, and merges, always use the
+person's own token, so they are made in their name.
 
 Its read API lives under `/forge`, with the token as a bearer token:
 `GET /forge` answers `{"login", "repositories"}`, the person the token names
@@ -1550,8 +1544,7 @@ header:
 The new reviewer settles the open findings of the one it replaces, and the
 shadow follows it. Only when every eligible reviewer is out does the run fail,
 exiting 3 with each one's error. A reviewer `--harness`, `--model`, or
-`--effort` names never passes the round on, so a controlled run, such as
-`quest eval run`'s, measures the reviewer it names.
+`--effort` names never passes the round on.
 
 A quest branch takes its quest's size, read from the base branch's tip so a
 change cannot lower its own review; any other PR, such as a skill's own, takes
@@ -1844,35 +1837,6 @@ override's own tier, which agrees with it, and `quest usage`
 counts overrides as a reading of the tier's accuracy. So a raise to medium on
 a head overridden from low to high ends the override, and the next run on that
 head picks from the PR's size list again.
-
-### Score the reviewer
-
-`quest eval` scores the reviewer on the repository's past PRs, kept in
-`review-eval.json` at its root: culprits, each with the places at its last head
-of the defect a later fix's `## Caused by` named, and clean PRs that broke
-nothing. Score a change to the reviewer table, the prompts, or `REVIEW.md`
-before it lands, and put the score and its cost in its PR.
-
-```sh
-quest eval add 570 --fix 704 --what "It counts every link as a culprit." \
-  --defect src/cli/usage.ts:395-399 --defect src/cli/usage.ts:408-410
-quest eval add 503 --clean
-quest eval run                          # each case's reviewers as its tier seats them
-quest eval run --harness claude --effort high --pr 570
-```
-
-`add` reads the PR's last head and base from GitHub and records its merge base,
-size, latest writer, and tier, and a culprit already in the set gains each
-further defect. `run` fetches each case from the set's repository, so a fork's
-clone scores its upstream's set, and reviews it at its head in a detached checkout,
-giving the reviewers the first round `quest review` gives, with the base's
-`AGENTS.md` and `CLAUDE.md` and this checkout's committed `REVIEW.md`. A
-finding on any line of a defect's places finds it; every finding on a clean PR
-is noise. Each case gets the reviewers `quest review` seats for its classified tier: the
-pick and its shadow, or for a high case the pick and a second reviewer. It prints defects
-found and clean findings by severity for the pick, its shadow, the second
-reviewer, and either, by size and by tier, each case's rounds, and the cost
-token-max prices for the run's sessions.
 
 ## Audit cost and accuracy
 

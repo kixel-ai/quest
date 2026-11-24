@@ -2,7 +2,7 @@
 
 ## Goal
 
-`quest review --harness agy --model <id> [--effort <level>]` reviews a branch through Google's Antigravity CLI (`agy -p`), read-only, isolated from the checkout's and the user's config, on the user's own Antigravity login, so a contributor with a Google AI plan can review with Gemini 4 Neon. The harness ships opt-in; whether Neon moves ahead of the size's Codex entry (Sol, or Astra at XL) in a PR size's `REVIEWERS` ranking is judged later from real PRs, by the culprits per dollar `quest usage` shows. Once [reviewer rungs](/quest/m0/reviewer-rungs.md) has landed, its rung placement, by cost and quality, decides that instead.
+`quest review --harness agy --model <id> [--effort <level>]` reviews a branch through Google's Antigravity CLI (`agy -p`), read-only, isolated from the checkout's and the user's config, on the user's own Antigravity login, so a contributor with a Google AI plan can review with Gemini 4 Neon. The harness ships opt-in and adds no `agy` model to `REVIEWERS`. Neon gets real-PR stats once a round seats it: [reviewer rungs](/quest/m0/reviewer-rungs.md) draws every vendor's models from cross-vendor rungs each round, and [review seats](/quest/m0/review-seats.md) sets how many vendors a round seats by tier, so Gemini reviews a round only when its rung draws it. Where Neon ranks is then judged from those stats: the share of its reviewed PRs a later fix names as a culprit, and its cost per review, reported side by side as `quest usage` shows them, never folded into one ratio.
 
 Non-goals: `agy` as a writer, iterate, or land-fixer harness; models other than Gemini in the ranking, which [the model check](/quest/m1/model-check.md) can add from its own evidence once the harness exists.
 
@@ -11,7 +11,8 @@ Non-goals: `agy` as a writer, iterate, or land-fixer harness; models other than 
 Decided 2026-11-16 (user, /quest-plan), still standing. The user reports Gemini 4 Carbon catching bugs that Claude Opus 5.5 at medium effort missed in their own work.
 
 - ✅ An opt-in reviewer harness before any ranking change (rejected: Gemini in the default ranking right away; a generic any-model harness, which [kixel-ai/quest#701](https://github.com/kixel-ai/quest/pull/701) removed).
-- Amended 2026-11-23 (maintainer, [on kixel-ai/quest#831](https://github.com/kixel-ai/quest/pull/831#issuecomment-7118011769)): ✅ no eval scores Carbon and this PR leaves the ranking as it is; real-PR stats decide a ranking change later (was: an eval decides and this PR moves Carbon ahead of Codex Sol where it wins). Amended 2026-11-23 by [kixel-ai/quest#831](https://github.com/kixel-ai/quest/pull/831#issuecomment-7111249892): XL's Codex entry is now Astra high, and once [reviewer rungs](/quest/m0/reviewer-rungs.md) has landed, its rung placement decides instead of a ranking.
+- Amended 2026-11-23 (maintainer, [root plan](/quest/README.md)): ✅ no eval scores Carbon and this PR leaves the ranking as it is; real-PR stats from the rounds rungs and review seats give Carbon decide a ranking change later (was: an eval decides and this PR moves Carbon ahead of Codex Sol where it wins).
+- Amended 2026-11-23 by [kixel-ai/quest#831](https://github.com/kixel-ai/quest/pull/831#issuecomment-7111249892): XL's Codex entry is now Astra high, and once [reviewer rungs](/quest/m0/reviewer-rungs.md) has landed, its rung placement decides instead of a ranking.
 - Amended 2026-11-23 (maintainer, [on kixel-ai/quest#838](https://github.com/kixel-ai/quest/pull/838#issuecomment-7119663087)): ✅ Gemini 4 Neon, never Carbon: Neon scores higher than Carbon at every effort on far less usage, and `agy` serves `gemini-4-neon` at low through xhigh, where Carbon tops out at high (rejected: Carbon).
 - ✅ m1 (rejected: m0, m2): contributors must be able to run `quest review` on their forks, including those whose only plan is Google's.
 
@@ -50,7 +51,7 @@ Guidance:
 - Append a cheap `agy`-served classifier last in `CLASSIFIERS`, so a contributor with only `agy` can still classify risk.
 - Detect `agy`'s usage-limit and logged-out errors from its structured output as a `ReviewLimitError` or `ReviewerUnavailableError`, so the round passes over an unavailable reviewer.
 - Ultra is a flat plan and token-max prices only Claude Code and Codex sessions, so a culprits-per-dollar comparison needs a per-token price. Recommended: price `agy` sessions from the usage their stream reports, at Google's API list price for the model, through token-max if it gains them first, else in `quest usage`.
-- Keep the harness opt-in: no `agy` model enters `REVIEWERS` in this PR. Update `README.md`'s reviewer list and `quest review --help`.
+- Keep the harness opt-in: no `agy` model enters `REVIEWERS` in this PR. Update `README.md`'s reviewer list and `quest review --help`. If reviewer rungs has landed, seat Neon at the rung placements its Recommendations give, since a model on no rung never reviews a real PR; if this lands first, rungs carries Gemini in as its Plan says.
 
 ## Hosts
 

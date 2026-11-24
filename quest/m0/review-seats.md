@@ -55,10 +55,10 @@ Decided 2026-11-22 (maintainer, `/quest-plan` follow-up of
 
 Guidance:
 
-- Judge the seats from real PRs once they land, with no `quest eval` run,
-  as [reviewer rungs](/quest/m0/reviewer-rungs.md) judges its rungs:
-  `quest usage`'s findings, share fixed, and cost per seat, and the
-  `## Caused by` escapes it lists against each culprit's reviewers, by tier.
+- Judge the seats from real PRs once they land, as the
+  [root plan](/quest/README.md) decided on 2026-11-23: `quest usage`'s
+  findings, share fixed, and cost per seat, and the `## Caused by`
+  escapes it lists against each culprit's reviewers, by tier.
 - Each seat is a reviewer `quest review` already runs, so a seat that
   cannot run passes to another vendor on the round's rung. Recommended:
   when the drawn rung has too few vendors that can run, such as when

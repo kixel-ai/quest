@@ -11,6 +11,14 @@ kixel-ai/kixel.quest owns; repository- or user-level model settings.
 
 ## Plan
 
+Decided 2026-11-23 (maintainer, `/quest-run`): "please stop doing evals",
+"we don't want to waste tokens on throw-away reviews/code". ✅ Delete
+`quest eval` and every quest step that runs it (rejected: keep the command
+and drop only the quests' eval steps; drop only `AGENTS.md`'s eval rule).
+Reviewer routing is judged from real PRs instead: `quest usage`'s per-reviewer
+findings, share fixed, and cost, and the `## Caused by` escapes it lists
+against each culprit's reviewers.
+
 Decided 2026-11-22 (maintainer, `/quest-plan` in
 [kixel-ai/kixel.quest#104](https://github.com/kixel-ai/kixel.quest/pull/104)),
 reversing both decisions below on where tooling lives: ✅ "`quest` is public.
