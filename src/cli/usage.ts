@@ -545,11 +545,15 @@ const sized = (value: string | null | undefined): Size | null =>
  * rule fixes or refutes those before merge without another round; nothing records which, so they count as settled.
  */
 function settledOnMerge(reviews: ReviewSummary[], merged: boolean): ReviewSummary[] {
+	// A finding carried over from an earlier run is listed under the round that kept it open and counted in its
+	// raiser's tally, so the open ones are matched across the reviewers, not within each.
+	const sum = (counts: number[]) => counts.reduce((total, count) => total + count, 0);
+	const tallied = reviews.filter((review) => review.tally !== null);
 	const settles =
 		merged &&
-		reviews.every(
-			({ tally, open }) => open.high === 0 && open.medium === 0 && (tally === null || tally.open === open.low),
-		);
+		reviews.every(({ open }) => open.high === 0 && open.medium === 0) &&
+		(tallied.length === 0 ||
+			sum(tallied.map((review) => review.tally!.open)) === sum(reviews.map((review) => review.open.low)));
 	if (!settles) return reviews;
 	return reviews.map((review) =>
 		review.tally === null

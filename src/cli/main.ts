@@ -94,7 +94,6 @@ import {
 	review,
 	nextStep,
 	roundLines,
-	savedReview,
 } from "./review";
 import { type Recorded, pullModels, recordRounds } from "./review-record";
 import {
@@ -1629,14 +1628,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 	const sizeRungs = SIZES.map((size) => `${size} ${SIZE_RUNGS[size]}`).join(", ");
 	const classifiers = CLASSIFIERS.map((e) => `${e.harness} ${e.model} ${e.effort}`).join(", then ");
 	/** quest review's exit code for `error`: 2 for a usage error, 3 when no reviewer could run, else 1. */
-	const reviewFailure = (error: unknown, json = false): number => {
-		// A failure after a raise saved the rounds that ran, so they print for their findings to be answered.
-		const reviewed = savedReview(error);
-		if (reviewed !== undefined) {
-			const { rounds, tallies, risk, skipped } = reviewed;
-			if (json) print(JSON.stringify({ rounds, tallies, risk, skipped, record: null, next: null }));
-			else for (const line of roundLines(reviewed)) print(line);
-		}
+	const reviewFailure = (error: unknown): number => {
 		const outage = error instanceof ReviewerUnavailableError || error instanceof ReviewOutageError;
 		if (error instanceof ReviewInputError || outage) {
 			out.stderr(`error: ${error.message}\n`);
@@ -1659,17 +1651,14 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"finding is saved, passes its seat on the same way: a CLI that is not installed, " +
 				"logged out, or has its login rejected, or sent to a gateway with no credential, passes over every model of that CLI, and a model at its usage limit, " +
 				"or one its login or gateway does not serve, as Codex's `model is not supported when using Codex with a ChatGPT account`, " +
-				"only itself; the run's report and record name each it passed over and why. A reviewer --harness or --model " +
-				"names never passes its seat on; --effort alone names none, so its seat is drawn and passes on. " +
+				"only itself; the run's report and record name each it passed over and why. A reviewer a flag names never passes its run on. " +
 				"--exclude-model names each model to avoid; without it, the " +
 				"latest writer's is avoided, and no other, so a draw may seat a model weaker than the writer: the model the last Implementer line names in the `## Models` record of the body of the branch's open PR. " +
 				"When it names none or an `unknown` model, " +
 				"it is any model of the harness running this command, usually the session that just pushed, detected from the " +
 				"variables Claude Code, Codex, and Antigravity each set, so Codex reviews from Claude Code and Claude Code from Codex; with --harness it is " +
 				"none. " +
-				"--harness names the only reviewer instead of the draw, taking that CLI's own draw, and --model and " +
-				"--effort override that reviewer's, or without --harness, the first seat's; a --model a rung lists, in any spelling such as openai/gpt-6.2-astra, runs on its entry's harness and effort on the size's rung or the nearest that lists it, passed to the CLI as given, and one no rung lists at --harness's first entry, or without it in place of the first seat's draw; a repository whose AGENTS.md names other reviewers " +
-				"passes them. The seats run at once, each CLI's login checked before any turn starts, and the first to fail stops the others and fails the " +
+				"--harness, --model, or --effort names one reviewer, which runs alone, outside the draw, as a run of its own, even on a high head: the first entry the flags fit from the size's rung outward, in the order the rungs list, so the same flags name the same reviewer on every run. --harness alone is that CLI's first entry whose model is not avoided, --model its own entry in any spelling such as openai/gpt-6.2-astra, passed to the CLI as given, and --effort alone the first entry whose model is not avoided; --model and --effort then override the entry's. A --model no rung lists needs --harness, at whose first entry's effort it runs unless --effort names one. A repository whose AGENTS.md names other reviewers passes them. The seats run at once, each CLI's login checked before any turn starts, and the first to fail stops the others and fails the " +
 				"run, saving no round. The " +
 				"size is --size, else the size of the quest a quest/ branch names, read from the base's tip so a " +
 				`change cannot lower its own review, else the PR record's Size line, else ${DEFAULT_SIZE}. ` +
@@ -1700,7 +1689,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"responses, and its reply settles each, by its number in the prompt, as fixed, refuted, or still open, before it reviews the change anew; one any seat keeps open carries over once, as it was reported and still its raiser's, so no reply reports it again. " +
 				"Findings are numbered across the run's reviewers in the order it printed them. A run on the head the last run passed with no " +
 				"finding, under the same base, a size on the same rung, and applicable AGENTS.md, CLAUDE.md, shipped shared review rules, and REVIEW.md, runs no reviewer and " +
-				"repeats its rounds, marked unchanged, but for a seat the tier now calls for that they lack, or a reviewer a flag names that is not among them, which joins that run. " +
+				"repeats its rounds, marked unchanged, while they are the review this run would be: as many vendors as the tier seats, none since avoided, or else the one reviewer a flag names; otherwise a new run reviews the head. " +
 				"--new drops the last run's findings unsettled, and its classification, continuing each reviewer's tally of its findings on the branch, less those it drops, unless the saved state is one this quest cannot read. The branch's rounds are kept in the clone's common Git directory, so any worktree of the clone continues them. " +
 				"A checked-out branch with an upstream other than the base continues its upstream branch's rounds, so a " +
 				"temporary branch tracking the PR's head shares the head's rounds. " +
@@ -1745,9 +1734,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"The classifier also names the class of RISK.md's ## Automatic list every changed file falls in, or none. " +
 				"The tier scales the review: a low head with no finding to settle runs no reviewer unless --harness, " +
 				"--model, or --effort names one, and a high head seats two reviewers of different vendors, each drawn from the run's rung as above. " +
-				"--model and --effort name only the first seat, so the second still runs; the one reviewer --harness names runs " +
-				"alone. A round that raises the tier to high saves its rounds and " +
-				"seats the second reviewer at once, printing those rounds before the error when that review fails, as when no other vendor's reviewer can run. " +
+				"A round that raises the tier to high seats the second reviewer at once, in the same run; a run is saved whole or not at all, so one that fails there, as when no other vendor's reviewer can run, leaves the branch as it was. " +
 				"--override and --reason record the maintainer's tier for the branch, which holds until the reviewed " +
 				"tier grows riskier than the one overridden, other than to the override's own tier.\n\n" +
 				"Prints the size and where it came from, base, and head, its risk tier and reason, the classifier's tier, " +
@@ -1772,7 +1759,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"such PR, several from other repositories that `HEAD` contains, or a remote off GitHub, it prints `record skipped: <why>` and changes nothing.\n\n" +
 				"Exits 0 once the round finishes, whatever it found, 2 for invalid arguments " +
 				"or a checkout that cannot be reviewed, 3 when no eligible reviewer could run, each not installed, logged " +
-				"out, its login rejected, at its usage limit, or unable to run on this host, and 1 for other failures, including a PR GitHub will not show or a record it " +
+				"out, its login rejected, its status check failing, at its usage limit, or unable to run on this host, and 1 for other failures, including a PR GitHub will not show or a record it " +
 				"refuses. A malformed `## Models` field the round reads, such as a Size line naming no size or an " +
 				"Implementer line naming no model it can read, is a usage error, unless --size or --exclude-model replaces it. A usage limit of the only " +
 				"eligible reviewer prints one line, " +
@@ -1782,14 +1769,14 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		)
 		.option("--base <remote/branch>", "Base branch to review against (default: origin's default branch)")
 		.addOption(
-			new Option("--harness <name>", "The only reviewer to run, instead of the run's draw").choices(
+			new Option("--harness <name>", "The CLI of the one reviewer to run, instead of the run's draw").choices(
 				REVIEW_HARNESSES,
 			),
 		)
-		.option("--model <model>", "Model the first seat, or --harness's reviewer, runs instead of its draw")
+		.option("--model <model>", "Model of the one reviewer to run, instead of the run's draw")
 		.option(
 			"--effort <level>",
-			"Reasoning effort the first seat, or --harness's reviewer, runs at instead, never max",
+			"Reasoning effort of the one reviewer to run, instead of the run's draw, never max",
 			effortLevel,
 		)
 		.option(
@@ -1891,7 +1878,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 						);
 						return 1;
 					},
-					(error) => reviewFailure(error, options.json),
+					(error) => reviewFailure(error),
 				);
 			},
 		);

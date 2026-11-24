@@ -121,15 +121,6 @@ export interface Skip extends ReviewModel {
 	reason: string;
 }
 
-/** The rounds a run saved before the further review a raise called for failed, by the error that stopped it. */
-const savedBefore = new WeakMap<object, Reviewed>();
-
-/** The rounds a failed run saved before it failed, which still need their findings answered, if any. */
-export function savedReview(error: unknown): Reviewed | undefined {
-	return typeof error === "object" && error !== null ? savedBefore.get(error) : undefined;
-}
-
-/** A seat found no reviewer that could run on any rung, each one tried out for the reason `skipped` names; `rung` is the size's. */
 export class ReviewOutageError extends Error {
 	constructor(
 		rung: Rung,
@@ -417,28 +408,25 @@ export function drawSeat(
 }
 
 /**
- * The one reviewer `--harness`, `--model`, or `--effort` names, which never passes its round on. `--harness` alone
- * takes that CLI's draw, and `--effort` alone the round's; `--model` and `--effort` then override its model and
- * effort. A `--model` a rung lists runs on its entry's harness and effort; one no rung lists runs at `--harness`'s
- * first entry, or without it in place of the round's draw. An override never brings back an avoided model.
+ * The one reviewer `--harness`, `--model`, or `--effort` names, which runs alone, outside the draw, and never passes
+ * its run on. It is the first entry the flags fit, from the size's rung outward in the rungs' listed order, so the
+ * same flags name the same reviewer on every run: `--harness` that CLI's first entry whose model is not avoided,
+ * `--model` its own entry, and `--effort` alone the first whose model is not avoided. `--model` and `--effort` then
+ * override that entry's. A `--model` no rung lists needs `--harness`, at whose first entry's effort it runs.
  */
-export function namedReviewer(choice: Choice, draw: Draw, avoided: (entry: ReviewModel) => boolean): ReviewModel {
-	const ours = (entry: ReviewModel) => choice.harness === undefined || entry.harness === choice.harness;
-	// From the size's rung outward, whatever the run drew, so a model a flag pins runs at one effort on a size.
-	const pool = rungOrder(draw.size, SIZE_RUNGS[draw.size])
+export function namedReviewer(choice: Choice, size: Size, avoided: (entry: ReviewModel) => boolean): ReviewModel {
+	const pool = rungOrder(size, SIZE_RUNGS[size])
 		.flatMap((rung) => RUNGS[rung])
-		.filter(ours);
-	const seat = () => drawSeat({ ...draw, usable: (each) => ours(each) && draw.usable(each) }, [])?.reviewer;
-	const first = choice.harness === undefined ? undefined : pool[0];
+		.filter((entry) => choice.harness === undefined || entry.harness === choice.harness);
 	const entry =
 		choice.model === undefined
-			? (seat() ?? first)
-			: (pool.find((each) => sameModel(each.model, choice.model!)) ?? first ?? seat());
+			? (pool.find((each) => !avoided(each)) ?? pool[0])
+			: (pool.find((each) => sameModel(each.model, choice.model!)) ??
+				(choice.harness === undefined ? undefined : pool[0]));
 	const harness = choice.harness ?? entry?.harness;
 	const model = choice.model ?? entry?.model;
 	const effort = choice.effort ?? entry?.effort;
-	if (harness === undefined)
-		throw new ReviewInputError("every reviewer is avoided, as the latest writer's; pass --harness and --model");
+	if (harness === undefined) throw new ReviewInputError(`no rung lists ${choice.model}; pass --harness with it`);
 	if (model === undefined || effort === undefined)
 		throw new ReviewInputError(`no rung lists a ${harness} reviewer; pass --model and --effort`);
 	const picked = { harness, model, effort };
@@ -541,8 +529,8 @@ export interface Tally extends Reviewing {
 	/** The run of its latest round, which orders the reviewers a rung has no new model left to seat instead of. */
 	last: number;
 	/**
-	 * Each finding it raised, once however many rounds keep it open, by its latest severity. One a later round keeps
-	 * open becomes that round's reviewer's, since its round reports it again unlinked to the earlier one.
+	 * Each finding it raised, once however many runs keep it open: one a later run keeps open carries over as it
+	 * was, still counted here.
 	 */
 	findings: Record<(typeof SEVERITIES)[number], number>;
 	/** Its first round's findings by severity, which later rounds leave as they were. */
@@ -1639,8 +1627,13 @@ async function prepare(
 			reviewer.supported?.(dir);
 			const { code, stderr } = await run(reviewer.status, dir, env, "", reader, signal);
 			const output = `${printed}${stderr}`.trim();
+			// A status check that asks the provider can fail on the network, which is that CLI out, not logged out.
 			if (code !== 0 && reviewer.remoteStatus && !reviewer.unauthorized.test(output))
-				throw new Error(`\`${reviewer.status.join(" ")}\` failed: ${output || `exit ${code}`}`);
+				throw new ReviewerUnavailableError(
+					harness,
+					"status check failed",
+					`\`${reviewer.status.join(" ")}\` failed: ${output || `exit ${code}`}`,
+				);
 			return code === 0;
 		} finally {
 			if (dir !== cwd) rmSync(dir, { recursive: true, force: true });
@@ -2605,27 +2598,25 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 		},
 		usable: (entry) => !avoided(entry) && !down.has(entry.harness) && !out.has(canonicalModel(entry.model)),
 	};
-	/** A run's seats beside the rounds on `taken` vendors: `lead`, when a flag names one, then each seat's draw. */
-	const plan = (count: number, taken: ReviewHarness[], lead?: ReviewModel, effort?: string): Seat[] => {
-		const seats: Seat[] = lead === undefined ? [] : [{ reviewer: lead }];
+	/** `count` drawn seats beside those on `taken` vendors; the skips since `from` are what an outage names. */
+	const plan = (count: number, taken: ReviewHarness[], from = 0): Seat[] => {
+		const seats: Seat[] = [];
 		while (seats.length < count) {
 			const vendors = [...taken, ...seats.map((seat) => seat.reviewer.harness)];
 			const seat = drawSeat(draw, vendors);
 			if (seat === undefined) {
+				const passed = skipped.slice(from);
 				// A CLI this host lacks could never take a further seat, so alone it leaves that seat to the avoided models,
 				// which the writer's record frees; with no seat filled, the missing CLI is what to restore.
-				const lacking = skipped.every(
+				const lacking = passed.every(
 					(skip) => skip.reason === "not installed" || skip.reason === "not supported",
 				);
 				const unavoided = {
 					...draw,
 					usable: (entry: ReviewModel) => !down.has(entry.harness) && !out.has(canonicalModel(entry.model)),
 				};
-				if (
-					skipped.length > 0 &&
-					!(vendors.length > 0 && lacking && drawSeat(unavoided, vendors) !== undefined)
-				)
-					throw new ReviewOutageError(SIZE_RUNGS[sized.size], skipped, messages);
+				if (passed.length > 0 && !(vendors.length > 0 && lacking && drawSeat(unavoided, vendors) !== undefined))
+					throw new ReviewOutageError(SIZE_RUNGS[sized.size], passed, messages.slice(from));
 				const guessed =
 					"when the writer was guessed from the running harness, name it in the PR's ## Models record or with --exclude-model";
 				throw new ReviewInputError(
@@ -2636,15 +2627,10 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 			}
 			seats.push(seat);
 		}
-		// --effort alone names no reviewer, so the first seat is drawn, and passes on, like any other.
-		if (effort !== undefined && seats[0] !== undefined) seats[0] = { reviewer: { ...seats[0].reviewer, effort } };
 		return seats;
 	};
 	// A flag's reviewer, or else that some reviewer may take the first seat, is checked before the classifier spends a turn.
-	const lead =
-		options.harness !== undefined || options.model !== undefined
-			? namedReviewer(options, draw, avoided)
-			: undefined;
+	const lead = named ? namedReviewer(options, sized.size, avoided) : undefined;
 	if (lead === undefined) plan(1, []);
 
 	const head = git(root, ["rev-parse", "HEAD"]);
@@ -2708,34 +2694,37 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 		return { rounds: [], tallies, risk: low, skipped: [], since, branch, head, base, sized };
 	}
 
-	// The head the last run passed with no finding, under the same base, instructions, and rules: its rounds stand,
-	// repeated as unchanged, and a seat they lack joins that run rather than start another.
-	const kept =
+	// A flag's reviewer runs alone; else a high head seats two vendors, and any other one.
+	const seats = (risk: Risk) => (lead !== undefined ? 1 : overridden(risk, override).tier === "high" ? 2 : 1);
+	const one = (round: Round): ReviewModel => ({ harness: round.reviewer, model: round.model, effort: round.effort });
+	// The head the last run passed with no finding, under the same base, size's rung, instructions, and rules: its
+	// rounds stand whole, repeated as unchanged, while they are the review this run would be: the flag's reviewer
+	// alone, or else as many vendors as the tier seats, none since avoided. Otherwise a new run reviews the head.
+	const stands =
 		prior !== undefined &&
 		earlier.length === 0 &&
 		latest[0]?.head === head &&
 		latest[0].base.ref === baseRef &&
-		// A size on another rung calls for that rung's review.
 		SIZE_RUNGS[latest[0].size] === SIZE_RUNGS[sized.size] &&
 		prior.mergeBase === mergeBase &&
 		prior.given.instructions === given.instructions &&
-		prior.given.rules === given.rules
-			? // A reviewer now avoided, as the writer the record has since named, fills no seat.
-				latest.filter(
-					(round) => !avoided({ harness: round.reviewer, model: round.model, effort: round.effort }),
-				)
-			: [];
-	const number = kept.length > 0 ? runs : runs + 1;
-	// A seat that joins a run draws from the rung its standing rounds ran on, not another.
-	if (kept[0]?.rung !== undefined) draw.rung = kept[0].rung.name;
-	const stood = kept.map((round): Round => ({
-		...round,
-		base,
-		size: sized.size,
-		sizeFrom: sized.from,
-		usage: [],
-		unchanged: true,
-	}));
+		prior.given.rules === given.rules &&
+		latest.every((round) => !avoided(one(round))) &&
+		(lead !== undefined
+			? latest.length === 1 && latest[0].reviewer === lead.harness && sameReviewer(latest[0], lead)
+			: new Set(latest.map((round) => round.reviewer)).size >= seats(before));
+	if (stands) {
+		save(statePath, state(prior, runs, tallies, low));
+		const rounds = latest.map((round): Round => ({
+			...round,
+			base,
+			size: sized.size,
+			sizeFrom: sized.from,
+			usage: [],
+			unchanged: true,
+		}));
+		return { rounds, tallies, risk: low, skipped: [], since, branch, head, base, sized };
+	}
 	const shared: Shared = {
 		root,
 		branch,
@@ -2747,7 +2736,7 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 		classified: classified.value,
 		earlier: earlier.length === 0 ? null : { head: latest[0]!.head, findings: earlier },
 		responses: options.responses,
-		number,
+		number: runs + 1,
 		dir,
 		env: deps.env,
 	};
@@ -2755,86 +2744,39 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 	// The last run's findings this run already carried over, by number.
 	const open = new Set<number>();
 	const judged = () => settle(classified.value, [...onHead, ...done]);
-	const persist = () => {
-		const after = tallied(tallies, [...stood, ...done], raisers);
-		const risk = overridden(judged(), override);
-		const reviewed = done.length === 0 ? prior : { mergeBase, given, rounds: [...onHead, ...done] };
-		save(statePath, state(reviewed, done.length === 0 ? runs : number, after, risk));
-		return { after, risk };
-	};
-	// --model or --effort names only the first seat, so a high head still gets its second; --harness's runs alone.
-	const seats = (risk: Risk) =>
-		options.harness !== undefined ? 1 : overridden(risk, override).tier === "high" ? 2 : 1;
-	// Whether a standing round is the reviewer the flags name, as resolved to its harness, model, and effort.
-	const flagged = (round: Round) =>
-		lead === undefined
-			? round.effort === options.effort
-			: round.reviewer === lead.harness && sameReviewer(round, lead);
-	let after = tallies;
-	let risk = low;
-	// The first pass seats what the tier before the run calls for. A round that raised the tier to high gets the seat
-	// the lower tier skipped in a second pass, at once: the rounds already run are saved first, so a further reviewer
-	// that cannot run costs them nothing, and the next run seats it again.
-	for (let pass = 0; ; pass++) {
-		const wanted = pass === 0 && named && !kept.some(flagged);
-		const first = wanted ? lead : undefined;
-		const effort = wanted && lead === undefined ? options.effort : undefined;
-		// The seats are vendors, so two standing rounds of one vendor's models, as a flag may name, fill one.
-		const taken = [...new Set([...kept, ...done].map((round) => round.reviewer))];
-		const count = Math.max(seats(pass === 0 ? before : judged()) - taken.length, wanted ? 1 : 0);
-		if (count === 0) break;
-		try {
-			let planned = plan(count, taken, first, effort);
-			const passed = skipped.length;
-			for (;;) {
+	// A round that raises the tier to high gets the seat the lower tier skipped in a further pass, at once. The run
+	// is saved whole or not at all, so one that fails leaves the last run's findings and responses as they were.
+	for (;;) {
+		const taken = [...new Set(done.map((round) => round.reviewer))];
+		const count = seats(judged()) - taken.length;
+		if (count <= 0) break;
+		const passed = skipped.length;
+		let planned: Seat[] = lead === undefined ? plan(count, taken, passed) : [{ reviewer: lead }];
+		for (;;) {
+			try {
+				done = [...done, ...carried(await runSeats(shared, planned, options.signal), earlier, raisers, open)];
+				break;
+			} catch (error) {
+				// A reviewer a flag named never passes its run on.
+				if (!(error instanceof ReviewerUnavailableError) || error.seat === undefined || lead !== undefined)
+					throw error;
+				if (error.model === null) down.add(error.harness);
+				out.add(canonicalModel(error.seat.model));
+				skipped.push({ ...error.seat, reason: error.reason });
+				messages.push(error.message);
 				try {
-					done = [
-						...done,
-						...carried(await runSeats(shared, planned, options.signal), earlier, raisers, open),
-					];
-					break;
-				} catch (error) {
-					// A reviewer a flag named never passes its round on.
-					if (
-						!(error instanceof ReviewerUnavailableError) ||
-						error.seat === undefined ||
-						error.seat === first
-					)
-						throw error;
-					if (error.model === null) down.add(error.harness);
-					out.add(canonicalModel(error.seat.model));
-					skipped.push({ ...error.seat, reason: error.reason });
-					messages.push(error.message);
-					try {
-						planned = plan(count, taken, first, effort);
-					} catch (outage) {
-						// The only reviewer that could take the seat fails as itself, rather than as an outage of one.
-						throw outage instanceof ReviewOutageError && skipped.length - passed === 1 ? error : outage;
-					}
+					planned = plan(count, taken, passed);
+				} catch (outage) {
+					// The only reviewer that could take the seat fails as itself, rather than as an outage of one.
+					throw outage instanceof ReviewOutageError && skipped.length - passed === 1 ? error : outage;
 				}
 			}
-		} catch (error) {
-			// Whatever stopped the further review, the rounds saved before it still need their findings answered, so
-			// the failure carries them to the report.
-			if (pass > 0 && typeof error === "object" && error !== null)
-				savedBefore.set(error, {
-					rounds: [...stood, ...done],
-					tallies: after,
-					risk,
-					skipped,
-					since,
-					branch,
-					head,
-					base,
-					sized,
-				});
-			throw error;
 		}
-		({ after, risk } = persist());
 	}
-	// A run that seated no one still saves the head's classification.
-	if (done.length === 0) ({ after, risk } = persist());
-	return { rounds: [...stood, ...done], tallies: after, risk, skipped, since, branch, head, base, sized };
+	const after = tallied(tallies, done, raisers);
+	const risk = overridden(judged(), override);
+	save(statePath, state({ mergeBase, given, rounds: [...onHead, ...done] }, runs + 1, after, risk));
+	return { rounds: done, tallies: after, risk, skipped, since, branch, head, base, sized };
 }
 
 /**

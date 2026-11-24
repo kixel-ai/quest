@@ -1535,8 +1535,7 @@ the record names it in its header:
 ```
 
 Only when no reviewer is left for a seat does the run fail, exiting 3 with
-each one's error. A reviewer `--harness` or `--model` names never
-passes its seat on; `--effort` alone names none, so its seat is drawn and passes on.
+each one's error. A reviewer a flag names never passes its run on.
 
 A quest branch takes its quest's size, read from the base branch's tip so a
 change cannot lower its own review; any other PR, such as a skill's own, takes
@@ -1550,14 +1549,13 @@ Without a record, or when its last line names an `unknown` model, the harness
 running the command, usually the session that
 just pushed, detected from the variables Claude Code, Codex, and Antigravity
 each set, is taken to be the latest writer, so Codex reviews from Claude Code
-and Claude Code from Codex. `--harness` names the only reviewer instead of
-the draw, taking that CLI's own draw, and
-`--model` and `--effort` override that reviewer's or, without `--harness`, the
-first seat's, as a
-repository whose `AGENTS.md` names other reviewers needs; a `--model` a rung
-lists, in any spelling such as `openai/gpt-6.2-astra`, runs on its own entry's
-harness and effort on the size's rung or the nearest that lists it, whatever the run drew, passed to the CLI as given, and one no rung lists at
-`--harness`'s first entry, or without it in place of the first seat's draw.
+and Claude Code from Codex. `--harness`, `--model`, or `--effort` names one reviewer, which runs alone, outside the draw, as a run of its
+own, even on a high head: the first entry the flags fit from the size's rung outward, in the order the rungs
+list, so the same flags name the same reviewer on every run. `--harness` alone is that CLI's first entry whose
+model is not avoided, `--model` its own entry in any spelling such as `openai/gpt-6.2-astra`, passed to the CLI
+as given, and `--effort` alone the first entry whose model is not avoided; `--model` and `--effort` then
+override the entry's. A `--model` no rung lists needs `--harness`, at whose first entry's effort it runs unless
+`--effort` names one. A repository whose `AGENTS.md` names other reviewers passes them.
 `--exclude-model`, records, and `quest usage` match
 a listed model by any spelling too. A reviewer a flag names records no rung.
 An unknown harness or a branch whose
@@ -1627,9 +1625,9 @@ refutation stands only
 when it cites evidence the reviewer can check. A run on
 the head the last run passed with no finding, under the same base, a size on the same rung, and
 applicable `AGENTS.md`, `CLAUDE.md`, shipped shared review rules, and `REVIEW.md`, runs no
-reviewer and repeats its rounds, marked `unchanged`, but for a seat the tier
-now calls for that they lack, or a reviewer a flag names that is not among
-them, which joins that run. Claude
+reviewer and repeats its rounds, marked `unchanged`, while they are the review this run would be: as many
+vendors as the tier seats, none since avoided, or else the one reviewer a flag names. Otherwise a new run
+reviews the head. Claude
 Code is asked for its 1-hour prompt cache, and Codex keeps its default. The
 branch's rounds are kept in the clone's common Git directory, so
 any worktree of the clone continues them; `--new` drops the last run's
@@ -1718,7 +1716,7 @@ It prints the size and its source, base, and head; the head's `risk` tier and
 reason, then `classified` with the classifier's tier, how it was set (`model`,
 `paths`, or `default`), and reason, and for a model a `classifier` line with its
 harness, model, effort, and session, and its `usage` line; then for each reviewer its
-harness, model, and effort, session, round,
+harness, model, and effort, a `rung` line with its rung and which way that lies from the size's unless a flag named it, session, the branch's run as `round`,
 an `unchanged` line for a repeated round, a `usage` line per turn (input tokens, the part read from the prompt cache, and output),
 the score, a `raised` line with the tier and reason when it raised the classifier's, the
 finding count, then each finding as its number, severity, `path:line`, and title over its
@@ -1745,7 +1743,7 @@ its location, and the last round's findings with their dispositions. The
 tally, as `- Rounds: 3, runs 1 to 5; first round 2 (medium 2); findings 4 (high 1, medium 3): fixed 3, refuted 1, open 0`,
 counts the rounds on the branch of that model at that effort, the branch's runs of its first and latest, its first round's findings as that
 round graded them, and each finding it raised once,
-by its latest severity, however many rounds keep it open. A finding counts
+however many runs keep it open. A finding counts
 for the reviewer that raised it when a later run's reviewer fixes or
 refutes it, as the run's first round settled it, and one any seat of the run keeps open stays open and its own. `--new` drops the findings it leaves unsettled from the
 tallies. A reviewer of an earlier run keeps a block with only its sessions and
@@ -1770,8 +1768,7 @@ failures. The only eligible reviewer's usage limit prints one line,
 `error: <harness> hit its usage limit; resets <time>`, where `<time>` is the
 reset as an ISO 8601 UTC timestamp, or `unknown` when the CLI named none; with
 several, it prints `error: no eligible <list> reviewer could run: <model>
-<effort> (<error>), ...`, where `<list>` is the PR's size, or `high` for a high
-head's list.
+<effort> (<error>), ...`, where `<list>` is the size's rung.
 Through a gateway that pools accounts, such as CLIProxyAPI, the limit is the
 pool's: Claude Code shows its "All credentials for model ... are cooling down",
 and Codex, sent to `OPENAI_BASE_URL`, gives up on the gateway's 429 after its
@@ -1853,12 +1850,9 @@ A low head with no finding left to settle runs no local reviewer, unless
 `--harness`, `--model`, or `--effort` names one: the record names the head in
 full, adds `- Local review: none, since a low-risk head needs only the online
 reviewer`, and `next done` says so. A high head seats two reviewers
-of different vendors, each drawn from the run's rung as any seat is. `--model`
-and `--effort` name only the first seat, so the second still runs; the
-one reviewer `--harness` names runs alone. A round that raises the tier to high saves its rounds and seats the
-second reviewer at once, on a vendor the head's rounds lack; when that review
-fails, as when none can run, it prints those rounds before the error, so their
-findings can be answered. When every model of the other vendor is avoided, as
+of different vendors, each drawn from the run's rung as any seat is. A reviewer a flag names runs alone. A round that raises the tier to high seats the
+second reviewer at once, in the same run; a run is saved whole or not at all, so one that fails there, as when
+none can run, leaves the branch as it was. When every model of the other vendor is avoided, as
 with no `## Models` record, which avoids every model of the harness running the
 command, the run fails as a usage error; when they cannot run, as an outage.
 
@@ -1944,8 +1938,8 @@ unanswered otherwise.
 
 Rollups follow: spend by size, role, harness, model, and effort; accuracy
 by size and implementer, which sums every reviewer's tally, so it counts
-every finding the reviewers caught before merge, and as first rounds those of the branch's first run alone, since a
-later model's first round reports again what an earlier one left open. Since a branch's tallies span every PR from it, only the
+every finding the reviewers caught before merge, and as first rounds those of the branch's first run alone, the measure of what the writer handed over: what later
+runs find, on later heads, counts in the findings and not there. Since a branch's tallies span every PR from it, only the
 PR whose record holds its latest tally, by the most rounds and then the newest,
 counts them, and a record written before tallies
 counts as unreviewed. An `Implementer:` line's own size, as

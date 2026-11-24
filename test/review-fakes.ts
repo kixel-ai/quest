@@ -265,7 +265,7 @@ const path = require("node:path");${LOG}
 const argv = process.argv.slice(2);
 const raw = fs.readFileSync(0, "utf8");
 const stdin = raw ? JSON.parse(raw).message.content : "";
-const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => /^(CLAUDE|CODEX|ANTHROPIC|ANTIGRAVITY|AGY|FAKE_HOST|PATH$)/.test(k)));
+const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => /^(CLAUDE|CODEX|ANTHROPIC|ANTIGRAVITY|AGY|GEMINI|GOOGLE|FAKE_HOST|PATH$)/.test(k)));
 const walk = (dir) => fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) =>
 	entry.isDirectory() ? walk(path.join(dir, entry.name)).map((name) => entry.name + "/" + name) : [entry.name]);
 // A turn runs in its directory's workspace, so the whole directory, its export included, is logged.
