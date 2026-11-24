@@ -23,6 +23,7 @@ import {
 	type Settled,
 	type Tally,
 	UnansweredError,
+	agyTurn,
 	ask,
 	authored,
 	baseInstructions,
@@ -1150,6 +1151,48 @@ test.skipIf(caseInsensitive)(
 	},
 );
 
+test.skipIf(caseInsensitive)("agy's export fetches what a partial clone lacks of the head, in one batch", () => {
+	const dir = realpathSync(tempDir());
+	const run = (cwd: string, ...args: string[]) =>
+		execFileSync("git", ["-C", cwd, ...args], {
+			encoding: "utf8",
+			env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
+		});
+	const source = join(dir, "source");
+	run(dir, "init", "-q", source);
+	write(source, "top.txt", "top\n");
+	write(source, "sub/inner.txt", "inner\n");
+	run(source, "add", "-A");
+	run(source, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "one");
+	run(source, "config", "uploadpack.allowFilter", "true");
+	run(source, "config", "uploadpack.allowAnySHA1InWant", "true");
+	const part = join(dir, "part");
+	run(dir, "clone", "-q", "--no-local", "--filter=blob:none", "--sparse", `file://${source}`, part);
+	const head = run(part, "rev-parse", "HEAD").trim();
+	// The sparse checkout leaves sub/inner.txt's blob behind.
+	expect(run(part, "rev-list", "--objects", "--missing=print", "--no-walk", head)).toMatch(/^\?/m);
+	const call = agyTurn(
+		{
+			mergeBase: head,
+			root: part,
+			head,
+			ranges: [],
+			instructions: "",
+			model: "m",
+			effort: "low",
+			schema: {},
+			schemaFile: "",
+		},
+		"",
+		[],
+	);
+	try {
+		expect(readFileSync(join(call.workspace!.dir, "head", "sub", "inner.txt"), "utf8")).toBe("inner\n");
+	} finally {
+		rmSync(call.workspace!.dir, { recursive: true, force: true });
+	}
+});
+
 // Root lists any directory, so the refusal only shows for another user.
 test.skipIf(process.getuid?.() === 0 || caseInsensitive)("agy's read rules refuse a parent they cannot list", () => {
 	const dir = realpathSync(tempDir());
@@ -1230,8 +1273,12 @@ agyFakes(
 		git(s.repo, "commit", "-qm", "attributes");
 		const smudged = join(s.repo, ".tmp", "smudged");
 		git(s.repo, "config", "filter.plant.smudge", `touch ${smudged}; cat`);
-		// The user's own attributes name the filter too, which no export runs either.
+		// The user's own attributes name the filter too, and their default attributes file converts line endings,
+		// neither of which the export applies.
 		write(s.repo, ".git/info/attributes", "* filter=plant\n");
+		const config = join(s.bin, "..", "config");
+		write(config, "git/attributes", "*.ts eol=crlf\n");
+		vi.stubEnv("XDG_CONFIG_HOME", config);
 		write(s.repo, ".tmp/secret.env", "UNTRACKED-SECRET\n");
 		// An Antigravity session's own state and an Antigravity gateway never reach the reviewer.
 		vi.stubEnv("ANTIGRAVITY_LS_ADDRESS", "127.0.0.1:1");
@@ -2832,8 +2879,19 @@ test("the verdict is checked field by field, settling each earlier finding once"
 	);
 	expect(() => verdict({ text: '{"verdict":"approve"}' }, 0)).toThrow("no findings list");
 	// An agy reviewer naming a file by its path in the head's export names it in the repository.
-	const exported = { ...FINDING, file: "/run/user/1000/quest/agent/review-AbC123/head/src/lib.ts" };
-	expect(verdict({ structured: { ...scored, findings: [exported] } }, 0).findings[0]!.file).toBe("src/lib.ts");
+	const exported = (file: string) =>
+		verdict(
+			{
+				structured: {
+					...scored,
+					findings: [{ ...FINDING, file: `/run/user/1/quest/agent/review-AbC123/head/${file}` }],
+				},
+			},
+			0,
+		).findings[0]!.file;
+	expect(exported("src/lib.ts")).toBe("src/lib.ts");
+	// Only the export's own prefix, though a tracked path looks like one.
+	expect(exported("packages/review-ui/head/index.ts")).toBe("packages/review-ui/head/index.ts");
 	for (const score of [-1, 11, 7.5, "7", undefined]) {
 		expect(() => verdict({ structured: { ...scored, score, findings: [] } }, 0)).toThrow("no score from 0 to 10");
 	}

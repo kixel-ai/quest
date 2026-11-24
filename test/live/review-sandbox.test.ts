@@ -785,7 +785,10 @@ describe("agy", () => {
 			return;
 		}
 		// Without the read rules the same turn quotes every canary, so the checks below are not vacuous.
+		clearAgy();
 		const open = agyRun(await turn(hostile(), (rules) => rules.filter((rule) => !rule.startsWith("read_file("))));
+		// It keeps every rule but the read rules, so the command it asks for runs no more than a plant does.
+		expect(recordedAgy(), `planted configuration or a command ran\n${open.output}`).toEqual([]);
 		expect(open.response, `the canary was not read without the read rules\n${open.output}`).toContain(secret);
 		expect(open.response, `the other canary was not read without the read rules\n${open.output}`).toContain(
 			otherSecret,

@@ -1014,7 +1014,7 @@ const AGY_AGENT = "quest-reviewer";
 const AGY_SETTINGS = "settings.json";
 
 /** The head's export in a turn's directory, should an agy reviewer name a finding's file by its absolute path. */
-const IN_EXPORT = /^\/.*\/review-[^/]+\/head\//;
+const IN_EXPORT = /^\/.*?\/review-[^/]+\/head\//;
 
 /** The empty tree in `root`'s object format, whose attributes are none. */
 const emptyTree = (root: string) => git(root, ["hash-object", "-t", "tree", "--stdin"], "");
@@ -1139,6 +1139,11 @@ function exportHead(root: string, head: string, into: string): void {
 	const objects = join(git(root, ["rev-parse", "--path-format=absolute", "--git-common-dir"]), "objects");
 	const format = git(root, ["rev-parse", "--show-object-format"]);
 	const empty = emptyTree(root);
+	// A partial clone may lack some of the head's objects, which the scratch directory has no remote to fetch, so the
+	// checkout fetches them first, in one batch, as a diff from the empty tree does.
+	const listed = git(root, ["rev-list", "--objects", "--missing=print", "--no-walk", commit]);
+	if (listed.split("\n").some((line) => line.startsWith("?")))
+		git(root, ["diff", "--no-ext-diff", "--no-textconv", "--numstat", empty, commit]);
 	const scratch = `${into}.git`;
 	mkdirSync(join(scratch, "objects", "info"), { recursive: true, mode: 0o700 });
 	mkdirSync(join(scratch, "refs"), { mode: 0o700 });
@@ -1175,6 +1180,9 @@ function exportHead(root: string, head: string, into: string): void {
 		run("checkout-index", [
 			"-c",
 			"core.symlinks=false",
+			// Git reads the user's own attributes file even with no configuration, so none is named.
+			"-c",
+			"core.attributesFile=/dev/null",
 			`--attr-source=${empty}`,
 			"checkout-index",
 			"--all",
