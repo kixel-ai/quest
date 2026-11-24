@@ -547,8 +547,8 @@ first wait is still reported.
 
 `quest status` prints a GitHub PR's current state in one call, such as after
 `quest wait` wakes. It accepts the same PR argument and authentication as
-`quest wait`, and reports facts without deciding whether the PR is ready or
-whose review counts:
+`quest wait`, and reports facts without deciding whether the PR is ready, except
+that it counts only a `## Review` record maintainers wrote:
 
 ```console
 $ quest status 128
@@ -579,7 +579,7 @@ comes last, and a missing value prints as `-`:
 | --- | --- |
 | `url`, `state`, `draft`, `head` | The PR URL; `open`, `closed`, or `merged`; `true` or `false`; the head SHA. |
 | `mergeable`, `merge-state`, `review-decision` | GitHub's values, lowercased. |
-| `review-record` | Whether the PR body's [`## Review` record](#review-locally) still covers the head, and the head it names last: `current` when it is the head, `diff-identical` when `git diff <base>...<head>` prints the same as for it, `stale` otherwise, or `unknown` when GitHub cannot compare them, such as a diff too large; `-` when the record names no full SHA, or when someone without write access to the base repository, such as a bot or the PR's contributor, last changed the section's text, which `quest status` reads from the body's edit history and warns about. HTML comments and [`quest land`](#the-watchers-own-queue)'s fixer lines are no part of that text, so a bot adding them changes no record. |
+| `review-record` | Whether the PR body's [`## Review` record](#review-locally) still covers the head, and the head it names last: `current` when it is the head, `diff-identical` when `git diff <base>...<head>` prints the same as for it, `stale` otherwise, or `unknown` when GitHub cannot compare them, such as a diff too large; `-` when the record names no full SHA, or, with a warning saying why, when anyone without write access to the base repository, such as a bot or the PR's contributor, wrote any of the section's text, which `quest status` reads from the body's edit history: newest first, each edit that changes the text must be a writer's, and a writer's edit that only adds lines vouches for those alone. Hidden HTML comments, line endings, and trailing spaces are no part of that text, and a bot's edit that only adds [`quest land`](#the-watchers-own-queue)'s fixer lines changes nothing; those lines name the head the fixer pushed, so they never name a reviewed head. Reading the history takes a token that can push to the repository; any other sees every record as untrusted. |
 | `risk` | The record's [risk tier](#risk-tiers), `low`, `medium`, or `high`; the same state as `review-record` for the head it names; the tier its classifier set before any reviewer raised it; and the reason. `-` when the record names none, and `- malformed -` with why when its risk lines do not parse, which `quest merge` refuses. |
 | `class` | The `## Automatic` class of the base's `RISK.md` the record's classifier found the change in, or `-`. |
 | `auto-merge` | Method, who enabled it, when, and the head it was enabled on. |

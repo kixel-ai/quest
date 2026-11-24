@@ -1,11 +1,11 @@
-// Whose `## Review` record `quest status` counts: only one whose section a user with write access to the base
-// repository last changed, since anyone can write a SHA into their own PR's body.
-import { type PullRequest, recordedRisk, reviewSection } from "../core";
-import { type GitHubReader, array, object, string } from "./client";
+// Whose `## Review` record `quest status` counts: only one users with write access to the base repository wrote,
+// since anyone can write a SHA into their own PR's body.
+import { FIX_LINE, type PullRequest, recordBody, recordedRisk, reviewText } from "../core";
+import { type GitHubReader, WRITE, array, object, permission, string } from "./client";
 
 /** Edits read per page, each carrying a whole body of up to 65,536 characters; the record's writer is usually among the newest few. */
 const PAGE = 10;
-/** The newest edits read for the one that last changed the section; past them, its writer is unknown. */
+/** The newest edits read for the ones that wrote the section; past them, its writer is unknown. */
 const EDITS = 100;
 
 const EDITS_QUERY = `query BodyEdits($owner: String!, $repo: String!, $number: Int!, $after: String) {
@@ -18,29 +18,10 @@ const EDITS_QUERY = `query BodyEdits($owner: String!, $repo: String!, $number: I
 	} }
 }`;
 
-/** Permissions that count, as GitHub's `permission` field names them, which reads maintain as write and triage as read. */
-const WRITERS = ["admin", "maintain", "write"];
-const PERMISSIONS = [...WRITERS, "triage", "read", "none"];
-
 /**
- * The `## Review` section's text as its readers take it, or null without one. HTML comments, which GitHub hides,
- * and the land fixer's `mechanical fix by` lines are dropped, so a bot adding either, as CodeRabbit's summary
- * markers and `quest land` do, changes no record, and neither can carry a SHA into one.
- */
-export function counted(body: string): string | null {
-	const section = reviewSection(body);
-	if (section === null) return null;
-	return body
-		.slice(section.start, section.end)
-		.replace(/<!--[\s\S]*?(?:-->|$)/g, "")
-		.replace(/^mechanical fix by [^:\n]+: .*$/gm, "")
-		.trim();
-}
-
-/**
- * `body` reduced to the `## Review` record `quest status` counts: the section as {@link counted} reads it when a user
- * with write access to `pr`'s repository last changed that text, else nothing, with a warning saying why. A body
- * whose section names no full SHA and no risk is returned as it reads, unchecked, since it records nothing.
+ * `body` reduced to the `## Review` record `quest status` counts, as {@link recordBody} gives it, when writers alone
+ * wrote the section's text, else nothing, with a warning saying why. A section naming no full SHA and no risk is
+ * returned unchecked, since it records nothing.
  */
 export async function trustedReview(
 	github: GitHubReader,
@@ -48,70 +29,118 @@ export async function trustedReview(
 	body: string,
 	warn: (message: string) => void,
 ): Promise<string> {
-	const text = counted(body);
+	const text = reviewText(body);
 	if (text === null) return "";
-	const record = `## Review\n\n${text}\n`;
-	if (!/\b[0-9a-f]{40}\b/.test(text) && recordedRisk(record) === null) return record;
+	const record = recordBody(text);
+	if (!/\b[0-9a-f]{40}\b/.test(record) && recordedRisk(record) === null) return record;
 	const why = await untrusted(github, pr, body, text);
 	if (why === null) return record;
 	warn(`${pr.owner}/${pr.repo}#${pr.number}'s ## Review record does not count: ${why}`);
 	return "";
 }
 
-/** Why the section reading `text` is untrusted, or null when writers alone last changed it. */
+/** What a walk reads with: the repository's client and PR, and each account's permission once asked. */
+interface Reading {
+	github: GitHubReader;
+	pr: PullRequest;
+	permissions: Map<string, Promise<string | 403 | 404>>;
+}
+
+/** One version of the body: who saved it, and its section's text, null without one, or why it cannot be read. */
+interface Version {
+	editor: unknown;
+	text: string | null | { unreadable: string };
+}
+
+/**
+ * Why the section is untrusted, or null when writers wrote it. Walking the body's versions newest first, each edit
+ * that changes the section's text must be a writer's. A writer's edit that only adds lines vouches for those alone, so
+ * the walk goes on to whoever wrote the rest; any other edit by a writer, or the section's creation, ends it.
+ */
 async function untrusted(github: GitHubReader, pr: PullRequest, body: string, text: string): Promise<string | null> {
-	// Newest first: the version that set `text` is the oldest of the newest run of versions reading `text`.
-	let writer: unknown = undefined;
+	let newer: Version | undefined;
 	let after: string | null = null;
 	let read = 0;
-	let newer = Infinity;
+	let time = Infinity;
+	const reading: Reading = { github, pr, permissions: new Map() };
 	for (;;) {
 		const data = await github.graphql(EDITS_QUERY, { owner: pr.owner, repo: pr.repo, number: pr.number, after });
 		const pull = object(object(data.repository).pullRequest);
 		if (pull.body !== body)
 			throw new Error("the PR body changed while reading its edit history; rerun quest status");
 		const edits = object(pull.userContentEdits);
-		const nodes = array(edits.nodes);
-		for (const edit of nodes) {
+		for (const edit of array(edits.nodes)) {
 			const at = Date.parse(string(edit.editedAt));
-			if (!(at <= newer)) throw new Error("invalid GitHub response: the PR body's edits are not newest first");
-			newer = at;
-			if (typeof edit.diff !== "string") return "a revision in its edit history was deleted";
+			if (!(at <= time)) throw new Error("invalid GitHub response: the PR body's edits are not newest first");
+			time = at;
 			if (read++ === 0 && edit.diff !== body)
-				throw new Error("invalid GitHub response: the PR body's newest edit is not its body");
-			if (counted(edit.diff) !== text) return judge(github, pr, [writer]);
-			writer = edit.editor;
+				return "its edit history does not show the current body yet; rerun quest status";
+			const version: Version = {
+				editor: edit.editor,
+				text:
+					typeof edit.diff === "string"
+						? reviewText(edit.diff)
+						: { unreadable: edit.deletedAt == null ? "is unreadable" : "was deleted" },
+			};
+			if (newer !== undefined) {
+				const verdict = await change(reading, newer, version);
+				if (verdict !== undefined) return verdict;
+			}
+			newer = version;
 		}
 		const info = object(edits.pageInfo);
-		// The oldest edit is the PR's creation, by its author; a body never edited has none.
-		if (info.hasNextPage !== true) return judge(github, pr, read === 0 ? [pull.author] : [writer, pull.author]);
-		if (read >= EDITS)
-			return `its newest ${EDITS} edits all leave the section as it is, so who wrote it is unknown`;
+		if (info.hasNextPage !== true)
+			// The oldest edit is the PR's creation, by its author; a body never edited has none. Creating the section
+			// settles the walk, so it never reads on from here.
+			return (
+				(await change(reading, newer ?? { editor: pull.author, text }, { editor: null, text: null })) ?? null
+			);
+		if (read >= EDITS) return `its newest ${EDITS} edits leave unknown who wrote all of its section`;
 		after = string(info.endCursor);
 	}
 }
 
-/** Why `actors` are not all users with write access to `pr`'s repository, or null when they are. */
-async function judge(github: GitHubReader, pr: PullRequest, actors: unknown[]): Promise<string | null> {
-	const seen = new Set<string>();
-	for (const actor of actors) {
-		if (actor === null) return "the account that last changed its section is gone";
-		const { __typename: kind, login } = object(actor);
-		const name = string(login);
-		if (seen.has(name)) continue;
-		seen.add(name);
-		if (kind !== "User") return `${name}, who last changed its section, is a ${string(kind)}, not a user`;
-		const response = await github.request(
-			`/repos/${pr.owner}/${pr.repo}/collaborators/${encodeURIComponent(name)}/permission`,
-			{ allow: [403, 404] },
-		);
-		if (!response.ok)
-			return `cannot read the permission of ${name}, who last changed its section (HTTP ${response.status})`;
-		const permission = object(await response.json()).permission;
-		if (typeof permission !== "string" || !PERMISSIONS.includes(permission))
-			throw new Error(`invalid GitHub response: unknown permission ${JSON.stringify(permission)}`);
-		if (!WRITERS.includes(permission))
-			return `${name}, who last changed its section, has ${permission} access to ${pr.owner}/${pr.repo}, not write`;
+/**
+ * What the edit from `older` to `newer`, a version already read, says: why the section is untrusted, null once
+ * writers wrote all of it, or undefined to read on. A bot's edit that only adds or drops land fixer lines changes
+ * nothing, since `quest land` writes them as a bot.
+ */
+async function change(reading: Reading, newer: Version, older: Version): Promise<string | null | undefined> {
+	const text = newer.text as string | null;
+	if (typeof older.text === "object" && older.text !== null)
+		return `a revision in its edit history ${older.text.unreadable}`;
+	if (text === older.text) return undefined;
+	const fixes = (section: string | null) => section?.replace(FIX_LINE, "").trim() ?? null;
+	if (kind(newer.editor) === "Bot" && fixes(text) === fixes(older.text)) return undefined;
+	const why = await writer(reading, newer.editor);
+	if (why !== null) return why;
+	return older.text !== null && text !== null && adds(older.text, text) ? undefined : null;
+}
+
+/** Whether `newer` holds every line of `older` in order, with lines added around them. */
+function adds(older: string, newer: string): boolean {
+	const lines = newer.split("\n");
+	let at = 0;
+	for (const line of older.split("\n")) {
+		while (at < lines.length && lines[at] !== line) at++;
+		if (at++ >= lines.length) return false;
 	}
+	return true;
+}
+
+const kind = (actor: unknown) => (actor === null ? null : object(actor).__typename);
+
+/** Why `actor`, who changed the section, is not a user with write access to `pr`'s repository, or null when it is. */
+async function writer({ github, pr, permissions }: Reading, actor: unknown): Promise<string | null> {
+	if (actor === null) return "the account that changed its section is gone";
+	const name = string(object(actor).login);
+	if (kind(actor) !== "User") return `${name}, who changed its section, is a ${String(kind(actor))}, not a user`;
+	// A walk past a writer's additions asks about the same account again.
+	if (!permissions.has(name)) permissions.set(name, permission(github, pr, name));
+	const found = await permissions.get(name)!;
+	if (typeof found === "number")
+		return `cannot read the permission of ${name}, who changed its section (HTTP ${found})`;
+	if (!WRITE.includes(found))
+		return `${name}, who changed its section, has ${found} access to ${pr.owner}/${pr.repo}, not write`;
 	return null;
 }

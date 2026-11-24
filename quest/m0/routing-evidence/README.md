@@ -197,7 +197,8 @@ three hosts' saved review rounds:
     [review seats](/quest/m0/review-seats.md)' one, two, or three vendor
     seats match it, with its tally. The gate retired first: on 2026-11-24
     its review quota ran out, and the maintainer removed the `Pullfrog
-    approval` ruleset, so only a maintainer's local `quest review` record
+    approval` ruleset in
+    [kixel-ai/dotfiles#297](https://github.com/kixel-ai/dotfiles/pull/297), so only a maintainer's local `quest review` record
     gates a merge. Where it still runs, its findings are suggestions like
     any online reviewer's, and this comparison decides whether it keeps
     running.

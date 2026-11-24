@@ -562,7 +562,8 @@ describe("merge --land", () => {
 			"risk is malformed: dire; rerun quest review",
 		);
 		expect(pull.writes).toEqual([]);
-		pull.body = `Summary.\n\n## Review\n\n- Head: ${HEAD}\n- Risk: low, \`docs\`\n- Classified: low by default\n`;
+		// A bot's hidden marker after the reason leaves the line as quest status reads it.
+		pull.body = `Summary.\n\n## Review\n\n- Head: ${HEAD}\n- Risk: low, \`docs\`<!-- bot -->\r\n- Classified: low by default\n`;
 		await land(PR, { sha: HEAD, method: "merge", check: clean }, pull.deps());
 		expect(pull.writes).not.toEqual([]);
 	});

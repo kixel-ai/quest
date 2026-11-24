@@ -1,7 +1,7 @@
 // What holds a PR's head from landing besides its checks: an online reviewer's finding on the head that no writer has
 // answered, and a maintainer decision recorded in a comment after the head was committed that nothing has answered.
 import type { Repository, Signal } from "../core";
-import { type GitHubReader, type ObjectValue, array, object, string } from "./client";
+import { type GitHubReader, type ObjectValue, WRITE, array, object, permission } from "./client";
 import { type Activity, bodyFindings, isBot, login, readActivity, reviewerOf } from "./online-review";
 
 /** The picked heads whose signals a later commit carries unread, and when the pick was made. */
@@ -15,9 +15,6 @@ export interface Carried {
  * a quote or code, which four leading spaces or a tab also start.
  */
 export const DECISION = /^ {0,3}(?![ \t])[^A-Za-z>`~\n]*Maintainer decision\b/i;
-
-/** Repository permissions that can push, whose decisions and answers count. */
-const WRITE = ["admin", "maintain", "write"];
 
 /** A body's first line of prose, past markup such as a bot's HTML comments and images, cut short. */
 const firstLine = (body: string) =>
@@ -155,12 +152,10 @@ async function writersOf(
 		if (association === "OWNER") writers.add(name);
 		else if ((association === "MEMBER" || association === "COLLABORATOR") && !asked.has(name)) {
 			asked.add(name);
-			const response = await client.request(
-				`/repos/${repository.owner}/${repository.repo}/collaborators/${encodeURIComponent(name)}/permission`,
-				{ allow: [404] },
-			);
-			if (response.status !== 404 && WRITE.includes(string(object(await response.json()).permission)))
-				writers.add(name);
+			const found = await permission(client, repository, name);
+			if (found === 403)
+				throw new Error(`cannot read ${name}'s permission on ${repository.owner}/${repository.repo}: HTTP 403`);
+			if (found !== 404 && WRITE.includes(found)) writers.add(name);
 		}
 	}
 	return writers;

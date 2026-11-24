@@ -29,14 +29,12 @@ Use conventional commit subjects. Keep PR descriptions concise: explain the
 problem, resulting behavior, validation, and any limitations.
 
 The PR body's `## Review` record of a local `quest review` round, which
-`quest status` counts only while someone with write access last changed it, satisfies the
+`quest status` counts only when people with write access wrote it, satisfies the
 required review `/quest-merge` describes when it names
 the exact head being landed, with no finding left unfixed or unrefuted; so does
 a recorded skip of a trivial change.
 `/quest-merge`'s exemptions still apply; a hand-resolved conflict outside them
-needs a local review of the new head, but not a maintainer review specifically.
-Dependabot PRs that only bump patch versions or a lockfile
-need no review.
+needs a local review of the new head.
 
 PRs land on `main` through GitHub's merge queue, one PR at a time, as squash commits.
 Queue the reviewed head with `quest merge <pr> --land <sha>` (`/quest-merge` does this).

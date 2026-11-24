@@ -13,6 +13,8 @@ import {
 	type PullRequest,
 	Refusal,
 	recordedRisk,
+	recordBody,
+	reviewText,
 	withoutHandBack,
 } from "../core";
 import { cleanAutoMergeRefusal, immediateMerge, queueHead } from "../github/merge";
@@ -407,9 +409,10 @@ function open(snapshot: Snapshot): void {
 	}
 }
 
-/** Refuse a body whose `## Review` risk record does not parse, so no reader can mistake its tier. */
+/** Refuse a body whose `## Review` risk record does not parse as `quest status` reads it, so no reader can mistake its tier. */
 function readableRisk(snapshot: Snapshot): void {
-	const risk = recordedRisk(snapshot.body);
+	const text = reviewText(snapshot.body);
+	const risk = text === null ? null : recordedRisk(recordBody(text));
 	if (risk !== null && "malformed" in risk)
 		throw new Refusal(`${snapshot.url}: ${risk.malformed}; rerun quest review to rewrite it, then land it again`);
 }

@@ -772,3 +772,27 @@ function seconds(value: string | null): number | undefined {
 	const result = Number(value) * 1000;
 	return Number.isFinite(result) ? result : undefined;
 }
+
+/** Repository permissions that can push, as GitHub's `permission` field names them. */
+export const WRITE = ["admin", "maintain", "write"];
+const PERMISSIONS = [...WRITE, "triage", "read", "none"];
+
+/**
+ * `login`'s permission on `repository`, as GitHub's `permission` field names it, or the status GitHub refused the
+ * read with: 403 for a token without push access, 404 for no such account.
+ */
+export async function permission(
+	client: GitHubReader,
+	repository: Repository,
+	login: string,
+): Promise<string | 403 | 404> {
+	const response = await client.request(
+		`/repos/${repository.owner}/${repository.repo}/collaborators/${encodeURIComponent(login)}/permission`,
+		{ allow: [403, 404] },
+	);
+	if (response.status === 403 || response.status === 404) return response.status;
+	const value = object(await response.json()).permission;
+	if (typeof value !== "string" || !PERMISSIONS.includes(value))
+		throw new Error(`invalid GitHub response: unknown permission ${JSON.stringify(value)}`);
+	return value;
+}
