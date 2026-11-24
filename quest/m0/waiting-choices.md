@@ -46,11 +46,13 @@ Decided by the planning agent, 2026-11-24, with the maintainer away:
   `action`; reading every unmarked `Maintainer:` item as an action, which
   turns legacy prose decisions into Done buttons).
 - ✅ A nested list is a choice list only when one of its bullets carries
-  `(Recommended)`, matched case-insensitively and ending the label (rejected:
+  `(Recommended)`, matched case-insensitively anywhere in the bullet, so
+  `quest check` still sees, and rejects, a marker that does not end its label (rejected:
   any nested list, which would turn checklists such as moq-dev/moq's deploy
   steps into choices). An item may hold detail lists beside it.
 - ✅ Only the `(Recommended)` marker makes a nested list a choice list; a
-  `Maintainer:` item with an unmarked list stays prose, and the guide and
+  `Maintainer:` item stays prose when none of its nested lists is marked, and
+  one with a marked list beside unmarked detail lists is a decision; the guide and
   skills teach agents to mark one (rejected: treating a question's unmarked
   list as a malformed choice list, which rejects legacy checklists under a
   question such as "Can you check these?" and detail lists beside a valid
