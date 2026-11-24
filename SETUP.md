@@ -1,7 +1,7 @@
 # Set up Quest
 
 Instructions for a coding agent. A user pastes a line like
-"Follow https://github.com/moq-dev/quest/blob/main/SETUP.md to set up Quest here"
+"Follow https://github.com/kixel-ai/quest/blob/main/SETUP.md to set up Quest here"
 (or "... to remove Quest"). Work from the repository root and show the user
 every file you changed before committing.
 
@@ -11,7 +11,7 @@ line in its root instructions.
 
 ## Install and pin
 
-Pin the latest [release](https://github.com/moq-dev/quest/releases) tag.
+Pin the latest [release](https://github.com/kixel-ai/quest/releases) tag.
 A day's merges that change what Quest ships become one release, cut daily, so a
 release tag is at most about a day behind `main`; prefer it to pinning a commit.
 Releases ship binaries for macOS, Linux, and native Windows on arm64 and x64.
@@ -22,15 +22,15 @@ both.
 Use the tool manager the repository already has:
 
 - **mise** (`mise.toml` or `.mise.toml`):
-  `mise use github:moq-dev/quest@<tag>`.
+  `mise use github:kixel-ai/quest@<tag>`.
 - **nix flake** (`flake.nix`): add the input
-  `quest.url = "github:moq-dev/quest/<tag-or-sha>"`, put
+  `quest.url = "github:kixel-ai/quest/<tag-or-sha>"`, put
   `quest.packages.${system}.default` in the dev shell, and update `flake.lock`.
   The flake doesn't build for Intel Macs (`x86_64-darwin`); use mise there, or
   the shell installer as described below.
 - **Neither:** ask the user before installing anything globally. With consent,
   run the release's shell installer,
-  `curl -LsSf https://github.com/moq-dev/quest/releases/download/<tag>/quest-installer.sh | sh`,
+  `curl -LsSf https://github.com/kixel-ai/quest/releases/download/<tag>/quest-installer.sh | sh`,
   which puts `quest` in `~/.local/bin` (set `QUEST_INSTALL_DIR` to change it)
   and edits no shell configuration. On native Windows, use the verified ZIP
   installation in [the Windows guide](docs/windows.md) with consent instead of

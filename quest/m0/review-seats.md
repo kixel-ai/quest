@@ -11,18 +11,18 @@ local review for the first time. Once these seats find what Pullfrog finds
 behind them, per dollar, Pullfrog and its required-approval ruleset retire.
 
 Non-goals: the writers, which only Claude runs since
-[moq-dev/quest#832](https://github.com/moq-dev/quest/pull/832); the rungs
+[kixel-ai/quest#832](https://github.com/kixel-ai/quest/pull/832); the rungs
 and their draw, which [reviewer rungs](/quest/m0/reviewer-rungs.md) builds.
 
 ## Plan
 
 Decided 2026-11-22 (maintainer, `/quest-plan` follow-up of
-[moq-dev/quest#826](https://github.com/moq-dev/quest/pull/826)):
+[kixel-ai/quest#826](https://github.com/kixel-ai/quest/pull/826)):
 
 - Seats per tier? ✅ 1, 2, and 3 local seats, one per vendor (rejected:
   the same counts with seats picked by eval alone, which may seat one
   vendor twice; today's counts). Counting Pullfrog, today's setup is
-  already 1, 2, and 3 once [moq-dev/quest#819](https://github.com/moq-dev/quest/pull/819)
+  already 1, 2, and 3 once [kixel-ai/quest#819](https://github.com/kixel-ai/quest/pull/819)
   seats Opus xhigh as a second reviewer on high heads. Pullfrog's catches
   behind a mostly-Sol pick (147 of 272 high and 148 of 549 medium merged
   PRs, 93% accepted) suggest vendor diversity is what finds them.
@@ -31,7 +31,7 @@ Decided 2026-11-22 (maintainer, `/quest-plan` follow-up of
   ✅ Quest ships it, Codex, Gemini, then Claude, and "risk determines number
   of reviewers" (rejected: the order the eval ranks per tier).
   Amended 2026-11-23 (maintainer, `/quest-run` on
-  [moq-dev/quest#831](https://github.com/moq-dev/quest/pull/831#issuecomment-7111249892)):
+  [kixel-ai/quest#831](https://github.com/kixel-ai/quest/pull/831#issuecomment-7111249892)):
   ✅ no fixed order; the tier still sets 1, 2, or 3 seats per round, and
   each seat draws from the round's rung, on distinct vendors within a round
   (rejected: keep the fixed Codex, Gemini, Claude order; one seat and drop

@@ -18,10 +18,10 @@ draw; the writer tables.
 ## Plan
 
 Decided 2026-11-23 (maintainer, `/quest-run` on
-[moq-dev/quest#831](https://github.com/moq-dev/quest/pull/831#issuecomment-7111249892),
+[kixel-ai/quest#831](https://github.com/kixel-ai/quest/pull/831#issuecomment-7111249892),
 which dropped its live Fable candidate seat for this quest):
 
-- Where? ✅ A follow-up quest (rejected: build it in moq-dev/quest#831).
+- Where? ✅ A follow-up quest (rejected: build it in kixel-ai/quest#831).
 - Rungs? ✅ One ranked list of named rungs. Each rung is a set of reviewer
   configs of roughly equal cost and quality across vendors, such as Opus
   high ≈ Sol xhigh ≈ Fable medium ≈ Astra high, and each size maps to a
@@ -76,8 +76,8 @@ Recommendations, the implementer's to revisit:
   case's writer, so a rung change is measured before it lands. Put the
   base's and head's scores and cost in `## Validation`, as `AGENTS.md`
   requires.
-- [moq-dev/quest#838](https://github.com/moq-dev/quest/pull/838)'s Gemini
-  harness and [moq-dev/quest#819](https://github.com/moq-dev/quest/pull/819)'s
+- [kixel-ai/quest#838](https://github.com/kixel-ai/quest/pull/838)'s Gemini
+  harness and [kixel-ai/quest#819](https://github.com/kixel-ai/quest/pull/819)'s
   rule that no seat is weaker than the latest writer both change how
   `src/cli/models.ts` routes reviewers. Whichever lands first, carry it
   into the rungs: Gemini as a rung member, and the weaker-model rule as a

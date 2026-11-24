@@ -2,7 +2,7 @@
 
 ## Goal
 
-`quest records backfill --since <date>` sends every session still on the host since that date, as the sender would have when it ended, and its transcript for a person who opted in. Resending is harmless: Kixel Quest stores a session once.
+`quest records backfill --since <date>` sends every session still on the host since that date, as the sender would have when it ended, its transcript for a person who opted in, and every review round saved under a clone's `.git/quest/review/`, as `quest review` would have posted it. Resending is harmless: Kixel Quest stores a session once.
 
 ## Plan
 
@@ -10,9 +10,10 @@ Decided in [kixel-ai/kixel.quest#104](https://github.com/kixel-ai/kixel.quest/pu
 
 - Reuse the sender's path, so a backfilled record is indistinguishable from a live one except for when it was sent.
 
-Tests: on a seeded host, a backfill since a date sends each session once, and a second run sends nothing new.
+Tests: on a seeded host, a backfill since a date sends each session and each saved review round once, and a second run sends nothing new.
 
 ## Required
 
 - [Sessions](/quest/m0/telemetry/sessions.md) - the record fields a backfilled session fills
 - [Transcripts](/quest/m0/telemetry/transcripts.md) - the upload a backfill repeats
+- [Review posts](/quest/m0/telemetry/review-posts.md) - the post a saved round is sent as

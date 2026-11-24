@@ -7,9 +7,9 @@ The size still sets each entry's model and effort.
 
 ## Plan
 
-Decided 2026-11-22 (maintainer, `/quest-plan` in [kixel-ai/kixel.quest#104](https://github.com/kixel-ai/kixel.quest/pull/104)): ✅ "Claude/Codex/Gemini for coding … T-shirt size determines model/effort", writers falling back Claude to Codex to Gemini (rejected: Claude-only writers and fixer, decided earlier the same day in [moq-dev/quest#827](https://github.com/moq-dev/quest/pull/827) and implemented by [Claude writers](https://github.com/moq-dev/quest/pull/832)). Kixel Quest's routing view compares fall-back PRs' rounds and later fixes with Claude's, so the order is measured rather than assumed.
+Decided 2026-11-22 (maintainer, `/quest-plan` in [kixel-ai/kixel.quest#104](https://github.com/kixel-ai/kixel.quest/pull/104)): ✅ "Claude/Codex/Gemini for coding … T-shirt size determines model/effort", writers falling back Claude to Codex to Gemini (rejected: Claude-only writers and fixer, decided earlier the same day in [kixel-ai/quest#827](https://github.com/kixel-ai/quest/pull/827) and implemented by [Claude writers](https://github.com/kixel-ai/quest/pull/832)). Kixel Quest's routing view compares fall-back PRs' rounds and later fixes with Claude's, so the order is measured rather than assumed.
 
-- Keep [Claude writers](https://github.com/moq-dev/quest/pull/832)'s Claude-first land fixer and add the same fallbacks behind it.
+- Keep [Claude writers](https://github.com/kixel-ai/quest/pull/832)'s Claude-first land fixer and add the same fallbacks behind it.
 - Gemini writes through `agy`, which the [Gemini reviewer](/quest/m0/gemini-reviewer.md) adds as a harness.
 - `/quest-run` falls to a list's next entry only while nothing is written; check that a limit exit (3) moves on to Codex, then Gemini, before leaving a quest unclaimed.
 

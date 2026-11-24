@@ -19,7 +19,7 @@ there.
 Decided 2026-11-22 (maintainer, `/quest-plan` in [kixel-ai/kixel.quest#104](https://github.com/kixel-ai/kixel.quest/pull/104)): ✅ Kixel Quest reads experiments out itself, putting a decision prompt in the inbox when one reaches its sample, with the tally and its routing chart (rejected: a recurring agent quest; the view only). Delete this quest once its [readouts](https://github.com/kixel-ai/kixel.quest/blob/main/quest/m0/insight/readouts.md) land; until then, run as below.
 
 Decided 2026-11-11 (user, /quest-plan, from an audit of PRs merged
-2026-11-01 to 11-11 in moq-dev/moq, moq-dev/moq.pro and moq-dev/quest):
+2026-11-01 to 11-11 in moq-dev/moq, moq-dev/moq.pro and kixel-ai/quest):
 
 - Scope?
   - ✅ Records, experiments, and runtime escapes, the last in the
@@ -87,11 +87,11 @@ Readout, the agent's choices for the implementer to revisit:
   `quest usage --json` rows give each arm's cost per merged PR and
   first-round findings, and each shadow pair's cost and findings per PR.
   Only tallies begun after
-  [moq-dev/quest#721](https://github.com/moq-dev/quest/pull/721) merged
+  [kixel-ai/quest#721](https://github.com/kixel-ai/quest/pull/721) merged
   record a first round, so count first rounds only over those.
 
 Readout of 2026-11-22, from `quest usage --since 2026-11-14 --json` over
-moq-dev/moq, moq-dev/moq.pro, and moq-dev/quest, with this host's, the CI
+moq-dev/moq, moq-dev/moq.pro, and kixel-ai/quest, with this host's, the CI
 host's, and the Fedora host's sessions (the laptop was offline), and the
 three hosts' saved review rounds:
 
@@ -119,7 +119,7 @@ three hosts' saved review rounds:
   week. Both seats' findings were mostly fixed: refuted 9 of 103 routed and
   5 of 36 shadow at M, 5 of 78 and 2 of 47 at L.
 - Decided 2026-11-22 (maintainer, `/quest-run`,
-  [moq-dev/quest#801](https://github.com/moq-dev/quest/pull/801#issuecomment-7073966129)):
+  [kixel-ai/quest#801](https://github.com/kixel-ai/quest/pull/801#issuecomment-7073966129)):
   - Review table? ✅ Keep every cell, Sol medium, medium, high, xhigh,
     xhigh for XS to XL (rejected: lower XS to low).
   - Shadow reviewer? ✅ Retarget it: none at XS, one effort above the
@@ -127,7 +127,7 @@ three hosts' saved review rounds:
     below at L until L reaches its sample (rejected: unchanged until
     12-20, then end it; end it now; a permanent second reviewer at L and
     XL, left to the risk tiers, whose high tier seats a second reviewer
-    since [moq-dev/quest#802](https://github.com/moq-dev/quest/pull/802)). XL
+    since [kixel-ai/quest#802](https://github.com/kixel-ai/quest/pull/802)). XL
     keeps its step down with L. Compare the step up's pairs as the step
     down's were, counting only rounds after the retarget merged.
     Superseded 2026-11-23 (maintainer): reviewer rungs replace the shadow.
@@ -164,10 +164,10 @@ three hosts' saved review rounds:
     eval move under its 2026-11-21 decision (rejected: all here, building
     what the port strips; all in kixel.quest, waiting weeks for the port).
   - M ends its arm on Opus high, L gains a Fable arm, and XL writes on
-    Fable, as [moq-dev/quest#829](https://github.com/moq-dev/quest/pull/829)
+    Fable, as [kixel-ai/quest#829](https://github.com/kixel-ai/quest/pull/829)
     routes them.
   - Astra picks for XL:
-    [moq-dev/quest#831](https://github.com/moq-dev/quest/pull/831). Its
+    [kixel-ai/quest#831](https://github.com/kixel-ai/quest/pull/831). Its
     Fable seat beside the L pick was dropped on 2026-11-23 for
     [reviewer rungs](/quest/m0/reviewer-rungs.md), which seats Fable as a
     rung member.
@@ -185,7 +185,7 @@ three hosts' saved review rounds:
     effort, and a token and cost table. Behind local review it still
     found something on 147 of 272 high-tier and 148 of 549 medium-tier
     merged PRs, 93% of its findings accepted, most likely for its model
-    differing from the mostly-Sol pick. Once moq-dev/quest#819's second
+    differing from the mostly-Sol pick. Once kixel-ai/quest#819's second
     seat runs on high heads (Opus xhigh, or Sonnet high when Opus wrote
     the branch, never the writer's model), compare what Pullfrog still
     finds behind it per dollar, and recommend retiring it once

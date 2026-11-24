@@ -10,13 +10,13 @@ Non-goals: `agy` as a writer, iterate, or land-fixer harness; models other than 
 
 Decided 2026-11-16 (user, /quest-plan), still standing. The user reports Gemini 4 Carbon catching bugs that Claude Opus 5.5 at medium effort missed in their own work.
 
-- ✅ An opt-in reviewer harness, scored with `quest eval run` before any ranking change (rejected: Gemini in the default ranking right away, with no eval, which `AGENTS.md` requires for a change to `src/cli/models.ts`; a generic any-model harness, which [moq-dev/quest#701](https://github.com/moq-dev/quest/pull/701) removed).
-- ✅ The eval decides and this PR moves Carbon ahead of Codex Sol where it wins (rejected: post the scores and leave the ranking to a `Maintainer:` decision). Amended 2026-11-23 by [moq-dev/quest#831](https://github.com/moq-dev/quest/pull/831#issuecomment-7111249892): XL's Codex entry is now Astra high, and once [reviewer rungs](/quest/m0/reviewer-rungs.md) has landed, the eval places Carbon on a rung instead of ranking it.
+- ✅ An opt-in reviewer harness, scored with `quest eval run` before any ranking change (rejected: Gemini in the default ranking right away, with no eval, which `AGENTS.md` requires for a change to `src/cli/models.ts`; a generic any-model harness, which [kixel-ai/quest#701](https://github.com/kixel-ai/quest/pull/701) removed).
+- ✅ The eval decides and this PR moves Carbon ahead of Codex Sol where it wins (rejected: post the scores and leave the ranking to a `Maintainer:` decision). Amended 2026-11-23 by [kixel-ai/quest#831](https://github.com/kixel-ai/quest/pull/831#issuecomment-7111249892): XL's Codex entry is now Astra high, and once [reviewer rungs](/quest/m0/reviewer-rungs.md) has landed, the eval places Carbon on a rung instead of ranking it.
 - ✅ m1 (rejected: m0, m2): contributors must be able to run `quest review` on their forks, including those whose only plan is Google's.
 
 Decided 2026-11-21 (maintainer, /quest-plan), carried over from the Cursor plan: ✅ a review reaches the login where the CLI keeps it, never a copy, so the refresh token stays in one place (rejected: a copied credential file, which splits it). The isolation test must also show a hostile checkout cannot read other credentials that store holds. ✅ The implementing agent may run `quest eval run` on the maintainer's plan.
 
-Decided 2026-11-22 (maintainer, /quest-run on [moq-dev/quest#805](https://github.com/moq-dev/quest/pull/805), then /quest-plan):
+Decided 2026-11-22 (maintainer, /quest-run on [kixel-ai/quest#805](https://github.com/kixel-ai/quest/pull/805), then /quest-plan):
 
 - Which harness?
   - ✅ The Antigravity CLI, `agy`
@@ -27,13 +27,13 @@ Decided 2026-11-22 (maintainer, /quest-run on [moq-dev/quest#805](https://github
   - Google's FAQ (https://antigravity.google/docs/faq, read 2026-11-22) says "Wrapping `agy` inside third-party coding agents or applications, or automating account rotation, is not supported under consumer plans", and that using third-party software to access Antigravity "can result in suspension or termination of your account". It recommends an API key for third-party agents. The maintainer chose the Ultra login knowing this.
 - ✅ Close #805, which holds only a claim commit and the Cursor findings, once this replan merges (rejected: leave it open).
 
-Decided 2026-11-22 (maintainer, `/quest-plan` of the routing audit in [moq-dev/quest#826](https://github.com/moq-dev/quest/pull/826)): ✅ m0 (rejected: leave it in m1), since [review seats](/quest/m0/review-seats.md) seats Gemini on every high-tier PR, and on medium where the eval ranks it in the first two, once this harness exists. Since 2026-11-23, review seats draws each seat from the round's rung instead of a ranking.
+Decided 2026-11-22 (maintainer, `/quest-plan` of the routing audit in [kixel-ai/quest#826](https://github.com/kixel-ai/quest/pull/826)): ✅ m0 (rejected: leave it in m1), since [review seats](/quest/m0/review-seats.md) seats Gemini on every high-tier PR, and on medium where the eval ranks it in the first two, once this harness exists. Since 2026-11-23, review seats draws each seat from the round's rung instead of a ranking.
 
 The maintainer's Ultra login (kixelated@gmail.com) was signed in on 2026-11-22 on the Linux workstation that runs agent sessions (`agy` 1.5.14) and on the macOS laptop (`agy` 1.5.6, run from the dotfiles flake, since the laptop's Nix profile predates `agy`). `agy models` lists `gemini-4-carbon-low`, `-medium`, and `-high` on both. The CI host and the desktop are not signed in.
 
 Guidance:
 
-- [moq-dev/quest#805](https://github.com/moq-dev/quest/pull/805)'s body holds the Cursor probes in full. Repeat each one for `agy` before choosing the isolation design:
+- [kixel-ai/quest#805](https://github.com/kixel-ai/quest/pull/805)'s body holds the Cursor probes in full. Repeat each one for `agy` before choosing the isolation design:
   - A clean `HOME` did not keep out workspace config. Cursor ran the checkout's `.cursor/` and `.claude/` hooks as the user, outside its sandbox. Plant every format another CLI reads (`.claude/`, `.codex/`, `.agents/`, `.gemini/`, `AGENTS.md`, `GEMINI.md`), not only `agy`'s own.
   - Hooks fired on read and shell events, not only at session start.
   - Run from inside a repository, including its `.git/`, Cursor walked up to the root's hooks and rules. Run from a directory outside any repository, it still loaded ancestor rules. Run from an empty directory outside any repository, reading the checkout by absolute path, nothing planted loaded. That is the candidate design if `agy` also scopes config to its workspace (`--add-dir` may serve the checkout).
@@ -44,7 +44,7 @@ Guidance:
 - `agy` 1.5.14 (the maintainer's workstation, 2026-11-22) has the flags a reviewer needs: `-p`, `--output-format stream-json`, `--json-schema` for the verdict, `--effort low|medium|high|xhigh|max`, `--mode plan`, `--sandbox`, `--settings` (inline, never saved), `--disable-slash-commands`, and `--conversation <id>`. `agy models` lists model ids only when signed in. Look up Carbon's id there rather than guessing, and record the CLI version you checked.
 - Read T3 Code's Antigravity driver for how it launches `agy` (print mode or `agy acp`), and match it, since the maintainer's reason for using the Ultra login is that use.
 - Keep `agy` a reviewer-only harness: give `quest review` its own `ReviewHarness` union beside `HARNESSES`, rather than adding `agy` to `HARNESSES` in `src/cli/agent.ts`, which would also reach `quest agent start --harness` and `transcriptFacts()`.
-- Strip credential and model overrides from the reviewer's environment, so it reviews on the CLI's login as [moq-dev/quest#492](https://github.com/moq-dev/quest/pull/492) settled for the other harnesses. Make `runningHarness()` recognize an `agy` session, so `quest review` from one avoids the right writer.
+- Strip credential and model overrides from the reviewer's environment, so it reviews on the CLI's login as [kixel-ai/quest#492](https://github.com/kixel-ai/quest/pull/492) settled for the other harnesses. Make `runningHarness()` recognize an `agy` session, so `quest review` from one avoids the right writer.
 - The reviewers run nothing from a reviewed head. Verify it with a test like `test/live/review-sandbox.test.ts`, on Linux and macOS: an untrusted checkout whose rules, skills, plugins, MCP config, hooks, and helper binaries try to read outside the review snapshot or run a process. If the pinned CLI cannot reliably keep out both user and checkout config, record that under `## Waiting` instead of shipping the harness.
 - Append a cheap `agy`-served classifier last in `CLASSIFIERS`, so a contributor with only `agy` can still classify risk.
 - Detect `agy`'s usage-limit and logged-out errors from its structured output as a `ReviewLimitError` or `ReviewerUnavailableError`, so the round passes over an unavailable reviewer.
