@@ -158,6 +158,8 @@ export interface Finding {
 	title: string;
 	/** The concrete scenario: the input or state, and the wrong result. */
 	body: string;
+	/** The reviewer that raised it, on a finding an earlier run reported and this one's round kept open. */
+	raised?: Reviewing;
 }
 
 /** A finding of the last round, with what became of it by this one. */
@@ -424,7 +426,7 @@ export function namedReviewer(choice: Choice, draw: Draw, avoided: (entry: Revie
 	const ours = (entry: ReviewModel) => choice.harness === undefined || entry.harness === choice.harness;
 	// From the size's rung outward, whatever the run drew, so a model a flag pins runs at one effort on a size.
 	const pool = rungOrder(draw.size, SIZE_RUNGS[draw.size])
-		.flatMap((rung) => draw.order[rung])
+		.flatMap((rung) => RUNGS[rung])
 		.filter(ours);
 	const seat = () => drawSeat({ ...draw, usable: (each) => ours(each) && draw.usable(each) }, [])?.reviewer;
 	const first = choice.harness === undefined ? undefined : pool[0];
@@ -582,6 +584,8 @@ interface State {
 	runs: number;
 	/** The run the last `--new` followed, which the design checkpoint counts from; none before any. */
 	since?: number;
+	/** Every round of an earlier head, or that `--new` dropped, oldest first, kept for telemetry to send. */
+	past?: Round[];
 	/**
 	 * Every round on the head reviewed last, oldest first, each still judging its tier. Those of the latest run are
 	 * in the order it printed them, which numbers their findings: the open ones, which the next run settles.
@@ -675,6 +679,8 @@ interface Reviewer {
 	 * stored login or a route is set, since a route's credential is meant for it.
 	 */
 	credentials: string[];
+	/** Variables the CLI would run on in place of its login, which never reach it. */
+	dropped?: string[];
 	/**
 	 * Credentials only a gateway or provider reads, passed only while a route is
 	 * set, so an unused provider key never reaches the reviewer.
@@ -1371,8 +1377,8 @@ export function agyTurn(context: Context, prompt: string, flags: string[]): Turn
  * Google's Antigravity CLI, which only reviews. It runs on the user's own login and configuration directory, where
  * it keeps its login when no keyring holds it, as over ssh; the reviewer agent keeps the user's customizations out,
  * except their skills' text and their MCP servers' processes, whose tools it cannot call. Its status check lists the
- * account's models, which fails while it is logged out, and over the network otherwise. It ignores GEMINI_API_KEY and
- * GOOGLE_API_KEY in favor of the login, so no credential is added.
+ * account's models, which fails while it is logged out, and over the network otherwise. GEMINI_API_KEY and
+ * GOOGLE_API_KEY never reach it, so a drawn review never bills a key in place of the login.
  */
 const agy: Reviewer = {
 	status: ["agy", "models"],
@@ -1385,6 +1391,7 @@ const agy: Reviewer = {
 	},
 	login: "agy",
 	credentials: [],
+	dropped: ["GEMINI_API_KEY", "GOOGLE_API_KEY"],
 	routeCredentials: [],
 	connection: [],
 	routes: () => [],
@@ -1611,6 +1618,7 @@ async function prepare(
 	const bare = reviewer.bareGateway?.(env);
 	if (bare) throw new ReviewerUnavailableError(harness, "gateway without credential", bare);
 	const connected = { ...strippedEnvironment(env), ...pick(env, reviewer.connection) };
+	for (const name of reviewer.dropped ?? []) delete connected[name];
 	const routes = reviewer.routes(env);
 	const through = routes.length > 0 ? ` through ${names(routes)}` : "";
 	const host = managed ? ", ignoring the host-managed provider's route" : "";
@@ -1779,11 +1787,6 @@ export function verdict(reply: { structured?: unknown; text?: string }, earlier:
 	if (numbers.length !== earlier || numbers.some((n, i) => n !== i + 1)) {
 		throw new Error(`the reviewer's reply does not settle each of the last round's ${earlier} finding(s) once`);
 	}
-	// A finding still open is one this round reports again; one left out of `findings` would read as clean.
-	const open = settled.filter((answer) => answer.disposition === "open").length;
-	if (open > found.length) {
-		throw new Error(`the reviewer's reply keeps ${open} earlier finding(s) open but reports ${found.length}`);
-	}
 	return { score: score as number, rationale: fields!.rationale, risk, findings: found, earlier: settled };
 }
 
@@ -1928,10 +1931,14 @@ function earlierList(earlier: Finding[]): string {
 /** How a round settles the last run's findings, `where`: in the review's text, or in the reply's `earlier`. */
 const settling = (where: string) =>
 	`Settle each ${where} by its number: \`fixed\` when the head fixes it, \`refuted\` when the author's ` +
-	"refutation holds, or `open` when it still holds, reporting it as a finding again. Give each a one-sentence " +
-	"reason citing the fix, the refutation's evidence, or why it still holds. Then review the whole change anew, " +
-	"as if no one had reviewed it: those findings are no limit on what you look at, and this is your first round on " +
-	"the branch, so no rule that limits a later round to what changed since the last one applies to you.";
+	"refutation holds, or `open` when it still holds, which carries it over as it is: never report it again among " +
+	"your findings. Give each a one-sentence reason citing the fix, the refutation's evidence, or why it still holds.";
+
+/** The review turn's scope beside those findings: the whole change, which the report turn only transcribes. */
+const ANEW =
+	"Then review the whole change anew, as if no one had reviewed it: those findings are no limit on what you look " +
+	"at, and this is your first round on the branch, so no rule that limits a later round to what changed since the " +
+	"last one applies to you.";
 
 /** The author's responses to the last run's findings, and how a refutation stands. */
 function responseParts(responses: string | undefined): string[] {
@@ -1993,7 +2000,7 @@ export function reviewPrompt(change: Change, rules: Rules | null, earlier: Findi
 						"They add to and take precedence over the shared rules and the review's defaults: drop the findings they exclude, and check anything they ask for.",
 					`<review-rules>\n${rules.text}\n</review-rules>`,
 				]),
-		...(earlier.length > 0 ? [earlierList(earlier), settling("in your review")] : []),
+		...(earlier.length > 0 ? [earlierList(earlier), `${settling("in your review")} ${ANEW}`] : []),
 		...responseParts(responses),
 		DEPENDENTS,
 		`${SEVERITY} End with a score from 0 to 10 for how ready the head is to land, and one sentence on why.`,
@@ -2185,6 +2192,7 @@ export function parseState(value: unknown): State {
 		state !== null &&
 		Number.isSafeInteger(state.runs) &&
 		(state.since === undefined || Number.isSafeInteger(state.since)) &&
+		(state.past === undefined || Array.isArray(state.past)) &&
 		Array.isArray(state.tallies) &&
 		state.tallies.every(
 			(tally) =>
@@ -2574,7 +2582,7 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 	// The last run's rounds, whose findings are the open ones, numbered across them as that run printed them.
 	const latest = (prior?.rounds ?? []).filter((round) => round.round === runs);
 	const earlier = latest.flatMap((round) => round.findings);
-	const raisers = latest.flatMap((round) => round.findings.map(() => round));
+	const raisers = latest.flatMap((round) => round.findings.map((finding): Reviewing => finding.raised ?? round));
 	if (earlier.length === 0 && options.responses !== undefined)
 		throw new ResponsesError("--responses answers the last round's findings, and this branch has none to settle");
 	if (earlier.length > 0 && options.responses === undefined)
@@ -2598,13 +2606,26 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 		usable: (entry) => !avoided(entry) && !down.has(entry.harness) && !out.has(canonicalModel(entry.model)),
 	};
 	/** A run's seats beside the rounds on `taken` vendors: `lead`, when a flag names one, then each seat's draw. */
-	const plan = (count: number, taken: ReviewHarness[], lead?: ReviewModel): Seat[] => {
+	const plan = (count: number, taken: ReviewHarness[], lead?: ReviewModel, effort?: string): Seat[] => {
 		const seats: Seat[] = lead === undefined ? [] : [{ reviewer: lead }];
 		while (seats.length < count) {
 			const vendors = [...taken, ...seats.map((seat) => seat.reviewer.harness)];
 			const seat = drawSeat(draw, vendors);
 			if (seat === undefined) {
-				if (skipped.length > 0) throw new ReviewOutageError(SIZE_RUNGS[sized.size], skipped, messages);
+				// A CLI this host lacks could never take a further seat, so alone it leaves that seat to the avoided models,
+				// which the writer's record frees; with no seat filled, the missing CLI is what to restore.
+				const lacking = skipped.every(
+					(skip) => skip.reason === "not installed" || skip.reason === "not supported",
+				);
+				const unavoided = {
+					...draw,
+					usable: (entry: ReviewModel) => !down.has(entry.harness) && !out.has(canonicalModel(entry.model)),
+				};
+				if (
+					skipped.length > 0 &&
+					!(vendors.length > 0 && lacking && drawSeat(unavoided, vendors) !== undefined)
+				)
+					throw new ReviewOutageError(SIZE_RUNGS[sized.size], skipped, messages);
 				const guessed =
 					"when the writer was guessed from the running harness, name it in the PR's ## Models record or with --exclude-model";
 				throw new ReviewInputError(
@@ -2615,11 +2636,16 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 			}
 			seats.push(seat);
 		}
+		// --effort alone names no reviewer, so the first seat is drawn, and passes on, like any other.
+		if (effort !== undefined && seats[0] !== undefined) seats[0] = { reviewer: { ...seats[0].reviewer, effort } };
 		return seats;
 	};
 	// A flag's reviewer, or else that some reviewer may take the first seat, is checked before the classifier spends a turn.
-	const lead = named ? namedReviewer(options, draw, avoided) : undefined;
-	if (!named) plan(1, []);
+	const lead =
+		options.harness !== undefined || options.model !== undefined
+			? namedReviewer(options, draw, avoided)
+			: undefined;
+	if (lead === undefined) plan(1, []);
 
 	const head = git(root, ["rev-parse", "HEAD"]);
 	let mergeBase: string;
@@ -2656,11 +2682,17 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 	const before = settle(classified.value, onHead);
 	const override = options.override === undefined ? saved?.override : { ...options.override, from: before.tier };
 	const { usage: _, ...value } = classified.value;
+	// Every round the saved state held that `reviewed` leaves out, as of an earlier head or dropped by --new.
+	const past = (reviewed: State["reviewed"]) => [
+		...(saved?.past ?? []),
+		...(saved?.reviewed?.rounds ?? []).filter((round) => !(reviewed?.rounds ?? []).includes(round)),
+	];
 	const state = (reviewed: State["reviewed"], runs: number, tallies: Tally[], risk: Risk): State => ({
 		branch,
 		runs,
 		...(since > 0 && { since }),
 		...(reviewed !== undefined && { reviewed }),
+		...(past(reviewed).length > 0 && { past: past(reviewed) }),
 		tallies,
 		classified: { key: classified.key, value },
 		// A riskier change than the one the maintainer judged ends their override, unless it is riskier only up to the
@@ -2683,6 +2715,8 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 		earlier.length === 0 &&
 		latest[0]?.head === head &&
 		latest[0].base.ref === baseRef &&
+		// A size on another rung calls for that rung's review.
+		SIZE_RUNGS[latest[0].size] === SIZE_RUNGS[sized.size] &&
 		prior.mergeBase === mergeBase &&
 		prior.given.instructions === given.instructions &&
 		prior.given.rules === given.rules
@@ -2692,6 +2726,8 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 				)
 			: [];
 	const number = kept.length > 0 ? runs : runs + 1;
+	// A seat that joins a run draws from the rung its standing rounds ran on, not another.
+	if (kept[0]?.rung !== undefined) draw.rung = kept[0].rung.name;
 	const stood = kept.map((round): Round => ({
 		...round,
 		base,
@@ -2716,6 +2752,8 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 		env: deps.env,
 	};
 	let done: Round[] = [];
+	// The last run's findings this run already carried over, by number.
+	const open = new Set<number>();
 	const judged = () => settle(classified.value, [...onHead, ...done]);
 	const persist = () => {
 		const after = tallied(tallies, [...stood, ...done], raisers);
@@ -2727,27 +2765,33 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 	// --model or --effort names only the first seat, so a high head still gets its second; --harness's runs alone.
 	const seats = (risk: Risk) =>
 		options.harness !== undefined ? 1 : overridden(risk, override).tier === "high" ? 2 : 1;
+	// Whether a standing round is the reviewer the flags name, as resolved to its harness, model, and effort.
 	const flagged = (round: Round) =>
-		(options.harness === undefined || round.reviewer === options.harness) &&
-		(options.model === undefined || sameModel(round.model, options.model)) &&
-		(options.effort === undefined || round.effort === options.effort);
+		lead === undefined
+			? round.effort === options.effort
+			: round.reviewer === lead.harness && sameReviewer(round, lead);
 	let after = tallies;
 	let risk = low;
 	// The first pass seats what the tier before the run calls for. A round that raised the tier to high gets the seat
 	// the lower tier skipped in a second pass, at once: the rounds already run are saved first, so a further reviewer
 	// that cannot run costs them nothing, and the next run seats it again.
 	for (let pass = 0; ; pass++) {
-		const first = pass === 0 && lead !== undefined && !kept.some(flagged) ? lead : undefined;
+		const wanted = pass === 0 && named && !kept.some(flagged);
+		const first = wanted ? lead : undefined;
+		const effort = wanted && lead === undefined ? options.effort : undefined;
 		// The seats are vendors, so two standing rounds of one vendor's models, as a flag may name, fill one.
 		const taken = [...new Set([...kept, ...done].map((round) => round.reviewer))];
-		const count = Math.max(seats(pass === 0 ? before : judged()) - taken.length, first === undefined ? 0 : 1);
+		const count = Math.max(seats(pass === 0 ? before : judged()) - taken.length, wanted ? 1 : 0);
 		if (count === 0) break;
 		try {
-			let planned = plan(count, taken, first);
+			let planned = plan(count, taken, first, effort);
 			const passed = skipped.length;
 			for (;;) {
 				try {
-					done = [...done, ...(await runSeats(shared, planned, options.signal))];
+					done = [
+						...done,
+						...carried(await runSeats(shared, planned, options.signal), earlier, raisers, open),
+					];
 					break;
 				} catch (error) {
 					// A reviewer a flag named never passes its round on.
@@ -2762,7 +2806,7 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 					skipped.push({ ...error.seat, reason: error.reason });
 					messages.push(error.message);
 					try {
-						planned = plan(count, taken, first);
+						planned = plan(count, taken, first, effort);
 					} catch (outage) {
 						// The only reviewer that could take the seat fails as itself, rather than as an outage of one.
 						throw outage instanceof ReviewOutageError && skipped.length - passed === 1 ? error : outage;
@@ -2791,6 +2835,25 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 	// A run that seated no one still saves the head's classification.
 	if (done.length === 0) ({ after, risk } = persist());
 	return { rounds: [...stood, ...done], tallies: after, risk, skipped, since, branch, head, base, sized };
+}
+
+/**
+ * `rounds` with each of the last run's findings, `earlier`, that one keeps open added to the first that does, once
+ * a run as `open` tracks by number: the finding as it was reported, still its raiser's.
+ */
+function carried(rounds: Round[], earlier: Finding[], raisers: Reviewing[], open: Set<number>): Round[] {
+	return rounds.map((round) => {
+		const kept = (round.earlier?.findings ?? []).filter(
+			(finding) => finding.disposition === "open" && !open.has(finding.number),
+		);
+		if (kept.length === 0) return round;
+		const over = kept.map(({ number }): Finding => {
+			open.add(number);
+			const { reviewer, model, effort } = raisers[number - 1]!;
+			return { ...earlier[number - 1]!, raised: { reviewer, model, effort } };
+		});
+		return { ...round, findings: [...round.findings, ...over] };
+	});
 }
 
 /** Every seat's round at once, the first failure stopping the others and failing the whole. */
@@ -2841,8 +2904,8 @@ function dropped(saved: State | undefined): Tally[] {
 	const tallies = (saved?.tallies ?? []).map((tally) => ({ ...tally, findings: { ...tally.findings } }));
 	for (const round of saved?.reviewed?.rounds ?? []) {
 		if (round.round !== saved!.runs) continue;
-		const tally = tallies.find((each) => sameReviewer(each, round))!;
-		for (const finding of round.findings) tally.findings[finding.severity]--;
+		for (const finding of round.findings)
+			tallies.find((each) => sameReviewer(each, finding.raised ?? round))!.findings[finding.severity]--;
 	}
 	return tallies;
 }
@@ -2850,9 +2913,9 @@ function dropped(saved: State | undefined): Tally[] {
 /**
  * `tallies` after a run's `rounds`, the run's reviewers first. A round counts its findings for its own model and
  * effort. The last run's findings, each raised by the reviewer at its number in `raisers`, are settled for that
- * reviewer once, since every seat settles them all: open when any seat keeps it open, which moves it to the count
- * of each round that reports it again, else as the run's first round judged it. Each tally keeps the branch's run
- * of its first round as `debut`.
+ * reviewer once, since every seat settles them all: left open when any seat keeps it open, which carries it over
+ * as its raiser's, else as the run's first round judged it. Each tally keeps the branch's run of its first round
+ * as `debut`.
  */
 export function tallied(tallies: Tally[], rounds: Round[], raisers: Reviewing[] = []): Tally[] {
 	const none = () => ({ high: 0, medium: 0, low: 0 });
@@ -2870,8 +2933,8 @@ export function tallied(tallies: Tally[], rounds: Round[], raisers: Reviewing[] 
 		const open = ran.some((round) =>
 			round.earlier?.findings.some((each) => each.number === finding.number && each.disposition === "open"),
 		);
-		if (open) raiser.findings[finding.severity]--;
-		else if (finding.disposition === "fixed") raiser.fixed++;
+		if (open) continue;
+		if (finding.disposition === "fixed") raiser.fixed++;
 		else raiser.refuted++;
 	}
 	for (const round of ran) {
@@ -2891,9 +2954,13 @@ export function tallied(tallies: Tally[], rounds: Round[], raisers: Reviewing[] 
 		own.sessions.push(round.session);
 		own.rounds++;
 		own.last = round.round;
-		for (const finding of round.findings) own.findings[finding.severity]++;
-		if (own.rounds === 1) for (const finding of round.findings) own.first[finding.severity]++;
-		by.set(tallyKey(round), { ...own, ...(round.rung && { rung: round.rung }) });
+		// A finding carried over from an earlier run is still its raiser's.
+		const found = round.findings.filter((finding) => finding.raised === undefined);
+		for (const finding of found) own.findings[finding.severity]++;
+		if (own.rounds === 1) for (const finding of found) own.first[finding.severity]++;
+		// A round a flag named leaves the rung its drawn rounds recorded, so the row does not turn on their order.
+		const rung = round.rung ?? by.get(tallyKey(round))?.rung;
+		by.set(tallyKey(round), { ...own, ...(rung && { rung }) });
 	}
 	const run = new Set(rounds.map(tallyKey));
 	return [

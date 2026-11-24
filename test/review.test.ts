@@ -581,7 +581,6 @@ fakes("a reviewer CLI that is not installed passes the round to the next eligibl
 fakes.each([
 	["--harness", "codex"],
 	["--model", "gpt-6.2-sol"],
-	["--effort", "high"],
 ])("a reviewer named with %s %s never falls through", async (flag, value) => {
 	const s = setup(null);
 	vi.stubEnv("FAKE_FAILS", "codex");
@@ -590,6 +589,18 @@ fakes.each([
 	expect(result.stderr).toBe(`error: codex hit its usage limit; resets ${codexReset}\n`);
 	expect(result.code).toBe(3);
 	expect(s.calls().filter((c) => c.argv[0] !== "exec" && c.argv[0] !== "login")).toEqual([]);
+});
+
+fakes("--effort alone names no reviewer, so its seat passes on like any draw", async () => {
+	const s = setup(null);
+	vi.stubEnv("FAKE_FAILS", "codex");
+	vi.stubEnv("FAKE_LIMITED", "reset");
+	const result = await quest("--root", s.repo, "review", ...OPUS_WROTE, "--effort", "low", "--json");
+	expect(result.code, result.stderr).toBe(0);
+	const { rounds, skipped } = JSON.parse(result.stdout);
+	// The skipped seat and the one that ran both carry the effort named, and no rung.
+	expect(skipped.map((skip: Round) => skip.effort)).toContain("low");
+	expect(rounds.map((r: Round) => [r.effort, r.rung])).toEqual([["low", undefined]]);
 });
 
 fakes("a failed turn whose reply only quotes a usage limit is no limit, so no other reviewer runs", async () => {
@@ -1429,8 +1440,13 @@ agyFakes(
 		// An Antigravity session's own state and an Antigravity gateway never reach the reviewer.
 		vi.stubEnv("ANTIGRAVITY_LS_ADDRESS", "127.0.0.1:1");
 		vi.stubEnv("AGY_LLM_GATEWAY_URL", "http://127.0.0.1:9");
+		// Nor does an API key it would bill in place of the login.
+		vi.stubEnv("GEMINI_API_KEY", "key");
+		vi.stubEnv("GOOGLE_API_KEY", "key");
 		const result = await quest("--root", s.repo, "review", ...AGY, "--json");
 		expect(result.code, result.stderr).toBe(0);
+		for (const call of s.calls())
+			expect(Object.keys(call.env).filter((name) => /^(GEMINI|GOOGLE)_API_KEY$/.test(name))).toEqual([]);
 		const [round] = JSON.parse(result.stdout).rounds;
 		expect(round).toMatchObject({ reviewer: "agy", model: "gemini-4-neon", effort: "high", score: 8 });
 		expect(round.findings).toEqual([FINDING]);
@@ -2668,9 +2684,16 @@ fakes("a round on the head the last round passed runs no reviewer and repeats th
 	]);
 	expect(s.calls()).toHaveLength(ran);
 
-	// Its reviewer since avoided, the passed head needs another: Sol's round no longer counts for it.
+	// Its reviewer since avoided, a passed head needs another: Sol's round no longer counts for it. So does a size
+	// on another rung.
+	const u = setup();
+	expect((await quest("--root", u.repo, "review", ...SMALL)).code).toBe(0);
+	const large = JSON.parse((await quest("--root", u.repo, "review", "--json", "--size", "L", ...OPUS_WROTE)).stdout);
+	expect(large.rounds.map((r: Round) => [r.round, r.unchanged])).toEqual([[2, false]]);
+	const v = setup();
+	expect((await quest("--root", v.repo, "review", ...SMALL)).code).toBe(0);
 	const avoided = JSON.parse(
-		(await quest("--root", s.repo, "review", "--json", "--size", "S", "--exclude-model", "gpt-6.2-sol")).stdout,
+		(await quest("--root", v.repo, "review", "--json", "--size", "S", "--exclude-model", "gpt-6.2-sol")).stdout,
 	);
 	expect(avoided.rounds.map((r: Round) => [r.model, r.unchanged])).toEqual([["claude-opus-5-5", false]]);
 
@@ -2987,12 +3010,9 @@ test("the verdict is checked field by field, settling each earlier finding once"
 	expect(() => verdict({ structured: { ...scored, findings: [], earlier: undefined } }, 1)).toThrow(
 		"no earlier list",
 	);
-	// A finding kept open is reported again, so a reply cannot keep one open and read as clean.
+	// A finding kept open carries over as it was, so the reply need not report it again.
 	const open = { ...fixed, disposition: "open" };
-	expect(() => verdict({ structured: { ...scored, findings: [], earlier: [open] } }, 1)).toThrow(
-		"keeps 1 earlier finding(s) open but reports 0",
-	);
-	expect(verdict({ structured: { ...scored, findings: [FINDING], earlier: [open] } }, 1).earlier).toEqual([open]);
+	expect(verdict({ structured: { ...scored, findings: [], earlier: [open] } }, 1).earlier).toEqual([open]);
 	// Each of the last round's findings is settled exactly once, by its number.
 	for (const earlier of [[fixed], [fixed, fixed], [fixed, { ...refuted, finding: 3 }]]) {
 		expect(() => verdict({ structured: { ...scored, findings: [], earlier } }, 2)).toThrow("settle each");
@@ -3154,6 +3174,34 @@ fakes("--harness reviews alone, and its findings are the next run's to settle", 
 	]);
 });
 
+fakes("a finding a later run keeps open carries over once, still its raiser's", async () => {
+	const s = setup(null);
+	const first = JSON.parse((await quest("--root", s.repo, "review", "--json", ...FABLE_WROTE)).stdout);
+	expect(first.rounds.map((r: Round) => [r.model, r.findings.length])).toEqual([["gpt-6.2-sol", 1]]);
+	write(s.repo, ".tmp/responses.md", "1. Refuted.\n");
+	const responses = ["--responses", join(s.repo, ".tmp", "responses.md")];
+	// Two seats both keep it open: the first carries it, as Sol's, beside what each found itself.
+	vi.stubEnv("FAKE_DISPOSITION", "open");
+	const high = ["--override", "high", "--reason", "It ships tonight."];
+	const kept = JSON.parse(
+		(await quest("--root", s.repo, "review", "--json", ...FABLE_WROTE, ...high, ...responses)).stdout,
+	);
+	const found = kept.rounds.map((r: Round) => r.findings.map((f) => f.raised?.model ?? null));
+	expect(found).toEqual([[null, "gpt-6.2-sol"], [null]]);
+	// Counted once: Sol's one and the two the seats found, none of them settled.
+	const total = (tallies: Tally[]) =>
+		tallies.reduce((sum, t) => sum + t.findings.high + t.findings.medium + t.findings.low, 0);
+	expect([total(kept.tallies), ...kept.tallies.map((t: Tally) => t.fixed + t.refuted)]).toEqual([3, 0, 0]);
+	// The next run settles all three, the carried one for Sol.
+	vi.stubEnv("FAKE_DISPOSITION", "fixed");
+	write(s.repo, ".tmp/responses.md", "1. Fixed.\n2. Fixed.\n3. Fixed.\n");
+	const settled = JSON.parse(
+		(await quest("--root", s.repo, "review", "--json", ...FABLE_WROTE, ...responses)).stdout,
+	);
+	expect(settled.tallies.reduce((sum: number, t: Tally) => sum + t.fixed, 0)).toBe(3);
+	expect(total(settled.tallies)).toBe(3 + settled.rounds.length);
+});
+
 test("a tally counts each finding once, for the model that raised it, through every round", () => {
 	const finding = (severity: Finding["severity"], title: string): Finding => ({
 		file: "a.ts",
@@ -3206,12 +3254,12 @@ test("a tally counts each finding once, for the model that raised it, through ev
 		},
 	]);
 	// Another model's round settles them for the model that raised them, and starts its own tally: the finding it
-	// keeps open is reported again, so it moves to its count at its new severity.
+	// keeps open carries over in its round, still its raiser's.
 	const two: Round = {
 		...base,
 		...opus,
 		round: 2,
-		findings: [{ ...b, severity: "high" }],
+		findings: [{ ...b, raised: one }],
 		earlier: {
 			head: base.head,
 			findings: [settled(a, "fixed", 1), settled(b, "open", 2), settled(c, "refuted", 3)],
@@ -3219,9 +3267,8 @@ test("a tally counts each finding once, for the model that raised it, through ev
 	};
 	const second = tallied(first, [two], [one, one, one]);
 	expect(second.map((t) => [t.model, t.rounds, t.last, t.findings, t.first, t.fixed, t.refuted])).toEqual([
-		["claude-opus-5-5", 1, 2, { high: 1, medium: 0, low: 0 }, { high: 1, medium: 0, low: 0 }, 0, 0],
-		// The first round's findings stay as it reported them, however later rounds settle them.
-		["gpt-6.2-sol", 1, 1, { high: 1, medium: 0, low: 1 }, { high: 1, medium: 1, low: 1 }, 1, 1],
+		["claude-opus-5-5", 1, 2, { high: 0, medium: 0, low: 0 }, { high: 0, medium: 0, low: 0 }, 0, 0],
+		["gpt-6.2-sol", 1, 1, { high: 1, medium: 1, low: 1 }, { high: 1, medium: 1, low: 1 }, 1, 1],
 	]);
 	// A second seat of the same run settles the same findings its own way, which counts for nothing: each is
 	// settled once, as the run's first round judged it. A round that repeats the last one counts nothing either.
@@ -3252,11 +3299,11 @@ test("a tally counts each finding once, for the model that raised it, through ev
 		["gpt-6.2-sol", 1, 1, 1],
 	]);
 	// The same model at the same effort, in any spelling, continues its tally and names each session; a round a
-	// flag named drops the rung its last one recorded.
+	// flag named leaves the rung its drawn rounds recorded.
 	const { rung: _, ...flagged } = base;
 	const again = tallied(second, [{ ...flagged, model: "openai/gpt-6.2-sol", session: "s4", round: 3, findings: [] }]);
 	expect(again[0]).toMatchObject({ model: "gpt-6.2-sol", sessions: ["s1", "s4"], rounds: 2, last: 3 });
-	expect(again[0]).not.toHaveProperty("rung");
+	expect(again[0]!.rung).toEqual({ name: "standard", drawn: "size" });
 	// Another effort is another reviewer.
 	expect(tallied(second, [{ ...base, effort: "xhigh", round: 3, findings: [] }])).toHaveLength(3);
 	expect(() => tallied([], [two], [one])).toThrow(/no tally/);

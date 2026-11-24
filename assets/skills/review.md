@@ -23,7 +23,7 @@ Run no new round when a review already counts for the committed head, as `/quest
 If you judge the change too trivial to review, skip the review instead and record the skip and its reason in `## Review`.
 
 Otherwise, review the committed branch with `quest review --base <remote>/<base>`, in the foreground; a round takes minutes.
-It picks a reviewer other than the model that changed the branch last, at an effort the PR's size sets.
+It draws a reviewer the branch has not had, never the model that changed the branch last, from the rung the PR's size sets or the one beside it.
 It reads that model, and off a quest branch the size, from the PR body's `## Models` record: open the draft PR and write the record before the first round, as `Size: M` and `Implementer: Claude Code, claude-opus-5-5, high effort`.
 Pass `--exclude-model` or `--size` only for a PR whose body cannot hold the record.
 Where the repository's root instructions name other reviewers, pass them with `--harness`, `--model`, and `--effort`, which runs that reviewer alone.

@@ -433,6 +433,12 @@ describe("PR records", () => {
 		const record = reviewRecord({ ...at, rounds: [second], tallies: [tallies[1]!], risk, skipped: [] });
 		const older = `## Review\n\n${record.replace(/^- Rounds: .*\n/m, "")}\n`;
 		expect(parseReview(older)[0]!.tally).toBeNull();
+		// An older record's shadow block is left out, and its second reviewer reads as one a flag named.
+		const both = reviewRecord({ ...at, rounds: [round, second], tallies, risk, skipped: [] });
+		const marked = (suffix: string) =>
+			`## Review\n\n${both.replace(/^(- Reviewer: Codex, gpt-6.2-astra, medium effort)$/m, `$1, ${suffix}`)}\n`;
+		expect(parseReview(marked("shadow")).map((review) => review.model)).not.toContain("gpt-6.2-astra");
+		expect(parseReview(marked("second")).find((review) => review.model === "gpt-6.2-astra")!.rung).toBeNull();
 		// The settled count `quest usage` prints reads back.
 		const settled = "1; findings 2 (low 2): fixed 1, refuted 0, settled 1, open 0";
 		expect(

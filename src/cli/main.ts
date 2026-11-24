@@ -1659,8 +1659,8 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"finding is saved, passes its seat on the same way: a CLI that is not installed, " +
 				"logged out, or has its login rejected, or sent to a gateway with no credential, passes over every model of that CLI, and a model at its usage limit, " +
 				"or one its login or gateway does not serve, as Codex's `model is not supported when using Codex with a ChatGPT account`, " +
-				"only itself; the run's report and record name each it passed over and why. A reviewer --harness, --model, " +
-				"or --effort names never passes its seat on. " +
+				"only itself; the run's report and record name each it passed over and why. A reviewer --harness or --model " +
+				"names never passes its seat on; --effort alone names none, so its seat is drawn and passes on. " +
 				"--exclude-model names each model to avoid; without it, the " +
 				"latest writer's is avoided, and no other, so a draw may seat a model weaker than the writer: the model the last Implementer line names in the `## Models` record of the body of the branch's open PR. " +
 				"When it names none or an `unknown` model, " +
@@ -1697,9 +1697,9 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"JSON schema without reading anything again. No round resumes another's session: each starts its own and reviews the " +
 				"whole change. --responses gives the author's fixes and refutations of " +
 				"the last run's findings, required while that run reported any; every seat of the next run is given those findings and " +
-				"responses, and its reply settles each, by its number in the prompt, as fixed, refuted, or still open, before it reviews the change anew. " +
+				"responses, and its reply settles each, by its number in the prompt, as fixed, refuted, or still open, before it reviews the change anew; one any seat keeps open carries over once, as it was reported and still its raiser's, so no reply reports it again. " +
 				"Findings are numbered across the run's reviewers in the order it printed them. A run on the head the last run passed with no " +
-				"finding, under the same base and applicable AGENTS.md, CLAUDE.md, shipped shared review rules, and REVIEW.md, runs no reviewer and " +
+				"finding, under the same base, a size on the same rung, and applicable AGENTS.md, CLAUDE.md, shipped shared review rules, and REVIEW.md, runs no reviewer and " +
 				"repeats its rounds, marked unchanged, but for a seat the tier now calls for that they lack, or a reviewer a flag names that is not among them, which joins that run. " +
 				"--new drops the last run's findings unsettled, and its classification, continuing each reviewer's tally of its findings on the branch, less those it drops, unless the saved state is one this quest cannot read. The branch's rounds are kept in the clone's common Git directory, so any worktree of the clone continues them. " +
 				"A checked-out branch with an upstream other than the base continues its upstream branch's rounds, so a " +

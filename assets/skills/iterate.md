@@ -15,7 +15,7 @@ Your `Implementer:` line ends with the size your brief gives the work, and the a
 Read the PR, its linked issues and quest, the reviews and comments posted on it, and the surrounding code.
 `quest status <pr>` reports its checks, reviews by head, and unresolved threads in one call.
 Judge the approach before touching anything: would you take a different one?
-`/quest-review`'s design checkpoint counts the rounds of each reviewer's session on the branch, including those earlier agents ran, so it may fall due in this one.
+`/quest-review`'s design checkpoint counts the branch's review runs since the last `--new`, including those earlier agents ran, so it may fall due in this one.
 At a `checkpoint` line in `quest status`, an online reviewer's every third round with findings, stop before fixing them and take `/quest-review`'s design checkpoint.
 
 Settle every decision this PR needs with the grill skill's interview, starting from the user's feedback: those its `## Waiting` section lists, those your judgment of the approach or the review findings raise, and any you find along the way.

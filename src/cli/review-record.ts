@@ -228,7 +228,10 @@ export function parseReview(body: string): ReviewSummary[] {
 	const blocks = all
 		.slice(at)
 		.split(/^(?=- Reviewer: )/m)
-		.slice(1);
+		.slice(1)
+		// An older record's shadow reviewer measured an effort step, not the writer or a rung, so its block stays out;
+		// its second reviewer reads as one a flag named.
+		.filter((text) => !/^- Reviewer: .*, shadow\r?$/m.test(text));
 	return blocks.map((text) => {
 		const match = (pattern: RegExp) => {
 			const found = pattern.exec(text);
@@ -237,7 +240,7 @@ export function parseReview(body: string): ReviewSummary[] {
 		};
 		const reviewer = match(
 			new RegExp(
-				`^- Reviewer: (.+?), (\\S+), (\\S+) effort(?:, (${RUNG_NAMES.join("|")}) rung \\((${DRAWN.join("|")})\\))?\\r?$`,
+				`^- Reviewer: (.+?), (\\S+), (\\S+) effort(?:, (${RUNG_NAMES.join("|")}) rung \\((${DRAWN.join("|")})\\)|, second)?\\r?$`,
 				"m",
 			),
 		);

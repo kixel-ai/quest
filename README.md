@@ -1535,8 +1535,8 @@ the record names it in its header:
 ```
 
 Only when no reviewer is left for a seat does the run fail, exiting 3 with
-each one's error. A reviewer `--harness`, `--model`, or `--effort` names never
-passes its seat on.
+each one's error. A reviewer `--harness` or `--model` names never
+passes its seat on; `--effort` alone names none, so its seat is drawn and passes on.
 
 A quest branch takes its quest's size, read from the base branch's tip so a
 change cannot lower its own review; any other PR, such as a skill's own, takes
@@ -1621,11 +1621,11 @@ reported findings requires. Findings are numbered across the run's
 reviewers, in the order it printed them. Every seat of the next run is given
 those findings and the responses, and its reply settles each by its number as
 fixed, refuted, or still open, with a one-sentence reason, before it reviews
-the change anew; a reply that skips or repeats one,
-or keeps more open than it reports, fails like any malformed reply. A
+the change anew; a reply that skips or repeats one fails like any malformed reply. One any seat keeps open
+carries over once, as it was reported and still its raiser's, so no reply reports it again. A
 refutation stands only
 when it cites evidence the reviewer can check. A run on
-the head the last run passed with no finding, under the same base and
+the head the last run passed with no finding, under the same base, a size on the same rung, and
 applicable `AGENTS.md`, `CLAUDE.md`, shipped shared review rules, and `REVIEW.md`, runs no
 reviewer and repeats its rounds, marked `unchanged`, but for a seat the tier
 now calls for that they lack, or a reviewer a flag names that is not among
@@ -1747,8 +1747,7 @@ counts the rounds on the branch of that model at that effort, the branch's runs 
 round graded them, and each finding it raised once,
 by its latest severity, however many rounds keep it open. A finding counts
 for the reviewer that raised it when a later run's reviewer fixes or
-refutes it, as the run's first round settled it, but one any seat of the run keeps open becomes that seat's, since its round
-reports it again. `--new` drops the findings it leaves unsettled from the
+refutes it, as the run's first round settled it, and one any seat of the run keeps open stays open and its own. `--new` drops the findings it leaves unsettled from the
 tallies. A reviewer of an earlier run keeps a block with only its sessions and
 tally. `quest status` takes the last full SHA the section names as the
 reviewed head, so the head appears in full only once no reviewer reports a
@@ -1870,7 +1869,7 @@ the reviewed tier grows riskier than the one overridden, other than to the
 override's own tier, which agrees with it, and `quest usage`
 counts overrides as a reading of the tier's accuracy. So a raise to medium on
 a head overridden from low to high ends the override, and the next run on that
-head picks from the PR's size list again.
+head needs one reviewer again, not two.
 
 ## Audit cost and accuracy
 
