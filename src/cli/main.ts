@@ -682,9 +682,9 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"url, state, draft, head, mergeable, merge-state, review-decision, review-record, risk, class, auto-merge, merge-queue, " +
 				"landing-stopped, and checks, whose state and counts follow the checks that count, pending while an open PR's base requires a check or workflow nothing reports; review-record gives whether the PR body's ## Review record " +
 				"covers the head, as current, diff-identical (git diff <base>...<head> prints the same as for the head it names), " +
-				"stale, or unknown when GitHub cannot compare them, then the head it names last, counting the record only when users " +
-				"with write access to the repository added every line of the section's text, as its edit history shows (else -, with a warning " +
-				"saying why); risk gives the record's risk " +
+				"stale, or unknown when GitHub cannot compare them, then the head it names last, counting the record only when the latest " +
+				"quest review commit status on that head is success, set by a user with write access to the repository, and attests the " +
+				"record's risk tier and class (else -, with a warning saying why); risk gives the record's risk " +
 				"tier, the same state for its head, the tier its classifier set before any reviewer raised it, and the " +
 				"reason last, - when the record names none, or - malformed - and why when its risk lines do not parse; class gives the RISK.md ## Automatic class the record's classifier named, or -; auto-merge gives its method, who enabled it and when, and the head it was " +
 				"enabled on, which differs from head once a push follows, as GitHub keeps auto-merge across a writer's " +
@@ -1786,7 +1786,10 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"user the GitHub token names, keeping the rest of the body, and prints `record <url>`: the reviewed " +
 				"head, named in full only once no reviewer reports a finding, the base, the head's risk tier and reason, " +
 				"an `- Overridden:` line, the classifier's tier and who set it, a `- Class:` line, a `- Local review: none` line for a low head no reviewer ran on, a `- Skipped:` line for each reviewer passed over, and each reviewer, its Reviewer line ending in `, shadow` for the shadow or `, second` for the second reviewer, its " +
-				"session and round, score, the tier it raised the risk to and why, its tally of findings across the branch's rounds, and each finding with its disposition. With no " +
+				"session and round, score, the tier it raised the risk to and why, its tally of findings across the branch's rounds, and each finding with its disposition. " +
+				"It then sets the `quest review` commit status on the head, on the same token: success once no finding is open, else failure, " +
+				"its description the head's risk tier and class, which `quest status` counts only from a user who can push; one GitHub refuses " +
+				"prints `; status skipped: <why>` after the record's URL. With no " +
 				"such PR, several from other repositories that `HEAD` contains, or a remote off GitHub, it prints `record skipped: <why>` and changes nothing.\n\n" +
 				"Exits 0 once the round finishes, whatever it found, 2 for invalid arguments " +
 				"or a checkout that cannot be reviewed, 3 when no eligible reviewer could run, each not installed, logged " +
@@ -1901,7 +1904,11 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 						else {
 							for (const line of roundLines(reviewed)) print(line);
 							if (record !== undefined)
-								print("url" in record ? `record ${record.url}` : `record skipped: ${record.skipped}`);
+								print(
+									"url" in record
+										? `record ${record.url}${record.unattested ? `; status skipped: ${record.unattested}` : ""}`
+										: `record skipped: ${record.skipped}`,
+								);
 							print(nextStep(rounds));
 						}
 						if (failure === undefined) return 0;

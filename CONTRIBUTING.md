@@ -29,10 +29,10 @@ Use conventional commit subjects. Keep PR descriptions concise: explain the
 problem, resulting behavior, validation, and any limitations.
 
 The PR body's `## Review` record of a local `quest review` round, which
-`quest status` counts only when people with write access wrote it, satisfies the
+`quest status` counts only through the passing `quest review` commit status a
+maintainer's round sets on the head it names, satisfies the
 required review `/quest-merge` describes when it names
-the exact head being landed, with no finding left unfixed or unrefuted; so does
-a recorded skip of a trivial change.
+the exact head being landed, with no finding left unfixed or unrefuted.
 `/quest-merge`'s exemptions still apply; a hand-resolved conflict outside them
 needs a local review of the new head.
 

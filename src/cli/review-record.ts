@@ -5,6 +5,7 @@ import { recorded } from "./models-record";
 import { type ClaimDependencies, upstream } from "./claims";
 import { pullsFrom } from "../github/claims";
 import { object, repositoryPath } from "../github/client";
+import { REVIEW_CONTEXT, attestation } from "../github/review-trust";
 import { git } from "./git";
 import { contains } from "./land";
 import { requireRemote } from "./github";
@@ -97,9 +98,7 @@ function classifiedBy({ by }: Risk["classified"]): string {
  * round, and a reviewer the run left out on its own.
  */
 export function reviewRecord({ rounds, tallies, risk, skipped, head, base }: Reviewed): string {
-	// A reviewer the run left out may still hold open findings, which keep the head from passing too.
-	const clean =
-		rounds.every((round) => round.findings.length === 0) && tallies.every((tally) => counted(tally).open === 0);
+	const clean = passed({ rounds, tallies });
 	const lines = [
 		MARK,
 		"",
@@ -305,8 +304,12 @@ export function withReview(body: string, record: string): string {
 	return `${body.slice(0, start)}\n\n${record}\n${end < body.length ? "\n" : ""}${body.slice(end)}`;
 }
 
+/** Whether a run passed its head: no finding open, including a reviewer's the run left out. */
+const passed = ({ rounds, tallies }: Pick<Reviewed, "rounds" | "tallies">) =>
+	rounds.every((round) => round.findings.length === 0) && tallies.every((tally) => counted(tally).open === 0);
+
 /** Where a round's record went: the PR whose body holds it, or why no body changed. */
-export type Recorded = { url: string } | { skipped: string };
+export type Recorded = { url: string; unattested?: string } | { skipped: string };
 
 /**
  * The open PR from `branch` into the base `<remote>/<branch>` names, or why there is none: the one from the repository
@@ -318,7 +321,16 @@ async function openPull(
 	baseRef: string,
 	branch: string,
 	deps: ClaimDependencies,
-): Promise<{ url: string; body: string; edit(body: string): Promise<void> } | { skipped: string }> {
+): Promise<
+	| {
+			url: string;
+			body: string;
+			edit(body: string): Promise<void>;
+			/** Set the `quest review` status on `sha`, or say why it cannot be set. */
+			attest(sha: string, state: "success" | "failure", description: string): Promise<string | null>;
+	  }
+	| { skipped: string }
+> {
 	// The checkout's top level: a subdirectory would look for the quest tree below it.
 	const top = git(root, ["rev-parse", "--show-toplevel"]);
 	const { remote, branch: base } = parseBase(top, baseRef);
@@ -356,6 +368,16 @@ async function openPull(
 		url: pull.url,
 		body,
 		edit: (body) => hosting.writes().edit({ ...repository, number: pull.number }, { title: null, body }),
+		// The status goes on the person's own token, which `quest status` counts only when it can push.
+		attest: async (sha, state, description) => {
+			if (up.github === null) return `${remote} is not on GitHub`;
+			const response = await up.github.client.request(`${repositoryPath(repository)}/statuses/${sha}`, {
+				body: { state, context: REVIEW_CONTEXT, description },
+				allow: [403, 404, 422],
+			});
+			if (response.status === 422) return `GitHub has no commit ${sha}; push it, then review it again`;
+			return response.ok ? null : `GitHub refused the ${REVIEW_CONTEXT} status (HTTP ${response.status})`;
+		},
 	};
 }
 
@@ -371,11 +393,20 @@ export async function pullModels(
 	return recorded(pull.body);
 }
 
-/** Record a run in the `## Review` section of its branch's open PR. The edit is the token's user's, which `/quest-merge` counts only when that user wrote the PR. */
+/**
+ * Record a run in the `## Review` section of its branch's open PR, and attest it with a `quest review` status on the
+ * head, which `quest status` counts only when the token's user can push.
+ */
 export async function recordRounds(root: string, reviewed: Reviewed, deps: ClaimDependencies): Promise<Recorded> {
 	const pull = await openPull(root, reviewed.base.ref, reviewed.branch, deps);
 	if ("skipped" in pull) return pull;
 	const next = withReview(pull.body, reviewRecord(reviewed));
 	if (next !== pull.body) await pull.edit(next);
-	return { url: pull.url };
+	const ok = passed(reviewed);
+	const why = await pull.attest(
+		reviewed.head,
+		ok ? "success" : "failure",
+		attestation(reviewed.risk.tier, reviewed.risk.classified.class, ok),
+	);
+	return why === null ? { url: pull.url } : { url: pull.url, unattested: why };
 }

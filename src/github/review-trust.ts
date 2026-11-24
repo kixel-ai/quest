@@ -1,27 +1,30 @@
-// Whose `## Review` record `quest status` counts: only one users with write access to the base repository wrote,
-// since anyone can write a SHA into their own PR's body.
-import { FIX_LINE, type PullRequest, recordBody, recordedRisk, reviewText } from "../core";
-import { type GitHubReader, WRITE, array, object, permission, string } from "./client";
+// Whose `## Review` record `quest status` counts: only one a `quest review` commit status attests, set on the reviewed
+// head by a user with write access to the base repository, since anyone can write a SHA into their own PR's body.
+import { type PullRequest, type Tier, recordedRisk, reviewSection } from "../core";
+import { type GitHubReader, WRITE, object, permission } from "./client";
 
-/** Edits read per page, each carrying a whole body of up to 65,536 characters; the record's writer is usually among the newest few. */
-const PAGE = 10;
-/** The newest edits read for the ones that wrote the section; past them, its writer is unknown. */
-const EDITS = 100;
+/** The commit status context `quest review` sets on each head it records. */
+export const REVIEW_CONTEXT = "quest review";
 
-const EDITS_QUERY = `query BodyEdits($owner: String!, $repo: String!, $number: Int!, $after: String) {
-	repository(owner: $owner, name: $repo) { pullRequest(number: $number) {
-		body author { __typename login }
-		userContentEdits(first: ${PAGE}, after: $after) {
-			pageInfo { hasNextPage endCursor }
-			nodes { editedAt deletedAt editor { __typename login } diff }
-		}
-	} }
+/** The status description `quest review` sets: the head's risk and class, which the body's record must match, and its outcome. */
+export function attestation(tier: Tier, kind: string | null, passed: boolean): string {
+	return `Risk ${tier}${kind === null ? "" : `, class ${kind}`}: ${passed ? "passed" : "findings open"}`;
+}
+
+const ATTESTED = /^Risk (low|medium|high)(?:, class ([a-z0-9-]+))?: /;
+
+const STATUS_QUERY = `query ReviewStatus($owner: String!, $repo: String!, $sha: GitObjectID!) {
+	repository(owner: $owner, name: $repo) {
+		object(oid: $sha) { ... on Commit { status { context(name: "${REVIEW_CONTEXT}") {
+			state description creator { __typename login }
+		} } } }
+	}
 }`;
 
 /**
- * `body` reduced to the `## Review` record `quest status` counts, as {@link recordBody} gives it, when writers alone
- * wrote the section's text, else nothing, with a warning saying why. A section naming no full SHA and no risk is
- * returned unchecked, since it records nothing.
+ * `body` as `quest status` reads its `## Review` record: as written when a `quest review` status attests the head the
+ * section names last, else without the record, with a warning saying why. A section naming no full SHA is returned
+ * unchecked, since no record counts there.
  */
 export async function trustedReview(
 	github: GitHubReader,
@@ -29,126 +32,47 @@ export async function trustedReview(
 	body: string,
 	warn: (message: string) => void,
 ): Promise<string> {
-	const text = reviewText(body);
-	if (text === null) return "";
-	const record = recordBody(text);
-	if (!/\b[0-9a-f]{40}\b/.test(record) && recordedRisk(record) === null) return record;
-	const why = await untrusted(github, pr, body, text);
-	if (why === null) return record;
+	const section = reviewSection(body);
+	const reviewed =
+		section &&
+		body
+			.slice(section.start, section.end)
+			.match(/\b[0-9a-f]{40}\b/g)
+			?.at(-1);
+	if (!reviewed) return body;
+	const why = await unattested(github, pr, body, reviewed);
+	if (why === null) return body;
 	warn(`${pr.owner}/${pr.repo}#${pr.number}'s ## Review record does not count: ${why}`);
 	return "";
 }
 
-/**
- * What a walk reads with: the repository's client and PR, each account's permission once asked, and each line of the
- * current section, by count, not yet traced to the edit that added it.
- */
-interface Walk {
-	github: GitHubReader;
-	pr: PullRequest;
-	permissions: Map<string, Promise<string | 403 | 404>>;
-	pending: Map<string, number>;
-}
-
-/** One version of the body: who saved it, and its section's text, null without one, or why it cannot be read. */
-interface Version {
-	editor: unknown;
-	text: string | null | { unreadable: string };
-}
-
-/** Each line of `text` that says something, by count: not blank, and not a land fixer line, which readers skip. */
-function lines(text: string | null): Map<string, number> {
-	const counts = new Map<string, number>();
-	for (const line of text?.split("\n") ?? [])
-		if (line.trim() !== "" && line.replace(FIX_LINE, "") !== "") counts.set(line, (counts.get(line) ?? 0) + 1);
-	return counts;
-}
-
-/**
- * Why the section is untrusted, or null when writers wrote it. Walking the body's versions newest first, each edit
- * that changes the section's text must be a writer's, and vouches only for the lines it added; the walk ends once
- * every line of the current section is traced to the writer who added it. A writer's edit of a line therefore
- * launders no line a non-writer added before it.
- */
-async function untrusted(github: GitHubReader, pr: PullRequest, body: string, text: string): Promise<string | null> {
-	let newer: Version | undefined;
-	let after: string | null = null;
-	let read = 0;
-	let time = Infinity;
-	const walk: Walk = { github, pr, permissions: new Map(), pending: lines(text) };
-	for (;;) {
-		const data = await github.graphql(EDITS_QUERY, { owner: pr.owner, repo: pr.repo, number: pr.number, after });
-		const pull = object(object(data.repository).pullRequest);
-		if (pull.body !== body)
-			throw new Error("the PR body changed while reading its edit history; rerun quest status");
-		const edits = object(pull.userContentEdits);
-		for (const edit of array(edits.nodes)) {
-			const at = Date.parse(string(edit.editedAt));
-			if (!(at <= time)) throw new Error("invalid GitHub response: the PR body's edits are not newest first");
-			time = at;
-			if (read++ === 0 && edit.diff !== body)
-				return "its edit history does not show the current body yet; rerun quest status";
-			const version: Version = {
-				editor: edit.editor,
-				text:
-					typeof edit.diff === "string"
-						? reviewText(edit.diff)
-						: { unreadable: edit.deletedAt == null ? "is unreadable" : "was deleted" },
-			};
-			if (newer !== undefined) {
-				const verdict = await change(walk, newer, version);
-				if (verdict !== undefined) return verdict;
-			}
-			newer = version;
-		}
-		const info = object(edits.pageInfo);
-		if (info.hasNextPage !== true)
-			// The oldest edit is the PR's creation, by its author; a body never edited has none. Creating the section
-			// adds every line, so the walk never reads on from here.
-			return (await change(walk, newer ?? { editor: pull.author, text }, { editor: null, text: null })) ?? null;
-		if (read >= EDITS) return `its newest ${EDITS} edits leave unknown who wrote all of its section`;
-		after = string(info.endCursor);
-	}
-}
-
-/**
- * What the edit from `older` to `newer`, a version already read, says: why the section is untrusted, null once
- * writers added every line of it, or undefined to read on. A bot's edit that only adds or drops land fixer lines
- * changes nothing, since `quest land` writes them as a bot.
- */
-async function change(walk: Walk, newer: Version, older: Version): Promise<string | null | undefined> {
-	const text = newer.text as string | null;
-	if (typeof older.text === "object" && older.text !== null)
-		return `a revision in its edit history ${older.text.unreadable}`;
-	if (text === older.text) return undefined;
-	const fixes = (section: string | null) => section?.replace(FIX_LINE, "").trim() ?? null;
-	if (kind(newer.editor) === "Bot" && fixes(text) === fixes(older.text)) return undefined;
-	const why = await writer(walk, newer.editor);
-	if (why !== null) return why;
-	const before = lines(older.text);
-	for (const [line, count] of lines(text)) {
-		const added = count - (before.get(line) ?? 0);
-		const waiting = walk.pending.get(line);
-		if (added <= 0 || waiting === undefined) continue;
-		if (waiting > added) walk.pending.set(line, waiting - added);
-		else walk.pending.delete(line);
-	}
-	return walk.pending.size === 0 ? null : undefined;
-}
-
-const kind = (actor: unknown) => (actor === null ? null : object(actor).__typename);
-
-/** Why `actor`, who changed the section, is not a user with write access to `pr`'s repository, or null when it is. */
-async function writer({ github, pr, permissions }: Walk, actor: unknown): Promise<string | null> {
-	if (actor === null) return "the account that changed its section is gone";
-	const name = string(object(actor).login);
-	if (kind(actor) !== "User") return `${name}, who changed its section, is a ${String(kind(actor))}, not a user`;
-	// A walk through several of a writer's edits asks about the same account again.
-	if (!permissions.has(name)) permissions.set(name, permission(github, pr, name));
-	const found = await permissions.get(name)!;
+/** Why no writer's passing `quest review` status on `sha` attests `body`'s record, or null when one does. */
+async function unattested(github: GitHubReader, pr: PullRequest, body: string, sha: string): Promise<string | null> {
+	const data = await github.graphql(STATUS_QUERY, { owner: pr.owner, repo: pr.repo, sha });
+	const commit = object(data.repository).object;
+	if (commit === null) return `${pr.owner}/${pr.repo} has no commit ${sha}`;
+	const rollup = object(commit).status;
+	const status = rollup == null ? null : object(rollup).context;
+	if (status == null) return `${sha} has no ${REVIEW_CONTEXT} status`;
+	const { state, description, creator } = object(status);
+	if (state !== "SUCCESS")
+		return `the ${REVIEW_CONTEXT} status on ${sha} is ${String(state).toLowerCase()}, not success`;
+	if (creator == null) return `the account that set the ${REVIEW_CONTEXT} status on ${sha} is gone`;
+	const { __typename: kind, login } = object(creator);
+	const name = String(login);
+	if (kind !== "User")
+		return `${name}, who set the ${REVIEW_CONTEXT} status on ${sha}, is a ${String(kind)}, not a user`;
+	const found = await permission(github, pr, name);
 	if (typeof found === "number")
-		return `cannot read the permission of ${name}, who changed its section (HTTP ${found})`;
+		return `cannot read the permission of ${name}, who set the ${REVIEW_CONTEXT} status on ${sha} (HTTP ${found})`;
 	if (!WRITE.includes(found))
-		return `${name}, who changed its section, has ${found} access to ${pr.owner}/${pr.repo}, not write`;
+		return `${name}, who set the ${REVIEW_CONTEXT} status on ${sha}, has ${found} access to ${pr.owner}/${pr.repo}, not write`;
+	// The tier and class gate a standing pick, so the body's must be the ones the status attests.
+	const attested = ATTESTED.exec(typeof description === "string" ? description : "");
+	if (attested === null) return `the ${REVIEW_CONTEXT} status on ${sha} names no risk`;
+	const risk = recordedRisk(body);
+	// A malformed risk is left for `quest status` to print and `quest merge` to refuse.
+	if (risk !== null && !("malformed" in risk) && (risk.tier !== attested[1] || risk.class !== (attested[2] ?? null)))
+		return `its risk differs from the ${REVIEW_CONTEXT} status on ${sha}: ${String(description)}`;
 	return null;
 }

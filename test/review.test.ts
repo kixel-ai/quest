@@ -1681,12 +1681,18 @@ fakes("a change to the applicable instructions starts a new session that weighs 
  */
 /** An open PR from `feature` into `main`, from `acme/widget` unless `head` names another repository. */
 type FakePull = { number: number; body: string | null; head?: string; sha?: string };
-function onGitHub(repo: string, pulls: FakePull[], fork = false): { body: string }[] {
+function onGitHub(
+	repo: string,
+	pulls: FakePull[],
+	fork = false,
+): { body: string }[] & { statuses: { sha: string; state: string; context: string; description: string }[] } {
 	const local = git(repo, "remote", "get-url", "origin");
 	git(repo, "remote", "set-url", "origin", "https://github.com/acme/widget.git");
 	git(repo, "config", `url.${local}.insteadOf`, "https://github.com/acme/widget.git");
 	const owner = fork ? "upstream" : "acme";
-	const writes: { body: string }[] = [];
+	const writes = Object.assign([] as { body: string }[], {
+		statuses: [] as { sha: string; state: string; context: string; description: string }[],
+	});
 	const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status });
 	const info = (login: string, parent: string | null) => ({
 		owner: { login },
@@ -1729,6 +1735,11 @@ function onGitHub(repo: string, pulls: FakePull[], fork = false): { body: string
 			pulls.find((p) => p.number === Number(patched[1]))!.body = body;
 			return json({});
 		}
+		const attested = new RegExp(`^/repos/${owner}/widget/statuses/([0-9a-f]{40})$`).exec(url.pathname);
+		if (attested && init?.method === "POST") {
+			writes.statuses.push({ sha: attested[1]!, ...JSON.parse(String(init.body)) });
+			return json({}, 201);
+		}
 		if (patched && (init?.method ?? "GET") === "GET")
 			return json({ body: pulls.find((p) => p.number === Number(patched[1]))!.body });
 		throw new Error(`unexpected ${init?.method ?? "GET"} ${url.pathname}`);
@@ -1761,6 +1772,10 @@ fakes("each round rewrites the Review section of the branch's open PR, keeping t
 		expect(first.stdout).toContain("record https://github.com/acme/widget/pull/7\n");
 		const head = git(s.repo, "rev-parse", "HEAD");
 		const base = git(s.repo, "rev-parse", "origin/main");
+		// The record's head carries a status saying it has not passed, which `quest status` reads before the body.
+		expect(writes.statuses).toEqual([
+			{ sha: head, state: "failure", context: "quest review", description: "Risk medium: findings open" },
+		]);
 		expect(pull.body).toBe(
 			[
 				// The author's lines keep their line endings.
@@ -2496,7 +2511,7 @@ fakes(
 			number: 7,
 			body: "Fixes averaging.\n\n## Models\n\n- Size: S\n- Implementer: Claude Code, claude-opus-5-5, high effort\n",
 		};
-		onGitHub(s.repo, [pull]);
+		const writes = onGitHub(s.repo, [pull]);
 		vi.stubEnv(
 			"FAKE_RISK",
 			JSON.stringify({ tier: "low", reason: "Only a constant changes.", class: "constants" }),
@@ -2526,6 +2541,15 @@ fakes(
 				"- Class: `constants`\n- Local review: none, since a low-risk head needs only the online reviewer",
 			);
 			expect(recordedRisk(pull.body)).toMatchObject({ tier: "low", class: "constants", overridden: null });
+			// Its status attests the tier and class the record names, which `quest status` checks the body against.
+			expect(writes.statuses).toEqual([
+				{
+					sha: head,
+					state: "success",
+					context: "quest review",
+					description: "Risk low, class constants: passed",
+				},
+			]);
 
 			// The maintainer holds it high: the high list's pick and a second reviewer from another vendor review it.
 			const held = await quest("--root", s.repo, "review", "--override", "high", "--reason", "It ships tonight.");
@@ -2957,6 +2981,26 @@ test("the record replaces only a top-level Review section, never an example of o
 	// A heading appended inside an unclosed construct would be no section, which the land gate never reads.
 	for (const open of ["```md\nunclosed", "<!-- unclosed"])
 		expect(() => withReview(open, "new")).toThrow("unclosed code fence or HTML comment");
+});
+
+fakes("a status GitHub refuses, as a contributor's token's, leaves the record and says so", async () => {
+	const s = setup();
+	onGitHub(s.repo, [{ number: 9, body: "" }]);
+	const fetch = globalThis.fetch;
+	vi.stubGlobal("fetch", async (input: URL, init?: RequestInit) =>
+		new URL(input).pathname.includes("/statuses/")
+			? new Response('{"message":"Not Found"}', { status: 404 })
+			: fetch(input, init),
+	);
+	try {
+		const result = await quest("--root", s.repo, "review");
+		expect(result.code, result.stderr).toBe(0);
+		expect(result.stdout).toContain(
+			"record https://github.com/acme/widget/pull/9; status skipped: GitHub refused the quest review status (HTTP 404)\n",
+		);
+	} finally {
+		vi.unstubAllGlobals();
+	}
 });
 
 fakes("a record GitHub refuses fails the command after printing the round", async () => {

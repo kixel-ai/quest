@@ -1,7 +1,9 @@
 // A fake GitHub for `quest status`: recorded GraphQL answers and the REST reads around them.
 import { expect } from "vitest";
 
+import { recordedRisk } from "../src/core";
 import { type GitHubReadDependencies } from "../src/github/client";
+import { attestation } from "../src/github/review-trust";
 
 export const A = "a".repeat(40);
 export const B = "b".repeat(40);
@@ -128,10 +130,10 @@ export function setup(
 		/** The open PRs as the duplicate read lists them, and each `<head>:<path>` blob's text. */
 		open?: { pulls: Node[]; blobs?: Record<string, string>; files?: Record<number, Node[]> };
 		/**
-		 * The PR body's edit history, newest first, and its author; by default never edited, by `maintainer`. `body`
-		 * overrides the body the history read returns.
+		 * The latest `quest review` status on each commit, or null for a commit GitHub does not have; by default, the
+		 * maintainer's passing status attesting the body's risk on every commit.
 		 */
-		history?: { edits?: Node[]; author?: Node | null; body?: string };
+		statuses?: Record<string, Node | null>;
 		/** Each login's permission on the repository, or the status GitHub refuses it with; by default `maintainer` is an admin. */
 		permissions?: Record<string, string | number>;
 	} = {},
@@ -144,7 +146,7 @@ export function setup(
 	const eventPages = [...(options.eventPages ?? [])];
 	const activityPages = [...(options.activity ?? [])];
 	const activityRequests: string[] = [];
-	const historyQueries: Record<string, unknown>[] = [];
+	const statusQueries: string[] = [];
 	const permissionRequests: string[] = [];
 	const deps: GitHubReadDependencies = {
 		readToken: "test-token",
@@ -240,30 +242,22 @@ export function setup(
 					},
 				});
 			}
-			if (request.query.includes("query BodyEdits(")) {
-				historyQueries.push(request.variables);
-				if (!last) throw new Error("history read before PR state");
-				const edits = options.history?.edits ?? [];
-				// The cursor is the index of the page's first edit; quest status reads 10 a page.
-				const from = Number(request.variables.after ?? 0);
-				const to = from + 10;
-				return Response.json({
-					data: {
-						repository: {
-							pullRequest: {
-								body: options.history?.body ?? last.data.repository.pullRequest.body,
-								author:
-									options.history?.author === undefined
-										? { __typename: "User", login: "maintainer" }
-										: options.history.author,
-								userContentEdits: {
-									pageInfo: { hasNextPage: to < edits.length, endCursor: String(to) },
-									nodes: edits.slice(from, to),
-								},
-							},
-						},
-					},
-				});
+			if (request.query.includes("query ReviewStatus(")) {
+				const sha = String(request.variables.sha);
+				statusQueries.push(sha);
+				// By default the maintainer's passing status attests whatever the body's record says.
+				const recorded = recordedRisk(String(last?.data.repository.pullRequest.body ?? ""));
+				const status =
+					options.statuses === undefined
+						? reviewStatus(
+								"SUCCESS",
+								recorded === null || "malformed" in recorded
+									? "Risk low: passed"
+									: attestation(recorded.tier, recorded.class, true),
+							)
+						: options.statuses[sha];
+				const object = status === null ? null : { status: status === undefined ? null : { context: status } };
+				return Response.json({ data: { repository: { object } } });
 			}
 			if (request.query.includes("query HoldOwnership(")) {
 				holdQueries.push(request.variables);
@@ -290,15 +284,10 @@ export function setup(
 			return Response.json(body);
 		},
 	};
-	return { deps, queries, texts, holdQueries, eventRequests, activityRequests, historyQueries, permissionRequests };
+	return { deps, queries, texts, holdQueries, eventRequests, activityRequests, statusQueries, permissionRequests };
 }
 
-/** One version of the PR body in its edit history, `minute` minutes in, by `login` of GraphQL type `kind`. */
-export function edit(login: string, diff: string | null, minute: number, kind = "User") {
-	return {
-		editedAt: new Date(Date.UTC(2026, 10, 24, 0, minute)).toISOString(),
-		deletedAt: diff === null ? "2026-11-25T00:00:00Z" : null,
-		editor: { __typename: kind, login },
-		diff,
-	};
+/** A `quest review` status as GitHub's GraphQL `StatusContext` gives it, set by `login` of GraphQL type `kind`. */
+export function reviewStatus(state: string, description: string, login = "maintainer", kind = "User") {
+	return { state, description, creator: { __typename: kind, login } };
 }

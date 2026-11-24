@@ -548,7 +548,7 @@ first wait is still reported.
 `quest status` prints a GitHub PR's current state in one call, such as after
 `quest wait` wakes. It accepts the same PR argument and authentication as
 `quest wait`, and reports facts without deciding whether the PR is ready, except
-that it counts only a `## Review` record maintainers wrote:
+that it counts only a `## Review` record a maintainer's `quest review` status attests:
 
 ```console
 $ quest status 128
@@ -579,7 +579,7 @@ comes last, and a missing value prints as `-`:
 | --- | --- |
 | `url`, `state`, `draft`, `head` | The PR URL; `open`, `closed`, or `merged`; `true` or `false`; the head SHA. |
 | `mergeable`, `merge-state`, `review-decision` | GitHub's values, lowercased. |
-| `review-record` | Whether the PR body's [`## Review` record](#review-locally) still covers the head, and the head it names last: `current` when it is the head, `diff-identical` when `git diff <base>...<head>` prints the same as for it, `stale` otherwise, or `unknown` when GitHub cannot compare them, such as a diff too large; `-` when the record names no full SHA, or, with a warning saying why, when anyone without write access to the base repository, such as a bot or the PR's contributor, wrote any of the section's text, which `quest status` reads from the body's edit history: newest first, each edit that changes the text must be a writer's and vouches only for the lines it added, until every line is traced to a writer. So a line a contributor added stays theirs until a writer removes the section, and `quest review` then writes it afresh. Hidden HTML comments, line endings, and trailing spaces are no part of that text, and a bot's edit that only adds [`quest land`](#the-watchers-own-queue)'s fixer lines changes nothing; those lines name the head the fixer pushed, so they never name a reviewed head. Reading the history takes a token that can push to the repository; any other sees every record as untrusted. |
+| `review-record` | Whether the PR body's [`## Review` record](#review-locally) still covers the head, and the head it names last: `current` when it is the head, `diff-identical` when `git diff <base>...<head>` prints the same as for it, `stale` otherwise, or `unknown` when GitHub cannot compare them, such as a diff too large; `-` when the record names no full SHA, or, with a warning saying why, when no passing [`quest review` commit status](#review-locally) attests it: the latest one on the head it names must be `success`, set by a user with write access to the base repository, and its description must name the record's risk tier and class. So a record a contributor or a bot wrote, or edited to name another head or tier, counts for nothing. Reading the setter's permission takes a token that can push to the repository; any other sees every record as untrusted. |
 | `risk` | The record's [risk tier](#risk-tiers), `low`, `medium`, or `high`; the same state as `review-record` for the head it names; the tier its classifier set before any reviewer raised it; and the reason. `-` when the record names none, and `- malformed -` with why when its risk lines do not parse, which `quest merge` refuses. |
 | `class` | The `## Automatic` class of the base's `RISK.md` the record's classifier found the change in, or `-`. |
 | `auto-merge` | Method, who enabled it, when, and the head it was enabled on. |
@@ -1781,9 +1781,12 @@ text to `quest status` and the record alike; the rest of the body stays as writt
 gains it at the end, unless it ends inside an unclosed code fence or HTML
 comment, which fails the record. With no such PR, or a remote off GitHub, it changes nothing
 and prints `record skipped: <why>`. It edits as the user the GitHub token names
-(`GH_TOKEN`, `GITHUB_TOKEN`, or `gh auth token`), and `quest status` counts the
-record only when users with write access wrote all of it, so a
-contributor's own record counts for nothing. A record GitHub refuses fails the command after the
+(`GH_TOKEN`, `GITHUB_TOKEN`, or `gh auth token`), then sets the `quest review`
+commit status on the head on the same token: `success` once no finding is open,
+else `failure`, described by the head's risk tier and class, as `Risk low, class
+test: passed`. `quest status` counts a record only through that status, set by
+someone who can push, so a contributor's own record counts for nothing; a status
+GitHub refuses prints `; status skipped: <why>` after the record's URL. A record GitHub refuses fails the command after the
 round's report, with exit status 1. It exits 0 once the round
 finishes, whatever it found, 2 for invalid arguments or a checkout that
 cannot be reviewed, 3 when no eligible reviewer could run, each not installed,

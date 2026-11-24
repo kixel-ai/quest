@@ -167,7 +167,7 @@ export async function pullRequestStatus(
 			? { checks: [], workflows: [] }
 			: (base?.needs ?? (await requiredOf(github, pr, baseRef)));
 	const status = summarize(first!, rollup, current, needs, reviewNodes, threadNodes);
-	// The record is read from the text a writer last set, so no one else's edit names a reviewed head or risk.
+	// A record counts only where a writer's `quest review` status attests it, so no one else's edit names a reviewed head.
 	const trusted = await trustedReview(github, pr, typeof first!.body === "string" ? first!.body : "", deps.warn);
 	status.reviewRecord = await reviewRecord(github, pr, { ...first!, body: trusted }, deps.warn);
 	status.risk = risk(trusted, head, status.reviewRecord);
