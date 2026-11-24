@@ -12,6 +12,7 @@ It no longer writes the PR body's `## Review` section, and `quest status`, `ques
 Decided in the [epic](/quest/m0/telemetry/README.md): ✅ `## Review` moves out of the body.
 
 - The saved rounds under `.git/quest/review/` already hold what a post needs; post them as they are written.
+- Each round also posts its round number, 0 to 10 score, and the score's rationale, so Kixel Quest shows every round's score in order rather than only the latest one the body keeps; decided 2026-11-24 (maintainer, `/quest-plan` in [kixel-ai/kixel.quest#146](https://github.com/kixel-ai/kixel.quest/pull/146)). Test that a round's post carries all three.
 - Update the guide, `assets/CONTEXT.md`, and the review, iterate, and merge skills where they describe the `## Review` record; this decision is the maintainer's request for that work.
 
 Tests: a round posts each finding with its location; a `--responses` round posts each finding's outcome; a low head posts its classification alone; and the PR body is left unchanged.
