@@ -10,7 +10,7 @@ The sender stops parsing `## Caused by` on the host, since Kixel Quest parses it
 
 ## Plan
 
-Decided in the [epic](/quest/m0/telemetry/README.md): ✅ `Implementer:` lines become posts. 68% of them said effort `unknown` in [moq-dev/quest#826](https://github.com/moq-dev/quest/pull/826)'s audit, while transcripts record the effort.
+Decided in the [epic](/quest/m0/telemetry/README.md): ✅ `Implementer:` lines become posts. 68% of them said effort `unknown` in [kixel-ai/quest#826](https://github.com/kixel-ai/quest/pull/826)'s audit, while transcripts record the effort.
 
 - `quest agent` knows the routing decision; write it where the record sender finds it for that session.
 - `## Models` keeps its `Size:` line, which starting and reviewing need.

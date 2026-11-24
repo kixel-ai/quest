@@ -28,7 +28,7 @@ export const GUIDE: string = guide;
 export const CONTEXT: string = context;
 
 /** Where an agent without the CLI learns to install it. */
-const SETUP = "https://github.com/moq-dev/quest/blob/main/SETUP.md";
+const SETUP = "https://github.com/kixel-ai/quest/blob/main/SETUP.md";
 
 /** The guide's `##` sections by heading, each with its heading; headings inside code fences belong to their section. */
 const SECTIONS: ReadonlyMap<string, string> = (() => {

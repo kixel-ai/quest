@@ -11,18 +11,18 @@ seats find what Pullfrog finds behind them, per dollar, Pullfrog and its
 required-approval ruleset retire.
 
 Non-goals: the writers, which only Claude runs since
-[moq-dev/quest#832](https://github.com/moq-dev/quest/pull/832); the shadow and Fable candidate seats, which measure and do not count
+[kixel-ai/quest#832](https://github.com/kixel-ai/quest/pull/832); the shadow and Fable candidate seats, which measure and do not count
 toward a tier's seats.
 
 ## Plan
 
 Decided 2026-11-22 (maintainer, `/quest-plan` follow-up of
-[moq-dev/quest#826](https://github.com/moq-dev/quest/pull/826)):
+[kixel-ai/quest#826](https://github.com/kixel-ai/quest/pull/826)):
 
 - Seats per tier? ✅ 1, 2, and 3 local seats, one per vendor (rejected:
   the same counts with seats picked by eval alone, which may seat one
   vendor twice; today's counts). Counting Pullfrog, today's setup is
-  already 1, 2, and 3 once [moq-dev/quest#819](https://github.com/moq-dev/quest/pull/819)
+  already 1, 2, and 3 once [kixel-ai/quest#819](https://github.com/kixel-ai/quest/pull/819)
   seats Opus xhigh as a second reviewer on high heads. Pullfrog's catches
   behind a mostly-Sol pick (147 of 272 high and 148 of 549 medium merged
   PRs, 93% accepted) suggest vendor diversity is what finds them.
@@ -37,7 +37,7 @@ Decided 2026-11-22 (maintainer, `/quest-plan` follow-up of
   three: Astra high, Gemini, and a Claude model other than the writer's,
   such as Opus xhigh for a Fable-written XL quest. The Claude seat never
   takes the writer's model: on an Opus-written head it is Sonnet or Fable,
-  as moq-dev/quest#819 already seats Sonnet high when Opus wrote the branch.
+  as kixel-ai/quest#819 already seats Sonnet high when Opus wrote the branch.
 - Pullfrog retires on evidence, as [routing evidence](/quest/m0/routing-evidence/README.md)
   records: compare what it still finds behind these seats per dollar, from
   its run logs' cost tables.
