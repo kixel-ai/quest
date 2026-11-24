@@ -22,7 +22,7 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { homedir, tmpdir, userInfo } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { createInterface } from "node:readline";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 
@@ -704,7 +704,10 @@ describe("agy", () => {
 		rmSync(markers, { recursive: true });
 		mkdirSync(markers);
 	};
-	/** One turn as quest runs it, with `deny` rewriting its deny rules when given. */
+	/**
+	 * One turn as quest runs it, with `deny` rewriting its deny rules when given. `@CLIMB@` in the prompt becomes a
+	 * path that starts inside the head's export and climbs with `..` to the root.
+	 */
 	const turn = async (prompt: string, deny?: (rules: string[]) => string[]) => {
 		const call = agyTurn(
 			{
@@ -721,6 +724,8 @@ describe("agy", () => {
 			prompt,
 			[],
 		);
+		const exported = join(call.workspace!.dir, "head");
+		call.stdin = call.stdin.replaceAll("@CLIMB@", `${exported}/${"../".repeat(exported.split("/").length - 1)}`);
 		const settings = call.argv[call.argv.indexOf("--settings") + 1]!;
 		if (deny) {
 			const rules = (JSON.parse(readFileSync(settings, "utf8")) as { permissions: { deny: string[] } })
@@ -808,6 +813,15 @@ describe("agy", () => {
 					codeword,
 				);
 		}
+		// A read that names the export, then climbs out with `..`. Flash often refuses it as traversal, so a refusal
+		// only warns, and a quote fails whenever it does try.
+		clearAgy();
+		const climb = agyRun(await turn(read(`@CLIMB@${other.slice(1)}`)));
+		if (!climb.reads.some((path) => path.endsWith(basename(other))))
+			console.warn(`the reviewer refused the climbing read, so it shows nothing:\n${climb.response}`);
+		for (const each of [secret, otherSecret, untrackedSecret])
+			expect(climb.response, "the reviewer quoted a file through `..`").not.toContain(each);
+		expect(recordedAgy(), `planted configuration or a command ran\n${climb.output}`).toEqual([]);
 	});
 
 	test("quest review runs none of it and quotes nothing the store holds", async () => {
