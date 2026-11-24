@@ -36,6 +36,7 @@ import { githubRepository, requireRemote } from "./github";
 import { type GitHub, type ObjectValue, link, object } from "../github/client";
 import { type OnlineReview, readOnlineReviews } from "../github/online-review";
 import {
+	HARNESSES,
 	type Counts,
 	type ReviewSummary,
 	classifierSessions,
@@ -837,13 +838,14 @@ function count(to: { tally: Omit<Counts, "first">; firstRounds: FirstRounds }, t
  * A PR's spend split among `seats`, as its record names them: spend whose `seat` is known, as a reviewer's session its
  * record names, to that seat; each model's other spend to the seats of that model, of its effort where both name one;
  * and spend of a model no seat names, as a sub-agent on a smaller model, to the seat that took the most, the PR's
- * main one. Spend that fits several seats goes to the first, the PR's writer, when an implementing session spent it,
+ * main one. Spend never goes to an Antigravity seat, since token-max reads no Antigravity session, and spend that only
+ * an Antigravity seat could take is uncounted. Spend that fits several seats goes to the first, the PR's writer, when an implementing session spent it,
  * and to the others when an iterating one did; what still fits several is split evenly among them and counted as
  * `split`, rather than given to one. Returns each seat's share, by index, and nothing without a seat.
  */
 export function share(
 	spent: (Spent & { role?: Role; seat?: number })[],
-	seats: { model: string; effort: string }[],
+	seats: { model: string; effort: string; harness?: string }[],
 ): Map<number, Tokens & { split: number }> {
 	const shares = new Map<number, Tokens & { split: number }>();
 	if (seats.length === 0) return shares;
@@ -854,14 +856,17 @@ export function share(
 		shares.set(seat, to);
 	};
 	const rest: Spent[] = [];
+	// token-max reads no Antigravity session, so spend it reports is never an Antigravity seat's, whatever its model.
+	const read = (seat: number) => seats[seat]!.harness !== HARNESSES.agy;
 	const canonical = (model: string | null) => (model === null ? null : canonicalModel(model));
 	for (const each of spent) {
-		if (each.seat !== undefined) {
+		// Even a session a record names on an Antigravity seat, as by hand, belongs to some other seat.
+		if (each.seat !== undefined && read(each.seat)) {
 			into(each.seat, each);
 			continue;
 		}
 		const model = canonical(each.model);
-		const same = seats.flatMap((seat, i) => (canonical(seat.model) === model ? [i] : []));
+		const same = seats.flatMap((seat, i) => (read(i) && canonical(seat.model) === model ? [i] : []));
 		const effort = each.effort ?? "unknown";
 		const exact = same.filter((i) => seats[i]!.effort === effort);
 		const loose = same.filter((i) => seats[i]!.effort === "unknown" || effort === "unknown");
@@ -873,11 +878,14 @@ export function share(
 		else for (const seat of fits) into(seat, part(each, fits.length), fits.length > 1);
 	}
 	if (rest.length > 0) {
-		const main = [...shares].reduce<[number, Tokens] | undefined>(
-			(best, entry) => (best === undefined || entry[1].cost > best[1].cost ? entry : best),
-			undefined,
-		);
-		for (const each of rest) into(main?.[0] ?? 0, each);
+		const main = [...shares]
+			.filter(([seat]) => read(seat))
+			.reduce<[number, Tokens] | undefined>(
+				(best, entry) => (best === undefined || entry[1].cost > best[1].cost ? entry : best),
+				undefined,
+			);
+		const to = main?.[0] ?? seats.findIndex((_, seat) => read(seat));
+		if (to >= 0) for (const each of rest) into(to, each);
 	}
 	return shares;
 }
@@ -1023,7 +1031,8 @@ function reviewerRows(pulls: PullRow[]): ReviewerRow[] {
 				reviewed: 0,
 				tally: noCounts(),
 				firstRounds: noFirst(),
-				spent: noSpend(),
+				// token-max reads no Antigravity session, so what an Antigravity reviewer spent is never all counted.
+				spent: review.harness === HARNESSES.agy ? { ...noSpend(), complete: false } : noSpend(),
 			};
 			rows.set(id, found);
 		}

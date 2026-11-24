@@ -1559,7 +1559,8 @@ names the latest writer, since each session moves its line last whenever it push
 than it. Earlier writers may review.
 Without a record, or when its last line names an `unknown` model, the harness
 running the command, usually the session that
-just pushed, is taken to be the latest writer, so Codex reviews from Claude Code
+just pushed, detected from the variables Claude Code, Codex, and Antigravity
+each set, is taken to be the latest writer, so Codex reviews from Claude Code
 and Claude Code from Codex; with no model known, no weaker one is avoided, so
 the never-weaker rule needs the record. `--harness` names the only reviewer instead of
 the pick and the shadow, at the model and effort of its first entry whose model is not avoided, and
@@ -1611,12 +1612,12 @@ with the base's tip, so a branch behind its base draws no findings on code the
 base gained since, which a diff against its tip shows as reverted.
 The first round explores the change once. It runs the reviewer's own review,
 `codex exec review` with custom instructions or Claude Code's `/code-review
-<effort> <merge-base>...HEAD` with text after the target, given the range,
-Quest's shared review rules (`assets/REVIEW.md`), the base's `REVIEW.md`, if
-any (which adds to them and takes precedence), and any earlier findings and
-responses up front. It
+<effort> <merge-base>...HEAD` with text after the target, or for `agy`, which
+has none, a turn asking what the change breaks, given the range, Quest's shared
+review rules (`assets/REVIEW.md`), the base's `REVIEW.md`, if any (which adds to
+them and takes precedence), and any earlier findings and responses up front. It
 also asks the reviewer to name each contract the change alters and search past
-the diff for the dependents left on the old one. Neither returns a JSON schema
+the diff for the dependents left on the old one. None returns a JSON schema
 itself, so the round resumes that session for one turn that reads nothing and
 reports the review in one schema, with a score from 0 to 10 for how ready the
 head is to land and one sentence on why: 10 lands as is, 7 to 9 lands after the
@@ -1629,9 +1630,10 @@ and their refutations still decide when the loop ends. Later rounds take
 reported findings requires. A later round resumes the session and checks only
 what changed since the last round's head and its findings when nothing but the
 head changed: the same model, effort, and base, a merge base the last round's
-covers, as when the base moved on, and the same applicable `AGENTS.md`,
-`CLAUDE.md`, shipped shared review rules, and `REVIEW.md`. Otherwise it starts
-a new session that reviews
+covers, as when the base moved on, the same applicable `AGENTS.md`,
+`CLAUDE.md`, shipped shared review rules, and `REVIEW.md`, and the last round's
+head still in the clone, which an amend and a prune can remove. Otherwise it
+starts a new session that reviews
 the whole change and still weighs the responses. A round that would resume on
 the head the last round reviewed, when that round found nothing, runs no
 reviewer and repeats that round, marked `unchanged`. A refutation stands only
@@ -1669,13 +1671,61 @@ runs `quest review` with the installed CLIs and copies of your logins, and
 fails if any of it runs, the review trusts a new directory, or the reviewer's
 flags let the planted rule allow a command. A login with no file to copy, such
 as one in the macOS keychain, needs the CLI's credential exported instead:
-`CLAUDE_CODE_OAUTH_TOKEN` from `claude setup-token`, or `CODEX_API_KEY`. It spends real usage, so CI never runs it; run it
-after upgrading either CLI. The base is fetched first, since
+`CLAUDE_CODE_OAUTH_TOKEN` from `claude setup-token`, or `CODEX_API_KEY`. For
+Antigravity it plants hooks, MCP servers, plugins, rules, and skills in every
+directory `agy` reads them from, with `AGENTS.md`, `GEMINI.md`, and helper
+binaries, and a change asking the reviewer to quote canaries it writes beside
+your login in `~/.gemini` and beside the checkout; on your own login and home,
+it fails if a plant runs, the checkout's instructions reach the reviewer, or
+the reviewer quotes a canary, after showing that `agy`'s defaults load them all
+and that quest's turn reads the canaries without its read rules. It spends real usage, so CI never
+runs it; run it after upgrading any of the CLIs. The base is fetched first, since
 the sandbox has no network. The reviewer follows the base's `AGENTS.md` and `CLAUDE.md`, at the
 root and in each directory holding a changed path, never the checkout's, so a
 change cannot instruct its own reviewer. Quest's shared review rules always come first and set the default adversarial
 stance; the base's `REVIEW.md` is optional, adds repo-specific rules, and takes
 precedence where they conflict.
+
+`--harness agy` reviews with Google's Antigravity CLI, `agy`, which only
+reviews: name its
+model and effort, as `--model gemini-4-neon --effort xhigh`. It runs `agy -p`
+on your own Antigravity login, wherever `agy` keeps it: the OS keyring, or over
+ssh its configuration directory, `~/.gemini/antigravity-cli`. Run `agy` to sign
+in. No `ANTIGRAVITY_*` or `AGY_*` variable reaches it, so no gateway either,
+and `GEMINI_API_KEY` and `GOOGLE_API_KEY` never replace the login. `agy` loads
+the `.agents/`, `AGENTS.md`, and `GEMINI.md` of every directory from where it
+runs up to the repository's root, so each turn, and its status check, `agy
+models`, runs in a new private directory under quest's agent directory instead,
+and an agent directory inside a repository is a usage error naming
+`XDG_RUNTIME_DIR` and `TMPDIR`. There it runs as an agent quest writes, whose
+only tools are `view_file` and `finish` and which inherits none of your hooks,
+rules, plugins, or MCP tools. Print mode cannot approve a read outside that
+directory, so permissions are skipped, and deny rules on commands, writes, web
+requests, and MCP calls back up the tool list. With no shell, the turn's
+directory holds what `git` would show: an export of the reviewed head's tracked
+files, beside the directory `agy` runs in so none of its configuration loads,
+`files.txt` listing them, and each reviewed range's diff; `agy` 1.5.14 gives an
+agent no search tool. The export and the diffs ignore the head's
+`.gitattributes`, so a head can neither hide a file or its hunks nor run a
+filter driver, and the export writes each symlink as a file holding its target.
+The review turn alone gets the export, since the report turn reads nothing. `agy` has no rule
+that allows only some paths, so a read rule denies each path beside the
+directories leading to the turn's directory, and nothing outside it, such as the
+checkout's untracked files, its `.git`, or another CLI's login, can be read. The
+rules hold what each turn's start lists, so the usual login and key paths under
+your home, such as `~/.codex` and `~/.ssh`, are denied even before they exist,
+and a parent that cannot be listed is a usage error; anything else created
+beside those directories while a turn runs, such as in the runtime directory, is
+not covered. The rules' own file is denied too. `agy` compares its rules with a
+path's case as written, so on a volume that matches names case-insensitively,
+such as macOS's default, `/USERS/...` passes a rule naming `/Users`: quest
+refuses to run `agy` where any directory leading to its agent directory is on
+one, or with a Git older than 2.41, which has no `--attr-source`; either passes a
+classifier turn to the next and exits 3 for `--harness agy`.
+An `agy models` that fails other than on the login fails as it is. Your skills' text
+still reaches it, and your MCP servers start, with no tool it can call. A
+`RESOURCE_EXHAUSTED` quota error counts as its usage limit, resetting at the
+time it names.
 
 It prints the size and its source, base, and head; the head's `risk` tier and
 reason, then `classified` with the classifier's tier, how it was set (`model`,
@@ -1729,7 +1779,7 @@ own PRs with your own token. A record GitHub refuses fails the command after the
 round's report, with exit status 1. It exits 0 once the round
 finishes, whatever it found, 2 for invalid arguments or a checkout that
 cannot be reviewed, 3 when no eligible reviewer could run, each not installed,
-logged out, its login rejected, or at its usage limit, and 1 for other
+logged out, its login rejected, at its usage limit, or unable to run on this host, and 1 for other
 failures. The only eligible reviewer's usage limit prints one line,
 `error: <harness> hit its usage limit; resets <time>`, where `<time>` is the
 reset as an ISO 8601 UTC timestamp, or `unknown` when the CLI named none; with
@@ -1793,10 +1843,11 @@ reports first. A base with no `RISK.md` makes every change no path holds high
 Otherwise a classifier reads the diff and the base's `RISK.md` in one read-only
 turn and replies with a tier, one sentence on why, and the `## Automatic`
 class every changed file falls in, or none: Claude Code
-`claude-haiku-5-5` at low effort, or Codex `gpt-6.2-sol` at low when Claude
-Code is missing, logged out, has its login rejected, or hit its usage limit.
-When neither can run, the review fails on the limit that resets first if both
-hit theirs, and otherwise as a usage error naming why each failed. A diff past 200,000 characters gives it only the
+`claude-haiku-5-5` at low effort, then Codex `gpt-6.2-sol` at low, then
+Antigravity `gemini-3.8-flash` at low, each when those before it are missing,
+logged out, have their login rejected, or hit their usage limit. When none can
+run, the review fails on the limit that resets first if every one whose CLI is
+installed hit its own, and otherwise as a usage error naming why each failed. A diff past 200,000 characters gives it only the
 stat, and it reads the parts it needs. The tier is kept with the reviewers'
 sessions, so a later round on the same head and base `RISK.md` reuses it, and
 `--new` classifies again. Each reviewer judges the tier too, told the

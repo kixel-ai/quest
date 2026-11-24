@@ -20,7 +20,12 @@ import {
 	sameSeat,
 } from "./review";
 
-const HARNESSES: Record<Round["reviewer"], string> = { claude: "Claude Code", codex: "Codex" };
+/** The name a PR body's review record gives each reviewer's CLI. */
+export const HARNESSES: Record<Round["reviewer"], string> = {
+	claude: "Claude Code",
+	codex: "Codex",
+	agy: "Antigravity",
+};
 
 /**
  * Model text as one inline code span, so a mention, issue reference, or Markdown in it renders as text.

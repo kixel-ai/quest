@@ -75,4 +75,3 @@ Guidance:
 ## Required
 
 - [Reviewer rungs](/quest/m0/reviewer-rungs.md) - the per-round rung draw each seat takes its model from
-- [Gemini reviewer](/quest/m0/gemini-reviewer.md) - the `agy` harness the Gemini seat runs on

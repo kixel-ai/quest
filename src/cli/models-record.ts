@@ -58,6 +58,8 @@ const key = (name: string) =>
 		.replace(/^claude-/, "");
 // Models the tables no longer list, which older records still name.
 const RETIRED = ["gpt-6.1-sol"];
+// Models no table lists yet, which run only when named, as `--harness agy --model gemini-4-neon` does.
+const NAMED = ["gemini-4-neon"];
 const KNOWN = new Map(
 	[
 		...[
@@ -70,10 +72,11 @@ const KNOWN = new Map(
 			.flat()
 			.map(({ model }) => model),
 		...RETIRED,
+		...NAMED,
 	].map((model) => [key(model), model]),
 );
 
-/** A listed or retired model's ID for any spelling of it, as `openai/gpt-6.2-astra` or `GPT-6.1 Sol`, else the name. */
+/** A listed, retired, or named model's ID for any spelling of it, as `openai/gpt-6.2-astra` or `GPT-6.1 Sol`, else the name. */
 export const canonicalModel = (name: string): string => KNOWN.get(key(name)) ?? name;
 
 /** Whether two model names mean the same model, however each is spelled. */
