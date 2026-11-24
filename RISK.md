@@ -10,9 +10,11 @@ while its release is live is a risk every behavior change carries, and
 medium covers it, including a bug in a record, comment, or upload `quest`
 already writes. What a revert cannot undo is what a change newly makes
 `quest` or its agents do beyond the repository: merge, post, upload, or
-spend where they did not before. The agent instructions `quest` ships
-are the exception: every agent session in every repository acts on their
-wording, so the `## High` list below holds them.
+spend where they did not before.
+
+The agent instructions `quest` ships are high anyway, though a revert
+undoes them: every agent session in every repository acts on their
+wording. The `## High` list holds the files they live in.
 
 What others rely on here:
 
@@ -37,6 +39,9 @@ A change is high when it:
 - changes when an agent may push, merge, post, or spend without asking,
   in any instructions, such as `AGENTS.md` or `CONTRIBUTING.md`, or in the
   code that acts on them.
+- changes the text `quest` gives agents from code, such as the line
+  `quest init` plants, skill stubs, hook messages, and the reviewer's and
+  classifier's prompts.
 - changes the reviewer's sandbox or the credentials an agent gets, or
   sends a new kind of data off the host or into a public comment, such as
   a new upload destination or command output it now posts. New fields in
@@ -64,15 +69,17 @@ class: its PRs merged, the culprits among them, and their wait on a person.
   no user, contributor, or other repository reads change
 - `refactor` - code changes that keep every behavior and output the same,
   such as a rename inside a module or a simplification
-- `trivial` - a dependency or pin bump, or another change as small outside
-  the `## High` list's instructions, from any author, which lands at any
-  tier once Pullfrog approves its head
+- `trivial` - a dependency or pin bump, or another change as small, from
+  any author and touching no `## High` path, which lands at any tier once
+  Pullfrog approves its head
 
 ## High
 
 - `assets/` - the rules, guide, skills, and audits every repository's
   agents load from `quest`, including when they may write remotely or merge
 - `docs/context.md` - the copy of `quest context` agents read without the CLI
+- `SETUP.md` - the install steps agents follow from `main` when a skill
+  stub finds no `quest`
 - `src/cli/rules.ts` - the rules `quest context` prints and `quest hook`
   enforces on every agent's tool calls
 - `scripts/installer.sh` - users pipe it to a shell, and a release
