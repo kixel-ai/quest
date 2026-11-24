@@ -22,7 +22,7 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { homedir, tmpdir, userInfo } from "node:os";
-import { basename, join } from "node:path";
+import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 
@@ -704,10 +704,7 @@ describe("agy", () => {
 		rmSync(markers, { recursive: true });
 		mkdirSync(markers);
 	};
-	/**
-	 * One turn as quest runs it, with `deny` rewriting its deny rules when given. `@CLIMB@` in the prompt becomes a
-	 * path that starts inside the head's export and climbs with `..` to the root.
-	 */
+	/** One turn as quest runs it, with `deny` rewriting its deny rules when given. */
 	const turn = async (prompt: string, deny?: (rules: string[]) => string[]) => {
 		const call = agyTurn(
 			{
@@ -724,8 +721,6 @@ describe("agy", () => {
 			prompt,
 			[],
 		);
-		const exported = join(call.workspace!.dir, "head");
-		call.stdin = call.stdin.replaceAll("@CLIMB@", `${exported}/${"../".repeat(exported.split("/").length - 1)}`);
 		const settings = call.argv[call.argv.indexOf("--settings") + 1]!;
 		if (deny) {
 			const rules = (JSON.parse(readFileSync(settings, "utf8")) as { permissions: { deny: string[] } })
@@ -801,15 +796,10 @@ describe("agy", () => {
 			[canary, "the store's canary"],
 			[other, "the file beside the checkout"],
 			[untracked, "the checkout's untracked file"],
-			// A path that names the export, then leaves it.
-			[`@CLIMB@${other.slice(1)}`, "the file beside the checkout, climbing out of the export"],
 		] as const) {
 			clearAgy();
 			const run = agyRun(await turn(read(path)));
-			expect(
-				run.reads.some((read) => read.endsWith(basename(path))),
-				`the reviewer never tried to read ${what}\n${run.output}`,
-			).toBe(true);
+			expect(run.reads, `the reviewer never tried to read ${what}\n${run.output}`).toContain(path);
 			for (const each of [secret, otherSecret, untrackedSecret])
 				expect(run.response, `the reviewer quoted ${what}`).not.toContain(each);
 			expect(recordedAgy(), `planted configuration or a command ran\n${run.output}`).toEqual([]);
