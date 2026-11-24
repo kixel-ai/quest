@@ -401,7 +401,12 @@ describe("PR records", () => {
 		const clean = [{ ...round, findings: [] }, second];
 		expect(reviewRecord({ ...at, rounds: clean, tallies, risk, skipped: [] })).not.toContain("b".repeat(40));
 		const settledAll = [tally(SOL, [THREAD], 3, { high: 1, medium: 1, low: 2 }, 3, 1), tallies[1]!];
+		// Two rounds of one vendor are not the two vendors a medium head seats, so the head stays short until they are.
 		expect(reviewRecord({ ...at, rounds: clean, tallies: settledAll, risk, skipped: [] })).toContain(
+			"- Head: bbbbbbbbbbbb, named in full once reviewers from 2 vendors pass it\n",
+		);
+		const vendors = [clean[0]!, { ...second, reviewer: "claude" as const }];
+		expect(reviewRecord({ ...at, rounds: vendors, tallies: settledAll, risk, skipped: [] })).toContain(
 			`- Head: ${"b".repeat(40)}\n`,
 		);
 		expect(fixes(body)).toEqual(["codex, gpt-6.2-sol, medium effort"]);
@@ -1056,15 +1061,15 @@ describe("usage", () => {
 			1.25,
 		]);
 		// Each row is one model and effort at the rung it was drawn from, with the later PRs that fixed what it
-		// reviewed: #11 names #10 under ## Caused by.
+		// reviewed: #11 names #10 under ## Caused by, which counts only for the reviewers of #10's latest run.
 		expect(
 			report.reviewers
 				.filter((r) => r.size === "L")
 				.map((r) => [r.model, r.effort, r.rung?.drawn ?? null, r.fixes]),
 		).toEqual([
-			["claude-opus-5-5", "high", null, 1],
+			["claude-opus-5-5", "high", null, 0],
 			["gpt-6.2-sol", "high", null, 1],
-			["gpt-6.2-sol", "medium", "down", 1],
+			["gpt-6.2-sol", "medium", "down", 0],
 			["gemini-3-pro", "high", null, 1],
 		]);
 		expect(ten.online).toEqual([

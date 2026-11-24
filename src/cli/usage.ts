@@ -1079,7 +1079,8 @@ function reviewerRows(pulls: PullRow[]): ReviewerRow[] {
 		for (const review of each.review.filter((review) => review.tally !== null)) {
 			const to = row(each, review);
 			to.reviewed++;
-			to.fixes += each.fixedBy.length;
+			// Only the latest run's reviewers saw the head that landed, so only they let its defects through.
+			if (review.round !== null) to.fixes += each.fixedBy.length;
 			count(to, [review.tally!]);
 		}
 	}

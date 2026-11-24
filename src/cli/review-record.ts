@@ -14,6 +14,7 @@ import {
 	type Reviewed,
 	type Risk,
 	type Round,
+	SEATS,
 	SEVERITIES,
 	type Tally,
 	located,
@@ -103,11 +104,19 @@ function classifiedBy({ by }: Risk["classified"]): string {
 export function reviewRecord({ rounds, tallies, risk, skipped, head, base }: Reviewed): string {
 	const clean =
 		rounds.every((round) => round.findings.length === 0) && tallies.every((tally) => counted(tally).open === 0);
+	const vendors = new Set(rounds.map((round) => round.reviewer)).size;
 	const lines = [
 		MARK,
 		"",
-		// `quest status` counts a full SHA here as a review of that head, which an open finding has not passed.
-		`- Head: ${clean ? head : `${head.slice(0, 12)}, named in full once no reviewer reports a finding`}`,
+		// `quest status` counts a full SHA here as a review of that head, which an open finding, or a run with fewer
+		// vendors than its tier seats, such as one `--harness` named, has not passed.
+		`- Head: ${
+			!clean
+				? `${head.slice(0, 12)}, named in full once no reviewer reports a finding`
+				: vendors < SEATS[risk.tier]
+					? `${head.slice(0, 12)}, named in full once reviewers from ${SEATS[risk.tier]} vendors pass it`
+					: head
+		}`,
 		`- Base: ${base.ref} at ${base.sha.slice(0, 12)}`,
 		`- Risk: ${risk.tier}, ${code(risk.reason)}`,
 		...(risk.overridden ? [`- Overridden: from ${risk.overridden} by the maintainer`] : []),

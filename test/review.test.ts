@@ -2478,6 +2478,20 @@ agyFakes("a raise to high seats the third reviewer at once, and a run that fails
 			"- Rounds: 1, runs 1 to 1; first round 1 (high 1); findings 1 (high 1): fixed 0, refuted 0, open 1\n",
 		);
 
+		// A --new run on a new head that raises the tier and then fails on its third seat keeps the raise, and drops
+		// nothing: the last run's findings still need responses.
+		write(s.repo, "src/lib.ts", "export const x = 9;\n");
+		git(s.repo, "commit", "-qam", "a constant for --new");
+		vi.stubEnv("FAKE_LIMITED", "reset");
+		vi.stubEnv("FAKE_FAILS", "claude-fable-5-2");
+		const fresh = await quest("--root", s.repo, "review", ...OPUS, "--new");
+		expect(fresh.code).toBe(3);
+		vi.stubEnv("FAKE_LIMITED", undefined);
+		vi.stubEnv("FAKE_FAILS", undefined);
+		const unanswered = await quest("--root", s.repo, "review", ...OPUS);
+		expect(unanswered.code).toBe(2);
+		expect(unanswered.stderr).toContain("the last round reported 3 finding(s); pass --responses");
+
 		// On a new head the tier starts at medium with two seats; when their rounds raise the tier again, the third
 		// seat runs at once, each reviewer once.
 		write(s.repo, "src/lib.ts", "export const x = 3;\n");

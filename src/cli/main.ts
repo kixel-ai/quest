@@ -1758,7 +1758,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"one object: `rounds`, one per reviewer, `tallies`, every reviewer's findings across the branch's rounds, `risk`, the head's tier with its classification, `skipped`, each reviewer passed over with its reason, `record`, and `next`.\n\n" +
 				"After each round, it rewrites the `## Review` section of the branch's open PR into the base, the one from the repository the base's remote pushes to, else the only one from another repository whose pushed head `HEAD` contains, as the " +
 				"user the GitHub token names, keeping the rest of the body, and prints `record <url>`: the reviewed " +
-				"head, named in full only once no reviewer reports a finding, the base, the head's risk tier and reason, " +
+				"head, named in full only once no reviewer reports a finding and reviewers from as many vendors as its tier seats ran, the base, the head's risk tier and reason, " +
 				"an `- Overridden:` line, the classifier's tier and who set it, a `- Class:` line, a `- Skipped:` line for each reviewer passed over, and each reviewer, its Reviewer line ending in its rung and which way it was drawn, as `, deep rung (up)`, its every session, its latest " +
 				"session and round, score, the tier it raised the risk to and why, its tally of findings across the branch's rounds, and each finding with its disposition. With no " +
 				"such PR, several from other repositories that `HEAD` contains, or a remote off GitHub, it prints `record skipped: <why>` and changes nothing.\n\n" +
@@ -1774,14 +1774,15 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		)
 		.option("--base <remote/branch>", "Base branch to review against (default: origin's default branch)")
 		.addOption(
-			new Option("--harness <name>", "The CLI of the one reviewer to run, instead of the run's draw").choices(
-				REVIEW_HARNESSES,
-			),
+			new Option(
+				"--harness <name>",
+				"The CLI of the one reviewer to run, alone, instead of the run's draw",
+			).choices(REVIEW_HARNESSES),
 		)
-		.option("--model <model>", "Model of the one reviewer to run, instead of the run's draw")
+		.option("--model <model>", "Model of the run's first reviewer, instead of its draw")
 		.option(
 			"--effort <level>",
-			"Reasoning effort of the one reviewer to run, instead of the run's draw, never max",
+			"Reasoning effort of the run's first reviewer, instead of its draw, never max",
 			effortLevel,
 		)
 		.option(

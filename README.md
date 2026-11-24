@@ -1759,7 +1759,8 @@ refutes it, as the run's first round settled it, and one any seat of the run kee
 tallies. A reviewer of an earlier run keeps a block with only its sessions and
 tally. `quest status` takes the last full SHA the section names as the
 reviewed head, so the head appears in full only once no reviewer reports a
-finding, and model text
+finding and reviewers from as many vendors as its tier seats ran, so a
+`--harness` run on a medium or high head never counts as its review, and model text
 appears as inline code, which mentions or links nothing and never holds a full
 SHA. The section runs to the next level-1 or
 level-2 heading, both as Markdown parses them, so an example in a code fence is

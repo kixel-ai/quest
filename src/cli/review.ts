@@ -2729,10 +2729,10 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 		...(saved?.past ?? []),
 		...(saved?.reviewed?.rounds ?? []).filter((round) => !(reviewed?.rounds ?? []).includes(round)),
 	];
-	const state = (reviewed: State["reviewed"], runs: number, tallies: Tally[], risk: Risk, raised = held): State => ({
+	const state = (reviewed: State["reviewed"], runs: number, tallies: Tally[], risk: Risk): State => ({
 		branch,
 		runs,
-		...(raised !== undefined && { raised }),
+		...(held !== undefined && { raised: held }),
 		...(since > 0 && { since }),
 		...(reviewed !== undefined && { reviewed }),
 		...(past(reviewed).length > 0 && { past: past(reviewed) }),
@@ -2792,6 +2792,7 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 		dir,
 		env: deps.env,
 		ready,
+		finished: [],
 	};
 	let done: Round[] = [];
 	// The last run's findings this run already carried over, by number.
@@ -2837,17 +2838,15 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 			}
 		}
 	} catch (error) {
-		const raised = judged();
+		// Every finished round's raise, even one whose peer then failed, and the saved state otherwise as it was, so a
+		// failed --new drops nothing.
+		const raised = settle(classified.value, [...onHead, ...shared.finished], held);
 		if (raised.raisedBy !== undefined && riskier(raised.tier, before.tier))
-			save(
-				statePath,
-				state(prior, runs, tallies, overridden(raised, override), {
-					head,
-					tier: raised.tier,
-					reason: raised.reason,
-					by: raised.raisedBy,
-				}),
-			);
+			save(statePath, {
+				...(saved ?? { branch, runs, tallies: [] }),
+				classified: { key: classified.key, value },
+				raised: { head, tier: raised.tier, reason: raised.reason, by: raised.raisedBy },
+			});
 		throw error;
 	}
 	const after = tallied(tallies, done, raisers);
@@ -2911,7 +2910,11 @@ async function runSeats(shared: Shared, seats: Seat[], stop: AbortSignal | undef
 		throw error;
 	}
 	const clis = checked.map((result) => (result as PromiseFulfilledResult<Cli>).value);
-	return all((seat, index) => reviewWith(shared, seat, clis[index]!));
+	return all(async (seat, index) => {
+		const round = await reviewWith(shared, seat, clis[index]!);
+		shared.finished.push(round);
+		return round;
+	});
 }
 
 /**
@@ -3024,6 +3027,8 @@ interface Shared {
 	env: NodeJS.ProcessEnv;
 	/** The CLIs whose status check passed this run, which a seat another CLI cannot take shows can review. */
 	ready: Set<ReviewHarness>;
+	/** Every round a seat finished this run, even in an attempt another seat then failed, whose raises a failed run keeps. */
+	finished: Round[];
 }
 
 /** A seat of a run: its reviewer, and the rung that gave it, or none for the one a flag named. */
