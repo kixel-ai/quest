@@ -1,9 +1,9 @@
 // A pull request's risk tier: what could break, for whom, and how hard it is to undo, set from its diff and never
 // from who wrote it. The repository's RISK.md lists the paths whose change is always high and says what else is
 // customer-facing there; `quest review` sets the tier and records it in the PR body's `## Review` section.
-import type { List, ListItem, Paragraph, RootContent } from "mdast";
+import type { List, ListItem, Paragraph, PhrasingContent, RootContent } from "mdast";
 
-import { markdown } from "./doc";
+import { codeSpan, markdown } from "./doc";
 import { reviewSection } from "./review";
 
 /** The tiers, from least risk to most. */
@@ -56,6 +56,27 @@ const segmentSource = (segment: string) => escape(segment).replace(/\*/g, "[^/]*
 
 /** Whether `path` matches `pattern`, as {@link patternError} defines one, or lies under a directory it matches. */
 export function matches(pattern: string, path: string): boolean {
+	// `s`, so a path holding a line break matches like any other.
+	return new RegExp(`^${patternSource(pattern)}(?:/.*)?$`, "s").test(path);
+}
+
+/**
+ * Whether `pattern` names `path` itself, or, when it ends in `/` or `/**`, a directory strictly holding it: unlike
+ * {@link matches}, a file pattern such as `*.md` never covers a directory whose name fits it, and a directory pattern
+ * such as `*` + `/**` never a file whose name does.
+ */
+function names(pattern: string, path: string): boolean {
+	const directory = pattern.endsWith("/**")
+		? pattern.slice(0, -3)
+		: pattern.endsWith("/")
+			? pattern.slice(0, -1)
+			: null;
+	const source = directory === null ? patternSource(pattern) : `${patternSource(directory)}/.+`;
+	return new RegExp(`^${source}$`, "s").test(path);
+}
+
+/** A regular expression's source for the paths `pattern` matches, not counting what lies under them. */
+function patternSource(pattern: string): string {
 	// Adjacent `**` segments match what one does.
 	const segments = (pattern.endsWith("/") ? pattern.slice(0, -1) : pattern)
 		.split("/")
@@ -66,14 +87,29 @@ export function matches(pattern: string, path: string): boolean {
 		if (segment === "**") source += index === 0 ? (last ? ".*" : "(?:[^/]+/)*") : last ? "(?:/.*)?" : "(?:/[^/]+)*";
 		else source += (index === 0 || (index === 1 && segments[0] === "**") ? "" : "/") + segmentSource(segment);
 	});
-	// `s`, so a path holding a line break matches like any other.
-	return new RegExp(`^${source}(?:/.*)?$`, "s").test(path);
+	return source;
 }
 
 /** A class of change that may land without the maintainer's pick, and the rule over the diff that defines it. */
 export interface Class {
 	name: string;
+	/**
+	 * Patterns every changed path must match one of, checked before a model judges the rule; null for any path. A
+	 * pattern names a whole path, and everything under a directory only when it ends in `/` or `/**`.
+	 */
+	scope: string[] | null;
 	rule: string;
+}
+
+/**
+ * The classes a change may fall in: each whose scope holds every path in `paths`, which must list both sides of a
+ * rename so a move out of a scope leaves it, and none when no path changed.
+ */
+export function classesFor(classes: readonly Class[], paths: readonly string[]): Class[] {
+	if (paths.length === 0) return [];
+	return classes.filter(
+		({ scope }) => scope === null || paths.every((path) => scope.some((pattern) => names(pattern, path))),
+	);
 }
 
 /** What a risk file holds: its always-high paths and automatic classes, and what keeps it from being read. */
@@ -88,7 +124,8 @@ export interface RiskFile {
  *
  * - `## High`: each item a backticked {@link patternError} pattern, ` - `, and why changing what it matches is always
  *   high.
- * - `## Automatic`: each item a backticked class name, ` - `, and the rule over the diff a change meets to fall in it.
+ * - `## Automatic`: each item a backticked class name; optionally its scope, backticked {@link patternError} patterns
+ *   joined by `, ` in parentheses; ` - `; and the rule over the diff a change meets to fall in it.
  *
  * The rest of the file is prose the classifier reads, such as what is customer-facing.
  */
@@ -131,24 +168,28 @@ function headingText(text: string, node: RootContent): string {
 		.trim();
 }
 
-/** A list item's backticked code and the text after its ` - `, or null when it has not that shape. */
-function codeItem(text: string, item: ListItem): { code: string; rest: string } | null {
+/** A list item's leading backticked code and its source after that, or null when it has not that shape. */
+function codeItem(text: string, item: ListItem): { code: string; after: string } | null {
 	const [first, ...rest] = item.children;
 	if (first?.type !== "paragraph" || rest.length > 0) return null;
 	const [code] = (first as Paragraph).children;
 	if (code?.type !== "inlineCode") return null;
-	const after = text.slice(code.position!.end.offset!, first.position!.end.offset!);
-	const tail = /^[ \t]+-[ \t]+(\S[\s\S]*)$/.exec(after)?.[1]?.replace(/\s+/g, " ").trim();
-	return tail === undefined ? null : { code: code.value, rest: tail };
+	return { code: code.value, after: text.slice(code.position!.end.offset!, first.position!.end.offset!) };
+}
+
+/** The text after the ` - ` that opens `after`, on one line, or null when `after` does not open with one. */
+function dashed(after: string): string | null {
+	return /^\s+-\s+(\S[\s\S]*)$/.exec(after)?.[1]?.replace(/\s+/g, " ").trim() ?? null;
 }
 
 /** One `## High` item, or why it is not one. */
 function highPath(text: string, item: ListItem): HighPath | string {
 	const parsed = codeItem(text, item);
-	if (parsed === null) return "a `## High` item is a backticked pattern, ` - `, and why its change is high";
+	const reason = parsed && dashed(parsed.after);
+	if (!parsed || !reason) return "a `## High` item is a backticked pattern, ` - `, and why its change is high";
 	const problem = patternError(parsed.code);
 	if (problem !== null) return `\`${parsed.code}\` is no pattern: ${problem}`;
-	return { pattern: parsed.code, reason: parsed.rest };
+	return { pattern: parsed.code, reason };
 }
 
 /** A class name: lowercase words joined by hyphens, so a record names it as one token. */
@@ -156,11 +197,59 @@ const CLASS_NAME = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
 /** One `## Automatic` item, or why it is not one. */
 function automaticClass(text: string, item: ListItem): Class | string {
-	const parsed = codeItem(text, item);
-	if (parsed === null) return "an `## Automatic` item is a backticked class name, ` - `, and the rule over the diff";
-	if (!CLASS_NAME.test(parsed.code))
-		return `\`${parsed.code}\` is no class name: use lowercase words joined by hyphens`;
-	return { name: parsed.code, rule: parsed.rest };
+	const [first, ...rest] = item.children;
+	const [code, ...inline] = first?.type === "paragraph" ? (first as Paragraph).children : [];
+	if (rest.length > 0 || code?.type !== "inlineCode")
+		return (
+			"an `## Automatic` item is a backticked class name, optionally a scope of backticked path patterns in " +
+			"parentheses, ` - `, and the rule over the diff"
+		);
+	const name = code.value;
+	if (!CLASS_NAME.test(name)) return `\`${name}\` is no class name: use lowercase words joined by hyphens`;
+	const opening = inline[0];
+	let scope: string[] | null = null;
+	let end = code.position!.end.offset!;
+	if (opening?.type === "text" && /^\s*\(/.test(opening.value)) {
+		if (/^\s*\(\s*\)/.test(opening.value))
+			return `\`${name}\`'s scope is empty: list its patterns, or drop the parentheses`;
+		const list = spanList(text, inline);
+		if (list === null) return `\`${name}\`'s scope is not backticked path patterns joined by \`, \``;
+		for (const pattern of list.spans) {
+			const problem = patternError(pattern);
+			if (problem !== null) return `${codeSpan(pattern)} in \`${name}\`'s scope is no pattern: ${problem}`;
+		}
+		[scope, end] = [list.spans, list.end];
+	}
+	const rule = dashed(text.slice(end, first!.position!.end.offset!));
+	if (rule === null)
+		return scope
+			? `\`${name}\`'s scope must be followed by \` - \` and the rule, with nothing between`
+			: `\`${name}\` must be followed by its optional scope in parentheses, \` - \`, and the rule over the diff`;
+	// A scope after the dash would read as prose the classifier judges, not a scope the code checks.
+	const [lead] = markdown(rule).children;
+	if (lead?.type === "paragraph" && spanList(rule, (lead as Paragraph).children) !== null)
+		return `\`${name}\`'s scope goes before \` - \`, not at the start of its rule`;
+	return { name, scope, rule };
+}
+
+/**
+ * The code spans of the parenthesized list joined by `, ` that `nodes`, parsed from `text`, open with, and the offset
+ * in `text` just past its `)`, or null when they open with no such list. Whitespace and line breaks may pad the list,
+ * and a span may use any backtick run, so it may hold a backtick. The punctuation is read from the source, so an
+ * escape or entity that decodes to it is text, not a delimiter.
+ */
+function spanList(text: string, nodes: PhrasingContent[]): { spans: string[]; end: number } | null {
+	const source = (node: PhrasingContent) => text.slice(node.position!.start.offset!, node.position!.end.offset!);
+	if (nodes[0]?.type !== "text" || !/^\s*\(\s*$/.test(source(nodes[0]))) return null;
+	const spans: string[] = [];
+	for (let index = 1; ; index += 2) {
+		const [code, next] = [nodes[index], nodes[index + 1]];
+		if (code?.type !== "inlineCode" || next?.type !== "text") return null;
+		spans.push(code.value);
+		const closing = /^\s*\)/.exec(source(next));
+		if (closing) return { spans, end: next.position!.start.offset! + closing[0].length };
+		if (!/^\s*,\s+$/.test(source(next))) return null;
+	}
 }
 
 /** The risk the PR body's `## Review` record names for its head. */

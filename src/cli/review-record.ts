@@ -1,6 +1,6 @@
 // `quest review` rewrites the `## Review` section of its branch's open PR after each round, so the head
 // it reviewed counts without an agent copying the round into the body by hand.
-import { DEFAULT, PATHS, REVIEW_MARK, reviewSection } from "../core";
+import { DEFAULT, PATHS, REVIEW_MARK, codeSpan, reviewSection } from "../core";
 import { recorded } from "./models-record";
 import { type ClaimDependencies, upstream } from "./claims";
 import { pullsFrom } from "../github/claims";
@@ -32,13 +32,12 @@ export const HARNESSES: Record<Round["reviewer"], string> = {
  * `quest status` takes the last full SHA the section names as its reviewed head, so no full SHA appears in it.
  */
 function code(text: string): string {
-	const flat = text
-		.replace(/\s+/g, " ")
-		.trim()
-		.replace(/\b[0-9a-f]{40}\b/g, (sha) => sha.slice(0, 12));
-	const fence = "`".repeat(Math.max(0, ...(flat.match(/`+/g) ?? []).map((run) => run.length)) + 1);
-	const pad = /^`|`$/.test(flat) ? " " : "";
-	return `${fence}${pad}${flat}${pad}${fence}`;
+	return codeSpan(
+		text
+			.replace(/\s+/g, " ")
+			.trim()
+			.replace(/\b[0-9a-f]{40}\b/g, (sha) => sha.slice(0, 12)),
+	);
 }
 
 const capitalized = (word: string) => word[0]!.toUpperCase() + word.slice(1);

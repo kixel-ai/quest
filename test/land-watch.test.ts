@@ -2038,7 +2038,10 @@ git commit -qm 'disable render_timeout'`;
 		);
 		fix.round(10, fixScript("fixed.txt"));
 		// rind's fixers on 2026-11-15 failed so before Codex started: the host's launcher refused the upload.
-		fix.round(11, "echo 'starting' \necho 'quest land check: upload exceeds 256 MiB <@maintainer>' >&2\nexit 1\n");
+		fix.round(
+			11,
+			"echo 'starting' \necho 'quest land check: upload exceeds 256 MiB <@maintainer>' >&2\necho 'upload exceeds 256 MiB <@maintainer>' >&3\nexit 1\n",
+		);
 		fix.round(13, fixScript("fixed.txt"));
 		expect(await watchPass(REPOSITORY, { state }, deps(github), context)).toEqual([
 			"removed 8 failed_checks fix",
@@ -2095,9 +2098,12 @@ git commit -qm 'disable render_timeout'`;
 		expect(handback).toContain("<pre>The merge queue removed");
 		expect(history(state, 9)!.rounds).toMatchObject([{ outcome: "handback" }]);
 		// A crash ends the pick too, with a round of its own.
-		// Its handback names the crash as the reason, quotes the gate's failure, then the fixer's output, escaped.
+		// Its handback names the crash and the wrapper's own error as the reason, recommends repairing the wrapper,
+		// quotes the gate's failure, then the fixer's output, escaped.
 		const crash = github.comments[11].at(-1)!.body;
-		expect(crash).toContain("fixer crashed (exit 1)");
+		expect(crash).toContain(
+			"Claude land fixer: `fixer crashed (exit 1): upload exceeds 256 MiB &lt;[at]maintainer>. Recommendation: repair the land fixer's wrapper on the watcher's host, then pick it again.`",
+		);
 		expect(crash).toContain("running tests\nFAIL queue.test.ts");
 		expect(crash).toContain(
 			"The fixer's output ended with:\n\n<pre>starting\nquest land check: upload exceeds 256 MiB &lt;@maintainer></pre>",

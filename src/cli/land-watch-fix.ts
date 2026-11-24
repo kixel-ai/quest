@@ -310,7 +310,7 @@ async function collectAll(
 				continue;
 			}
 			// Keep the first reason: a GitHub error while handing back a crash must not replace the crash.
-			job.handback ??= `fixer collection failed: ${String(error)}`;
+			job.handback ??= job.error ?? `fixer collection failed: ${String(error)}`;
 			try {
 				save(path, job);
 				output.push(...(await collect(github, state, path, job, context, deps, queue)));
@@ -517,7 +517,7 @@ async function fixerBranches(
 		.map((found) => ({ name: found![2], sha: found![1] }));
 }
 
-/** End a job: its checkout and its records go, and its output log stays for diagnosis on the host. */
+/** End a job: its checkout and its records go, and its output log and the wrapper's error stay for diagnosis on the host. */
 function finish(path: string, job: WatchJob): void {
 	if (job.checkout) rmSync(job.checkout, { recursive: true, force: true });
 	rmSync(`${path}.exit`, { force: true });
@@ -758,7 +758,13 @@ async function collect(
 		plan,
 		marked,
 		handback
-			? `${clip(handback, 300, ".")} Recommendation: run /quest-iterate before picking it again.`
+			? `${clip(handback, 300, ".")} Recommendation: ${
+					// A wrapper that names its own failure fails every pick until repaired, whatever the PR needs.
+					// "Repair", since `fixerText` breaks up "fix" as a closing keyword.
+					handback === job.error && job.wrapperError
+						? "repair the land fixer's wrapper on the watcher's host, then pick it again."
+						: "run /quest-iterate before picking it again."
+				}`
 			: result?.action === "handback"
 				? `${clip(result.diagnosis, 200, ".")} Recommendation: ${clip(result.recommendation, 200)}`
 				: "missing result; run /quest-iterate",

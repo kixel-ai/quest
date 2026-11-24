@@ -26,6 +26,7 @@ import { dirname, join, posix } from "node:path";
 import { promisify } from "node:util";
 
 import {
+	type Class,
 	heldHigh,
 	RISK_FILE,
 	SIZES,
@@ -33,6 +34,8 @@ import {
 	TIERS,
 	type Tier,
 	branchQuest,
+	classesFor,
+	codeSpan,
 	matches,
 	parse,
 	parseRiskFile,
@@ -1746,7 +1749,7 @@ function replied(reply: { structured?: unknown; text?: string }, what: string): 
 	}
 }
 
-/** The classifier's reply schema: the assessment, and the class the change falls in when the risk file lists any. */
+/** The classifier's reply schema: the assessment, and the class the change falls in when any class is offered. */
 function classSchema(classes: string[]) {
 	if (classes.length === 0) return ASSESSMENT;
 	return {
@@ -1760,7 +1763,7 @@ function classSchema(classes: string[]) {
 export function classed(value: unknown, classes: string[], what: string): Assessment & { class: string | null } {
 	const named = record(value)?.class ?? null;
 	if (named !== null && !classes.includes(named as string))
-		throw new Error(`${what} names ${JSON.stringify(named)}, which is no class the risk file lists`);
+		throw new Error(`${what} names ${JSON.stringify(named)}, which is no class the risk file offers this change`);
 	return { ...assessment(value, what), class: named as string | null };
 }
 
@@ -2061,7 +2064,7 @@ export function classifyPrompt(
 	file: { sha: string; text: string },
 	stat: string,
 	patch: string,
-	classes: string[] = [],
+	classes: readonly Class[] = [],
 ): string {
 	const range = `${change.mergeBase}..${change.head}`;
 	const whole = stat.length + patch.length <= DIFF_BUDGET;
@@ -2073,16 +2076,25 @@ export function classifyPrompt(
 			? `The change, \`git diff --stat --patch ${range}\`:`
 			: `The diff is ${stat.length + patch.length} characters, more than this prompt holds, so only its stat ` +
 				`follows${shown.length < stat.length ? ", cut short" : ""}. Read the parts you need with ` +
-				`\`git diff ${range} -- <path>\`.`,
+				`\`git diff --ignore-submodules=none ${range} -- <path>\`.`,
 		`<diff>\n${shown}\n</diff>`,
 		"Report the change's tier as JSON matching the response schema, with one sentence on what could break, for " +
 			"whom, and how hard it is to undo.",
 		...(classes.length > 0
 			? [
-					"Also report as `class` the one class from the risk file's `## Automatic` list whose rule every " +
-						"changed file meets, judged by what the diff does rather than its title or description, or null " +
-						"when no single class covers the whole change or you are unsure. A class lets a low change land " +
-						"without a person, so between a class and null, pick null.",
+					"Also report as `class` the one class below whose rule every changed file meets, judged by what the " +
+						"diff does rather than its title or description, or null when no single class covers the whole " +
+						"change or you are unsure. These are the risk file's `## Automatic` classes whose path scope, the " +
+						"parentheses between a class's name and ` - ` where it has one, already holds every changed path, " +
+						"so judge only the rule for a scoped class; for one with no scope, no path was checked, so judge " +
+						"from the rule whether each changed path belongs. A class lets a low change land without a " +
+						"person, so between a class and null, pick null.\n\n" +
+						classes
+							.map(({ name, scope, rule }) => {
+								const within = scope === null ? "" : ` (${scope.map(codeSpan).join(", ")})`;
+								return `- \`${name}\`${within} - ${rule}`;
+							})
+							.join("\n"),
 				]
 			: []),
 	].join("\n\n");
@@ -2355,6 +2367,8 @@ interface Classifying {
 	root: string;
 	baseSha: string;
 	change: Change;
+	/** The paths the change touches, both sides of each rename and every submodule update included. */
+	changed: string[];
 	dir: string;
 	env: NodeJS.ProcessEnv;
 	signal?: AbortSignal;
@@ -2368,17 +2382,16 @@ interface Classifying {
  * the change and the file are the same, which `key` names.
  */
 export async function classify(input: Classifying): Promise<{ key: string; value: Classified }> {
-	const { root, baseSha, change } = input;
+	const { root, baseSha, change, changed } = input;
 	const text = exists(root, baseSha, RISK_FILE) ? show(root, baseSha, RISK_FILE) : null;
-	const key = digest(JSON.stringify([change.mergeBase, change.head, text]));
+	// The paths too, since they set the tier and the offered classes along with the risk file.
+	const key = digest(JSON.stringify([change.mergeBase, change.head, text, changed]));
 	if (input.saved?.key === key) return { key, value: { ...input.saved.value, usage: [] } };
 	const set = (value: Omit<Classified, "usage">) => ({ key, value: { ...value, usage: [] } });
 	const file = text === null ? null : parseRiskFile(text);
 	if (file !== null && file.problems.length > 0)
 		throw new ReviewInputError(`the base's ${RISK_FILE} cannot be read: ${file.problems.join("; ")}`);
 	const range = `${change.mergeBase}..${change.head}`;
-	// Both sides of a rename, so moving a file out of a high path is high too.
-	const changed = git(root, ["diff", "--name-only", "--no-renames", "-z", range]).split("\0").filter(Boolean);
 	const held = heldHigh(file);
 	const hits = changed.flatMap((path) => {
 		const rule = held.find((each) => matches(each.pattern, path));
@@ -2394,11 +2407,13 @@ export async function classify(input: Classifying): Promise<{ key: string; value
 		const reason = `the base has no ${RISK_FILE} to name what is always high or customer-facing, so every change is medium`;
 		return set({ tier: "medium", reason, by: { kind: "default" }, class: null });
 	}
-	const classes = file!.classes.map((each) => each.name);
+	// Only the classes whose scope holds every changed path, so the classifier cannot widen one.
+	const offered = classesFor(file!.classes, changed);
+	const classes = offered.map((each) => each.name);
 
 	const diff = (args: string[]) =>
-		git(root, ["diff", "--no-ext-diff", "--no-textconv", "--no-color", ...args, range]);
-	const prompt = classifyPrompt(change, { sha: baseSha, text }, diff(["--stat=160"]), diff(["--patch"]), classes);
+		git(root, ["diff", "--no-ext-diff", "--no-textconv", "--no-color", "--ignore-submodules=none", ...args, range]);
+	const prompt = classifyPrompt(change, { sha: baseSha, text }, diff(["--stat=160"]), diff(["--patch"]), offered);
 	const answer = await ask(CLASSIFIERS, {
 		cwd: root,
 		dir: input.dir,
@@ -2651,7 +2666,16 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 		throw new ReviewInputError(`HEAD shares no history with ${baseRef}`);
 	}
 	const change: Change = { base: baseRef, mergeBase, head };
-	const changed = git(root, ["diff", "--name-only", "-z", `${mergeBase}..${head}`])
+	// Both sides of a rename, so moving a file out of a high path, a class's scope, or an instructed directory counts,
+	// and every submodule update, whatever the local config hides.
+	const changed = git(root, [
+		"diff",
+		"--name-only",
+		"--no-renames",
+		"--ignore-submodules=none",
+		"-z",
+		`${mergeBase}..${head}`,
+	])
 		.split("\0")
 		.filter(Boolean);
 	const files = baseInstructions(root, baseSha, changed);
@@ -2666,6 +2690,7 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 		root,
 		baseSha,
 		change,
+		changed,
 		dir,
 		env: deps.env,
 		signal: options.signal,
