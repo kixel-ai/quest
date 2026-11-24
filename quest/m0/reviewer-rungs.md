@@ -4,8 +4,8 @@
 
 Each `quest review` round draws its reviewers from a named rung of reviewer
 configs of about equal cost and quality across vendors. Each draw takes a
-model the PR has not had yet and never the latest writer's, so each round
-brings a reviewer the PR has not seen. Each round's reviewer starts a fresh
+model the PR has not had yet while the rung has one, and never the latest
+writer's, so rounds bring reviewers the PR has not seen. Each round's reviewer starts a fresh
 session. It gets the earlier rounds' findings and the author's responses,
 judges those fixes and refutations, and reviews the branch anew. Rungs
 replace the shadow reviewer. `quest usage` reports what each reviewer model
@@ -74,7 +74,8 @@ Recommendations, the implementer's to revisit:
   sampling it. The top and bottom rungs have no step past them: give that
   quarter to the size's rung.
 - Once every model on the drawn rung has reviewed the PR, take the one
-  whose last round is oldest, still never the writer's. A model that cannot
+  whose last round is oldest, still never the writer's, rather than borrow
+  another rung's, which mostly holds the same models at another cost. A model that cannot
   run passes the round to the next untried model on the same rung, then
   as today. That includes a login or gateway that does not serve the
   model, such as Codex's `The '<model>' model is not supported when using

@@ -141,6 +141,17 @@ const claude: Harness = {
 	},
 };
 
+/**
+ * Refuse messages from the person's other Claude Code sessions, and deny the tools to list or send them, so no
+ * other session steers an agent and it cannot steer them. `--settings` outranks user settings; only managed
+ * settings, or a `refuse` in project or local settings, override it. Needs Claude Code 2.1.224 or later; checked
+ * against 2.1.330. A shell can still write to another session's inbox socket: that session closing it is its own setting.
+ */
+const CLOSED_SESSIONS = JSON.stringify({
+	crossSessionInbound: "refuse",
+	permissions: { deny: ["SendMessage", "ListAgents"] },
+});
+
 function claudeFlags(launch: Launch): string[] {
 	return [
 		"claude",
@@ -153,6 +164,8 @@ function claudeFlags(launch: Launch): string[] {
 		launch.effort,
 		"--permission-mode",
 		launch.permissionMode,
+		"--settings",
+		CLOSED_SESSIONS,
 	];
 }
 

@@ -1,7 +1,7 @@
 // A pull request's risk tier: what could break, for whom, and how hard it is to undo, set from its diff and never
 // from who wrote it. The repository's RISK.md lists the paths whose change is always high and says what else is
 // customer-facing there; `quest review` sets the tier and records it in the PR body's `## Review` section.
-import type { Code, List, ListItem, Paragraph, RootContent } from "mdast";
+import type { List, ListItem, Paragraph, RootContent } from "mdast";
 
 import { markdown } from "./doc";
 import { reviewSection } from "./review";
@@ -73,12 +73,10 @@ export interface Class {
 	rule: string;
 }
 
-/** What a risk file holds: its always-high paths, automatic classes, and full suite, and what keeps it from being read. */
+/** What a risk file holds: its always-high paths and automatic classes, and what keeps it from being read. */
 export interface RiskFile {
 	high: HighPath[];
 	classes: Class[];
-	/** The command that runs the repository's whole test suite, which a high change gets beyond its scoped checks. */
-	suite: string | null;
 	problems: string[];
 }
 
@@ -88,7 +86,6 @@ export interface RiskFile {
  * - `## High`: each item a backticked {@link patternError} pattern, ` - `, and why changing what it matches is always
  *   high.
  * - `## Automatic`: each item a backticked class name, ` - `, and the rule over the diff a change meets to fall in it.
- * - `## Full suite`: one fenced code block holding the command that runs the whole test suite.
  *
  * The rest of the file is prose the classifier reads, such as what is customer-facing.
  */
@@ -121,15 +118,7 @@ export function parseRiskFile(text: string): RiskFile {
 	for (const [index, each] of classes.entries())
 		if (classes.findIndex((other) => other.name === each.name) < index)
 			problems.push(`${RISK_FILE} lists the class \`${each.name}\` twice`);
-	const suiteSection = section("Full suite");
-	let suite: string | null = null;
-	if (suiteSection !== null) {
-		const blocks = suiteSection.filter((node): node is Code => node.type === "code");
-		if (blocks.length !== 1 || blocks[0]!.value.trim() === "")
-			problems.push(`${RISK_FILE}'s ## Full suite must hold one fenced code block with the command`);
-		else suite = blocks[0]!.value.trim();
-	}
-	return { high, classes, suite, problems };
+	return { high, classes, problems };
 }
 
 function headingText(text: string, node: RootContent): string {

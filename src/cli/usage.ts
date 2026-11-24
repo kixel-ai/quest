@@ -976,7 +976,7 @@ function accuracyRows(pulls: PullRow[]): AccuracyRow[] {
 			each.state === "merged" ? share(writing, distinct) : new Map<number, Tokens & { split: number }>();
 		for (const [i, implementer] of distinct.entries()) {
 			const size = implementer.size;
-			const model = canonicalModel(implementer.model);
+			const { model } = implementer;
 			const id = JSON.stringify([size, implementer.harness, model, implementer.effort]);
 			let row = rows.get(id);
 			if (!row) {

@@ -29,7 +29,7 @@ Pass `--exclude-model` or `--size` only for a PR whose body cannot hold the reco
 Where the repository's root instructions name other reviewers, pass them with `--harness`, `--model`, and `--effort`, which runs that reviewer alone.
 Each round rewrites the PR body's `## Review` section, so add context only after it, and write a round's record by hand only when it printed `record skipped`.
 
-`quest review` sets the head's risk tier before any reviewer runs: a low head gets no local reviewer, only a record saying so, and a high one gets a second reviewer on another model, which a round that raises the tier runs at once.
+`quest review` sets the head's risk tier before any reviewer runs: a low head gets no local reviewer, only a record saying so, and a high one gets a second reviewer from another vendor on the high list, which a round that raises the tier runs at once; a head classified high also takes its pick from that list.
 When the user overrides the tier, pass it with `--override <tier> --reason <their reason>`.
 
 Each round ends with a `next` line: follow it until a round of the head reports no finding you have not refuted; never block on the score.

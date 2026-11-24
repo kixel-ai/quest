@@ -23,7 +23,7 @@ Decided 2026-11-22 (maintainer, `/quest-plan` follow-up of
   the same counts with seats picked by eval alone, which may seat one
   vendor twice; today's counts). Counting Pullfrog, today's setup is
   already 1, 2, and 3 once [kixel-ai/quest#819](https://github.com/kixel-ai/quest/pull/819)
-  seats Opus xhigh as a second reviewer on high heads. Pullfrog's catches
+  seats a second reviewer from another vendor on high heads. Pullfrog's catches
   behind a mostly-Sol pick (147 of 272 high and 148 of 549 medium merged
   PRs, 93% accepted) suggest vendor diversity is what finds them.
 - Seat order? Amended 2026-11-22 (maintainer, `/quest-plan` in
@@ -42,16 +42,23 @@ Decided 2026-11-22 (maintainer, `/quest-plan` follow-up of
   vendor no other seat that round has. An XL head that is high tier gets
   three vendors from XL's drawn rung, such as Astra, Gemini, and a Claude
   model other than the writer's.
+- ✅ No seat is ever weaker than the latest writer, at every size and tier
+  (maintainer, 2026-11-22, on
+  [kixel-ai/quest#819](https://github.com/kixel-ai/quest/pull/819#issuecomment-7087183777):
+  "don't have sonnet review opus, that's extremely dumb"; rejected: high
+  risk only). Interim: #819's `weaker()` and high-tier second seat route
+  reviews until [reviewer rungs](/quest/m0/reviewer-rungs.md) lands, which
+  drops the rule under rungs and deletes this line.
 - Pullfrog retires on evidence, as [routing evidence](/quest/m0/routing-evidence/README.md)
   records: compare what it still finds behind these seats per dollar, from
   its run logs' cost tables.
 
 Guidance:
 
-- Score each tier's seats with `quest eval run` on the base's build
-  and the head's, per `AGENTS.md`, and put both in `## Validation`. The
-  eval set has few L and no XL cases; add the audit's XL culprits with
-  `quest eval add` first.
+- Judge the seats from real PRs once they land, with no `quest eval` run,
+  as [reviewer rungs](/quest/m0/reviewer-rungs.md) judges its rungs:
+  `quest usage`'s findings, share fixed, and cost per seat, and the
+  `## Caused by` escapes it lists against each culprit's reviewers, by tier.
 - Each seat is a reviewer `quest review` already runs, so a seat that
   cannot run passes to another vendor on the round's rung. Recommended:
   when the drawn rung has too few vendors that can run, such as when
