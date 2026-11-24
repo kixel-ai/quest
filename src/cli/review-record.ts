@@ -4,6 +4,7 @@ import { DEFAULT, PATHS, reviewSection } from "../core";
 import { recorded } from "./models-record";
 import { type ClaimDependencies, upstream } from "./claims";
 import { pullsFrom } from "../github/claims";
+import { object, repositoryPath } from "../github/client";
 import { git } from "./git";
 import { contains } from "./land";
 import { requireRemote } from "./github";
@@ -306,7 +307,7 @@ export type Recorded = { url: string } | { skipped: string };
 /**
  * The open PR from `branch` into the base `<remote>/<branch>` names, or why there is none: the one from the repository
  * the base's remote pushes to, else the only one from any repository whose head `HEAD` contains, as a maintainer's
- * checkout of a contributor's fork PR finds it. It reads the PR list from GitHub itself, never an index, since its body is rewritten.
+ * checkout of a contributor's fork PR finds it. The list comes from the forge, and on GitHub the body from the PR itself.
  */
 async function openPull(
 	root: string,
@@ -339,9 +340,17 @@ async function openPull(
 						? `no open PR from ${branch} into ${base} from ${head.owner} or with a head this checkout holds: ${candidates.map((each) => each.url).join(", ")}`
 						: `several open PRs from ${branch} into ${base} with heads this checkout holds, none from ${head.owner}: ${held.map((each) => each.url).join(", ")}`,
 		};
+	// The forge's list may predate an edit just made, such as the `## Models` record written before a round, and the
+	// record rewrites the whole body, so on GitHub the body comes fresh from the PR itself, on the person's token.
+	const body =
+		up.github === null
+			? pull.body
+			: ((object(
+					await (await up.github.client.request(`${repositoryPath(repository)}/pulls/${pull.number}`)).json(),
+				).body as string | null) ?? "");
 	return {
 		url: pull.url,
-		body: pull.body,
+		body,
 		edit: (body) => hosting.writes().edit({ ...repository, number: pull.number }, { title: null, body }),
 	};
 }

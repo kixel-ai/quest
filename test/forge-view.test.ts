@@ -133,7 +133,7 @@ describe("quest pr view on a GitHub repository Kixel Quest serves", () => {
 		expect(await cli("pr", "view", url)).toEqual({
 			code: 1,
 			stdout: "",
-			stderr: `quest: Kixel Quest (${KIXEL}) failed POST /forge/view: it is rate limiting your reads (HTTP 429, read budget spent); try again in 30 seconds; set QUEST_FORGE=github to read GitHub\n`,
+			stderr: `quest: Kixel Quest (${KIXEL}) failed POST /forge/view: it is rate limiting your requests (HTTP 429, read budget spent); try again in 30 seconds; set QUEST_FORGE=github to read GitHub\n`,
 		});
 	});
 });

@@ -1275,6 +1275,8 @@ function onGitHub(repo: string, pulls: FakePull[], fork = false): { body: string
 			pulls.find((p) => p.number === Number(patched[1]))!.body = body;
 			return json({});
 		}
+		if (patched && (init?.method ?? "GET") === "GET")
+			return json({ body: pulls.find((p) => p.number === Number(patched[1]))!.body });
 		throw new Error(`unexpected ${init?.method ?? "GET"} ${url.pathname}`);
 	});
 	return writes;

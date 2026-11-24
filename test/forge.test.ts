@@ -590,7 +590,7 @@ describe("choosing the forge", () => {
 				),
 			);
 		const message = (wait: string) =>
-			`Kixel Quest (${URL_}) failed POST /forge/pulls: it is rate limiting your reads (HTTP 429, read budget spent)${wait}; set QUEST_FORGE=github to read GitHub`;
+			`Kixel Quest (${URL_}) failed POST /forge/pulls: it is rate limiting your requests (HTTP 429, read budget spent)${wait}; set QUEST_FORGE=github to read GitHub`;
 		// The dependencies' clock reads 0, the epoch.
 		for (const [header, wait] of [
 			["90", "; try again in 90 seconds"],

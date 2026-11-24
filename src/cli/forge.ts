@@ -262,11 +262,11 @@ export class KixelQuest {
 		// A write the forge declines as things stand, such as a PR another session holds, is a refusal to report.
 		if (response.status === 409 && write)
 			throw new Refusal(reason(text).slice(2) || `Kixel Quest refused ${method} ${path}`);
-		// Past the person's budget of GitHub reads, or below the installation's reserve: retrying sooner is refused too.
+		// Past the person's budget of GitHub requests, or below the installation's reserve: retrying sooner is refused too.
 		if (response.status === 429) {
 			const wait = retryAfter(response.headers.get("retry-after"), this.deps.now());
 			throw failed(
-				`it is rate limiting your reads (HTTP 429${reason(text)})${wait === null ? "" : `; try again in ${wait} second${wait === 1 ? "" : "s"}`}`,
+				`it is rate limiting your requests (HTTP 429${reason(text)})${wait === null ? "" : `; try again in ${wait} second${wait === 1 ? "" : "s"}`}`,
 			);
 		}
 		if (!response.ok) throw failed(`HTTP ${response.status}${reason(text)}`);

@@ -290,8 +290,16 @@ async function openDraft(
 		listed = (await forge.pulls(repository)).value;
 	} catch (error) {
 		// Unchecked, the claim may be a later one's, so take it back whole, as a refused open does.
-		deleteBranch(root, remote, branch, sha);
-		await writes.close({ ...repository, number: created.number });
+		try {
+			deleteBranch(root, remote, branch, sha);
+			await writes.close({ ...repository, number: created.number });
+		} catch (cleanup) {
+			// Both matter: why the check failed, such as when to retry, and what was left behind.
+			throw new Error(
+				`${(error as Error).message}; taking back the claim on ${created.url} then failed: ${(cleanup as Error).message}`,
+				{ cause: error },
+			);
+		}
 		throw error;
 	}
 	const open = pullsFrom(listed, branch);

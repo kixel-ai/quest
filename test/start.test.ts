@@ -205,6 +205,10 @@ class FakeGitHub {
 			return json(201, { ...pull, title: body.title, baseRef: body.base });
 		}
 		match = /^\/repos\/([^/]+\/[^/]+)\/pulls\/(\d+)$/.exec(url.pathname);
+		if (match && method === "GET") {
+			const pull = this.pulls.find((p) => p.base === match![1] && p.number === Number(match![2]));
+			return pull ? json(200, pull) : json(404, { message: "Not Found" });
+		}
 		if (match && method === "PATCH") {
 			const pull = this.pulls.find((p) => p.base === match![1] && p.number === Number(match![2]))!;
 			Object.assign(pull, body);
@@ -871,22 +875,40 @@ describe("start on GitHub, read through the Kixel Quest serving it", () => {
 		expect(out).toEqual({
 			code: 1,
 			stdout: "",
-			stderr: `quest: Kixel Quest (${KIXEL}) failed POST /forge/pulls: it is rate limiting your reads (HTTP 429, read budget spent); try again in 90 seconds; set QUEST_FORGE=github to read GitHub\n`,
+			stderr: `quest: Kixel Quest (${KIXEL}) failed POST /forge/pulls: it is rate limiting your requests (HTTP 429, read budget spent); try again in 90 seconds; set QUEST_FORGE=github to read GitHub\n`,
 		});
 		expect(github.pulls[0]!.state).toBe("closed");
 		expect(tip(bare)).toBe("");
 	});
 
-	test("quest review finds its branch's PR on the forge's list", async () => {
+	test("a claim that cannot be taken back after a failed list read names both failures", async () => {
+		const { work, kixel } = served();
+		kixel.fail = { status: 429, error: "read budget spent", call: "pulls", retryAfter: "90" };
+		const served_ = globalThis.fetch;
+		vi.stubGlobal("fetch", async (input: string | URL | Request, init?: RequestInit) =>
+			init?.method === "PATCH"
+				? Response.json({ message: "Validation Failed" }, { status: 422 })
+				: served_(input, init),
+		);
+		const out = await cli("--root", work, "start", ONE);
+		expect(out.code).toBe(1);
+		expect(out.stderr).toContain("try again in 90 seconds");
+		expect(out.stderr).toContain("taking back the claim on https://github.com/example/project/pull/1 then failed");
+	});
+
+	test("quest review finds its branch's PR on the forge's list, and its body on the PR itself", async () => {
 		const { work, kixel, github: fake, asked } = served();
-		kixel.add({ branch: "feature", body: "Does it.\n\n## Models\n\nSize: S\n" });
+		// The forge's list predates the `## Models` record just written, which GitHub already has.
+		kixel.add({ branch: "feature", body: "Does it." });
+		fake.open("example/project", "feature", "example/project", { body: "Does it.\n\n## Models\n\n- Size: S\n" });
 		// Through the stubbed fetch, which records each GitHub request.
 		const github = () => ({ ...fake.deps(), fetch: globalThis.fetch });
 		const forge = { env: process.env, fetch: globalThis.fetch, now: Date.now, sleep: async () => {}, github };
 		const deps = { github, forge: (repository: Repository) => forgeFor(repository, forge), warn: () => {} };
-		expect(await pullModels(work, "origin/main", "feature", deps)).not.toBeNull();
+		expect(await pullModels(work, "origin/main", "feature", deps)).toEqual({ sizes: ["S"], implementers: [] });
 		expect(kixel.calls.map(({ call }) => call)).toEqual(["pulls"]);
 		expect(asked.filter((request) => request.startsWith("GET") && request.endsWith("/pulls"))).toEqual([]);
+		expect(asked).toContain("GET /repos/example/project/pulls/1");
 	});
 });
 
