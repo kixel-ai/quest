@@ -572,6 +572,37 @@ describe("choosing the forge", () => {
 		);
 	});
 
+	test("a 429 fails the read, naming its Retry-After in seconds or as a date, and nothing when it has none", async () => {
+		const limited = (retryAfter: string | null) =>
+			new KixelQuestForge(
+				new KixelQuest(
+					URL_,
+					TOKEN,
+					dependencies(
+						async () =>
+							Response.json(
+								{ error: "read budget spent" },
+								{ status: 429, headers: retryAfter === null ? {} : { "retry-after": retryAfter } },
+							),
+						unreachable,
+					),
+					false,
+				),
+			);
+		const message = (wait: string) =>
+			`Kixel Quest (${URL_}) failed POST /forge/pulls: it is rate limiting your requests (HTTP 429, read budget spent)${wait}; set QUEST_FORGE=github to read GitHub`;
+		// The dependencies' clock reads 0, the epoch.
+		for (const [header, wait] of [
+			["90", "; try again in 90 seconds"],
+			[new Date(120_000).toUTCString(), "; try again in 120 seconds"],
+			// A date already past still says to wait, since the forge refused this read.
+			[new Date(0).toUTCString(), "; try again in 1 second"],
+			["soon", ""],
+			[null, ""],
+		] as const)
+			await expect(limited(header).pulls(repository)).rejects.toThrow(message(wait));
+	});
+
 	test("the person is the token's, not the reading credential's", async () => {
 		const server = kixelQuest(unreachable, { login: "kixelated" });
 		const forge = new KixelQuestForge(new KixelQuest(URL_, TOKEN, dependencies(server.fetch, unreachable), false));
