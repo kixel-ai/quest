@@ -9,6 +9,7 @@ import {
 	symlinkSync,
 	writeFileSync,
 } from "node:fs";
+import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { afterEach, expect, test, vi } from "vitest";
 
@@ -1049,7 +1050,12 @@ test("agy's read rules leave every path outside its roots under a denied one, an
 	for (const path of ["a/x/in.txt", "a/y/out.txt", "a/x-sibling/out.txt", "b/in.txt", "c/out.txt", "top.txt"])
 		write(dir, path, "");
 	symlinkSync(join(dir, "c"), join(dir, "a", "x", "link"));
-	const denied = beside([join(dir, "a", "x"), join(dir, "b")]);
+	// Paths that may appear during a turn: one beside the roots, one a root's parent, and one inside a root.
+	const later = ["d/login.json", "a", "b/new.txt"].map((path) => join(dir, path));
+	const denied = beside([join(dir, "a", "x"), join(dir, "b")], later);
+	expect(denied).toContain(join(dir, "d/login.json"));
+	expect(denied).not.toContain(join(dir, "a"));
+	expect(denied).not.toContain(join(dir, "b/new.txt"));
 	// Antigravity matches a rule by whole components, so `a/x` never covers `a/x-sibling`.
 	const blocked = (path: string) => denied.some((rule) => path === rule || path.startsWith(`${rule}/`));
 	for (const path of ["a/x/in.txt", "b/in.txt"]) expect(blocked(join(dir, path)), path).toBe(false);
@@ -1060,6 +1066,20 @@ test("agy's read rules leave every path outside its roots under a denied one, an
 	// Above the tree too, as the system's own directories.
 	const top = dir.split("/")[1]!;
 	for (const name of readdirSync("/").filter((name) => name !== top)) expect(blocked(`/${name}`), name).toBe(true);
+});
+
+// Root lists any directory, so the refusal only shows for another user.
+test.skipIf(process.getuid?.() === 0)("agy's read rules refuse a parent they cannot list", () => {
+	const dir = realpathSync(tempDir());
+	write(dir, "hidden/checkout/in.txt", "");
+	chmodSync(join(dir, "hidden"), 0o311);
+	try {
+		expect(() => beside([join(dir, "hidden", "checkout")])).toThrow(
+			`since ${join(dir, "hidden")} cannot be listed`,
+		);
+	} finally {
+		chmodSync(join(dir, "hidden"), 0o755);
+	}
 });
 
 test("review refuses max effort", async () => {
@@ -1157,6 +1177,8 @@ fakes(
 			// Reads stay in the checkout and the workspace: what lies beside them is denied, and nothing in them.
 			const repo = realpathSync(s.repo);
 			expect(deny).toContain(`read_file(${join(dirname(repo), "origin.git")})`);
+			// A login created while the turn runs, as by signing in to Codex, is denied before it exists.
+			expect(deny).toContain(`read_file(${join(realpathSync(homedir()), ".codex")})`);
 			const inside = (dir: string) => (rule: string) =>
 				rule === `read_file(${dir})` || rule.startsWith(`read_file(${dir}/`);
 			expect(deny.filter(inside(repo))).toEqual([]);

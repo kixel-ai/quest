@@ -21,6 +21,7 @@ import {
 	rmSync,
 	writeFileSync,
 } from "node:fs";
+import { homedir } from "node:os";
 import { dirname, join, posix } from "node:path";
 import { promisify } from "node:util";
 
@@ -972,17 +973,53 @@ export function codexFlags(context: Context): string[] {
 const AGY_AGENT = "quest-reviewer";
 
 /**
- * Every path beside the directories leading to `roots`, so a path outside them all lies under one, since it parts from
- * them in some directory those lead through. Each root is a resolved path.
+ * Where, under the home directory, CLIs and tools keep a login or key, denied even before one exists: the rules hold
+ * only what a turn's start lists, and a sign-in while the turn runs, as to Codex, creates its directory then.
  */
-export function beside(roots: string[]): string[] {
+const HOME_CREDENTIALS = [
+	".aws",
+	".azure",
+	".claude",
+	".claude.json",
+	".codex",
+	".config",
+	".docker",
+	".gemini",
+	".git-credentials",
+	".gnupg",
+	".kube",
+	".local",
+	".netrc",
+	".npmrc",
+	".ssh",
+	"Library",
+];
+
+/**
+ * Every path beside the directories leading to `roots`, so a path outside them all lies under one, since it parts from
+ * them in some directory those lead through, and each of `later`, paths that may appear while a turn runs, that leads
+ * to no root and lies in none. Each path is resolved.
+ */
+export function beside(roots: string[], later: string[] = []): string[] {
 	const through = new Set<string>();
 	for (const root of roots) for (let up = root; !through.has(up); up = dirname(up)) through.add(up);
-	return [...through]
+	const outside = (path: string) => !through.has(path) && !roots.some((root) => path.startsWith(`${root}/`));
+	const listed = [...through]
 		.filter((dir) => !roots.includes(dir))
-		.flatMap((dir) => readdirSync(dir).map((name) => join(dir, name)))
-		.filter((path) => !through.has(path))
-		.sort();
+		.flatMap((dir) => entries(dir).map((name) => join(dir, name)));
+	return [...new Set([...listed, ...later].filter(outside))].sort();
+}
+
+/** The names in `dir`, which must be listed, since a path in it that no rule names could be read. */
+function entries(dir: string): string[] {
+	try {
+		return readdirSync(dir);
+	} catch (error) {
+		throw new ReviewInputError(
+			`the reviewer's reads cannot be kept to the checkout and its workspace, since ${dir} cannot be listed ` +
+				`(${(error as Error).message}); review from a checkout, and with an agent directory, whose every parent you can list`,
+		);
+	}
 }
 
 /**
@@ -994,6 +1031,7 @@ export function beside(roots: string[]): string[] {
  * `..`.
  */
 function agySettings(roots: string[]): string {
+	const home = existsSync(homedir()) ? realpathSync(homedir()) : undefined;
 	return JSON.stringify({
 		permissions: {
 			deny: [
@@ -1003,7 +1041,9 @@ function agySettings(roots: string[]): string {
 				"execute_url(*)",
 				"download_url(*)",
 				"mcp(*)",
-				...beside(roots).map((path) => `read_file(${path})`),
+				...beside(roots, home ? HOME_CREDENTIALS.map((name) => join(home, name)) : []).map(
+					(path) => `read_file(${path})`,
+				),
 			],
 		},
 	});

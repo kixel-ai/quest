@@ -1691,7 +1691,11 @@ directory, so permissions are skipped, and deny rules on commands, writes, web
 requests, and MCP calls back up the tool list. `agy` has no rule that allows only
 some paths, so a read rule denies each path beside the directories leading to
 the checkout and that directory, and nothing outside those two, such as another
-CLI's login, can be read. With no shell, the directory
+CLI's login, can be read. The rules hold what each turn's start lists, so the
+usual login and key paths under your home, such as `~/.codex` and `~/.ssh`, are
+denied even before they exist, and a parent that cannot be listed is a usage
+error; anything else created beside those directories while a turn runs is not
+covered. With no shell, the directory
 holds what `git` would show, `files.txt` with the checkout's tracked files and
 each reviewed range's diff, and the reviewer reads the checkout's files by
 absolute path; `agy` 1.5.14 gives an agent no search tool. Your skills' text
