@@ -26,7 +26,7 @@ import { dirname, join, posix } from "node:path";
 import { promisify } from "node:util";
 
 import {
-	ALWAYS_HIGH,
+	heldHigh,
 	RISK_FILE,
 	SIZES,
 	type Size,
@@ -2363,7 +2363,7 @@ interface Classifying {
 
 /**
  * Set the head's risk tier before any reviewer runs, from the change alone: high when it touches a path
- * {@link ALWAYS_HIGH} or the base's risk file holds high, medium when the base has no risk file, and otherwise as the
+ * {@link heldHigh} names from the base's risk file, medium when the base has no risk file, and otherwise as the
  * first of {@link CLASSIFIERS} that can run judges the diff against the file. The last classification is reused while
  * the change and the file are the same, which `key` names.
  */
@@ -2379,7 +2379,7 @@ export async function classify(input: Classifying): Promise<{ key: string; value
 	const range = `${change.mergeBase}..${change.head}`;
 	// Both sides of a rename, so moving a file out of a high path is high too.
 	const changed = git(root, ["diff", "--name-only", "--no-renames", "-z", range]).split("\0").filter(Boolean);
-	const held = [...ALWAYS_HIGH, ...(file?.high ?? [])];
+	const held = heldHigh(file);
 	const hits = changed.flatMap((path) => {
 		const rule = held.find((each) => matches(each.pattern, path));
 		return rule === undefined ? [] : [{ path, rule }];

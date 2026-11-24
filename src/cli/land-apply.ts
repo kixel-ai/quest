@@ -130,14 +130,14 @@ export function resolutionSection(number: number, resolution: Resolution, room: 
 	const { head, base, tree, patch, cause } = resolution;
 	const why =
 		cause === "protected"
-			? "The fixer's resolution edits protected paths beyond what the base merge carries, and only a maintainer's push lands those"
+			? "The fixer's resolution edits protected paths, which on a pull request its review record rates high are all of them, beyond what a clean base merge carries, and only a maintainer's push lands those"
 			: "GitHub refused the fixer's push";
 	const merge = base === head ? "no base merge" : `base \`${base}\``;
 	const review = cause === "protected" ? "reviews its protected edits" : "reviews it";
 	const text =
 		`\n\n${why}, so its validated resolution travels in this comment: PR head \`${head}\`, ` +
 		`${merge}, resolved tree \`${tree}\`. A maintainer session rebuilds the commit with ` +
-		`\`quest land apply ${number}\`, ${review}, pushes it to the PR branch, and picks the PR again.` +
+		`\`quest land apply ${number}\`, ${review}, pushes it to the PR branch, and picks the PR again once a local \`quest review\` round covers the new head, since this commit is no recorded mechanical fix.` +
 		`\n\n<!-- quest land apply v1 head=${head} base=${base} tree=${tree} patch=${patch} -->`;
 	if (text.length <= room) return text;
 	return `\n\nThe fixer's resolution is too large for a comment (${patch.length} characters encoded), so redo the merge by hand.`;

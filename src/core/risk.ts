@@ -32,6 +32,9 @@ export const ALWAYS_HIGH: readonly HighPath[] = [
 	{ pattern: ".github/actions/", reason: "the repository's actions run inside its workflows, with their secrets" },
 ];
 
+/** The paths a base with risk file `file`, or none, holds high: {@link ALWAYS_HIGH} and its `## High` list. */
+export const heldHigh = (file: RiskFile | null): HighPath[] => [...ALWAYS_HIGH, ...(file?.high ?? [])];
+
 /**
  * Why `pattern` is not a path pattern, or null when it is one: a path from the repository root, `/`-separated,
  * where `*` matches within one segment, `?` one character of it, and a whole `**` segment any number of segments.
@@ -185,7 +188,7 @@ export interface MalformedRisk {
 
 /**
  * The risk `body`'s `## Review` record names, or null when it names none, as a record `quest review` wrote before
- * tiers, or a record of a skipped review. A body is its author's text, so a risk line that does not parse is returned
+ * tiers, or a section `quest review` never wrote. A body is its author's text, so a risk line that does not parse is returned
  * as {@link MalformedRisk} for the reader to refuse, rather than thrown to stop a read of many PRs.
  */
 export function recordedRisk(body: string): RecordedRisk | MalformedRisk | null {

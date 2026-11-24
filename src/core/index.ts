@@ -35,7 +35,7 @@ export {
 } from "./doc";
 export { AUDIT, AUDITS, type Audit, SKIPPED, auditOf, covered, skippedOf } from "./audit";
 export { type ClosedPull, handBackWaits, handedBack, landed, withoutHandBack } from "./claim";
-export { reviewSection } from "./review";
+export { REVIEW_MARK, reviewSection } from "./review";
 export {
 	ALWAYS_HIGH,
 	type Class,
@@ -48,6 +48,7 @@ export {
 	type RiskFile,
 	TIERS,
 	type Tier,
+	heldHigh,
 	matches,
 	parseRiskFile,
 	patternError,

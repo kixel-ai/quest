@@ -1939,6 +1939,53 @@ ${requeueScript}
 			"resolves a conflict in a protected path",
 		);
 	});
+	test("refuses a base merge that keeps the pin's copy of a protected path the base changed", async () => {
+		const forge = new Forge();
+		forge.advance({ "flake.nix": "old" });
+		forge.pull("one", { "one.txt": "yes" });
+		const deps = await forge.deps();
+		const plan = await resolveQueue(REPOSITORY, SQUASH, deps);
+		forge.advance({ "flake.nix": "base" });
+		const root = forge.clone();
+		const entry = plan.queue[0];
+		git(root, "checkout", "--quiet", "--detach", entry.head);
+		git(root, "merge", "--quiet", "--no-edit", "-s", "ours", forge.main());
+		expect(() => validateFix(root, entry, git(root, "rev-parse", "HEAD"), forge.main())).toThrow(
+			"protected set must equal the base merge result's",
+		);
+	});
+	test("refuses a merge of only part of the base", async () => {
+		const forge = new Forge();
+		forge.pull("one", { "one.txt": "yes" });
+		const deps = await forge.deps();
+		const plan = await resolveQueue(REPOSITORY, SQUASH, deps);
+		forge.advance({ "flake.nix": "base" });
+		forge.advance({ "two.txt": "base" });
+		const root = forge.clone();
+		const entry = plan.queue[0];
+		git(root, "checkout", "--quiet", "--detach", entry.head);
+		git(root, "merge", "--quiet", "--no-edit", `${forge.main()}~1`);
+		expect(() => validateFix(root, entry, git(root, "rev-parse", "HEAD"), forge.main())).toThrow(
+			"must merge all of the base",
+		);
+	});
+	test("protects every path of a head recorded high, past a clean base merge", async () => {
+		const forge = new Forge();
+		forge.pull("one", { "one.txt": "yes" });
+		const deps = await forge.deps();
+		const plan = await resolveQueue(REPOSITORY, SQUASH, deps);
+		forge.advance({ "two.txt": "base" });
+		const root = forge.clone();
+		const entry = plan.queue[0];
+		git(root, "checkout", "--quiet", "--detach", entry.head);
+		git(root, "merge", "--quiet", "--no-edit", forge.main());
+		const head = () => git(root, "rev-parse", "HEAD");
+		expect(() => validateFix(root, entry, head(), forge.main(), true)).not.toThrow();
+		writeFileSync(join(root, "one.txt"), "fixer");
+		git(root, "commit", "-qam", "fix the PR's own file");
+		expect(() => validateFix(root, entry, head(), forge.main())).not.toThrow();
+		expect(() => validateFix(root, entry, head(), forge.main(), true)).toThrow("protected set");
+	});
 });
 
 /** Private Git transport: require an exact ephemeral header before forwarding to the local forge. */

@@ -137,7 +137,7 @@ const JUDGED: Record<Cause, string> = {
 };
 
 const PULL = `query($id: ID!) { node(id: $id) { ... on PullRequest {
-	number repository { nameWithOwner } state baseRefName headRefOid mergeStateStatus reviewDecision mergeQueueEntry { enqueuedAt } autoMergeRequest { enabledAt }
+	number body repository { nameWithOwner } state baseRefName headRefOid mergeStateStatus reviewDecision mergeQueueEntry { enqueuedAt } autoMergeRequest { enabledAt }
 	labels(first: 100) { nodes { name } }
 	headRepository { nameWithOwner }
 } } }`;
@@ -701,6 +701,7 @@ async function collect(
 							context.read,
 							entry.head,
 							deps.warn,
+							typeof pull.body === "string" ? pull.body : "",
 						);
 					job.published = head;
 					save(path, job);

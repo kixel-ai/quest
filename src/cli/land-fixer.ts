@@ -14,7 +14,7 @@ import {
 } from "node:fs";
 import { constants as osConstants } from "node:os";
 import { join } from "node:path";
-import { ALWAYS_HIGH, type HighPath, RISK_FILE, matches, parseRiskFile, reviewSection } from "../core";
+import { type HighPath, RISK_FILE, heldHigh, matches, parseRiskFile, recordedRisk, reviewSection } from "../core";
 import { GitHub, type GitHubDependencies, type ObjectValue, object, string } from "../github/client";
 import { baseRemote, commandEnvironment, contains, git, tryGit, type Entry, type Plan } from "./land";
 import { COMMENT_LIMIT, resolution, type Resolution } from "./land-apply";
@@ -488,20 +488,23 @@ export function outputSection(output: string, room: number): string {
 	return section.length <= room ? section : "";
 }
 
-/** The paths `base`'s risk file holds high, with those every repository does: a fixer's edit to one never lands unread. */
-function highPaths(root: string, base: string): readonly HighPath[] {
-	if (tryGit(root, ["cat-file", "-e", `${base}:${RISK_FILE}`]).status !== 0) return ALWAYS_HIGH;
+/** The paths `quest review` holds high from `base`'s risk file: a fixer's edit to one never lands unread. */
+function highPaths(root: string, base: string): HighPath[] {
+	if (tryGit(root, ["cat-file", "-e", `${base}:${RISK_FILE}`]).status !== 0) return heldHigh(null);
 	const file = parseRiskFile(git(root, ["show", `${base}:${RISK_FILE}`]));
 	if (file.problems.length > 0)
-		throw new Error(`the base's ${RISK_FILE} cannot be read: ${file.problems.join("; ")}`);
-	return [...ALWAYS_HIGH, ...file.high];
+		throw new Error(
+			`the base's ${RISK_FILE} cannot be read, so no fix lands until the base repairs it: ${file.problems.join("; ")}`,
+		);
+	return heldHigh(file);
 }
 
 /**
- * New commits descend from the pin. Protected content/modes at the head must match the pin or its merge with `base`,
- * the base the fixer was given, and a head that merges `base` resolves no conflict in a protected path.
+ * New commits descend from the pin. A head that takes no history of `base`, the base the fixer was given, keeps the
+ * pin's protected content and modes; one that does merges all of `base`, resolves no conflict in a protected path, and
+ * keeps the plain merge's. With `high`, for a head its PR's review record rates high, every path is protected.
  */
-export function validateFix(root: string, entry: Pick<Entry, "head">, head: string, base: string): void {
+export function validateFix(root: string, entry: Pick<Entry, "head">, head: string, base: string, high = false): void {
 	if (!contains(root, entry.head, head) || head === entry.head)
 		throw new Error("fixed head must descend from the pinned PR head");
 	for (const commit of git(root, ["rev-list", head, `^${entry.head}`, `^${base}`])
@@ -510,14 +513,16 @@ export function validateFix(root: string, entry: Pick<Entry, "head">, head: stri
 		if (!contains(root, entry.head, commit)) throw new Error("new fixer commit is not on top of pinned head");
 	}
 
-	const high = highPaths(root, base);
+	const held = high ? [] : highPaths(root, base);
 	const protectedPath = (path: string) =>
+		high ||
 		["flake.nix", "flake.lock", "shell.nix", "default.nix", ".gitmodules", ".envrc", "nix", ".github"].some(
 			(prefix) => path === prefix || path.startsWith(`${prefix}/`),
-		) || high.some(({ pattern }) => matches(pattern, path));
+		) ||
+		held.some(({ pattern }) => matches(pattern, path));
 	const merged = tryGit(root, ["merge-tree", "--write-tree", "--name-only", "--no-messages", "-z", entry.head, base]);
 	if (merged.status !== 0 && merged.status !== 1) throw new Error("cannot compute protected merge result");
-	const [tree, ...conflicts] = merged.stdout.split("\0");
+	const [tree, ...conflicts] = merged.stdout.split("\0").filter(Boolean);
 	if (!/^[a-f0-9]{40}$/.test(tree)) throw new Error("invalid protected merge tree");
 	const entries = (ref: string) => git(root, ["ls-tree", "-rz", ref]).split("\0").filter(Boolean);
 	const maps = [head, entry.head, tree].map(entries);
@@ -531,12 +536,18 @@ export function validateFix(root: string, entry: Pick<Entry, "head">, head: stri
 		return protectedPath(path) || gitlinks.has(path);
 	};
 	const sets = maps.map((list) => list.filter(protectedEntry).sort().join("\0"));
-	const protectedConflict = conflicts.some((path) => protectedPath(path) || gitlinks.has(path));
-	// Every resolution picks between the sides: even keeping the pin's copy reverts the base's change.
-	if (protectedConflict && contains(root, base, head))
+	const count = (...not: string[]) => git(root, ["rev-list", "--count", head, ...not.map((ref) => `^${ref}`)]);
+	if (count(entry.head) === count(entry.head, base)) {
+		if (sets[0] !== sets[1])
+			throw new ProtectedEdit("off-limits fixer edit: protected set must equal the pinned head's");
+		return;
+	}
+	// With the base's history in the head, the pin's copy of a path the base changed reverts that change.
+	if (!contains(root, base, head)) throw new Error("a fix that merges base history must merge all of the base");
+	if (conflicts.some((path) => protectedPath(path) || gitlinks.has(path)))
 		throw new ProtectedEdit("off-limits fixer edit: it resolves a conflict in a protected path");
-	if (sets[0] !== sets[1] && (protectedConflict || sets[0] !== sets[2]))
-		throw new ProtectedEdit("off-limits fixer edit: protected set must equal pinned head or base merge result");
+	if (sets[0] !== sets[2])
+		throw new ProtectedEdit("off-limits fixer edit: protected set must equal the base merge result's");
 }
 
 /** Anything the fixer writes may echo a token it read; GitHub tokens never reach a post. */
@@ -628,8 +639,8 @@ function ready(
  * edits, the head's objects are imported from the fixer's `checkout`, and it must descend from the
  * pinned head and keep the protected paths, judged against the base the fixer was given rather than
  * the current one, since other PRs may land protected changes while the result waits. A fix that edits
- * them is refused with its resolution, for a maintainer to review and push with `quest land apply`,
- * when the PR stands at `entry`'s pinned head.
+ * them, or any path of a PR whose `body` records it high, is refused with its resolution, for a maintainer to review
+ * and push with `quest land apply`, when the PR stands at `entry`'s pinned head.
  */
 export async function importFix(
 	root: string,
@@ -642,6 +653,7 @@ export async function importFix(
 	read: RemoteRead,
 	standing: string,
 	warn: (message: string) => void,
+	body: string,
 ): Promise<void> {
 	if (entry.repository !== plan.repository && !entry.maintainerCanModify)
 		throw new FixerRefusal("fork does not allow maintainer edits");
@@ -652,7 +664,9 @@ export async function importFix(
 	}
 	await read(root, ["fetch", "--quiet", "--no-tags", baseRemote(plan), plan.base.sha]);
 	try {
-		validateFix(root, entry, head, plan.base.sha);
+		// A malformed record counts as high, since the PR's author writes the body.
+		const risk = recordedRisk(body);
+		validateFix(root, entry, head, plan.base.sha, risk !== null && ("malformed" in risk || risk.tier === "high"));
 	} catch (error) {
 		throw new FixerRefusal(
 			String(error),

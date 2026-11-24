@@ -579,7 +579,7 @@ comes last, and a missing value prints as `-`:
 | --- | --- |
 | `url`, `state`, `draft`, `head` | The PR URL; `open`, `closed`, or `merged`; `true` or `false`; the head SHA. |
 | `mergeable`, `merge-state`, `review-decision` | GitHub's values, lowercased. |
-| `review-record` | Whether the PR body's [`## Review` record](#review-locally) still covers the head, and the head it names last: `current` when it is the head, `diff-identical` when `git diff <base>...<head>` prints the same as for it, `stale` otherwise, or `unknown` when GitHub cannot compare them, such as a diff too large; `-` when the record names no full SHA. Whose record counts is the reader's call. |
+| `review-record` | Whether the PR body's [`## Review` record](#review-locally) still covers the head, and the head it names last: `current` when it is the head, `diff-identical` when `git diff <base>...<head>` prints the same as for it, `stale` otherwise, or `unknown` when GitHub cannot compare them, such as a diff too large; `-` when the section holds no record `quest review` wrote, or it names no full SHA. Whose record counts is the reader's call. |
 | `risk` | The record's [risk tier](#risk-tiers), `low`, `medium`, or `high`; the same state as `review-record` for the head it names; the tier its classifier set before any reviewer raised it; and the reason. `-` when the record names none, and `- malformed -` with why when its risk lines do not parse, which `quest merge` refuses. |
 | `class` | The `## Automatic` class of the base's `RISK.md` the record's classifier found the change in, or `-`. |
 | `auto-merge` | Method, who enabled it, when, and the head it was enabled on. |
@@ -1019,12 +1019,14 @@ restart only where the host leaves its process group alive (under systemd,
 `KillMode=process` on the daemon's unit); otherwise its handback names the signal
 and the restart. After the wrapper exits, the
 daemon validates every result, ancestry, and protected path before lease-pushing
-as the bot. The protected set as a whole must match the pinned head or its merge with the
-current base, including content and mode, and a head that merges the base resolves no
-conflict in it, not even by keeping the PR's side. It covers `flake.nix`, `flake.lock`,
-`shell.nix`, `default.nix`, `nix/`, `.envrc`, `.github/`, `.gitmodules`, gitlinks
-anywhere, and every path `quest review` holds high from the base's `RISK.md`, so
-a high path lands only after a local review. Collection copies at most 100 MiB of Git metadata the fixer added into a
+as the bot. A head that takes none of the base's history keeps the protected set as
+the pinned head has it, content and mode; one that does merges the whole base the
+fixer was given, resolves no conflict in the protected set, not even by keeping the
+PR's side, and keeps that set as a plain merge of the base leaves it. It covers
+`flake.nix`, `flake.lock`, `shell.nix`, `default.nix`, `nix/`, `.envrc`, `.github/`,
+`.gitmodules`, gitlinks anywhere, and every path `quest review` holds high from the
+base's `RISK.md`; on a PR whose `## Review` record rates it high, it covers every path.
+So a high change lands only after a local review. Collection copies at most 100 MiB of Git metadata the fixer added into a
 clean object repository. It skips the packs fetched at launch, whose objects the clean
 repository borrows from the daemon's own. It ignores fixer configuration and never
 follows the fixer's Git alternates. Pack indexes are rebuilt with
@@ -1041,7 +1043,8 @@ PR head, the base, the resolved tree, and the fixer's edits as a patch against t
 merge's conflicted result, or against the head itself for a fix that merges no base,
 sized to GitHub's 65,536-character comment limit. A maintainer
 runs `quest land apply <pr>`, which refuses a moved head, rebuilds and checks that
-tree, and prints an unpushed commit and its push command to run after reviewing it.
+tree, and prints an unpushed commit and its push command to run after reviewing it;
+it records no mechanical fix, so the pushed head needs a local `quest review` round.
 A resolution too large for the comment hands back plainly.
 
 Every base the watcher merges into a PR head, for a conflict's clean merge or an
