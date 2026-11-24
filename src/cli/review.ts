@@ -778,6 +778,11 @@ export function claudeFlags(context: Context): string[] {
 		"dontAsk",
 		"--setting-sources",
 		"",
+		// `--setting-sources ""` skips the person's `refuse`, and dontAsk counts as prompting, so with no value
+		// the reviewer would take messages from any session that doesn't bypass prompts. Needs Claude Code 2.1.224
+		// or later; checked against 2.1.330. `--tools` leaves out SendMessage and ListAgents, so none is denied.
+		"--settings",
+		JSON.stringify({ crossSessionInbound: "refuse" }),
 		"--strict-mcp-config",
 		"--tools",
 		context.tools ?? "Read,Grep,Glob,Bash,Agent",
