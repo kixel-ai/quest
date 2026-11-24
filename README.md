@@ -2483,8 +2483,9 @@ Follow https://github.com/kixel-ai/quest/blob/main/SETUP.md to set up Quest here
 
 The [getting started guide](docs/getting-started.md) covers what happens next.
 
-`quest context` prints the rules agents follow in every task, and `quest guide` the
-quest format and workflow they read before working on a quest outside a skill;
+`quest context` prints the rules agents follow in every task, `quest context <pack...>`
+prints on-demand topic packs (`pr`, `rust`, `ts`, `uniffi`; `--list` lists them), and `quest guide`
+prints the quest format and workflow agents read before working on a quest outside a skill;
 `quest guide prompting` prints one section.
 
 ### Configure your agent
@@ -2526,6 +2527,7 @@ as the reason:
   line;
 - a scratch file written under `/tmp`, outside the checkout, by a redirection,
   `tee`, `mkdir`, `mktemp`, `git clone` or `worktree add`, or a file edit;
+- killing processes by name with `pkill` or `killall`, which can hit sibling agents;
 - in a checkout whose origin is on [Kixel Quest](#work-on-a-repository-kixel-quest-hosts),
   a `gh pr` or `gh api` call aimed at that repository, which `gh` cannot reach:
   one naming no repository, through `--repo`, `GH_REPO`, a PR URL, or an

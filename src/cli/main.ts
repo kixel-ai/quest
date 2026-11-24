@@ -113,6 +113,7 @@ import { heal, init, stubFindings, uninstall } from "./setup";
 import { describe, notUpstream, releaseQuest, startQuest } from "./start";
 import { KIXEL_QUEST_URL, kixelUrl, tokensPath } from "./tokens";
 import { CONTEXT, GUIDE, GUIDE_SECTIONS, SKILLS, guideSections, sectionHeading, skill } from "./skills";
+import { CONTEXT_PACKS, contextPack, contextPacks } from "./context";
 import { type Terminal, Theme } from "./theme";
 import { type Snapshot, checkout, collect, load, snapshot, under } from "./tree";
 import { pullFileLines, statusLines, viewLines } from "./status";
@@ -1994,14 +1995,33 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 
 	program
 		.command("context")
-		.summary("Print the engineering rules agents follow in every task, before the repository's own")
+		.summary("Print the engineering rules agents follow in every task, or on-demand topic packs")
 		.description(
 			"Print the engineering rules agents follow in every task, before the repository's own. The hooks " +
 				"`quest setup` installs add them to each Claude Code and Codex session in a repository that uses " +
 				"Quest, so its agents need not run this, and check the rules under its last section, Checked, on " +
-				"each tool call, so the context they add leaves that section out.",
+				"each tool call, so the context they add leaves that section out.\n\n" +
+				`Name one or more topic packs to print only those, in order (${CONTEXT_PACKS.map((p) => p.name).join(", ")}). ` +
+				"PreToolUse hooks inject matching packs once per session when an agent edits matching files or runs PR commands.",
 		)
-		.action(() => out.stdout(`${CONTEXT}\n${CHECKED_CONTEXT}`));
+		.argument("[pack...]", "Topic packs to print, ignoring case")
+		.option("--list", "List available topic packs")
+		.action((packs: string[], options: { list?: boolean }) => {
+			if (options.list) {
+				if (packs.length > 0) throw new UsageError("--list takes no pack names");
+				for (const pack of CONTEXT_PACKS) print(`${pack.name} - ${pack.description}`);
+				return;
+			}
+			if (packs.length === 0) return out.stdout(`${CONTEXT}\n${CHECKED_CONTEXT}`);
+			for (const name of packs) {
+				try {
+					contextPack(name);
+				} catch (error) {
+					throw new UsageError(error instanceof Error ? error.message : String(error));
+				}
+			}
+			out.stdout(contextPacks(packs));
+		});
 
 	program
 		.command("skill")

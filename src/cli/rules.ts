@@ -27,6 +27,7 @@ export const RULES = {
 	rewrite:
 		"Never rebase or force-push, even a branch only you hold; merge the base instead, when the branch conflicts with it or a landing step refuses the head.",
 	tmp: "Put scratch files, such as PR bodies, logs, patches, helper scripts, and temporary clones, in the checkout's `.tmp/`, never `/tmp`, so they disappear with the worktree.",
+	pkill: "Stop a process you started by its PID or process group, never by name with `pkill` or `killall`: other agents share the host.",
 	recommend:
 		"In a question dialog, end each option you recommend with `(Recommended)`, and recommend one in every question with two or more options.",
 	kixel: "On a repository Kixel Quest hosts, `gh` cannot reach its PRs: use `quest pr view`, `list`, `create`, `edit`, `comment`, and `resolve`, and `quest status`, `ready`, and `merge`.",
@@ -434,7 +435,9 @@ function shell(
 		} else if (name === "mkdir") {
 			if (positionals(args, new Set(["-m", "--mode"])).some(scratch)) found.add("tmp");
 		} else if (name === "mktemp") mktemp(args, env, check);
-		else if (name === "git") git(args, asked, input, check);
+		else if (["pkill", "killall"].includes(basename(name!))) {
+			if (!args.some((arg) => arg === "--help" || arg === "-h")) found.add("pkill");
+		} else if (name === "git") git(args, asked, input, check);
 		else if (name === "gh") {
 			const command = ghCommand(args);
 			gh(command, input, check);

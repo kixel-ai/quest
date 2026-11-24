@@ -7,6 +7,7 @@ import { expect, test } from "vitest";
 
 import { SKILL_DIRS } from "../src/core";
 import { CONTEXT_LIMIT } from "../src/cli/hooks";
+import { CONTEXT_PACKS, contextPack, contextPacks } from "../src/cli/context";
 import { CONTEXT, GUIDE_SECTIONS, INLINE_LIMIT, SKILLS, guideSections, skill } from "../src/cli/skills";
 
 test.each(SKILLS.map((skill) => [skill.name, skill] as const))("%s frontmatter is complete", (_, skill) => {
@@ -99,4 +100,11 @@ test("the guide splits at its own headings, not the format example's", () => {
 /** The hook adds the rules to every session, and Claude Code shows only a preview of longer context. */
 test("the rules every task loads fit in one hook's context", () => {
 	expect(CONTEXT.length).toBeLessThanOrEqual(CONTEXT_LIMIT);
+	for (const pack of CONTEXT_PACKS) {
+		expect(pack.body.trim()).not.toBe("");
+		expect(pack.body.length).toBeLessThanOrEqual(CONTEXT_LIMIT);
+	}
+	expect(contextPacks(["TS", "rust"])).toContain("# Rust");
+	expect(contextPacks(["TS", "rust"])).toContain("# TypeScript");
+	expect(() => contextPack("nope")).toThrow("no context pack named nope");
 });
