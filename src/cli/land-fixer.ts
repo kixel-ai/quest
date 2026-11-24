@@ -90,12 +90,6 @@ function readLog(path: string, window: "head" | "tail"): string {
 export const ADMITTED = "quest land fixer: admitted";
 
 /**
- * A wrapper that fails prints this line, followed by its error, so a handback names the cause, such as
- * a launcher refusing the upload, apart from the agent's output. The last one counts.
- */
-export const FAILED = "quest land fixer: error";
-
-/**
  * The run gets `timeout` minutes from its admission, so a fixer queued for a shared launcher's slot
  * keeps its whole run. Waiting counts against a total of twice that from the spawn, which also
  * bounds a launcher that never admits the job and a wrapper that never reports admission.
@@ -364,7 +358,7 @@ export function prepare(root: string, checkout: string, refs: string[], base: { 
 /**
  * Save `job`, then start the fixer wrapper on it under a supervisor that survives a daemon restart
  * and atomically records the wrapper's exit status. Its state path is never passed to the wrapper
- * or mounted in its container.
+ * or mounted in its container; the wrapper reports its own failure on descriptor 3.
  */
 export async function launch(
 	path: string,
@@ -380,6 +374,18 @@ export async function launch(
 		constants.O_WRONLY | constants.O_CREAT | constants.O_APPEND | constants.O_NOFOLLOW,
 		0o600,
 	);
+	// The wrapper's own error channel, apart from the log its payload also writes, so no agent or check can forge it.
+	let channel: number;
+	try {
+		channel = openSync(
+			`${path}.error`,
+			constants.O_WRONLY | constants.O_CREAT | constants.O_TRUNC | constants.O_NOFOLLOW,
+			0o600,
+		);
+	} catch (failure) {
+		closeSync(output);
+		throw failure;
+	}
 	let child: ReturnType<typeof spawn>;
 	try {
 		child = spawn(
@@ -397,11 +403,12 @@ export async function launch(
 				cwd: job.checkout,
 				detached: true,
 				env: { ...commandEnvironment(), ...env },
-				stdio: ["ignore", output, output],
+				stdio: ["ignore", output, output, channel],
 			},
 		);
 	} finally {
 		closeSync(output);
+		closeSync(channel);
 	}
 	try {
 		await new Promise<void>((done, reject) => {
@@ -493,15 +500,14 @@ export function outputTail(path: string): string {
 /** The most of a wrapper's error a handback's summary names: one line, not a dump. */
 const WRAPPER_LIMIT = 200;
 
-/** The error the fixer wrapper at job `path` last reported on a `FAILED` line, tokens redacted and bounded, or undefined. */
+/** The last line the fixer wrapper at job `path` wrote to its error descriptor, tokens redacted and bounded, or undefined. */
 export function wrapperError(path: string): string | undefined {
-	const prefix = `${FAILED} `;
-	const line = readLog(`${path}.log`, "tail")
+	const line = readLog(`${path}.error`, "tail")
 		.split("\n")
-		.filter((item) => item.startsWith(prefix))
+		.map((item) => item.trim())
+		.filter(Boolean)
 		.at(-1);
-	const error = line && redactTokens(line.slice(prefix.length)).trim().slice(0, WRAPPER_LIMIT);
-	return error || undefined;
+	return line ? redactTokens(line).slice(0, WRAPPER_LIMIT) : undefined;
 }
 
 /**

@@ -1433,13 +1433,10 @@ printf '[{"number":1,"action":"handback","diagnosis":"saw %s","recommendation":"
 	test("names the wrapper's last error line, redacted and bounded, and nothing without one", () => {
 		const job = join(tempDir(), "job");
 		expect(wrapperError(job)).toBeUndefined();
-		writeFileSync(`${job}.log`, "agent output\n  quest land fixer: error indented\nquest land fixer: error \n");
+		writeFileSync(`${job}.error`, " \n\n");
 		expect(wrapperError(job)).toBeUndefined();
 		const token = `ghp_${"A1b2".repeat(9)}`;
-		writeFileSync(
-			`${job}.log`,
-			`quest land fixer: error first\nquest land fixer: error upload ${token} ${"x".repeat(300)}\nafter\n`,
-		);
+		writeFileSync(`${job}.error`, `first\n  upload ${token} ${"x".repeat(300)}\n\n`);
 		const error = wrapperError(job)!;
 		expect(error).toMatch(/^upload \[redacted token\] x+$/);
 		expect(error).toHaveLength(200);

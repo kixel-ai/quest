@@ -521,6 +521,7 @@ async function fixerBranches(
 function finish(path: string, job: WatchJob): void {
 	if (job.checkout) rmSync(job.checkout, { recursive: true, force: true });
 	rmSync(`${path}.exit`, { force: true });
+	rmSync(`${path}.error`, { force: true });
 	rmSync(path);
 }
 

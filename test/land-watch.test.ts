@@ -2011,7 +2011,7 @@ git commit -qm 'disable render_timeout'`;
 		// rind's fixers on 2026-11-15 failed so before Codex started: the host's launcher refused the upload.
 		fix.round(
 			11,
-			"echo 'starting' \necho 'quest land fixer: error upload exceeds 256 MiB <@maintainer>' >&2\nexit 1\n",
+			"echo 'starting' \necho 'quest land check: upload exceeds 256 MiB <@maintainer>' >&2\necho 'upload exceeds 256 MiB <@maintainer>' >&3\nexit 1\n",
 		);
 		fix.round(13, fixScript("fixed.txt"));
 		expect(await watchPass(REPOSITORY, { state }, deps(github), context)).toEqual([
@@ -2077,7 +2077,7 @@ git commit -qm 'disable render_timeout'`;
 		);
 		expect(crash).toContain("running tests\nFAIL queue.test.ts");
 		expect(crash).toContain(
-			"The fixer's output ended with:\n\n<pre>starting\nquest land fixer: error upload exceeds 256 MiB &lt;@maintainer></pre>",
+			"The fixer's output ended with:\n\n<pre>starting\nquest land check: upload exceeds 256 MiB &lt;@maintainer></pre>",
 		);
 		expect(history(state, 11)!.rounds).toMatchObject([
 			{ outcome: "handback", before: crashed, failure: "Check / test: just test" },
