@@ -32,7 +32,7 @@ Decided 2026-11-23 (maintainer, `/quest-plan`):
   These show rules agents ignore, misread, or never need. `quest eval` is gone (2026-11-23), so a run judges its rewrites from this evidence, not an A/B test.
 - `RISK.md`? ✅ Here, any change to the instructions `quest` ships is high, made in this planning PR: `assets/`, `docs/context.md`, `src/cli/rules.ts`, and `SETUP.md` join its `## High` list, as do instructions code plants or injects, and `trivial` no longer lands a high change other than a dependency or pin bump.
   ✅ Other repositories: each run checks that `RISK.md` rates changes to instruction files at least medium, as moq-dev/moq's does, and proposes that line where they could land as low or through an `## Automatic` class (rejected: leaving each repository's tiers alone).
-- The guide? ✅ The maintainer asked to "check the official guidance for all available models", which is the request `AGENTS.md` wants before this quest edits `assets/AGENTS.md`, `assets/audit.md`, and `assets/audits/`.
+- The guide? ✅ The maintainer asked for this audit of every file agents load, checked against "the official guidance for all available models", and picked this plan to merge, which names its edits: that pick is the request `AGENTS.md` wants before this quest edits `assets/AGENTS.md`, `assets/audit.md`, and `assets/audits/`, within the scope this Plan names.
 
 Agent's choices, for the implementer to revisit:
 
