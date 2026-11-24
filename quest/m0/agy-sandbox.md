@@ -14,7 +14,7 @@ it.
 
 ## Plan
 
-Decided 2026-11-23 (maintainer, [on kixel-ai/quest#838's review checkpoint](https://github.com/kixel-ai/quest/pull/838#issuecomment-7123306069)): ✅ keep this quest, widened to an OS read sandbox on both platforms: Seatbelt on macOS, bubblewrap or Landlock on Linux (rejected: drop it, leaving agy Linux-only). #838 itself landed without a sandbox, accepting the documented mid-turn gap, since agy is opt-in and on no rung yet.
+Decided 2026-11-23 (maintainer, [on kixel-ai/quest#838's review checkpoint](https://github.com/kixel-ai/quest/pull/838#issuecomment-7123306069)): ✅ keep this quest, widened to an OS read sandbox on both platforms: Seatbelt on macOS, bubblewrap or Landlock on Linux (rejected: drop it, leaving agy Linux-only). #838 itself landed without a sandbox, accepting the documented mid-turn gap, since agy reviews only when `--harness agy` names it and is on no rung yet. The gap also applies whenever the risk classifier falls through to agy, after Claude and Codex cannot run.
 
 What #838 found:
 
