@@ -559,7 +559,7 @@ head 0ade9d977d54c6f48152410532c58e9ea78db3d0
 mergeable conflicting
 merge-state dirty
 review-decision -
-review-record diff-identical 5f1c2e9a8b7d6c5e4f3a2b1c0d9e8f7a6b5c4d3e
+review-record diff-identical 5f1c2e9a8b7d6c5e4f3a2b1c0d9e8f7a6b5c4d3e local-review
 risk medium diff-identical low It changes when quest gate admits a command.
 class -
 auto-merge -
@@ -579,7 +579,7 @@ comes last, and a missing value prints as `-`:
 | --- | --- |
 | `url`, `state`, `draft`, `head` | The PR URL; `open`, `closed`, or `merged`; `true` or `false`; the head SHA. |
 | `mergeable`, `merge-state`, `review-decision` | GitHub's values, lowercased. |
-| `review-record` | Whether the PR body's [`## Review` record](#review-locally) still covers the head, and the head it names last: `current` when it is the head, `diff-identical` when `git diff <base>...<head>` prints the same as for it, `stale` otherwise, or `unknown` when GitHub cannot compare them, such as a diff too large; `-` when the record names no full SHA, or, with a warning saying why, when no passing [`quest review` commit status](#review-locally) attests it: the latest one on the head it names must be `success`, set by a user with write access to the base repository, its target the diff into the PR's base, and its description must name the record's risk tier, class, and whether a local reviewer ran. So a record a contributor or a bot wrote, or edited to name another head, base, or tier, counts for nothing. Reading the setter's permission takes a token that can push to the repository; any other sees every record as untrusted. |
+| `review-record` | Whether the PR body's [`## Review` record](#review-locally) still covers the head, and the head it names last: `current` when it is the head, `diff-identical` when `git diff <base>...<head>` prints the same as for it, `stale` otherwise, or `unknown` when GitHub cannot compare them, such as a diff too large; then `local-review`, or `no-local-review` for a low head no local reviewer ran on, as the status below attests; `-` when the record names no full SHA, or, with a warning saying why, when no passing [`quest review` commit status](#review-locally) attests it: the latest one on the head it names must be `success`, set by a user with write access to the base repository, its target the diff from the head's merge base with the PR's base, and its description must name the record's risk tier and class. So a record a contributor or a bot wrote, or edited to name another head, base, or tier, counts for nothing. Reading the setter's permission takes a token that can push to the repository; any other sees every record as untrusted. |
 | `risk` | The record's [risk tier](#risk-tiers), `low`, `medium`, or `high`; the same state as `review-record` for the head it names; the tier its classifier set before any reviewer raised it; and the reason. `-` when the record names none or does not count, and `- malformed -` with why when its risk lines do not parse, which `quest merge` refuses. |
 | `class` | The `## Automatic` class of the base's `RISK.md` the record's classifier found the change in, or `-`. |
 | `auto-merge` | Method, who enabled it, when, and the head it was enabled on. |
@@ -1785,12 +1785,14 @@ and prints `record skipped: <why>`. It edits as the user the GitHub token names
 `quest review` commit status on the head on the same token, so push the head
 first: `success` once no finding is open, else `failure`, described by the
 head's risk tier and class and whether a local reviewer ran, as `Risk low,
-class test: passed with no local reviewer`, its target the diff from the PR's
-base. `quest status` counts a record only through that status, set by someone
-who can push, so a contributor's own record counts for nothing, and a failing
-one blocks `quest merge --land` as any failed check does. A record or status
-GitHub refuses fails the command after the round's report, with exit status 1,
-a status printing `; status skipped: <why>` after the record's URL. It exits 0 once the round
+class test: passed with no local reviewer`, its target the diff from the
+head's merge base with the PR's base. `quest status` counts a record only
+through that status, set by someone who can push, so a contributor's own record
+counts for nothing, and a failing one blocks `quest merge --land` as any failed
+check does. A token that cannot push sets none, printing `; status skipped:
+<why>` after the record's URL. A record or status GitHub refuses otherwise fails
+the command after the round's report, with exit status 1, a status printing
+`; status refused: <why>`. It exits 0 once the round
 finishes, whatever it found, 2 for invalid arguments or a checkout that
 cannot be reviewed, 3 when no eligible reviewer could run, each not installed,
 logged out, its login rejected, at its usage limit, or unable to run on this host, and 1 for other

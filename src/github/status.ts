@@ -174,8 +174,9 @@ export async function pullRequestStatus(
 		typeof first!.body === "string" ? first!.body : "",
 		deps.warn,
 	);
-	status.reviewRecord = await reviewRecord(github, pr, { ...first!, body: trusted }, deps.warn);
-	status.risk = risk(trusted, head, status.reviewRecord);
+	const record = await reviewRecord(github, pr, { ...first!, body: trusted.body }, deps.warn);
+	status.reviewRecord = record && { ...record, localReview: trusted.localReview };
+	status.risk = risk(trusted.body, head, status.reviewRecord);
 	if (status.autoMerge !== null) status.autoMerge.head = await enabledHead(github, first!, deps.warn);
 	const signaled = (await readSignals(github, pr, [pr.number])).get(pr.number)!;
 	if (signaled.head !== first!.headRefOid)

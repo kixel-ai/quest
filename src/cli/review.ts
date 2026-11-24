@@ -3295,7 +3295,7 @@ export function nextStep(rounds: Round[]): string {
 	if (rounds.every((round) => round.findings.length === 0)) return "next done: no findings remain on this head";
 	if (rounds.some((round) => round.findings.length > 0 && round.round % 3 === 0))
 		return "next checkpoint: before fixing these findings, step back: work out the best long-term approach from first principles, compare it with the current one, and let the user decide, as /quest-review describes";
-	return "next respond: fix each finding or refute it with evidence the reviewer cannot rebut, commit, rerun the checks, then run the next round with --responses, one response per finding by its number";
+	return "next respond: fix each finding or refute it with evidence the reviewer cannot rebut, commit, rerun the checks, push, then run the next round with --responses, one response per finding by its number";
 }
 
 /** Model text on one line, for a report line's free text. */

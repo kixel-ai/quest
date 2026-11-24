@@ -3,10 +3,12 @@ import { expect } from "vitest";
 
 import { recordedRisk } from "../src/core";
 import { type GitHubReadDependencies } from "../src/github/client";
-import { NO_REVIEWER, attestation, reviewTarget } from "../src/github/review-trust";
+import { attestation, reviewTarget } from "../src/github/review-trust";
 
 export const A = "a".repeat(40);
 export const B = "b".repeat(40);
+/** Where every head branched from `main`. */
+export const MERGE_BASE = "e".repeat(40);
 export const pr = { owner: "example", repo: "project", number: 1 };
 export const URL_ = "https://github.com/example/project/pull/1";
 
@@ -190,8 +192,9 @@ export function setup(
 				return Response.json({ total_count: options.runs.length, workflow_runs: options.runs });
 			}
 			const compare = /^\/repos\/example\/project\/compare\/main\.\.\.([0-9a-f]{40})$/.exec(path.pathname);
+			if (compare && new Headers(init?.headers).get("Accept") !== "application/vnd.github.diff")
+				return Response.json({ merge_base_commit: { sha: MERGE_BASE } });
 			if (compare) {
-				expect(new Headers(init?.headers).get("Accept")).toBe("application/vnd.github.diff");
 				const diff = options.diffs?.[compare[1]!];
 				if (diff === undefined) throw new Error("unexpected compare request");
 				return typeof diff === "number"
@@ -258,11 +261,7 @@ export function setup(
 									"SUCCESS",
 									recorded === null || "malformed" in recorded
 										? "Risk low: passed"
-										: attestation(
-												recorded.tier,
-												recorded.class,
-												NO_REVIEWER.test(body) ? "passed with no local reviewer" : "passed",
-											),
+										: attestation(recorded.tier, recorded.class, "passed"),
 									sha,
 								);
 				const object = status === null ? null : { status: status === undefined ? null : { context: status } };
@@ -297,10 +296,10 @@ export function setup(
 }
 
 /**
- * A `quest review` status on `sha` as GitHub's GraphQL `StatusContext` gives it, its target the diff into `main`, set
- * by `login` of GraphQL type `kind`.
+ * A `quest review` status on `sha` as GitHub's GraphQL `StatusContext` gives it, its target the diff from
+ * `MERGE_BASE`, set by `login` of GraphQL type `kind`.
  */
 export function reviewStatus(state: string, description: string, sha: string, login = "maintainer", kind = "User") {
-	const targetUrl = reviewTarget({ owner: "example", repo: "project" }, "main", sha);
+	const targetUrl = reviewTarget({ owner: "example", repo: "project" }, MERGE_BASE, sha);
 	return { state, description, targetUrl, creator: { __typename: kind, login } };
 }

@@ -682,9 +682,9 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"url, state, draft, head, mergeable, merge-state, review-decision, review-record, risk, class, auto-merge, merge-queue, " +
 				"landing-stopped, and checks, whose state and counts follow the checks that count, pending while an open PR's base requires a check or workflow nothing reports; review-record gives whether the PR body's ## Review record " +
 				"covers the head, as current, diff-identical (git diff <base>...<head> prints the same as for the head it names), " +
-				"stale, or unknown when GitHub cannot compare them, then the head it names last, counting the record only when the latest " +
-				"quest review commit status on that head is success, set by a user with write access to the repository for the diff into the PR's base, " +
-				"and attests the record's risk tier, class, and whether a local reviewer ran (else -, with a warning saying why, and risk and class print - too); risk gives the record's risk " +
+				"stale, or unknown when GitHub cannot compare them, then the head it names last, then local-review or no-local-review for whether a local reviewer's round passed it; " +
+				"it counts the record only when the latest quest review commit status on that head is success, set by a user with write access to the repository, " +
+				"targets the diff from the head's merge base with the PR's base, and attests the record's risk tier and class (else -, with a warning saying why, and risk and class print - too); risk gives the record's risk " +
 				"tier, the same state for its head, the tier its classifier set before any reviewer raised it, and the " +
 				"reason last, - when the record names none or does not count, or - malformed - and why when its risk lines do not parse; class gives the RISK.md ## Automatic class the record's classifier named, or -; auto-merge gives its method, who enabled it and when, and the head it was " +
 				"enabled on, which differs from head once a push follows, as GitHub keeps auto-merge across a writer's " +
@@ -1787,8 +1787,8 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"an `- Overridden:` line, the classifier's tier and who set it, a `- Class:` line, a `- Local review: none` line for a low head no reviewer ran on, a `- Skipped:` line for each reviewer passed over, and each reviewer, its Reviewer line ending in `, shadow` for the shadow or `, second` for the second reviewer, its " +
 				"session and round, score, the tier it raised the risk to and why, its tally of findings across the branch's rounds, and each finding with its disposition. " +
 				"On GitHub it then sets the `quest review` commit status on the head, on the same token, so push the head first: success once no finding is open, else failure, " +
-				"its description the head's risk tier and class and whether a local reviewer ran, its target the diff from the PR's base, which `quest status` counts only from a user who can push; one GitHub refuses " +
-				"prints `; status skipped: <why>` after the record's URL and exits 1. With no " +
+				"its description the head's risk tier and class and whether a local reviewer ran, its target the diff from the head's merge base with the PR's base, which `quest status` counts only from a user who can push. " +
+				"For a token that cannot push, it sets none and prints `; status skipped: <why>` after the record's URL; a status GitHub refuses otherwise prints `; status refused: <why>` and exits 1. With no " +
 				"such PR, several from other repositories that `HEAD` contains, or a remote off GitHub, it prints `record skipped: <why>` and changes nothing.\n\n" +
 				"Exits 0 once the round finishes, whatever it found, 2 for invalid arguments " +
 				"or a checkout that cannot be reviewed, 3 when no eligible reviewer could run, each not installed, logged " +
@@ -1905,12 +1905,18 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 							if (record !== undefined)
 								print(
 									"url" in record
-										? `record ${record.url}${record.unattested ? `; status skipped: ${record.unattested}` : ""}`
+										? `record ${record.url}${record.status === undefined ? "" : "skipped" in record.status ? `; status skipped: ${record.status.skipped}` : `; status refused: ${record.status.refused}`}`
 										: `record skipped: ${record.skipped}`,
 								);
 							print(nextStep(rounds));
 						}
-						if (failure === undefined) return record !== undefined && "unattested" in record ? 1 : 0;
+						if (failure === undefined)
+							return record !== undefined &&
+								"url" in record &&
+								record.status &&
+								"refused" in record.status
+								? 1
+								: 0;
 						warn(
 							`the round finished, but recording it in the PR body failed: ${failure instanceof Error ? failure.message : String(failure)}`,
 						);

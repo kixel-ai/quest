@@ -5,7 +5,22 @@ import { main } from "../src/cli/main";
 import { statusLines } from "../src/cli/status";
 import { pullRequestStatus, requiredOf } from "../src/github/status";
 import { attestation } from "../src/github/review-trust";
-import { A, B, pr, URL_, type Node, page, CI, pull, run, review, thread, setup, reviewStatus } from "./status-fakes";
+import {
+	A,
+	B,
+	pr,
+	URL_,
+	type Node,
+	page,
+	CI,
+	pull,
+	run,
+	review,
+	thread,
+	setup,
+	reviewStatus,
+	MERGE_BASE,
+} from "./status-fakes";
 
 test("reports checks by requiredness, each reviewer's latest review against the head, and open threads", async () => {
 	const fixture = setup(
@@ -813,22 +828,24 @@ describe("the review record", () => {
 	};
 
 	test("is current when the section's last full SHA is the head, without comparing", async () => {
-		expect(await line(`## Review\n\n- Head: ${A}${RISK}`)).toBe(`review-record current ${A}`);
+		expect(await line(`## Review\n\n- Head: ${A}${RISK}`)).toBe(`review-record current ${A} local-review`);
 	});
 
 	test("carries across a head whose diff from the base matches the reviewed head's, and not otherwise", async () => {
 		const body = `## Review\n\n- Head: ${B}${RISK}`;
 		expect(await line(body, { ...on(B), diffs: { [A]: "same", [B]: "same" } })).toBe(
-			`review-record diff-identical ${B}`,
+			`review-record diff-identical ${B} local-review`,
 		);
-		expect(await line(body, { ...on(B), diffs: { [A]: "new", [B]: "old" } })).toBe(`review-record stale ${B}`);
+		expect(await line(body, { ...on(B), diffs: { [A]: "new", [B]: "old" } })).toBe(
+			`review-record stale ${B} local-review`,
+		);
 	});
 
 	test("is unknown, with a warning, when GitHub cannot compare a head", async () => {
 		for (const status of [406, 403]) {
 			const warnings: string[] = [];
 			expect(await line(`## Review\n\n- Head: ${B}${RISK}`, { ...on(B), diffs: { [A]: status }, warnings })).toBe(
-				`review-record unknown ${B}`,
+				`review-record unknown ${B} local-review`,
 			);
 			expect(warnings).toHaveLength(1);
 		}
@@ -863,7 +880,7 @@ describe("whose review record counts", () => {
 		for (const login of ["maintainer", "writer"]) {
 			const attested = await read(record(A), { statuses: { [A]: passed(A, login) } });
 			expect(attested).toMatchObject({
-				record: `review-record current ${A}`,
+				record: `review-record current ${A} local-review`,
 				risk: "risk low current low docs only",
 				warnings: [],
 			});
@@ -874,7 +891,7 @@ describe("whose review record counts", () => {
 
 	test("carries an attested record to a head with the same diff, reading the status of the head it names", async () => {
 		const carried = await read(record(B), { statuses: { [B]: passed(B) }, diffs: { [A]: "same", [B]: "same" } });
-		expect(carried).toMatchObject({ record: `review-record diff-identical ${B}`, warnings: [] });
+		expect(carried).toMatchObject({ record: `review-record diff-identical ${B} local-review`, warnings: [] });
 		expect(carried.fixture.statusQueries).toEqual([B]);
 	});
 
@@ -888,11 +905,12 @@ describe("whose review record counts", () => {
 			],
 			[
 				{ [A]: passed(B) },
-				`the quest review status on ${A} attests another diff than into main: https://github.com/example/project/compare/main...${B}`,
+				`the quest review status on ${A} attests another diff than main's, from ${MERGE_BASE}: https://github.com/example/project/compare/${MERGE_BASE}...${B}`,
 			],
+			// Reviewed from another merge base, as before a retarget or a base reset.
 			[
-				{ [A]: { ...passed(A), targetUrl: `https://github.com/example/project/compare/release...${A}` } },
-				`the quest review status on ${A} attests another diff than into main: https://github.com/example/project/compare/release...${A}`,
+				{ [A]: { ...passed(A), targetUrl: `https://github.com/example/project/compare/${C}...${A}` } },
+				`the quest review status on ${A} attests another diff than main's, from ${MERGE_BASE}: https://github.com/example/project/compare/${C}...${A}`,
 			],
 			[
 				{ [A]: passed(A, "alice") },
@@ -929,31 +947,28 @@ describe("whose review record counts", () => {
 		);
 	});
 
-	test("counts a record whose risk, class, and reviewer are the ones its status attests, and hides a forged one", async () => {
+	test("counts a record whose risk and class are the ones its status attests, and hides a forged one", async () => {
 		const risk = `${RISK.replace("by default", "by Claude Code, m, low effort, session `s`")}\n- Class: \`test\``;
-		const none = `${risk}\n- Local review: none, since the head is low risk`;
 		const attest = (description: string) => ({ statuses: { [A]: reviewStatus("SUCCESS", description, A) } });
-		for (const [body, outcome] of [
-			[risk, "passed"],
-			[none, "passed with no local reviewer"],
+		// Whether a local reviewer ran comes from the status alone, whatever the body claims.
+		for (const [outcome, review] of [
+			["passed", "local-review"],
+			["passed with no local reviewer", "no-local-review"],
 		] as const)
-			expect(await read(record(A, body), attest(attestation("low", "test", outcome)))).toMatchObject({
-				record: `review-record current ${A}`,
+			expect(await read(record(A, risk), attest(attestation("low", "test", outcome)))).toMatchObject({
+				record: `review-record current ${A} ${review}`,
 				risk: "risk low current low docs only",
 				warnings: [],
 			});
-		for (const [body, description] of [
-			[risk, "Risk high, class test: passed"],
-			[risk, "Risk low: passed"],
-			[risk, "Risk low, class chore: passed"],
-			// A reviewer's round claimed where none ran, or the reverse.
-			[risk, "Risk low, class test: passed with no local reviewer"],
-			[none, "Risk low, class test: passed"],
-		] as const)
-			expect(await read(record(A, body), attest(description))).toMatchObject({
+		for (const description of [
+			"Risk high, class test: passed",
+			"Risk low: passed",
+			"Risk low, class chore: passed",
+		])
+			expect(await read(record(A, risk), attest(description))).toMatchObject({
 				record: "review-record -",
 				risk: "risk -",
-				warnings: untrusted(`it differs from the quest review status on ${A}: ${description}`),
+				warnings: untrusted(`its risk differs from the quest review status on ${A}: ${description}`),
 			});
 		// A record whose risk was deleted after the status attested one counts for nothing either.
 		expect((await read(record(A, ""), attest("Risk high: passed"))).warnings).toEqual(

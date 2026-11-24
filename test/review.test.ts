@@ -1067,7 +1067,7 @@ fakes("codex reviews read-only with the base's instructions, then reports in the
 			"  average([3]) is 0.",
 			// The fixture's origin is a local path, which can have no PR.
 			"record skipped: origin is not on GitHub or Kixel Quest",
-			"next respond: fix each finding or refute it with evidence the reviewer cannot rebut, commit, rerun the checks, then run the next round with --responses, one response per finding by its number",
+			"next respond: fix each finding or refute it with evidence the reviewer cannot rebut, commit, rerun the checks, push, then run the next round with --responses, one response per finding by its number",
 			"",
 		].join("\n"),
 	);
@@ -1781,7 +1781,7 @@ fakes("each round rewrites the Review section of the branch's open PR, keeping t
 				state: "failure",
 				context: "quest review",
 				description: "Risk medium: findings open",
-				target_url: `https://github.com/acme/widget/compare/main...${head}`,
+				target_url: `https://github.com/acme/widget/compare/${base}...${head}`,
 			},
 		]);
 		expect(pull.body).toBe(
@@ -2552,7 +2552,7 @@ fakes(
 					state: "success",
 					context: "quest review",
 					description: "Risk low, class constants: passed with no local reviewer",
-					target_url: `https://github.com/acme/widget/compare/main...${head}`,
+					target_url: `https://github.com/acme/widget/compare/${git(s.repo, "merge-base", "origin/main", head)}...${head}`,
 				},
 			]);
 
@@ -2988,37 +2988,51 @@ test("the record replaces only a top-level Review section, never an example of o
 		expect(() => withReview(open, "new")).toThrow("unclosed code fence or HTML comment");
 });
 
-fakes(
-	"a status GitHub refuses, as for an unpushed head or a contributor's token, keeps the record and fails",
-	async () => {
-		for (const [status, message, why] of [
-			[422, "No commit found for SHA: x", ", which it needs pushed first: No commit found for SHA: x"],
-			[404, "Not Found", " (HTTP 404: Not Found); the token needs write access to commit statuses"],
-		] as const) {
-			const s = setup();
-			const pull = { number: 9, body: "" };
-			onGitHub(s.repo, [pull]);
-			const head = git(s.repo, "rev-parse", "HEAD");
-			const fetch = globalThis.fetch;
-			vi.stubGlobal("fetch", async (input: URL, init?: RequestInit) =>
-				new URL(input).pathname.includes("/statuses/")
-					? new Response(JSON.stringify({ message }), { status })
-					: fetch(input, init),
+fakes("a status GitHub refuses fails the run, unless the token cannot push, where it counts for nothing", async () => {
+	for (const [status, message, push, line] of [
+		[
+			422,
+			"No commit found for SHA: x",
+			true,
+			"status refused: GitHub refused the status on HEAD: No commit found for SHA: x; push it, then review it again",
+		],
+		[
+			403,
+			"Resource not accessible",
+			true,
+			"status refused: GitHub refused the status (HTTP 403: Resource not accessible); the token needs write access to acme/widget's commit statuses",
+		],
+		[
+			404,
+			"Not Found",
+			false,
+			"status skipped: you cannot push to acme/widget, so only a maintainer's round counts",
+		],
+	] as const) {
+		const s = setup();
+		const pull = { number: 9, body: "" };
+		onGitHub(s.repo, [pull]);
+		const head = git(s.repo, "rev-parse", "HEAD");
+		const fetch = globalThis.fetch;
+		vi.stubGlobal("fetch", async (input: URL, init?: RequestInit) => {
+			const path = new URL(input).pathname;
+			if (path.includes("/statuses/")) return new Response(JSON.stringify({ message }), { status });
+			const response = await fetch(input, init);
+			if (path !== "/repos/acme/widget") return response;
+			return new Response(JSON.stringify({ ...((await response.json()) as object), permissions: { push } }));
+		});
+		try {
+			const result = await quest("--root", s.repo, "review");
+			expect(result.code, result.stderr).toBe(push ? 1 : 0);
+			expect(result.stdout).toContain(
+				`\nrecord https://github.com/acme/widget/pull/9; ${line.replace("HEAD", head)}\n`,
 			);
-			try {
-				const result = await quest("--root", s.repo, "review");
-				expect(result.code, result.stderr).toBe(1);
-				const on = status === 422 ? ` on ${head}` : "";
-				expect(result.stdout).toContain(
-					`\nrecord https://github.com/acme/widget/pull/9; status skipped: GitHub refused the quest review status${on}${why}\n`,
-				);
-				expect(pull.body).toContain("## Review");
-			} finally {
-				vi.unstubAllGlobals();
-			}
+			expect(pull.body).toContain("## Review");
+		} finally {
+			vi.unstubAllGlobals();
 		}
-	},
-);
+	}
+});
 
 fakes("a record GitHub refuses fails the command after printing the round", async () => {
 	const s = setup();

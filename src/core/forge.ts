@@ -135,8 +135,11 @@ export interface Status {
 	reviews: Review[];
 	/** The design checkpoints online reviewers put on the head. */
 	checkpoints: { reviewer: string; round: number; url: string }[];
-	/** Null when the `## Review` section names no full SHA, or no writer's passing `quest review` status attests it. */
-	reviewRecord: ReviewRecord | null;
+	/**
+	 * Null when the `## Review` section names no full SHA, or no writer's passing `quest review` status attests it.
+	 * `localReview` is whether that status attests a local reviewer's round, false for a low head none ran on.
+	 */
+	reviewRecord: (ReviewRecord & { localReview: boolean }) | null;
 	/**
 	 * The head's risk tier as the `## Review` record names it, and the classifier's own tier, lower when a reviewer
 	 * raised it; null when the record names none or does not count, as for `reviewRecord`. `state` is the review record's, which a line after it carries to a
@@ -579,7 +582,9 @@ const status = shape<Status>({
 		}),
 	),
 	checkpoints: list(shape<Status["checkpoints"][number]>({ reviewer: string, round: count, url: string })),
-	reviewRecord: nullable(shape<ReviewRecord>({ state: oneOf(reviewStates), head: string })),
+	reviewRecord: nullable(
+		shape<NonNullable<Status["reviewRecord"]>>({ state: oneOf(reviewStates), head: string, localReview: boolean }),
+	),
 	risk: nullable((value, at) =>
 		isRecord(value) && value.state === "malformed"
 			? shape<MalformedStatus>({ state: oneOf(["malformed"] as const), error: string })(value, at)

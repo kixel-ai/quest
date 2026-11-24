@@ -308,8 +308,14 @@ export function withReview(body: string, record: string): string {
 const passed = ({ rounds, tallies }: Pick<Reviewed, "rounds" | "tallies">) =>
 	rounds.every((round) => round.findings.length === 0) && tallies.every((tally) => counted(tally).open === 0);
 
-/** Where a round's record went: the PR whose body holds it, or why no body changed. */
-export type Recorded = { url: string; unattested?: string } | { skipped: string };
+/**
+ * Where a round's record went: the PR whose body holds it, and why its status was not set, skipped for a token that
+ * cannot push, whose status would count for nothing, else refused; or why no body changed.
+ */
+export type Recorded = { url: string; status?: Unattested } | { skipped: string };
+
+/** Why `quest review` set no status on the head it recorded. */
+type Unattested = { skipped: string } | { refused: string };
 
 /**
  * The open PR from `branch` into the base `<remote>/<branch>` names, or why there is none: the one from the repository
@@ -326,8 +332,13 @@ async function openPull(
 			url: string;
 			body: string;
 			edit(body: string): Promise<void>;
-			/** Set the `quest review` status on `sha`, or say why it cannot be set. */
-			attest(sha: string, state: "success" | "failure", description: string): Promise<string | null>;
+			/** Set the `quest review` status on `head`, for its diff from the merge base `from`, or say why not. */
+			attest(status: {
+				head: string;
+				from: string;
+				state: "success" | "failure";
+				description: string;
+			}): Promise<Unattested | null>;
 	  }
 	| { skipped: string }
 > {
@@ -370,19 +381,26 @@ async function openPull(
 		edit: (body) => hosting.writes().edit({ ...repository, number: pull.number }, { title: null, body }),
 		// The status goes on the person's own token, which `quest status` counts only when it can push. Another forge
 		// has no commit statuses here, and decides on its own which record counts.
-		attest: async (sha, state, description) => {
+		attest: async ({ head: sha, from, state, description }) => {
 			if (up.github === null) return null;
-			const response = await up.github.client.request(`${repositoryPath(repository)}/statuses/${sha}`, {
-				body: { state, context: REVIEW_CONTEXT, description, target_url: reviewTarget(repository, base, sha) },
+			const { client } = up.github;
+			const response = await client.request(`${repositoryPath(repository)}/statuses/${sha}`, {
+				body: { state, context: REVIEW_CONTEXT, description, target_url: reviewTarget(repository, from, sha) },
 				allow: [403, 404, 422],
 				// The latest status per context wins, so setting it again leaves the same state.
 				repeat: true,
 			});
 			if (response.ok) return null;
 			const message = String(object(await response.json()).message);
-			return response.status === 422
-				? `GitHub refused the ${REVIEW_CONTEXT} status on ${sha}, which it needs pushed first: ${message}`
-				: `GitHub refused the ${REVIEW_CONTEXT} status (HTTP ${response.status}: ${message}); the token needs write access to commit statuses`;
+			if (response.status === 422)
+				return { refused: `GitHub refused the status on ${sha}: ${message}; push it, then review it again` };
+			const name = `${repository.owner}/${repository.repo}`;
+			const permissions = object(await (await client.request(repositoryPath(repository))).json()).permissions;
+			return permissions != null && object(permissions).push === true
+				? {
+						refused: `GitHub refused the status (HTTP ${response.status}: ${message}); the token needs write access to ${name}'s commit statuses`,
+					}
+				: { skipped: `you cannot push to ${name}, so only a maintainer's round counts` };
 		},
 	};
 }
@@ -410,10 +428,11 @@ export async function recordRounds(root: string, reviewed: Reviewed, deps: Claim
 	if (next !== pull.body) await pull.edit(next);
 	const ok = passed(reviewed);
 	const outcome = !ok ? "findings open" : reviewed.rounds.length === 0 ? "passed with no local reviewer" : "passed";
-	const why = await pull.attest(
-		reviewed.head,
-		ok ? "success" : "failure",
-		attestation(reviewed.risk.tier, reviewed.risk.classified.class, outcome),
-	);
-	return why === null ? { url: pull.url } : { url: pull.url, unattested: why };
+	const status = await pull.attest({
+		head: reviewed.head,
+		from: git(root, ["merge-base", reviewed.base.sha, reviewed.head]),
+		state: ok ? "success" : "failure",
+		description: attestation(reviewed.risk.tier, reviewed.risk.classified.class, outcome),
+	});
+	return status === null ? { url: pull.url } : { url: pull.url, status };
 }
