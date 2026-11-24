@@ -777,8 +777,8 @@ describe("messages", () => {
 
 	test("the command prints only its checkout's repository, every one with --all, and needs a named origin", () => {
 		const home = tempDir();
-		const checkout = join(home, "proj");
-		mkdirSync(checkout);
+		const checkout = join(home, "acme", "proj");
+		mkdirSync(checkout, { recursive: true });
 		execFileSync("git", ["init", "-q", checkout]);
 		execFileSync("git", ["-C", checkout, "remote", "add", "origin", "https://github.com/acme/proj.git"]);
 		mkdirSync(join(home, ".claude", "projects", "p"), { recursive: true });
@@ -793,19 +793,25 @@ describe("messages", () => {
 		vi.stubEnv("CLAUDE_CONFIG_DIR", join(home, ".claude"));
 		vi.stubEnv("CODEX_HOME", join(home, ".codex"));
 		vi.stubEnv("T3CODE_HOME", join(home, ".t3"));
+		const cwd = process.cwd();
 		try {
-			const texts = (...args: string[]) =>
+			const texts = (root: string, ...args: string[]) =>
 				(
 					JSON.parse(
-						run("--root", checkout, "messages", "--since", "2026-11-01", "--json", ...args).stdout,
+						run("--root", root, "messages", "--since", "2026-11-01", "--json", ...args).stdout,
 					) as Entry[]
 				).map((m) => m.kind === "message" && m.text);
-			expect(texts()).toEqual(["ours"]);
-			expect(texts("--all")).toEqual(["ours", "theirs"]);
+			expect(texts(checkout)).toEqual(["ours"]);
+			expect(texts(checkout, "--all")).toEqual(["ours", "theirs"]);
+			// A relative root spelled like its origin's name is still that checkout, not an unnamed directory.
+			process.chdir(home);
+			expect(texts("acme/proj")).toEqual(["ours"]);
+			process.chdir(cwd);
 			const outside = run("--root", home, "messages", "--since", "2026-11-01");
 			expect(outside.code).toBe(2);
 			expect(outside.stderr).toMatch(/pass --all/);
 		} finally {
+			process.chdir(cwd);
 			vi.unstubAllEnvs();
 		}
 	});

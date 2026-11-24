@@ -6,7 +6,7 @@ A head `RISK.md` rates high, such as one changing the instructions under `assets
 
 ## Plan
 
-Found 2026-11-23 by the review of [kixel-ai/quest#852](https://github.com/kixel-ai/quest/pull/852), which made all of `assets/` high and limited `RISK.md`'s `trivial` class, which `AGENTS.md`'s standing trivial pick defers to, to changes that are not high other than dependency and pin bumps.
+Found 2026-11-23 by the review of [kixel-ai/quest#852](https://github.com/kixel-ai/quest/pull/852), which made all of `assets/` high and limited `RISK.md`'s `chore` class, then named `trivial`, which `AGENTS.md`'s standing trivial pick defers to, to changes that are not high other than dependency and pin bumps.
 The gaps predate it, since `assets/CONTEXT.md` was already high:
 
 - `assets/skills/run.md` gives a trivial PR the standing pick "whatever its author and tier".
