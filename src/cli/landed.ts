@@ -108,9 +108,10 @@ export function landingCheck(root: string): LandingCheck {
 				run(["ls-tree", "-r", "-z", ref, "quest"])
 					.split("\0")
 					.some((line) => {
-						const [meta, path = ""] = line.split("\t");
-						const [mode, type] = meta.split(" ");
-						return type === "blob" && mode !== "120000" && isQuest(path);
+						// The first tab ends the metadata; a path may hold more.
+						const tab = line.indexOf("\t");
+						const [mode, type] = line.slice(0, tab).split(" ");
+						return tab !== -1 && type === "blob" && mode !== "120000" && isQuest(line.slice(tab + 1));
 					});
 			const [based, headed] = [quests(base), quests(tip)];
 			if (!based && !headed) return [];
