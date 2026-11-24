@@ -2231,6 +2231,8 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 				skipped.push({ ...seat.reviewer, reason: error.reason });
 				messages.push(error.message);
 				out.set(error.shadow, error);
+				// The second reviewer may be the model, or on the harness, the shadow just ruled out.
+				if (second !== null) second = secondFor(candidates[at]!);
 				planned = plan(candidates[at]!, second);
 				continue;
 			}

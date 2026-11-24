@@ -1949,6 +1949,29 @@ fakes("an old shadow whose model is avoided or cannot run passes its findings to
 		expect(shadowOf(out.stdout)).toEqual(["reviewer codex gpt-6.1-sol medium shadow"]);
 		vi.unstubAllEnvs();
 
+		// A high head Sonnet wrote picks Sol, seconded by Opus, and keeps the old Opus shadow. Opus is at its limit, which
+		// the old shadow hits first, resuming its session, so the second moves to Fable at once instead of retrying Opus.
+		const high = await opened();
+		moveBase(high.s.repo, (dir) => write(dir, "RISK.md", riskFile([])));
+		vi.stubEnv("FAKE_RISK", JSON.stringify({ tier: "high", reason: "It rewrites the wire format peers read." }));
+		vi.stubEnv("FAKE_FAILS", "claude-opus-5-5");
+		vi.stubEnv("FAKE_LIMITED", "reset");
+		const raised = await quest(
+			"--root",
+			high.s.repo,
+			"review",
+			"--exclude-model",
+			"claude-sonnet-5-5",
+			"--responses",
+			high.responses,
+		);
+		expect(raised.code, raised.stderr).toBe(0);
+		expect(raised.stdout.split("\n").filter((line) => line.startsWith("skipped "))).toEqual([
+			"skipped claude claude-opus-5-5 high usage limit, resets 2030-03-17T17:46:40Z",
+		]);
+		expect(raised.stdout).toContain("\nreviewer claude claude-fable-5-2 xhigh second\n");
+		vi.unstubAllEnvs();
+
 		// Opus wrote an M PR, whose pick, Sol high, and shadow, Sol xhigh, each leave a finding open. Resized to XS, Sol
 		// is at its limit, so the round passes to Astra, and the old shadow settles at Astra too, never retrying Sol.
 		const s = setup();
