@@ -20,7 +20,7 @@ A fix quest's Plan names the PR that caused the problem when it is known, so its
 When the PR deletes the quest, record its decisions in the PR body's `## Decisions` section instead, since the deletion takes the Plan with it.
 
 Work that recurs is a quest whose finishing PR creates the next run, so its Plan says, in its own words, where the next run goes, what gates it, what each run delivers, what ends the recurrence, and what the next run carries forward, such as baselines and what to check first.
-The next run goes to the same path in the next milestone, or wherever it belongs after milestones shift; check that milestone's `Required` and `Scheduled`, which gate every quest under it, and say in the interview when they delay the run.
+The next run goes to the same path in the next milestone, or wherever it belongs after milestones shift; whoever creates a run checks that milestone's `Required` and `Scheduled`, which gate every quest under it, and names any delay in the PR.
 Otherwise placement doesn't delay a quest: gate a run tied to the calendar with a `Scheduled` date one period on, and one tied to other work on a recurring gate or condition quest. A quest can't require its own milestone, so to run at the end of mN, the gate requires mN and the next run requires the gate; a recurring gate's Plan says to remove its path from every `Required` before re-creating it.
 An audit quest ships (`quest audit` lists them) recurs already through its stub: if the tree lacks it, remove it from the root README's `## Skipped audits`, run `quest init`, and put what this repository needs in the stub's Plan.
 
