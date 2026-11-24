@@ -61,16 +61,19 @@ on, so they are low.
 ## Automatic
 
 A low PR whose author has write access lands without the maintainer's pick
-when its whole diff falls in one class below. Only a PR the maintainer
-picks changes this list, proposed with `quest usage`'s numbers for the
-class: its PRs merged, the culprits among them, and their wait on a person.
+when its whole diff falls in one class below, judged by the diff alone:
+a PR title's commit type is only the author's claim. Only a PR the
+maintainer picks changes this list, proposed with `quest usage`'s numbers
+for the class: its PRs merged, the culprits among them, and their wait on a
+person.
 
-- `tests` - only tests, their fixtures, or benchmarks change
-- `internal-docs` - only comments, plans under `quest/`, or documentation
-  no user, contributor, or other repository reads change
+- `test` - only tests, their fixtures, or benchmarks change
+- `quest` - only plans under `quest/` change, which no user or other
+  repository reads
 - `refactor` - code changes that keep every behavior and output the same,
-  such as a rename inside a module or a simplification
-- `trivial` - a dependency or pin bump at any tier, or another change as
+  such as a rename inside a module, a simplification, or a comment-only
+  change
+- `chore` - a dependency or pin bump at any tier, or another change as
   small that is not high, from any author, which lands once a
   maintainer's `quest review` record of a local reviewer's round passes
   on its head; a low head's record with no reviewer is not enough

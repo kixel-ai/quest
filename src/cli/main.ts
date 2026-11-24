@@ -265,7 +265,9 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"reports a missing, outdated, or retired one. --no-stubs skips that, for a binary built from a base " +
 				"that checks a PR whose stubs follow the PR's own skills. It also reads the repository's RISK.md, if " +
 				"any, as quest review reads the base's, and reports each item of its ## High list that is not a " +
-				"backticked path pattern, ` - `, and a reason.\n\n" +
+				"backticked path pattern, ` - `, and a reason, and each item of its ## Automatic list that is not a " +
+				"backticked class name, an optional scope of backticked path patterns joined by `, ` in parentheses, " +
+				"` - `, and a rule.\n\n" +
 				"With --fix, first drop every Required, Related, or Closes entry that links to a quest deleted in " +
 				"the history of HEAD, and of MERGE_HEAD during a merge, that the working tree lacks, as quest rm " +
 				"does, such as the quests a merged base finished, and every epic's Required entry naming a quest in " +
@@ -904,7 +906,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		.requiredOption("--app-id <id>", "GitHub App id")
 		.option(
 			"--fixer <command>",
-			"Credential-free fixer wrapper executable, called with the failure log and the PR number (60 minutes from its admission line, 120 in total)",
+			"Credential-free fixer wrapper executable, called with the failure log and the PR number (60 minutes from its admission line, 120 in total), reporting its own failure on descriptor 3",
 		)
 		.option("--fixer-jobs <count>", "Most fixer jobs to run at once", positiveInteger("fixer-jobs"), 2)
 		.addOption(
@@ -1751,7 +1753,10 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"limit that resets first if every one whose CLI is installed hit its own, else as a usage error naming why each failed. A later round on the same head and base " +
 				"RISK.md reuses the tier unless --new. Each reviewer's reply judges the tier too, told the classified one, " +
 				"and can only raise it: the head's tier is the riskiest, with the reason of the first to judge it so. " +
-				"The classifier also names the class of RISK.md's ## Automatic list every changed file falls in, or none. " +
+				"The classifier also names the class of RISK.md's ## Automatic list every changed file falls in, or none, " +
+				"offered only the classes whose scope, backticked patterns in parentheses after the class's name, holds " +
+				"every changed path, either side of a rename: each path must match one pattern whole, so a directory " +
+				"needs a trailing / or /**, and a change that touches no path falls in no class. " +
 				"The tier scales the review: a low head with no finding to settle runs no reviewer unless --harness, " +
 				"--model, or --effort names one, and a high head runs no shadow but gets a second reviewer: the first of the " +
 				"high list from a vendor other than the pick's that can run, in its own session, which reviews " +
