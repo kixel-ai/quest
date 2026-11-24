@@ -53,8 +53,12 @@ export {
 	matches,
 	parseRiskFile,
 	patternError,
+	passed,
 	recordedRisk,
+	recordedRun,
 	riskier,
+	type Run,
+	SEATS,
 } from "./risk";
 export { type Missed, type Moved, type Source, move, promote, relocate, remove } from "./edit";
 export { comparePaths, normalize } from "./path";

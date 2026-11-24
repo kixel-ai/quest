@@ -24,7 +24,9 @@ import {
 	type ReviewRecord,
 	type Status,
 	type Thread,
+	passed,
 	recordedRisk,
+	recordedRun,
 	reviewSection,
 } from "../core";
 import { readHoldStatus } from "./hold";
@@ -207,7 +209,9 @@ async function reviewRecord(
 			.slice(section.start, section.end)
 			.match(/\b[0-9a-f]{40}\b/g)
 			?.at(-1);
-	if (!reviewed) return null;
+	// A full SHA counts only beside a run that passed: every seat its tier needs, with nothing left for another round.
+	const run = recordedRun(body);
+	if (!reviewed || run === null || !passed(run)) return null;
 	const head = string(pull.headRefOid);
 	if (reviewed === head) return { state: "current", head: reviewed };
 	const base = encodeURIComponent(string(pull.baseRefName));

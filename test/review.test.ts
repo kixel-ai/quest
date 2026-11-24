@@ -17,11 +17,11 @@ import { afterEach, expect, test, vi } from "vitest";
 
 import type { ReviewHarness } from "../src/cli/agent";
 import { RUNGS, type ReviewModel, type Rung, drawRung, drawnFrom, rungOrder } from "../src/cli/models";
-import { SIZES, type Size, TIERS, recordedRisk } from "../src/core";
+import { SEATS, SIZES, type Size, TIERS, recordedRisk } from "../src/core";
 import {
 	type Draw,
 	type Finding,
-	SEATS,
+	type Reviewed,
 	type Round,
 	type Settled,
 	type Tally,
@@ -572,10 +572,10 @@ fakes("a model at its usage limit passes the round to the next model of its rung
 			reason: "usage limit, resets 2030-03-17T17:46:40Z",
 		},
 	]);
-	// Claude Code's seat takes the rung's next model, and Codex's the one the exclusion leaves.
+	// Claude Code's seat, the first, takes the rung's next model, and Codex's the one the exclusion leaves.
 	expect(rounds.map((r: Round) => `${r.model} ${r.effort} ${r.rung?.name} ${r.rung?.drawn}`)).toEqual([
-		"gpt-6.2-astra medium deep size",
 		"claude-fable-5-2 medium deep size",
+		"gpt-6.2-astra medium deep size",
 	]);
 });
 
@@ -1673,19 +1673,28 @@ agyFakes("agy's status check failing other than on its login is agy out, never l
 	expect(skipped.map((skip: Round & { reason: string }) => [skip.model, skip.reason])).toEqual([
 		["gemini-4-neon", "status check failed"],
 	]);
-	// The medium head's two seats go to the next rung's other vendors.
-	expect(rounds.map((round: Round) => round.model)).toEqual(["gpt-6.2-astra", "claude-fable-5-2"]);
+	// The medium head's two seats go to the next rung's other vendors, agy's seat, the first, to Fable.
+	expect(rounds.map((round: Round) => round.model)).toEqual(["claude-fable-5-2", "gpt-6.2-astra"]);
 });
 
 agyFakes(
-	"a workspace inside a repository is refused before agy runs, since agy would load its configuration",
+	"a workspace inside a repository rules agy out before it runs, since agy would load its configuration",
 	async () => {
 		const s = setup("CLAUDECODE");
 		vi.stubEnv("XDG_RUNTIME_DIR", join(s.repo, ".tmp", "run"));
 		const result = await quest("--root", s.repo, "review", ...AGY);
-		expect(result.code).toBe(2);
+		expect(result.code).toBe(3);
 		expect(result.stderr).toContain(`lies in the repository at ${s.repo}`);
 		expect(s.calls().filter((call) => call.argv[0] !== "models")).toEqual([]);
+		// Only agy runs there, so a draw that seats it passes the seat on to the other vendors.
+		const others = ["gpt-6.2-sol", "claude-opus-5-5"].flatMap((model) => ["--exclude-model", model]);
+		const drawn = await quest("--root", s.repo, "review", "--size", "M", ...others, "--json");
+		expect(drawn.code, drawn.stderr).toBe(0);
+		const { rounds, skipped } = JSON.parse(drawn.stdout);
+		expect(skipped.map((skip: Round & { reason: string }) => [skip.model, skip.reason])).toEqual([
+			["gemini-4-neon", "not supported"],
+		]);
+		expect(rounds.map((round: Round) => round.reviewer).sort()).toEqual(["claude", "codex"]);
 	},
 );
 
@@ -2049,16 +2058,15 @@ agyFakes("a high head's seat that cannot run passes on, and each model is skippe
 		vi.stubEnv("FAKE_LIMITED", "reset");
 		const passed = await quest("--root", s.repo, "review", ...OPUS);
 		expect(passed.code, passed.stderr).toBe(0);
+		// Sol's seat, the first, keeps its place, and the seats beside it run on.
 		expect(reviewersOf(passed.stdout)).toEqual([
-			"reviewer agy gemini-4-neon medium",
 			"reviewer codex gpt-6.2-astra medium",
+			"reviewer agy gemini-4-neon medium",
 			"reviewer claude claude-fable-5-2 medium",
 		]);
-		// Sonnet wrote it, and Sol and Opus, two of the standard rung's seats, are both at their limits. Sol's first
-		// turn hangs, so Opus fails first, and once Sol fails too neither is run again: each is named once, and the
-		// next rung seats Astra and Fable beside Gemini.
+		// Sonnet wrote it, and Sol and Opus, two of the standard rung's seats, are both at their limits: each seat
+		// passes on alone, each model is named once, and the next rung seats Astra and Fable beside Gemini.
 		vi.stubEnv("FAKE_FAILS", "gpt-6.2-sol,claude-opus-5-5");
-		vi.stubEnv("FAKE_HANG", join(s.bin, "..", "sol.pid"));
 		const before = s.calls().length;
 		const sonnet = ["--exclude-model", "claude-sonnet-5-5"];
 		const both = await quest("--root", s.repo, "review", "--new", ...sonnet);
@@ -2068,9 +2076,9 @@ agyFakes("a high head's seat that cannot run passes on, and each model is skippe
 			`skipped codex gpt-6.2-sol high usage limit, resets ${codexReset}`,
 		]);
 		expect(reviewersOf(both.stdout)).toEqual([
-			"reviewer agy gemini-4-neon medium",
 			"reviewer codex gpt-6.2-astra medium",
 			"reviewer claude claude-fable-5-2 medium",
+			"reviewer agy gemini-4-neon medium",
 		]);
 		// Opus ran one attempt, its review turn and the findings turn that hit the limit.
 		const opus = s
@@ -2078,6 +2086,31 @@ agyFakes("a high head's seat that cannot run passes on, and each model is skippe
 			.slice(before)
 			.filter((c) => effortOf(c) !== null && c.argv[c.argv.indexOf("--model") + 1] === "claude-opus-5-5");
 		expect(opus).toHaveLength(2);
+	} finally {
+		vi.unstubAllGlobals();
+	}
+});
+
+agyFakes("a seat that passes on mid-turn leaves the others running, whose raise seats the third at once", async () => {
+	const s = setup();
+	const turns = (model: string) =>
+		s.calls().filter((c) => effortOf(c) !== null && c.argv.some((arg) => arg.includes(model)));
+	try {
+		// A medium head's two seats: Sol hits its limit mid-turn while Gemini finishes and raises the tier to high.
+		vi.stubEnv("FAKE_RAISE", "high");
+		vi.stubEnv("FAKE_FAILS", "gpt-6.2-sol");
+		vi.stubEnv("FAKE_LIMITED", "reset");
+		const out = await quest("--root", s.repo, "review", ...OPUS);
+		expect(out.code, out.stderr).toBe(0);
+		expect(out.stdout).toContain("\nrisk high It rewrites the wire format peers read.\n");
+		expect(reviewersOf(out.stdout)).toEqual([
+			"reviewer codex gpt-6.2-astra medium",
+			"reviewer agy gemini-4-neon medium",
+			"reviewer claude claude-fable-5-2 medium",
+		]);
+		// Gemini and Fable each ran once, their review and findings turns, though Sol's seat passed on beside them.
+		expect(turns("claude-fable-5-2")).toHaveLength(2);
+		expect(turns("gemini-4-neon")).toHaveLength(2);
 	} finally {
 		vi.unstubAllGlobals();
 	}
@@ -3250,26 +3283,52 @@ test("each changed directory keeps its own instructions, and a directory's symli
 });
 
 test("the next step stops for the design checkpoint when a reviewer's every third round reports findings", () => {
-	const round = (number: number, findings: number, severity = "medium") =>
-		({ round: number, findings: Array.from({ length: findings }, () => ({ severity })) }) as unknown as Round;
-	expect(nextStep([round(3, 1)])).toMatch(
+	const VENDORS = ["codex", "claude", "agy"];
+	const round = (number: number, findings: number, severity = "medium", reviewer = "codex") =>
+		({
+			reviewer,
+			round: number,
+			findings: Array.from({ length: findings }, () => ({ severity })),
+		}) as unknown as Round;
+	// A low head's run, one seat; and across reviewers, each on its own vendor, as a medium head's are.
+	const next = (rounds: Round[], since?: number) =>
+		nextStep(
+			{
+				rounds: rounds.map((each, i) => ({ ...each, reviewer: VENDORS[i] }) as Round),
+				risk: { tier: TIERS[rounds.length - 1]! } as Reviewed["risk"],
+			},
+			since,
+		);
+	expect(next([round(3, 1)])).toMatch(
 		/^next checkpoint: .*best long-term approach from first principles, compare it with the current one/,
 	);
-	expect(nextStep([round(6, 2)])).toMatch(/^next checkpoint: .*best long-term approach from first principles/);
-	expect(nextStep([round(4, 1)])).toMatch(/^next respond: /);
+	expect(next([round(6, 2)])).toMatch(/^next checkpoint: .*best long-term approach from first principles/);
+	expect(next([round(4, 1)])).toMatch(/^next respond: /);
 	// --new restarts the count: the third run after it is the checkpoint, not the branch's third.
-	expect(nextStep([round(3, 1)], 2)).toMatch(/^next respond: /);
-	expect(nextStep([round(5, 1)], 2)).toMatch(/^next checkpoint: /);
-	expect(nextStep([round(3, 0)])).toMatch(/^next done: /);
-	expect(nextStep([round(3, 2, "low")])).toMatch(/^next finish: /);
-	expect(nextStep([round(4, 1, "low")])).toMatch(/^next finish: /);
+	expect(next([round(3, 1)], 2)).toMatch(/^next respond: /);
+	expect(next([round(5, 1)], 2)).toMatch(/^next checkpoint: /);
+	expect(next([round(3, 0)])).toMatch(/^next done: /);
+	expect(next([round(3, 2, "low")])).toMatch(/^next finish: /);
+	expect(next([round(4, 1, "low")])).toMatch(/^next finish: /);
 	// Across reviewers: any finding not low needs another round, and a clean third round is no checkpoint.
-	expect(nextStep([round(1, 1, "low"), round(1, 1)])).toMatch(/^next respond: /);
-	expect(nextStep([round(3, 0), round(1, 1)])).toMatch(/^next respond: /);
-	expect(nextStep([round(1, 1), round(3, 1)])).toMatch(
+	expect(next([round(1, 1, "low"), round(1, 1)])).toMatch(/^next respond: /);
+	expect(next([round(3, 0), round(1, 1)])).toMatch(/^next respond: /);
+	expect(next([round(1, 1), round(3, 1)])).toMatch(
 		/^next checkpoint: .*best long-term approach from first principles/,
 	);
-	expect(nextStep([round(3, 0), round(1, 0)])).toMatch(/^next done: /);
+	expect(next([round(3, 0), round(1, 0)])).toMatch(/^next done: /);
+	// A run with fewer vendors than its tier seats, as one --harness named, is never done, nor finished by low findings.
+	const high = (rounds: Round[]) => nextStep({ rounds, risk: { tier: "high" } as Reviewed["risk"] });
+	expect(high([round(3, 0)])).toBe(
+		"next review: a high head needs reviewers from 3 vendors; run quest review without --harness for a review that counts",
+	);
+	expect(high([round(1, 0), round(1, 0, "medium", "claude"), round(1, 0, "medium", "claude")])).toMatch(
+		/^next review: /,
+	);
+	expect(high([round(4, 1, "low")])).toMatch(/^next respond: /);
+	expect(high([round(4, 1, "low"), round(4, 0, "low", "claude"), round(4, 0, "low", "agy")])).toMatch(
+		/^next finish: /,
+	);
 });
 
 test("saved rounds are read only in the current format, or refused naming --new", () => {

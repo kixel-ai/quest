@@ -28,6 +28,7 @@ import {
 	ALWAYS_HIGH,
 	type Class,
 	RISK_FILE,
+	SEATS,
 	SIZES,
 	type Size,
 	TIERS,
@@ -38,6 +39,7 @@ import {
 	matches,
 	parse,
 	parseRiskFile,
+	passed,
 	size as questSize,
 	riskier,
 } from "../core";
@@ -93,9 +95,6 @@ export class ResponsesError extends ReviewInputError {}
  * names it by.
  */
 export class ReviewerUnavailableError extends Error {
-	/** The reviewer whose seat could not run, once a round seated it. */
-	seat?: ReviewModel;
-
 	constructor(
 		readonly harness: ReviewHarness,
 		readonly reason: string,
@@ -367,9 +366,6 @@ function shuffled<T>(list: readonly T[], random: () => number): T[] {
 	while (left.length > 0) drawn.push(...left.splice(Math.floor(random() * left.length), 1));
 	return drawn;
 }
-
-/** How many seats a head's tier gets, each on a vendor of its own, so the riskier the change, the more vendors read it. */
-export const SEATS: Record<Tier, number> = { low: 1, medium: 2, high: 3 };
 
 /** What a round's seats draw from. */
 export interface Draw {
@@ -1628,7 +1624,17 @@ async function prepare(
 	const loggedIn = async (env: NodeJS.ProcessEnv) => {
 		// A CLI that is not installed passes the round on before its workspace can fail the run.
 		if (reviewer.isolated) installed(reviewer.status[0]!, env);
-		const dir = reviewer.isolated ? workspace({}, env) : cwd;
+		// A workspace this host cannot keep the CLI to rules out that CLI alone, so a drawn seat passes on.
+		const unsupported = (error: unknown) =>
+			error instanceof ReviewInputError
+				? new ReviewerUnavailableError(harness, "not supported", error.message)
+				: error;
+		let dir = cwd;
+		try {
+			if (reviewer.isolated) dir = workspace({}, env);
+		} catch (error) {
+			throw unsupported(error);
+		}
 		let printed = "";
 		const reader: Reader = {
 			line: (line) => {
@@ -1638,7 +1644,11 @@ async function prepare(
 		};
 		try {
 			// A host that cannot run the CLI is that, whatever its login.
-			reviewer.supported?.(dir);
+			try {
+				reviewer.supported?.(dir);
+			} catch (error) {
+				throw unsupported(error);
+			}
 			const { code, stderr } = await run(reviewer.status, dir, env, "", reader, signal);
 			const output = `${printed}${stderr}`.trim();
 			// A status check that asks the provider can fail on the network, which is that CLI out, not logged out.
@@ -2566,10 +2576,10 @@ export function overridden(risk: Risk, override: Override | undefined): Risk {
 
 /**
  * Review the checkout's committed branch: one run on its head, each seat a reviewer drawn from the run's rung in a
- * session of its own, or only the one a flag names. Every seat runs at once, and the first to fail stops the others
- * and fails the whole, saving no round. A drawn reviewer that cannot run, logged out, not installed, at its usage
- * limit, or not served, passes its seat to the next the draw gives, unless a flag named it; once a seat finds none
- * on any rung, the run fails as an outage.
+ * session of its own, or only the one a flag names. Every seat runs at once. A drawn reviewer that cannot run, logged
+ * out, not installed, at its usage limit, or not served, passes its seat alone to the next the draw gives, unless a
+ * flag named it, while the other seats run on; once a seat finds none on any rung, the run fails as an outage. Any
+ * other failure stops the others and fails the whole, saving no round.
  *
  * The head's tier sets the seats, each on a vendor of its own: one on a low head, two on medium, and three on high,
  * the extra of which a round that raises the tier runs at once.
@@ -2791,56 +2801,116 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 		number: runs + 1,
 		dir,
 		env: deps.env,
-		ready,
-		finished: [],
 	};
-	let done: Round[] = [];
 	// The last run's findings this run already carried over, by number.
 	const open = new Set<number>();
-	const judged = () => settle(classified.value, [...onHead, ...done], held);
-	// A round that raises the tier gets the seats the lower tier left out in a further pass, at once. The run
-	// is saved whole or not at all, so one that fails leaves the last run's findings and responses as they were, but
-	// keeps a raise its rounds made.
-	try {
-		for (;;) {
-			const taken = [...new Set(done.map((round) => round.reviewer))];
-			const count = seats(judged()) - taken.length;
-			if (count <= 0) break;
-			const passed = skipped.length;
-			// A flag's reviewer takes the run's first seat, and any further seat is drawn on another vendor.
-			const seated = (): Seat[] =>
-				lead === undefined || taken.length > 0
-					? plan(count, taken)
-					: [{ reviewer: lead }, ...plan(count - 1, [lead.harness])];
-			let planned = seated();
-			for (;;) {
-				try {
-					done = [
-						...done,
-						...carried(await runSeats(shared, planned, options.signal), earlier, raisers, open),
-					];
-					break;
-				} catch (error) {
-					// A reviewer a flag named never passes its run on.
-					if (!(error instanceof ReviewerUnavailableError) || error.seat === undefined || error.seat === lead)
-						throw error;
-					if (error.model === null) down.add(error.harness);
-					out.add(canonicalModel(error.seat.model));
-					skipped.push({ ...error.seat, reason: error.reason });
-					messages.push(error.message);
-					try {
-						planned = seated();
-					} catch (outage) {
-						// The only reviewer that could take the seat fails as itself, rather than as an outage of one.
-						throw outage instanceof ReviewOutageError && skipped.length - passed === 1 ? error : outage;
-					}
+	// Every seat runs at once, each on a vendor of its own, and passes itself on alone: a drawn reviewer that cannot run
+	// hands its seat to the next the draw gives on a vendor no other seat holds, while the other seats run on and keep
+	// what they finished. The first seats' CLIs are all checked before any turn runs, so an outage spends no turn, and a
+	// round that raises the tier seats the vendors it now needs at once. The first failure no seat can pass on stops
+	// the others and fails the run, which saves no round, though a raise a finished round made holds on the head.
+	const controller = new AbortController();
+	const signal = options.signal ? AbortSignal.any([options.signal, controller.signal]) : controller.signal;
+	// Each seat's reviewer, by seat, the skips it met, and its round once it finishes.
+	const holding: Seat[] = [];
+	const met: number[] = [];
+	const finished: Round[] = [];
+	const judged = () => settle(classified.value, [...onHead, ...finished.filter(Boolean)], held);
+	/** Seat `at` handed from its reviewer, which `error` says cannot run, to the next the draw gives. */
+	const passOn = (at: number, error: unknown) => {
+		const { reviewer } = holding[at]!;
+		// A reviewer a flag named never passes its seat on, and a stopped run passes nothing on.
+		if (!(error instanceof ReviewerUnavailableError) || reviewer === lead || signal.aborted) throw error;
+		if (error.model === null) down.add(error.harness);
+		out.add(canonicalModel(reviewer.model));
+		skipped.push({ ...reviewer, reason: error.reason });
+		messages.push(error.message);
+		try {
+			holding[at] = plan(
+				1,
+				holding.filter((_, each) => each !== at).map((seat) => seat.reviewer.harness),
+			)[0]!;
+		} catch (outage) {
+			// The only reviewer that could take the seat fails as itself, rather than as an outage of one.
+			throw outage instanceof ReviewOutageError && met[at]! === 0 ? error : outage;
+		}
+		met[at]!++;
+	};
+	/**
+	 * The CLIs of the seats `at`, each status check passed, a seat whose check fails passing on until one passes. Each
+	 * check settles, so the CLIs that can run are known whichever failed first, and the first seat's failure passes on first.
+	 */
+	const check = async (at: number[]): Promise<Cli[]> => {
+		const clis = new Map<number, Cli>();
+		for (let waiting = at; waiting.length > 0;) {
+			const results = await Promise.allSettled(
+				waiting.map(async (each) => {
+					const { harness } = holding[each]!.reviewer;
+					const cli = await prepare(harness, root, deps.env, signal);
+					ready.add(harness);
+					return cli;
+				}),
+			);
+			const failed: number[] = [];
+			for (const [i, result] of results.entries()) {
+				if (result.status === "fulfilled") clis.set(waiting[i]!, result.value);
+				else {
+					passOn(waiting[i]!, result.reason);
+					failed.push(waiting[i]!);
 				}
 			}
+			waiting = failed;
 		}
+		return at.map((each) => clis.get(each)!);
+	};
+	const tasks: Promise<void>[] = [];
+	const start = (task: Promise<void>) =>
+		tasks.push(
+			task.catch((error: unknown) => {
+				if (!controller.signal.aborted) controller.abort(error);
+			}),
+		);
+	/** Seat `at`'s round, its reviewer passing it on mid-turn, then any seats a raise now needs. */
+	const play = async (at: number, ready: Cli): Promise<void> => {
+		for (let cli = ready; ;) {
+			try {
+				finished[at] = await reviewWith(shared, holding[at]!, cli);
+				break;
+			} catch (error) {
+				passOn(at, error);
+				[cli] = await check([at]);
+			}
+		}
+		const more = seats(judged()) - holding.length;
+		if (more <= 0 || signal.aborted) return;
+		const from = holding.length;
+		for (const seat of plan(
+			more,
+			holding.map((each) => each.reviewer.harness),
+		)) {
+			holding.push(seat);
+			met.push(0);
+		}
+		const added = holding.slice(from).map((_, i) => from + i);
+		const clis = await check(added);
+		for (const [i, each] of added.entries()) start(play(each, clis[i]!));
+	};
+	try {
+		const count = seats(judged());
+		// A flag's reviewer takes the run's first seat, and any further seat is drawn on another vendor.
+		holding.push(
+			...(lead === undefined ? plan(count, []) : [{ reviewer: lead }, ...plan(count - 1, [lead.harness])]),
+		);
+		met.push(...holding.map(() => 0));
+		const clis = await check(holding.map((_, at) => at));
+		for (const [at, cli] of clis.entries()) start(play(at, cli));
+		// A raise adds tasks while these run.
+		for (let i = 0; i < tasks.length; i++) await tasks[i];
+		if (signal.aborted) throw signal.reason;
 	} catch (error) {
 		// Every finished round's raise, even one whose peer then failed, and the saved state otherwise as it was, so a
 		// failed --new drops nothing.
-		const raised = settle(classified.value, [...onHead, ...shared.finished], held);
+		const raised = judged();
 		if (raised.raisedBy !== undefined && riskier(raised.tier, before.tier))
 			save(statePath, {
 				...(saved ?? { branch, runs, tallies: [] }),
@@ -2849,6 +2919,7 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 			});
 		throw error;
 	}
+	const done = carried(finished, earlier, raisers, open);
 	const after = tallied(tallies, done, raisers);
 	const risk = overridden(judged(), override);
 	save(statePath, state({ mergeBase, given, rounds: [...onHead, ...done] }, runs + 1, after, risk));
@@ -2871,49 +2942,6 @@ function carried(rounds: Round[], earlier: Finding[], raisers: Reviewing[], open
 			return { ...earlier[number - 1]!, raised: { reviewer, model, effort } };
 		});
 		return { ...round, findings: [...round.findings, ...over] };
-	});
-}
-
-/** Every seat's round at once, the first failure stopping the others and failing the whole. */
-async function runSeats(shared: Shared, seats: Seat[], stop: AbortSignal | undefined): Promise<Round[]> {
-	const controller = new AbortController();
-	const signal = stop ? AbortSignal.any([stop, controller.signal]) : controller.signal;
-	const all = async <T>(each: (seat: Seat, index: number) => Promise<T>): Promise<T[]> => {
-		const results = await Promise.allSettled(
-			seats.map((seat, index) =>
-				each(seat, index).catch((error: unknown) => {
-					// The seats it stops may reject with this same error, which must keep naming the seat that failed.
-					if (controller.signal.aborted) throw error;
-					if (error instanceof ReviewerUnavailableError) error.seat = seat.reviewer;
-					controller.abort(error);
-					throw error;
-				}),
-			),
-		);
-		// The first failure stopped the others, so it is the one to report.
-		if (controller.signal.aborted) throw controller.signal.reason;
-		return results.map((result) => (result as PromiseFulfilledResult<T>).value);
-	};
-	// Every CLI is checked before any turn runs, so a seat that cannot run passes on before another spends a turn. Each
-	// check settles, so the CLIs that can run are known whichever failed first, and the first seat's failure is the one.
-	const checked = await Promise.allSettled(
-		seats.map(async ({ reviewer }) => {
-			const cli = await prepare(reviewer.harness, shared.root, shared.env, signal);
-			shared.ready.add(reviewer.harness);
-			return cli;
-		}),
-	);
-	const failed = checked.findIndex((result) => result.status === "rejected");
-	if (failed >= 0) {
-		const error = (checked[failed] as PromiseRejectedResult).reason;
-		if (error instanceof ReviewerUnavailableError) error.seat = seats[failed]!.reviewer;
-		throw error;
-	}
-	const clis = checked.map((result) => (result as PromiseFulfilledResult<Cli>).value);
-	return all(async (seat, index) => {
-		const round = await reviewWith(shared, seat, clis[index]!);
-		shared.finished.push(round);
-		return round;
 	});
 }
 
@@ -3025,10 +3053,6 @@ interface Shared {
 	/** The directory holding the branch's rounds and the reply schemas. */
 	dir: string;
 	env: NodeJS.ProcessEnv;
-	/** The CLIs whose status check passed this run, which a seat another CLI cannot take shows can review. */
-	ready: Set<ReviewHarness>;
-	/** Every round a seat finished this run, even in an attempt another seat then failed, whose raises a failed run keeps. */
-	finished: Round[];
 }
 
 /** A seat of a run: its reviewer, and the rung that gave it, or none for the one a flag named. */
@@ -3122,10 +3146,15 @@ async function open(
  * every third run since `since`, the run the last `--new` followed, reports others, else answering them, or
  * nothing left to do.
  */
-export function nextStep(rounds: Round[], since = 0): string {
+export function nextStep({ rounds, risk }: Pick<Reviewed, "rounds" | "risk">, since = 0): string {
 	const findings = rounds.flatMap((round) => round.findings);
-	if (findings.length === 0) return "next done: no findings remain on this head";
-	if (findings.every((finding) => finding.severity === "low"))
+	// A run with fewer vendors than its tier seats, as one --harness named, never passes, nor lets low findings finish it.
+	const covered = passed({ tier: risk.tier, vendors: rounds.map((round) => round.reviewer), open: 0 });
+	if (findings.length === 0)
+		return covered
+			? "next done: no findings remain on this head"
+			: `next review: a ${risk.tier} head needs reviewers from ${SEATS[risk.tier]} vendors; run quest review without --harness for a review that counts`;
+	if (covered && findings.every((finding) => finding.severity === "low"))
 		return "next finish: fix or refute each finding, commit, rerun the checks, then add a line after the PR body's review record naming the new head's full SHA and each finding's disposition; run no further round";
 	if (rounds.some((round) => round.findings.length > 0 && (round.round - since) % 3 === 0))
 		return "next checkpoint: before fixing these findings, step back: work out the best long-term approach from first principles, compare it with the current one, and let the user decide, as /quest-review describes";

@@ -801,21 +801,52 @@ test("refuses a head moved between the paged state and ownership read", async ()
 	await expect(pullRequestStatus(pr, fixture.deps)).rejects.toThrow("head changed while reading its holds");
 });
 
+/** A record's reviewer blocks, one per vendor named, each with its session's round and the findings it left open. */
+const seats = (vendors: string[], open = "") =>
+	vendors
+		.map(
+			(vendor, i) =>
+				`\n\n- Reviewer: ${vendor}, m, high effort\n- Session: \`s-${i}\`, round 2\n- Findings${open || ": none"}`,
+		)
+		.join("");
+
 describe("the review record", () => {
 	const C = "c".repeat(40);
+	// A low head's record, whose one seat passed it.
+	const low = (head: string, extra = "") =>
+		`## Review\n\n- Head: ${head}\n- Risk: low, \`docs\`\n- Classified: low by default${seats(["Codex"])}${extra}`;
 	const line = async (body: string, options: Parameters<typeof setup>[1] = {}) => {
 		const fixture = setup([pull({ body, checks: null, reviews: page([]), threads: page([]) })], options);
 		return statusLines(await pullRequestStatus(pr, fixture.deps)).find((l) => l.startsWith("review-record "));
 	};
 
 	test("is current when the section's last full SHA is the head, without comparing", async () => {
-		expect(await line(`## Review\n\n- Head: ${B}\n- Low findings fixed at ${A}`)).toBe(
+		expect(await line(low(B, `\n- Low findings fixed at ${A}`))).toBe(`review-record current ${A}`);
+	});
+
+	test("counts a full SHA only beside a run that passed it", async () => {
+		const high = (vendors: string[], open = "") =>
+			`## Review\n\n- Head: ${A}\n- Risk: high, \`wire\`\n- Classified: high by default${seats(vendors, open)}`;
+		expect(await line(high(["Codex", "Claude Code", "Antigravity"]))).toBe(`review-record current ${A}`);
+		// Too few vendors, as a --harness run's, or one vendor twice.
+		expect(await line(high(["Codex"]))).toBe("review-record -");
+		expect(await line(high(["Codex", "Codex", "Claude Code"]))).toBe("review-record -");
+		// A finding that needs another round, unlike a low one a later line settles.
+		const vendors = ["Codex", "Claude Code", "Antigravity"];
+		expect(await line(high(vendors, ", open until the next round settles them:\n  - Medium, `a:1`: `x`"))).toBe(
+			"review-record -",
+		);
+		expect(await line(high(vendors, ", open until the next round settles them:\n  - Low, `a:1`: `x`"))).toBe(
 			`review-record current ${A}`,
 		);
+		// A reviewer of an earlier run, its session naming no round, takes no seat.
+		expect(
+			await line(high(["Codex", "Claude Code"]) + "\n\n- Reviewer: Antigravity, m, high effort\n- Session: `s`"),
+		).toBe("review-record -");
 	});
 
 	test("carries across a head whose diff from the base matches the reviewed head's, and not otherwise", async () => {
-		const body = `## Review\n\n- Head: ${B}`;
+		const body = low(B);
 		expect(await line(body, { diffs: { [A]: "same", [B]: "same" } })).toBe(`review-record diff-identical ${B}`);
 		expect(await line(body, { diffs: { [A]: "new", [B]: "old" } })).toBe(`review-record stale ${B}`);
 	});
@@ -823,9 +854,7 @@ describe("the review record", () => {
 	test("is unknown, with a warning, when GitHub cannot compare a head", async () => {
 		for (const status of [406, 403]) {
 			const warnings: string[] = [];
-			expect(await line(`## Review\n\n- Head: ${B}`, { diffs: { [A]: status }, warnings })).toBe(
-				`review-record unknown ${B}`,
-			);
+			expect(await line(low(B), { diffs: { [A]: status }, warnings })).toBe(`review-record unknown ${B}`);
 			expect(warnings).toHaveLength(1);
 		}
 	});
@@ -843,7 +872,8 @@ describe("the risk tier", () => {
 	};
 	const record = (head: string, extra = "") =>
 		`## Review\n\n- Head: ${head}\n- Base: origin/main at bbbbbbbbbbbb\n- Risk: high, \`it rewrites the wire format\`\n` +
-		`- Classified: medium by Claude Code, claude-haiku-5-5, low effort, session \`s-1\`${extra}`;
+		`- Classified: medium by Claude Code, claude-haiku-5-5, low effort, session \`s-1\`` +
+		`${seats(["Codex", "Claude Code", "Antigravity"])}${extra}`;
 
 	test("names the record's tier, the classifier's, and whether it covers the head", async () => {
 		expect(await risk(record(A))).toEqual({

@@ -11,7 +11,7 @@ import { classifierSessions, parseReview, reviewRecord, reviewSessions } from ".
 import { culprits } from "../src/cli/breakage";
 import { type Session, causes, fold, parseSessions, share, usage, usageLines } from "../src/cli/usage";
 import type { LoggedWait } from "../src/cli/waits";
-import { SPLIT_CATEGORIES, type TimeSplit } from "../src/core";
+import { SPLIT_CATEGORIES, type TimeSplit, passed, recordedRun } from "../src/core";
 import { tempDir } from "./fixture";
 
 const THREAD = "01a1b8e8-8fca-7793-99d1-062f41f8a7b0";
@@ -409,6 +409,15 @@ describe("PR records", () => {
 		expect(reviewRecord({ ...at, rounds: vendors, tallies: settledAll, risk, skipped: [] })).toContain(
 			`- Head: ${"b".repeat(40)}\n`,
 		);
+		// The record names the head in full exactly when the run it records reads back as passed, as quest status reads it.
+		for (const [rounds, tallied] of [
+			[vendors, settledAll],
+			[clean, settledAll],
+			[[round, vendors[1]!], settledAll],
+		] as const) {
+			const text = `## Review\n\n${reviewRecord({ ...at, rounds: [...rounds], tallies: [...tallied], risk, skipped: [] })}`;
+			expect(passed(recordedRun(text)!)).toBe(text.includes("b".repeat(40)));
+		}
 		expect(fixes(body)).toEqual(["codex, gpt-6.2-sol, medium effort"]);
 		// The reviewer sessions read even from a record whose other lines this version cannot parse.
 		const newer = body.replace(

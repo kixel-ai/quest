@@ -1525,8 +1525,10 @@ the oldest. No two seats of a run share a vendor. A rung none of whose models
 can take the seat, each avoided, unable to run, or on a vendor another seat
 has, passes it to the size's rung, then each rung outward from it, the
 stronger first. The seats run at once, each CLI's login checked before any
-turn starts; the first to fail, such as on a usage limit, stops the others,
-and the run saves no round.
+turn starts, so a run that is an outage spends no turn. A seat whose reviewer
+cannot run, even mid-turn, passes itself on alone, while the other seats run on
+and keep what they finished; any other failure stops the others, and the run
+saves no round.
 
 A reviewer that cannot run passes its seat on the same way. That is a failure
 the CLI or provider reports before any finding is saved, never text in the
@@ -1690,8 +1692,9 @@ and `GEMINI_API_KEY` and `GOOGLE_API_KEY` never replace the login. `agy` loads
 the `.agents/`, `AGENTS.md`, and `GEMINI.md` of every directory from where it
 runs up to the repository's root, so each turn, and its status check, `agy
 models`, runs in a new private directory under quest's agent directory instead,
-and an agent directory inside a repository is a usage error naming
-`XDG_RUNTIME_DIR` and `TMPDIR`. There it runs as an agent quest writes, whose
+and an agent directory inside a repository rules `agy` out, naming
+`XDG_RUNTIME_DIR` and `TMPDIR`: a drawn seat passes on, and `--harness agy`
+exits 3. There it runs as an agent quest writes, whose
 only tools are `view_file` and `finish` and which inherits none of your hooks,
 rules, plugins, or MCP tools. Print mode cannot approve a read outside that
 directory, so permissions are skipped, and deny rules on commands, writes, web
@@ -1708,7 +1711,7 @@ directories leading to the turn's directory, and nothing outside it, such as the
 checkout's untracked files, its `.git`, or another CLI's login, can be read. The
 rules hold what each turn's start lists, so the usual login and key paths under
 your home, such as `~/.codex` and `~/.ssh`, are denied even before they exist,
-and a parent that cannot be listed is a usage error; anything else created
+and a parent that cannot be listed rules `agy` out the same way; anything else created
 beside those directories while a turn runs, such as in the runtime directory, is
 not covered. The rules' own file is denied too. `agy` compares its rules with a
 path's case as written, so on a volume that matches names case-insensitively,
@@ -1757,10 +1760,13 @@ however many runs keep it open. A finding counts
 for the reviewer that raised it when a later run's reviewer fixes or
 refutes it, as the run's first round settled it, and one any seat of the run keeps open stays open and its own. `--new` drops the findings it leaves unsettled from the
 tallies. A reviewer of an earlier run keeps a block with only its sessions and
-tally. `quest status` takes the last full SHA the section names as the
-reviewed head, so the head appears in full only once no reviewer reports a
-finding and reviewers from as many vendors as its tier seats ran, so a
-`--harness` run on a medium or high head never counts as its review, and model text
+tally. A run passes its head when every seat its tier needs ran, each on a
+vendor of its own, with no finding open; the record names the head in full only
+then, and `next done` follows only then. `quest status` takes the last full SHA
+the section names as the reviewed head, and only beside a record of a run that
+passed, counting no low finding, which a `next finish` line settles; so a
+`--harness` run on a medium or high head never counts as its review, and
+`next review` says so. Model text
 appears as inline code, which mentions or links nothing and never holds a full
 SHA. The section runs to the next level-1 or
 level-2 heading, both as Markdown parses them, so an example in a code fence is
@@ -1874,7 +1880,8 @@ then each rung outward. `--model` and `--effort` name only the first seat, so
 the rest are still drawn; the reviewer `--harness` names runs alone. A round
 that raises the tier seats the extra reviewers at once, in the same run; a run
 is saved whole or not at all, so one that fails there, as when none can run,
-leaves the branch as it was. When every model of a vendor a seat needs is
+leaves the branch as it was, but for the raise, which holds on that head, so a
+retry seats as many. When every model of a vendor a seat needs is
 avoided, as with no `## Models` record, which avoids every model of the harness
 running the command, the run fails as a usage error; when a seat finds no
 other vendor that can run on any rung, as an outage. So a host where `agy`

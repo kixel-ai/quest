@@ -13,6 +13,40 @@ export type Tier = (typeof TIERS)[number];
 /** Whether tier `a` is riskier than `b`. */
 export const riskier = (a: Tier, b: Tier): boolean => TIERS.indexOf(a) > TIERS.indexOf(b);
 
+/** How many seats a head's tier gets, each on a vendor of its own, so the riskier the change, the more vendors read it. */
+export const SEATS: Record<Tier, number> = { low: 1, medium: 2, high: 3 };
+
+/** A review run of a head: its tier, each seat's vendor, and how many findings it left that still need a round. */
+export interface Run {
+	tier: Tier;
+	vendors: string[];
+	open: number;
+}
+
+/** Whether a run passed its head: every seat its tier needs ran, each on a vendor of its own, with no finding open. */
+export const passed = (run: Run): boolean => run.open === 0 && new Set(run.vendors).size >= SEATS[run.tier];
+
+/**
+ * The latest run `body`'s `## Review` record names, or null when it names no tier: the reviewers whose session line
+ * names a round, and the high and medium findings they left open, since the low ones a later line settles without a
+ * round, as `next finish` asks.
+ */
+export function recordedRun(body: string): Run | null {
+	const risk = recordedRisk(body);
+	const section = reviewSection(body);
+	if (risk === null || "malformed" in risk || section === null) return null;
+	const blocks = body
+		.slice(section.start, section.end)
+		.split(/^(?=- Reviewer: )/m)
+		.slice(1)
+		.filter((block) => /^- Session: (`+) ?.*? ?\1, round \d+\r?$/m.test(block));
+	return {
+		tier: risk.tier,
+		vendors: blocks.map((block) => /^- Reviewer: (.+?),/.exec(block)![1]!),
+		open: blocks.reduce((sum, block) => sum + (block.match(/^ {2}- (?:High|Medium), /gm)?.length ?? 0), 0),
+	};
+}
+
 /** The repository's risk file, read from the base so a change cannot lower its own tier. */
 export const RISK_FILE = "RISK.md";
 

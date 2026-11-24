@@ -1660,8 +1660,8 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"it is any model of the harness running this command, usually the session that just pushed, detected from the " +
 				"variables Claude Code, Codex, and Antigravity each set, so Codex reviews from Claude Code and Claude Code from Codex; with --harness it is " +
 				"none. " +
-				"--harness, --model, or --effort names one reviewer, outside the draw: with --harness it runs alone, as a run of its own, and with only --model or --effort it takes the first seat, the rest drawn on other vendors. It is the first entry the flags fit from the size's rung outward, in the order the rungs list, so the same flags name the same reviewer on every run. --harness alone is that CLI's first entry whose model is not avoided, --model its own entry in any spelling such as openai/gpt-6.2-astra, passed to the CLI as given, and --effort alone the first entry whose model is not avoided; --model and --effort then override the entry's. A --model no rung lists needs --harness, at whose first entry's effort it runs unless --effort names one. A repository whose AGENTS.md names other reviewers passes them. The seats run at once, each CLI's login checked before any turn starts, and the first to fail stops the others and fails the " +
-				"run, saving no round. The " +
+				"--harness, --model, or --effort names one reviewer, outside the draw: with --harness it runs alone, as a run of its own, and with only --model or --effort it takes the first seat, the rest drawn on other vendors. It is the first entry the flags fit from the size's rung outward, in the order the rungs list, so the same flags name the same reviewer on every run. --harness alone is that CLI's first entry whose model is not avoided, --model its own entry in any spelling such as openai/gpt-6.2-astra, passed to the CLI as given, and --effort alone the first entry whose model is not avoided; --model and --effort then override the entry's. A --model no rung lists needs --harness, at whose first entry's effort it runs unless --effort names one. A repository whose AGENTS.md names other reviewers passes them. The seats run at once, each CLI's login checked before any turn starts, and each passes itself on alone while the others run on and keep what they finished; " +
+				"any other failure stops the others and fails the run, saving no round. The " +
 				"size is --size, else the size of the quest a quest/ branch names, read from the base's tip so a " +
 				`change cannot lower its own review, else the PR record's Size line, else ${DEFAULT_SIZE}. ` +
 				"The reviewer reaches its model as the user's own CLI " +
@@ -1708,7 +1708,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"its configuration directory, with no ANTIGRAVITY_* or AGY_* variable, so no gateway, and GEMINI_API_KEY and " +
 				"GOOGLE_API_KEY never replace the login. Each turn and the status check, `agy models`, run in a new private " +
 				"directory outside any repository, since agy loads the agent configuration of each directory up to the " +
-				"repository's root, which makes an agent directory inside one a usage error. Each turn runs as quest's own " +
+				"repository's root, which rules agy out where its agent directory lies inside one, as a directory it cannot list does: a drawn seat passes on, and --harness agy exits 3. Each turn runs as quest's own " +
 				"agent, whose only tools are view_file and finish and which inherits none of the user's hooks, rules, plugins, or " +
 				"MCP tools, with permissions skipped, since print mode cannot approve a read outside its directory, and deny " +
 				"rules on commands, writes, web requests, MCP calls, and a read of any path outside the turn's directory that " +
@@ -1739,7 +1739,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"needs a trailing / or /**, and a change that touches no path falls in no class. " +
 				"The tier sets the seats, each on a vendor of its own and drawn from the run's rung as above: one on a low head, two on medium, and three on high. " +
 				"A seat the drawn rung has no vendor left for fills from the size's rung, then each rung outward, and the run is an outage only when a seat finds no vendor on any rung. " +
-				"A round that raises the tier seats the extra reviewers at once, in the same run; a run is saved whole or not at all, so one that fails there, as when no other vendor's reviewer can run, leaves the branch as it was. " +
+				"A round that raises the tier seats the extra reviewers at once, in the same run; a run is saved whole or not at all, so one that fails there, as when no other vendor's reviewer can run, leaves the branch as it was, but for the raise, which holds on that head, so a retry seats as many. " +
 				"--override and --reason record the maintainer's tier for the branch, which holds until the reviewed " +
 				"tier grows riskier than the one overridden, other than to the override's own tier.\n\n" +
 				"Prints the size and where it came from, base, and head, its risk tier and reason, the classifier's tier, " +
@@ -1751,14 +1751,14 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"part read from the prompt cache, and output), a score from 0 to 10 for how ready the head is to land with " +
 				"its one-sentence rationale, a raised line with the tier and reason when it raised the classifier's, the finding count, each finding by its number, then the last round's findings with " +
 				"their numbers and dispositions; then the `record` line below and a last `next` line naming the author's next step: " +
-				"`next finish` when every finding is low severity, to fix or refute them without another round, " +
+				"`next finish` when every finding is low severity and the run seated as many vendors as its tier needs, to fix or refute them without another round, " +
 				"`next checkpoint` when every third run of the branch since the last --new reports other findings, to compare the current approach " +
-				"with the best long-term approach worked out from first principles before fixing them, `next respond` to fix or refute the findings, or `next done`. A reply without a valid score " +
+				"with the best long-term approach worked out from first principles before fixing them, `next respond` to fix or refute the findings, `next review` when a run with no findings seated fewer vendors than its tier needs, as one --harness named, or `next done` once a run passed the head: every seat its tier needs, each on its own vendor, with no finding open. A reply without a valid score " +
 				"fails as any malformed reply does. --json prints " +
 				"one object: `rounds`, one per reviewer, `tallies`, every reviewer's findings across the branch's rounds, `risk`, the head's tier with its classification, `skipped`, each reviewer passed over with its reason, `record`, and `next`.\n\n" +
 				"After each round, it rewrites the `## Review` section of the branch's open PR into the base, the one from the repository the base's remote pushes to, else the only one from another repository whose pushed head `HEAD` contains, as the " +
 				"user the GitHub token names, keeping the rest of the body, and prints `record <url>`: the reviewed " +
-				"head, named in full only once no reviewer reports a finding and reviewers from as many vendors as its tier seats ran, the base, the head's risk tier and reason, " +
+				"head, named in full only once a run passed it, the base, the head's risk tier and reason, " +
 				"an `- Overridden:` line, the classifier's tier and who set it, a `- Class:` line, a `- Skipped:` line for each reviewer passed over, and each reviewer, its Reviewer line ending in its rung and which way it was drawn, as `, deep rung (up)`, its every session, its latest " +
 				"session and round, score, the tier it raised the risk to and why, its tally of findings across the branch's rounds, and each finding with its disposition. With no " +
 				"such PR, several from other repositories that `HEAD` contains, or a remote off GitHub, it prints `record skipped: <why>` and changes nothing.\n\n" +
@@ -1869,14 +1869,14 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 									risk,
 									skipped,
 									record: record ?? null,
-									next: nextStep(rounds, since),
+									next: nextStep(reviewed, since),
 								}),
 							);
 						else {
 							for (const line of roundLines(reviewed)) print(line);
 							if (record !== undefined)
 								print("url" in record ? `record ${record.url}` : `record skipped: ${record.skipped}`);
-							print(nextStep(rounds, since));
+							print(nextStep(reviewed, since));
 						}
 						if (failure === undefined) return 0;
 						warn(

@@ -1,6 +1,6 @@
 // `quest review` rewrites the `## Review` section of its branch's open PR after each round, so the head
 // it reviewed counts without an agent copying the round into the body by hand.
-import { DEFAULT, PATHS, codeSpan, reviewSection } from "../core";
+import { DEFAULT, PATHS, SEATS, codeSpan, passed, reviewSection } from "../core";
 import { DRAWN, RUNG_NAMES } from "./models";
 import { recorded } from "./models-record";
 import { type ClaimDependencies, upstream } from "./claims";
@@ -14,7 +14,6 @@ import {
 	type Reviewed,
 	type Risk,
 	type Round,
-	SEATS,
 	SEVERITIES,
 	type Tally,
 	located,
@@ -102,20 +101,20 @@ function classifiedBy({ by }: Risk["classified"]): string {
  * round, and a reviewer of an earlier run on its own.
  */
 export function reviewRecord({ rounds, tallies, risk, skipped, head, base }: Reviewed): string {
-	const clean =
-		rounds.every((round) => round.findings.length === 0) && tallies.every((tally) => counted(tally).open === 0);
-	const vendors = new Set(rounds.map((round) => round.reviewer)).size;
+	const open =
+		rounds.reduce((sum, round) => sum + round.findings.length, 0) +
+		tallies.reduce((sum, tally) => sum + counted(tally).open, 0);
+	const run = { tier: risk.tier, vendors: rounds.map((round) => round.reviewer), open };
 	const lines = [
 		MARK,
 		"",
-		// `quest status` counts a full SHA here as a review of that head, which an open finding, or a run with fewer
-		// vendors than its tier seats, such as one `--harness` named, has not passed.
+		// `quest status` counts a full SHA here as a review of that head, which only a run that passed it has.
 		`- Head: ${
-			!clean
-				? `${head.slice(0, 12)}, named in full once no reviewer reports a finding`
-				: vendors < SEATS[risk.tier]
-					? `${head.slice(0, 12)}, named in full once reviewers from ${SEATS[risk.tier]} vendors pass it`
-					: head
+			passed(run)
+				? head
+				: open > 0
+					? `${head.slice(0, 12)}, named in full once no reviewer reports a finding`
+					: `${head.slice(0, 12)}, named in full once reviewers from ${SEATS[risk.tier]} vendors pass it`
 		}`,
 		`- Base: ${base.ref} at ${base.sha.slice(0, 12)}`,
 		`- Risk: ${risk.tier}, ${code(risk.reason)}`,
