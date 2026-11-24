@@ -21,14 +21,7 @@ import { snapshot } from "./tree";
  */
 export function landed(root: string, base: string, options: { branch?: string; head?: string } = {}): Finding[] {
 	const name = options.branch ?? currentBranch(root);
-	const head = options.head ?? "HEAD";
-	const mergeBase = git(root, ["merge-base", base, head]);
-	if (mergeBase.status !== 0) {
-		throw new Error(
-			`no merge base between ${base} and ${head}: ${mergeBase.stderr.trim() || "unrelated histories"}`,
-		);
-	}
-	const commit = mergeBase.stdout.trim();
+	const commit = mergeBase(root, base, options.head ?? "HEAD");
 	// Without a head, the pathspec and `<rev>:./path` are relative to the root,
 	// which may sit below the repository's top level; a bare repository has no
 	// work tree to be relative to.
@@ -72,8 +65,8 @@ export type LandingCheck = (head: LandingHead) => Promise<Finding[]>;
  * `root`, writing no ref, so Git sends only what that repository lacks and an interrupted run leaves
  * nothing behind. A checkout it cannot write, or a shallow one whose history could hide the merge
  * base, gives way to a temporary bare repository, as does no checkout.
- * A finding the base already has is not the head's, as the land daemon screens a head, and a
- * repository with no quests on either side does not use them.
+ * A finding the head's merge base with the base already has is not the head's, so a head only
+ * behind the base passes, and a repository with no quests on either side does not use them.
  */
 export function landingCheck(root: string): LandingCheck {
 	return async (head) => {
@@ -93,10 +86,7 @@ export function landingCheck(root: string): LandingCheck {
 			return result.stdout.trim();
 		};
 		// Findings and errors name the scratch directory and the base's SHA, which the refusal need not show.
-		const tidy = (finding: Finding): Finding => ({
-			...finding,
-			message: finding.message.replaceAll(`${dir}/`, "").replaceAll(base, `origin/${head.base}`),
-		});
+		const tidy = (text: string) => text.replaceAll(`${dir}/`, "").replaceAll(base, `origin/${head.base}`);
 		try {
 			if (!borrowed) run(["init", "--quiet", "--bare"]);
 			// The token rides in the environment, after any configuration the user's environment already passes.
@@ -113,25 +103,24 @@ export function landingCheck(root: string): LandingCheck {
 			const quests = (ref: string) => run(["ls-tree", "--name-only", ref, "quest"]) !== "";
 			const based = quests(base);
 			if (!based && !quests(tip)) return [];
-			// A finding the base already has is not this PR's, such as one a `quest` older than the tree's
-			// format reports; one more of the same in the head is.
-			const known = based ? treeCheck(dir, base) : [];
-			const findings = treeCheck(dir, tip).filter((finding) => {
+			// A finding the head branched with is not this PR's, such as a link to a quest the base finished
+			// since, whose fix the merge takes, or one a `quest` older than the tree's format reports; one
+			// more of the same in the head is.
+			const fork = mergeBase(dir, base, tip);
+			const forked = quests(fork);
+			const known = forked ? treeCheck(dir, fork) : [];
+			// A head that branched before the base adopted quests and adds none leaves them to the merge.
+			const tree = forked || quests(tip) ? treeCheck(dir, tip) : [];
+			const findings = tree.filter((finding) => {
 				const index = known.findIndex((old) => old.path === finding.path && old.message === finding.message);
 				if (index === -1) return true;
 				known.splice(index, 1);
 				return false;
 			});
-			let accurate: Finding[];
-			try {
-				accurate = landed(dir, base, { branch: head.branch, head: tip });
-			} catch (error) {
-				throw new Error(
-					tidy({ path: "", line: null, message: String(error instanceof Error ? error.message : error) })
-						.message,
-				);
-			}
-			return [...findings, ...accurate].map(tidy);
+			const accurate = landed(dir, base, { branch: head.branch, head: tip });
+			return [...findings, ...accurate].map((finding) => ({ ...finding, message: tidy(finding.message) }));
+		} catch (error) {
+			throw new Error(tidy(error instanceof Error ? error.message : String(error)));
 		} finally {
 			if (!borrowed) rmSync(dir, { recursive: true, force: true });
 		}
@@ -163,6 +152,14 @@ function questAt(root: string, commit: string, branch: string, relative: string)
 	if (!branch.startsWith("quest/") || branch.endsWith("/")) return null;
 	const path = branchQuest(branch);
 	return git(root, ["cat-file", "-e", `${commit}:${relative}${path}`]).status === 0 ? path : null;
+}
+
+/** The commit where `head` branched from `base`, failing on unrelated histories. */
+function mergeBase(root: string, base: string, head: string): string {
+	const result = git(root, ["merge-base", base, head]);
+	if (result.status !== 0)
+		throw new Error(`no merge base between ${base} and ${head}: ${result.stderr.trim() || "unrelated histories"}`);
+	return result.stdout.trim();
 }
 
 /** The branch checked out at `root`, failing on a detached HEAD with a hint to pass `flag`. */

@@ -167,25 +167,59 @@ describe("quest merge's landing check", () => {
 		expect(findings.map((finding) => finding.path)).toEqual(["quest/m0/epic/one.md"]);
 	});
 
-	test("skips a finding the base already has", async () => {
+	/** A tree whose `main` had a dangling link when `branch` left it, checked out on `branch`. */
+	function brokenAtFork(branch: string): Tree {
 		const tree = Tree.committed();
 		tree.append("quest/m0/epic/one.md", "\n## Related\n\n- [Gone](/quest/m0/gone.md) - missing\n");
 		commit(tree, "dangling link on main");
-		git(tree, "switch", "--quiet", "-c", "fix/other");
+		git(tree, "switch", "--quiet", "-c", branch);
+		return tree;
+	}
+
+	/** Fix `main`'s dangling link after the branch left it, as a later landing would. */
+	function fixMain(tree: Tree, branch: string) {
+		git(tree, "switch", "--quiet", "main");
+		git(tree, "revert", "--quiet", "--no-edit", "HEAD");
+		git(tree, "switch", "--quiet", branch);
+	}
+
+	test("skips a finding the merge base had, though the base fixed it since", async () => {
+		const tree = brokenAtFork("fix/behind");
+		tree.write("src.ts", "work\n");
+		commit(tree, "work");
+		fixMain(tree, "fix/behind");
+		expect(await inspect(tree, "fix/behind")).toEqual([]);
+	});
+
+	test("reports a finding a behind head adds", async () => {
+		const tree = brokenAtFork("fix/other");
 		tree.append("quest/m0/epic/two.md", "\n## Related\n\n- [Lost](/quest/m0/lost.md) - missing\n");
 		commit(tree, "another dangling link");
+		fixMain(tree, "fix/other");
 		const findings = await inspect(tree, "fix/other");
 		expect(findings.map((finding) => finding.path)).toEqual(["quest/m0/epic/two.md"]);
 	});
 
-	test("reports one more of a finding the base already has", async () => {
-		const tree = Tree.committed();
-		tree.append("quest/m0/epic/one.md", "\n## Related\n\n- [Gone](/quest/m0/gone.md) - missing\n");
-		commit(tree, "dangling link on main");
-		git(tree, "switch", "--quiet", "-c", "fix/again");
+	test("reports one more of a finding the merge base had", async () => {
+		const tree = brokenAtFork("fix/again");
 		tree.append("quest/m0/epic/one.md", "- [Gone again](/quest/m0/gone.md) - missing\n");
 		commit(tree, "the same dangling link");
+		fixMain(tree, "fix/again");
 		expect((await inspect(tree, "fix/again")).map((finding) => finding.path)).toEqual(["quest/m0/epic/one.md"]);
+	});
+
+	test("passes a head that branched before the base adopted quests", async () => {
+		const tree = new Tree(initRepository());
+		tree.write("README.md", "hi\n");
+		commit(tree, "init");
+		git(tree, "switch", "--quiet", "-c", "fix/early");
+		tree.write("src.ts", "work\n");
+		commit(tree, "work");
+		git(tree, "switch", "--quiet", "main");
+		Tree.baseline().copy(tree.path);
+		commit(tree, "adopt quests");
+		git(tree, "switch", "--quiet", "fix/early");
+		expect(await inspect(tree, "fix/early")).toEqual([]);
 	});
 
 	test("fetches into a checkout's repository, writing none of its refs", async () => {

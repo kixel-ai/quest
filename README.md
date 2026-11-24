@@ -748,7 +748,8 @@ head SHA and refuses once the head moves, or while any check on it that
 counts in `quest status` failed, required or not, naming each; pending checks do not block.
 It also refuses a head that fails `quest check --no-stubs --base <base> --branch
 <head branch>`, which it runs on git objects it fetches, so nothing from the
-head runs, and ignores findings the base already has; run a `quest` the PR
+head runs, and ignores findings its merge base with the base already has, so a
+head only behind the base passes; run a `quest` the PR
 cannot modify, since the head's own build could skip the check. A base without
 quests skips it. While the base requires an approval the PR lacks, such as an
 online reviewer's that a ruleset requires (GitHub's review decision is
