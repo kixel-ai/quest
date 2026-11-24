@@ -20,7 +20,9 @@ right only while token-max reads none.
 - Bring Antigravity sessions into the PR's rows. A review turn runs in a
   temporary workspace outside the checkout, so token-max may report no
   repository or branch for it: attach such a session to the PR whose
-  `## Review` record names its ID. Teach `transcriptFacts` in
+  `## Review` record names its ID in any version of its body, as
+  `## Waiting` is read today, since `quest review --new` replaces a
+  reviewer's session ID while its tally keeps the earlier rounds. Teach `transcriptFacts` in
   `src/cli/transcript.ts` token-max's Antigravity harness, which it throws
   on today.
 - Match a session to a seat by harness as well as model, using token-max's
