@@ -1873,7 +1873,8 @@ interface Classifying {
 export async function classify(input: Classifying): Promise<{ key: string; value: Classified }> {
 	const { root, baseSha, change, changed } = input;
 	const text = exists(root, baseSha, RISK_FILE) ? show(root, baseSha, RISK_FILE) : null;
-	const key = digest(JSON.stringify([change.mergeBase, change.head, text]));
+	// The paths too, since they set the tier and the offered classes along with the risk file.
+	const key = digest(JSON.stringify([change.mergeBase, change.head, text, changed]));
 	if (input.saved?.key === key) return { key, value: { ...input.saved.value, usage: [] } };
 	const set = (value: Omit<Classified, "usage">) => ({ key, value: { ...value, usage: [] } });
 	const file = text === null ? null : parseRiskFile(text);

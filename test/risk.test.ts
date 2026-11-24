@@ -232,6 +232,7 @@ test("a risk file's ## Automatic list names each class, its scope, and its rule"
 			"- `late` - (`quest/**`) a scope after the dash",
 			"- `later` - (``docs/**``): a scope after the dash, then punctuation",
 			"- `invalid` - (`/docs/**`) a misplaced scope whose pattern is no pattern",
+			"- `entity` (`docs/**`&#41; or (`notes/**`) - an entity is no delimiter",
 		].join("\n"),
 	);
 	expect(broken.classes).toEqual([
@@ -250,6 +251,7 @@ test("a risk file's ## Automatic list names each class, its scope, and its rule"
 		"RISK.md:13: `late`'s scope goes before ` - `, not at the start of its rule",
 		"RISK.md:14: `later`'s scope goes before ` - `, not at the start of its rule",
 		"RISK.md:15: `invalid`'s scope goes before ` - `, not at the start of its rule",
+		"RISK.md:16: `entity`'s scope is not backticked path patterns joined by `, `",
 		"RISK.md lists the class `docs` twice",
 	]);
 });

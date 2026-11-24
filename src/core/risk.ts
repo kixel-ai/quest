@@ -232,17 +232,20 @@ function automaticClass(text: string, item: ListItem): Class | string {
 /**
  * The code spans of the parenthesized list joined by `, ` that `nodes`, parsed from `text`, open with, and the offset
  * in `text` just past its `)`, or null when they open with no such list. Whitespace and line breaks may pad the list,
- * and a span may use any backtick run, so it may hold a backtick.
+ * and a span may use any backtick run, so it may hold a backtick. The punctuation is read from the source, so an
+ * escape or entity that decodes to it is text, not a delimiter.
  */
 function spanList(text: string, nodes: PhrasingContent[]): { spans: string[]; end: number } | null {
-	if (nodes[0]?.type !== "text" || !/^\s*\(\s*$/.test(nodes[0].value)) return null;
+	const source = (node: PhrasingContent) => text.slice(node.position!.start.offset!, node.position!.end.offset!);
+	if (nodes[0]?.type !== "text" || !/^\s*\(\s*$/.test(source(nodes[0]))) return null;
 	const spans: string[] = [];
 	for (let index = 1; ; index += 2) {
 		const [code, next] = [nodes[index], nodes[index + 1]];
 		if (code?.type !== "inlineCode" || next?.type !== "text") return null;
 		spans.push(code.value);
-		if (/^\s*\)/.test(next.value)) return { spans, end: text.indexOf(")", next.position!.start.offset!) + 1 };
-		if (!/^\s*,\s+$/.test(next.value)) return null;
+		const closing = /^\s*\)/.exec(source(next));
+		if (closing) return { spans, end: next.position!.start.offset! + closing[0].length };
+		if (!/^\s*,\s+$/.test(source(next))) return null;
 	}
 }
 
