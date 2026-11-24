@@ -2,13 +2,11 @@
 // questions, and nothing an agent or harness wrote. Each source marks its sender: T3 Code's state for the sessions it
 // drives, Claude Code's `origin` for the rest of its sessions, and Codex's content provenance for its interactive ones.
 // Answers come from each harness's own log, which keeps the question's options. Output goes to stdout only.
-import { spawnSync } from "node:child_process";
 import { closeSync, existsSync, openSync, readdirSync, readSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { discoveryEnv } from "./git";
 import { hostedRepository } from "./forge";
-import { githubRepository } from "./github";
+import { type RemoteHost, githubRepository, readRemote, remoteHost } from "./github";
 import { RECOMMENDED } from "./rules";
 import { kixelUrl } from "./tokens";
 
@@ -127,6 +125,8 @@ export interface MessagesQuery {
 export interface Repositories {
 	/** The repository the directory `dir` belongs to, as the output names it. */
 	name(dir: string): string;
+	/** The repository a recorded origin URL names on either forge, as `name` would, or null for neither. */
+	origin(url: string): string | null;
 	/** Whether the query reads this repository's sessions; the readers parse no further record of one it does not. */
 	keep(name: string): boolean;
 }
@@ -173,34 +173,40 @@ export function claudeText(content: unknown): string | null {
  */
 const WORKTREE = /^(.+?)[/\\](?:\.claude[/\\]worktrees|\.worktrees)[/\\][^/\\]+(?:[/\\].*)?$/;
 
-/** A repository's name as `keep` compares it: GitHub and Kixel Quest ignore case in `owner/name`. */
-const folded = (name: string) => (/^[\w.-]+\/[\w.-]+$/.test(name) ? name.toLowerCase() : name);
+/** A repository's name as `keep` compares it: both forges ignore case in `owner/name`, a directory keeps it. */
+const folded = (name: string) => (/^(?:[\w.-]+\/)?[\w.-]+\/[\w.-]+$/.test(name) ? name.toLowerCase() : name);
 
 /**
- * Names each directory's repository by its checkout's `origin` on GitHub or Kixel Quest, else the directory itself,
- * and keeps only `wanted`'s sessions, or every one when it is null.
+ * Names each directory's repository by its checkout's configured `origin`, before `insteadOf` rewrites, as
+ * `owner/name` on GitHub or `<host>/owner/name` on Kixel Quest, so the same name on both forges differs, else the
+ * directory itself; and keeps only `wanted`'s sessions, or every one when it is null.
  */
 export function repositories(env: NodeJS.ProcessEnv, wanted: string | null): Repositories {
 	const cache = new Map<string, string>();
 	const kixel = kixelUrl(env);
+	const named = (host: RemoteHost | null) =>
+		host === null
+			? null
+			: host.forge === "kixel"
+				? `${new URL(kixel).host}/${host.repository.owner}/${host.repository.repo}`
+				: `${host.repository.owner}/${host.repository.repo}`;
+	const hosted = (url: string) => hostedRepository(kixel, url);
 	return {
 		name(dir) {
 			let name = cache.get(dir);
 			if (name === undefined) {
 				const checkout = existsSync(dir) ? dir : WORKTREE.exec(dir)?.[1];
-				const url =
-					checkout !== undefined && existsSync(checkout)
-						? spawnSync("git", ["-C", checkout, "remote", "get-url", "origin"], {
-								encoding: "utf8",
-								env: discoveryEnv(),
-							})
-						: null;
-				const origin = url?.status === 0 ? url.stdout.trim() : null;
-				const repo = origin === null ? null : (hostedRepository(kixel, origin) ?? githubRepository(origin));
-				name = repo ? `${repo.owner}/${repo.repo}` : dir;
+				const remote = checkout !== undefined && existsSync(checkout) ? readRemote(checkout, "origin") : null;
+				name = named(remote === null ? null : remoteHost(remote, hosted)) ?? dir;
 				cache.set(dir, name);
 			}
 			return name;
+		},
+		origin(url) {
+			const repository = hosted(url);
+			if (repository !== null) return named({ forge: "kixel", repository });
+			const github = githubRepository(url);
+			return github === null ? null : named({ forge: "github", url, repository: github });
 		},
 		keep: (name) => wanted === null || folded(name) === folded(wanted),
 	};
@@ -386,8 +392,8 @@ export function readCodexMessages(path: string, since: number, repositories: Rep
 			unmarked = writesNoProvenance(payload.cli_version);
 			session = payload.id;
 			const url = (payload.git as Record<string, unknown> | undefined)?.repository_url;
-			const repo = typeof url === "string" ? githubRepository(url) : null;
-			if (repo) where = `${repo.owner}/${repo.repo}`;
+			const named = typeof url === "string" ? repositories.origin(url) : null;
+			if (named !== null) where = named;
 			else if (typeof payload.cwd === "string") where = repositories.name(payload.cwd);
 			else throw new Error(`${path} names no directory`);
 			return repositories.keep(where);
@@ -590,11 +596,11 @@ export function readT3Messages(path: string, since: number, repositories: Reposi
 			root: string | null;
 		}[];
 		return rows.flatMap((row) => {
+			const payload = JSON.parse(row.payload) as Record<string, unknown>;
+			if (payload.createdBy === "agent") return [];
 			if (row.root === null) throw new Error(`T3 Code message ${row.id} belongs to no project`);
 			const repository = repositories.name(row.root);
 			if (!repositories.keep(repository)) return [];
-			const payload = JSON.parse(row.payload) as Record<string, unknown>;
-			if (payload.createdBy === "agent") return [];
 			if (payload.createdBy !== "user")
 				throw new Error(`T3 Code message ${row.id} names an unknown sender: ${String(payload.createdBy)}`);
 			if (payload.creationSource === "server" || payload.scheduledTaskId !== undefined) return [];
@@ -635,8 +641,18 @@ export function messages(query: MessagesQuery, deps: MessagesDependencies): Entr
 	for (const [session, path] of claudeLogs(deps)) {
 		if (statSync(path).mtimeMs < from) continue;
 		let skipped = 0;
-		found.push(...readClaudeMessages(path, session, from, scope, () => skipped++));
-		if (skipped)
+		// A session the query leaves out goes unreported, since its note would name it.
+		let kept = query.repository === null;
+		const watched: Repositories = {
+			...scope,
+			keep(name) {
+				const keep = scope.keep(name);
+				kept ||= keep;
+				return keep;
+			},
+		};
+		found.push(...readClaudeMessages(path, session, from, watched, () => skipped++));
+		if (skipped && kept)
 			deps.warn?.(`skipped ${skipped} malformed line${skipped === 1 ? "" : "s"} in session ${session} (${path})`);
 	}
 	const codex = deps.env.CODEX_HOME || join(deps.home, ".codex");

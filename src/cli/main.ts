@@ -1598,9 +1598,9 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"Claude Code marks as a human's; other Codex sessions, from $CODEX_HOME (or ~/.codex), count the " +
 				"content Codex marks as the user's (before 0.162, which marks none, the parts but its environment, shell commands, and " +
 				"AGENTS.md instructions), outside headless and sub-agent sessions. The repository is the " +
-				"checkout's origin on GitHub or Kixel Quest, else the directory; a removed worktree under a checkout's .worktrees/ " +
+				"checkout's configured origin, as owner/name on GitHub or <host>/owner/name on Kixel Quest, else the directory; a removed worktree under a checkout's .worktrees/ " +
 				"or .claude/worktrees/ is named by that checkout, and one elsewhere, such as T3 Code's, by its directory. It prints only the repository of the checkout it runs in, " +
-				"comparing owner/name without case, and reads no further than the name of any other's sessions, unless --all " +
+				"comparing names without case, and reads no further than the name of any other's sessions, unless --all " +
 				"prints every repository's. Output goes to stdout only, except a note on stderr " +
 				"naming each Claude Code session whose malformed lines, such as a partial record a crashed write left, " +
 				"were skipped and how many; nothing is stored or posted. Each answer a person gave an agent's blocking question (Claude Code's AskUserQuestion, " +

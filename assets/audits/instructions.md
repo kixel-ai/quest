@@ -7,7 +7,7 @@ Turning new mistakes into new rules is not this audit's work, and which models r
 
 Gather first, over the window since the date the last run's baseline records, or the past month on the first run:
 
-- Harnesses and models: the ones the repository's agents ran, from the `## Models` lines of its PRs.
+- Harnesses and models: the ones the repository's agents ran, writers and reviewers alike, from its PRs' `## Models` lines and `## Review` records.
 - Guidance: every page `quest guide prompting` links, checked to resolve, then read, along with the current pages for each harness and model found above that it lacks.
 - Evidence: review findings and `## Caused by` escapes from `quest usage --since`, or from the PRs' own `## Review` and `## Caused by` sections where it cannot read the repository's forge; corrections people typed, from `quest messages --since` run in a checkout of the repository on each host that runs its agents, which reads that repository's sessions only; and the transcripts of sessions whose working directory was one of its checkouts. Read no other repository's messages or transcripts, and quote none in the PR or the stub: give counts and paraphrase.
 

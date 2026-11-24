@@ -3,24 +3,27 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 
 import {
+	type Entry,
 	claudeText,
 	messageLines,
 	messages,
 	readClaudeMessages,
 	readCodexMessages,
 	readT3Messages,
+	repositories,
 } from "../src/cli/messages";
-import { tempDir } from "./fixture";
+import { run, tempDir } from "./fixture";
 
 const SESSION = "0d8d9084-40a0-48e2-921b-8ba0d67baa2f";
 const THREAD = "01a1b8e8-8fca-7793-99d1-062f41f8a7b0";
 const SINCE = Date.parse("2026-11-01T00:00:00");
 
 const lines = (...records: unknown[]) => `${records.map((r) => JSON.stringify(r)).join("\n")}\n`;
-const plain = { name: (dir: string) => dir, keep: () => true };
+/** Names a directory as itself and an origin URL as `quest messages` does, keeping every repository. */
+const plain = { ...repositories({}, null), name: (dir: string) => dir };
 
 /** A Claude Code user turn. */
 const turn = (timestamp: string, content: unknown, extra: object = {}) => ({
@@ -708,12 +711,82 @@ describe("messages", () => {
 			join(home, ".codex", "sessions", `rollout-2026-11-06T10-00-00-${THREAD}.jsonl`),
 			lines(codexMeta({ cwd: "/other" }), codexTurn("2026-11-06T11:00:00Z", [["x", "plugins.mystery"]])),
 		);
-		const mine = messages({ since: "2026-11-01", repository: "acme/proj" }, { env: {}, home });
+		writeFileSync(
+			join(home, ".claude", "projects", "p", "other.jsonl"),
+			`{"partial\n${JSON.stringify(turn("2026-11-06T09:03:00Z", "theirs", { cwd: "/other" }))}\n`,
+		);
+		const notes: string[] = [];
+		const mine = messages(
+			{ since: "2026-11-01", repository: "acme/proj" },
+			{ env: {}, home, warn: (line) => notes.push(line) },
+		);
+		expect(notes).toEqual([]);
 		expect(mine.map((m) => m.kind === "message" && [m.repository, m.text])).toEqual([
 			["acme/proj", "from a worktree"],
 			["acme/proj", "from a quest worktree"],
 		]);
 		expect(() => messages({ since: "2026-11-01", repository: null }, { env: {}, home })).toThrow(/plugins.mystery/);
+	});
+
+	test("names each forge's repository from the configured origin, comparing owner/name without case", () => {
+		const home = tempDir();
+		const origin = (dir: string, url: string, ...config: string[]) => {
+			mkdirSync(dir);
+			execFileSync("git", ["init", "-q", dir]);
+			execFileSync("git", ["-C", dir, "remote", "add", "origin", url]);
+			for (let i = 0; i < config.length; i += 2)
+				execFileSync("git", ["-C", dir, "config", config[i]!, config[i + 1]!]);
+		};
+		origin(join(home, "hub"), "https://github.com/Acme/Proj.git");
+		origin(join(home, "hosted"), "https://kixel.quest/acme/proj.git");
+		// A rewrite to a mirror leaves the configured origin naming the repository.
+		origin(join(home, "mirrored"), "git@github.com:acme/proj.git", "url./srv/mirror/.insteadOf", "git@github.com:");
+		const scope = repositories({}, "acme/proj");
+		expect(scope.name(join(home, "hub"))).toBe("Acme/Proj");
+		expect(scope.name(join(home, "hosted"))).toBe("kixel.quest/acme/proj");
+		expect(scope.name(join(home, "mirrored"))).toBe("acme/proj");
+		expect(scope.origin("https://kixel.quest/acme/proj")).toBe("kixel.quest/acme/proj");
+		expect(scope.origin("/srv/mirror/proj")).toBeNull();
+		expect(["Acme/Proj", "kixel.quest/acme/proj", "/work/acme/proj"].map((name) => scope.keep(name))).toEqual([
+			true,
+			false,
+			false,
+		]);
+	});
+
+	test("the command prints only its checkout's repository, every one with --all, and needs a named origin", () => {
+		const home = tempDir();
+		const checkout = join(home, "proj");
+		mkdirSync(checkout);
+		execFileSync("git", ["init", "-q", checkout]);
+		execFileSync("git", ["-C", checkout, "remote", "add", "origin", "https://github.com/acme/proj.git"]);
+		mkdirSync(join(home, ".claude", "projects", "p"), { recursive: true });
+		writeFileSync(
+			join(home, ".claude", "projects", "p", `${SESSION}.jsonl`),
+			lines(
+				turn("2026-11-06T09:00:00Z", "ours", { cwd: checkout }),
+				turn("2026-11-06T09:01:00Z", "theirs", { cwd: "/other" }),
+			),
+		);
+		vi.stubEnv("HOME", home);
+		vi.stubEnv("CLAUDE_CONFIG_DIR", join(home, ".claude"));
+		vi.stubEnv("CODEX_HOME", join(home, ".codex"));
+		vi.stubEnv("T3CODE_HOME", join(home, ".t3"));
+		try {
+			const texts = (...args: string[]) =>
+				(
+					JSON.parse(
+						run("--root", checkout, "messages", "--since", "2026-11-01", "--json", ...args).stdout,
+					) as Entry[]
+				).map((m) => m.kind === "message" && m.text);
+			expect(texts()).toEqual(["ours"]);
+			expect(texts("--all")).toEqual(["ours", "theirs"]);
+			const outside = run("--root", home, "messages", "--since", "2026-11-01");
+			expect(outside.code).toBe(2);
+			expect(outside.stderr).toMatch(/pass --all/);
+		} finally {
+			vi.unstubAllEnvs();
+		}
 	});
 
 	test("prints an answer with its skill, question, recommendation, and pick", () => {

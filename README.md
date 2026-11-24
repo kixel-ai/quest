@@ -2245,7 +2245,8 @@ $ quest messages --since 2026-11-10
 ```
 
 Each message shows its time, harness, repository (the checkout's `origin` on
-GitHub or Kixel Quest, comparing `owner/name` without case, else its
+GitHub as `owner/name`, or on Kixel Quest as `<host>/owner/name`, compared
+without case, else its
 directory; a removed worktree under a checkout's `.worktrees/` or
 `.claude/worktrees/` takes that checkout's, while one elsewhere, such as T3 Code's,
 keeps its directory), and session, then its text. It also prints each
