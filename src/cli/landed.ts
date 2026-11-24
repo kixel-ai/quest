@@ -8,9 +8,9 @@ import { accessSync, constants, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { type Finding, branchQuest, check, isQuest, parse } from "../core";
+import { type Finding, branchQuest, check, parse } from "../core";
 import { discoveryEnv } from "./git";
-import { committedSources } from "./tree";
+import { committedSources, hasQuests } from "./tree";
 
 /**
  * A finding when `branch` (default: the current branch) is a quest's branch
@@ -65,8 +65,9 @@ export type LandingCheck = (head: LandingHead) => Promise<Finding[]>;
  * `root`, writing no ref, so Git sends only what that repository lacks and an interrupted run leaves
  * nothing behind. A checkout it cannot write, or a shallow one whose history could hide the merge
  * base, gives way to a temporary bare repository, as does no checkout.
- * A finding the head's merge base or the base already has is not the head's, so being behind the
- * base adds none. A head with no quest documents skips the check when the base or its merge base
+ * A finding the head's merge base or the base already has, in an entry or line the head left
+ * unchanged, is not the head's, so being behind the base adds none; an entry the head edits owns
+ * its findings. A head with no quest documents skips the check when the base or its merge base
  * has none either.
  */
 export function landingCheck(root: string): LandingCheck {
@@ -102,18 +103,7 @@ export function landingCheck(root: string): LandingCheck {
 				[`GIT_CONFIG_KEY_${count + 1}`]: "http.https://github.com/.extraheader",
 				[`GIT_CONFIG_VALUE_${count + 1}`]: `Authorization: basic ${basic}`,
 			});
-			// Quest documents as `committedSources` reads them: regular files, not symlinks. `-z` keeps Git
-			// from quoting a path it would escape, such as a non-ASCII one.
-			const quests = (ref: string) =>
-				run(["ls-tree", "-r", "-z", ref, "quest"])
-					.split("\0")
-					.some((line) => {
-						// The first tab ends the metadata; a path may hold more.
-						const tab = line.indexOf("\t");
-						const [mode, type] = line.slice(0, tab).split(" ");
-						return tab !== -1 && type === "blob" && mode !== "120000" && isQuest(line.slice(tab + 1));
-					});
-			const [based, headed] = [quests(base), quests(tip)];
+			const [based, headed] = [hasQuests(dir, base), hasQuests(dir, tip)];
 			if (!based && !headed) return [];
 			let fork: string;
 			let accurate: Finding[];
@@ -123,7 +113,7 @@ export function landingCheck(root: string): LandingCheck {
 			} catch (error) {
 				throw new Error(tidy(error instanceof Error ? error.message : String(error)), { cause: error });
 			}
-			const forked = quests(fork);
+			const forked = fork === base ? based : fork === tip ? headed : hasQuests(dir, fork);
 			// A head that branched before the base adopted quests and adds none leaves them to the merge.
 			if (!headed && !forked) return accurate.map(tidied);
 			let tree: Keyed[];
@@ -171,7 +161,8 @@ function writable(dir: string): boolean {
 
 /**
  * A finding, keyed by its file, its message, and the source it points at: the whole entry holding its
- * line, continuation lines included, or else that line. The key survives edits elsewhere.
+ * line, continuation lines included, or else that line, split at line endings as the parser splits
+ * them. The key survives edits elsewhere and changes of line ending.
  */
 interface Keyed {
 	finding: Finding;
@@ -183,7 +174,10 @@ function treeCheck(dir: string, commit: string): Keyed[] {
 	const { sources, exists } = committedSources(dir, commit, null);
 	const docs = sources.map((source) => parse(source.path, source.text));
 	const files = new Map(
-		sources.map((source, index) => [source.path, { lines: source.text.split("\n"), entries: docs[index].entries }]),
+		sources.map((source, index) => [
+			source.path,
+			{ lines: source.text.split(/\r\n?|\n/), entries: docs[index].entries },
+		]),
 	);
 	return check(docs, exists).map((finding) => {
 		const file = files.get(finding.path);

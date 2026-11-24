@@ -105,9 +105,7 @@ export function committedSources(
 ): { sources: CommittedSource[]; exists(path: string): boolean } {
 	const repo = { dir: root };
 	const tree = committed(repo, commit, note, "");
-	const quests = tree.entries.filter(
-		({ mode, type, path }) => type === "blob" && mode !== "120000" && path.startsWith("quest/") && isQuest(path),
-	);
+	const quests = tree.entries.filter(questDocument);
 	if (quests.length === 0) throw new Error(`no quest documents found under ${under(root, "quest")} at ${commit}`);
 
 	// One `cat-file --batch` reads every document: `<oid> blob <size>\n<content>\n` each, in input order.
@@ -121,6 +119,16 @@ export function committedSources(
 		return { path, mode, text };
 	});
 	return { sources: sources.sort((a, b) => comparePaths(a.path, b.path)), exists: tree.exists };
+}
+
+/** Whether `commit`, a commit or a tree, holds any quest document `committedSources` would read. */
+export function hasQuests(root: string, commit: string): boolean {
+	return committed({ dir: root }, commit, null, "").entries.some(questDocument);
+}
+
+/** A tree entry `committedSources` reads: a regular file under `quest/` that is a quest, not a symlink. */
+function questDocument({ mode, type, path }: Entry): boolean {
+	return type === "blob" && mode !== "120000" && path.startsWith("quest/") && isQuest(path);
 }
 
 /** A repository to read: a work tree, or a submodule's git directory without one. */

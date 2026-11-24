@@ -231,10 +231,28 @@ describe("quest merge's landing check", () => {
 		git(tree, "switch", "--quiet", "-c", "fix/entry");
 		tree.write("quest/m0/epic/two.md", tree.read("quest/m0/epic/two.md").replace("first step", "next step"));
 		commit(tree, "reword the step");
-		fixMain(tree, "fix/entry");
+		// The base fixes the link by adding its target, which leaves the head's lines alone.
+		git(tree, "switch", "--quiet", "main");
+		tree.write("quest/m0/gone.md", "# [S] Gone\n\n## Goal\n\nBack.\n");
+		commit(tree, "add the target");
+		git(tree, "switch", "--quiet", "fix/entry");
 		expect((await inspect(tree, "fix/entry")).map((finding) => finding.message)).toEqual([
 			"link does not resolve: /quest/m0/gone.md",
 		]);
+	});
+
+	test("skips a finding whose entry changed only its line endings", async () => {
+		const tree = Tree.committed();
+		const path = "quest/m0/epic/two.md";
+		tree.write(
+			path,
+			`${tree.read(path)}\n## Plan\n\n- first step\n  after [Gone](/quest/m0/gone.md)\n`.replaceAll("\n", "\r\n"),
+		);
+		commit(tree, "dangling link on main, in CRLF");
+		git(tree, "switch", "--quiet", "-c", "fix/endings");
+		tree.write(path, tree.read(path).replaceAll("\r\n", "\n"));
+		commit(tree, "LF");
+		expect(await inspect(tree, "fix/endings")).toEqual([]);
 	});
 
 	test("skips a finding the base tip has that the head carries without merging it", async () => {
