@@ -3,7 +3,7 @@
 // customer-facing there; `quest review` sets the tier and records it in the PR body's `## Review` section.
 import type { List, ListItem, Paragraph, PhrasingContent, RootContent, Text } from "mdast";
 
-import { markdown } from "./doc";
+import { codeSpan, markdown } from "./doc";
 import { reviewSection } from "./review";
 
 /** The tiers, from least risk to most. */
@@ -205,7 +205,9 @@ function automaticClass(text: string, item: ListItem): Class | string {
 			? `\`${name}\`'s scope must be followed by \` - \` and the rule, with nothing between`
 			: `\`${name}\` must be followed by its optional scope in parentheses, \` - \`, and the rule over the diff`;
 	// A scope after the dash would read as prose the classifier judges, not a scope the code checks.
-	if (/^\(`[^`]+`(?:, `[^`]+`)*\)(?:\s|$)/.test(rule))
+	const [lead] = markdown(rule).children;
+	const nodes = lead?.type === "paragraph" ? (lead as Paragraph).children : [];
+	if (nodes[0]?.type === "text" && typeof scopeOf(name, nodes) !== "string")
 		return `\`${name}\`'s scope goes before \` - \`, not at the start of its rule`;
 	return { name, scope: scoped?.patterns ?? null, rule };
 }
@@ -224,7 +226,7 @@ function scopeOf(name: string, nodes: PhrasingContent[]): { patterns: string[]; 
 		const [code, next] = [nodes[index], nodes[index + 1]];
 		if (code?.type !== "inlineCode" || next?.type !== "text") return malformed;
 		const problem = patternError(code.value);
-		if (problem !== null) return `\`${code.value}\` in \`${name}\`'s scope is no pattern: ${problem}`;
+		if (problem !== null) return `${codeSpan(code.value)} in \`${name}\`'s scope is no pattern: ${problem}`;
 		patterns.push(code.value);
 		if (next.value.startsWith(")")) return { patterns, end: next.position!.start.offset! + 1 };
 		if (!/^,\s+$/.test(next.value)) return malformed;

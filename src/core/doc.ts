@@ -336,6 +336,13 @@ export function markdown(text: string): Root {
 	});
 }
 
+/** One-line `text` as an inline code span that renders it whole, whatever backticks it holds. */
+export function codeSpan(text: string): string {
+	const fence = "`".repeat(Math.max(0, ...(text.match(/`+/g) ?? []).map((run) => run.length)) + 1);
+	const pad = /^`|`$/.test(text) ? " " : "";
+	return `${fence}${pad}${text}${pad}${fence}`;
+}
+
 /** Parse already-loaded Markdown. `path` stays repository-relative. */
 export function parse(path: string, text: string): Doc {
 	const tree = markdown(text);

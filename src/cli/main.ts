@@ -1731,7 +1731,8 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"and can only raise it: the head's tier is the riskiest, with the reason of the first to judge it so. " +
 				"The classifier also names the class of RISK.md's ## Automatic list every changed file falls in, or none, " +
 				"offered only the classes whose scope, backticked patterns in parentheses after the class's name, holds " +
-				"every changed path, either side of a rename. " +
+				"every changed path, either side of a rename: each path must match one pattern whole, so a directory " +
+				"needs a trailing / or /**, and a change that touches no path falls in no class. " +
 				"The tier scales the review: a low head with no finding to settle runs no reviewer unless --harness, " +
 				"--model, or --effort names one, and a high head runs no shadow but gets a second reviewer: the first of the " +
 				"high list from a vendor other than the pick's that can run, in its own session, which reviews " +

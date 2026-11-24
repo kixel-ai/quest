@@ -15,6 +15,7 @@ export {
 	children,
 	entries,
 	has,
+	codeSpan,
 	holds,
 	type Host,
 	hosts,

@@ -1692,6 +1692,22 @@ fakes(
 	20_000,
 );
 
+fakes("a submodule update the local git config hides still counts as a changed path", async () => {
+	const s = setup();
+	moveBase(s.repo, (dir) => write(dir, "RISK.md", riskFile(["- `vendor/` - vendored code ships as is"])));
+	git(s.repo, "config", "diff.ignoreSubmodules", "all");
+	const commit = git(s.repo, "rev-parse", "HEAD");
+	git(s.repo, "update-index", "--add", "--cacheinfo", `160000,${commit},vendor/lib`);
+	git(s.repo, "commit", "-qm", "vendor a library");
+	expect(git(s.repo, "diff", "--name-only", "origin/main", "HEAD", "--", "vendor")).toBe("");
+	vi.stubEnv("FAKE_REPLY", JSON.stringify({ score: 10, rationale: "Lands as is.", findings: [] }));
+	const result = await quest("--root", s.repo, "review", "--exclude-model", "claude-opus-5-5");
+	expect(result.code, result.stderr).toBe(0);
+	expect(result.stdout).toContain(
+		"\nrisk high it changes vendor/lib, which is always high: vendored code ships as is\n",
+	);
+});
+
 fakes("without a logged-in Claude Code, Codex classifies", async () => {
 	const s = setup();
 	moveBase(s.repo, (dir) => write(dir, "RISK.md", riskFile([])));

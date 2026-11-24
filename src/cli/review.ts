@@ -25,6 +25,7 @@ import {
 	type Tier,
 	branchQuest,
 	classesFor,
+	codeSpan,
 	matches,
 	parse,
 	parseRiskFile,
@@ -1246,7 +1247,7 @@ function replied(reply: { structured?: unknown; text?: string }, what: string): 
 	}
 }
 
-/** The classifier's reply schema: the assessment, and the class the change falls in when the risk file lists any. */
+/** The classifier's reply schema: the assessment, and the class the change falls in when any class is offered. */
 function classSchema(classes: string[]) {
 	if (classes.length === 0) return ASSESSMENT;
 	return {
@@ -1560,7 +1561,7 @@ export function classifyPrompt(
 			? `The change, \`git diff --stat --patch ${range}\`:`
 			: `The diff is ${stat.length + patch.length} characters, more than this prompt holds, so only its stat ` +
 				`follows${shown.length < stat.length ? ", cut short" : ""}. Read the parts you need with ` +
-				`\`git diff ${range} -- <path>\`.`,
+				`\`git diff --ignore-submodules=none ${range} -- <path>\`.`,
 		`<diff>\n${shown}\n</diff>`,
 		"Report the change's tier as JSON matching the response schema, with one sentence on what could break, for " +
 			"whom, and how hard it is to undo.",
@@ -1573,8 +1574,7 @@ export function classifyPrompt(
 						"class lets a low change land without a person, so between a class and null, pick null.\n\n" +
 						classes
 							.map(({ name, scope, rule }) => {
-								const within =
-									scope === null ? "" : ` (${scope.map((each) => `\`${each}\``).join(", ")})`;
+								const within = scope === null ? "" : ` (${scope.map(codeSpan).join(", ")})`;
 								return `- \`${name}\`${within} - ${rule}`;
 							})
 							.join("\n"),
@@ -1850,6 +1850,8 @@ interface Classifying {
 	root: string;
 	baseSha: string;
 	change: Change;
+	/** The paths the change touches, both sides of each rename and every submodule update included. */
+	changed: string[];
 	dir: string;
 	env: NodeJS.ProcessEnv;
 	signal?: AbortSignal;
@@ -1863,7 +1865,7 @@ interface Classifying {
  * the change and the file are the same, which `key` names.
  */
 export async function classify(input: Classifying): Promise<{ key: string; value: Classified }> {
-	const { root, baseSha, change } = input;
+	const { root, baseSha, change, changed } = input;
 	const text = exists(root, baseSha, RISK_FILE) ? show(root, baseSha, RISK_FILE) : null;
 	const key = digest(JSON.stringify([change.mergeBase, change.head, text]));
 	if (input.saved?.key === key) return { key, value: { ...input.saved.value, usage: [] } };
@@ -1872,11 +1874,6 @@ export async function classify(input: Classifying): Promise<{ key: string; value
 	if (file !== null && file.problems.length > 0)
 		throw new ReviewInputError(`the base's ${RISK_FILE} cannot be read: ${file.problems.join("; ")}`);
 	const range = `${change.mergeBase}..${change.head}`;
-	// Both sides of a rename, so moving a file out of a high path or a class's scope counts, and every submodule
-	// update, whatever the local config hides.
-	const changed = git(root, ["diff", "--name-only", "--no-renames", "--ignore-submodules=none", "-z", range])
-		.split("\0")
-		.filter(Boolean);
 	const held = [...ALWAYS_HIGH, ...(file?.high ?? [])];
 	const hits = changed.flatMap((path) => {
 		const rule = held.find((each) => matches(each.pattern, path));
@@ -2137,7 +2134,16 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 		throw new ReviewInputError(`HEAD shares no history with ${baseRef}`);
 	}
 	const change: Change = { base: baseRef, mergeBase, head };
-	const changed = git(root, ["diff", "--name-only", "-z", `${mergeBase}..${head}`])
+	// Both sides of a rename, so moving a file out of a high path, a class's scope, or an instructed directory counts,
+	// and every submodule update, whatever the local config hides.
+	const changed = git(root, [
+		"diff",
+		"--name-only",
+		"--no-renames",
+		"--ignore-submodules=none",
+		"-z",
+		`${mergeBase}..${head}`,
+	])
 		.split("\0")
 		.filter(Boolean);
 	const files = baseInstructions(root, baseSha, changed);
@@ -2149,6 +2155,7 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 		root,
 		baseSha,
 		change,
+		changed,
 		dir,
 		env: deps.env,
 		signal: options.signal,
