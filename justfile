@@ -39,8 +39,9 @@ _test:
     bash scripts/lifecycle-check.sh "$PWD/dist/quest" dev
 
 # Check that `quest review` runs nothing a reviewed head plants, with the real
-# Codex and Claude Code CLIs. Uses each CLI's login and spends its usage; run it
-# after upgrading either CLI. Arguments go to vitest, such as `-t codex`.
+# Codex, Claude Code, and Antigravity CLIs. Uses each CLI's login and spends its
+# usage; run it after upgrading any of them. Arguments go to vitest, such as
+# `-t codex`.
 review-sandbox *args:
     QUEST_LIVE=1 bun run vitest run test/live/review-sandbox {{args}}
 

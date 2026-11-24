@@ -36,7 +36,8 @@ import {
 import {
 	AgentInputError,
 	HARNESSES,
-	type HarnessName,
+	REVIEW_HARNESSES,
+	type ReviewHarness,
 	type Launch,
 	admitAgent,
 	processDependencies,
@@ -1271,7 +1272,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"The agent CLI runs from its absolute path on PATH, never from the worktree; on native Windows " +
 				"a batch shim such as npm's claude.cmd runs through System32's cmd.exe, and stop ends the agent's process tree at once.\n\n" +
 				"The agent runs in <worktree> with the user's environment minus every CLAUDE* (except CLAUDE_CONFIG_DIR), " +
-				"ANTHROPIC*, CODEX_* (except CODEX_HOME), OP_*, OPENAI_API_KEY, QUEST_GATE_ADMITTED, QUEST_GATE_PRIORITY, " +
+				"ANTHROPIC*, CODEX_* (except CODEX_HOME), ANTIGRAVITY_*, AGY_*, OP_*, OPENAI_API_KEY, QUEST_GATE_ADMITTED, QUEST_GATE_PRIORITY, " +
 				"and MBX_SCHEDULER_PRIORITY when QUEST_GATE_PRIORITY=1, so it uses the CLI's stored login rather than the coordinating session's.\n\n" +
 				"Start and resume first wait until the host can carry the agent, as agent admit describes, " +
 				"before claiming the worktree.\n\n" +
@@ -1664,7 +1665,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"so a reviewer is never weaker than the writer: the model the last Implementer line names in the `## Models` record of the body of the branch's open PR. " +
 				"When it names none or an `unknown` model, " +
 				"it is any model of the harness running this command, usually the session that just pushed, detected from the " +
-				"variables each sets, so Codex reviews from Claude Code and Claude Code from Codex, and with no model known no weaker one is avoided; with --harness it is " +
+				"variables Claude Code, Codex, and Antigravity each set, so Codex reviews from Claude Code and Claude Code from Codex, and with no model known no weaker one is avoided; with --harness it is " +
 				"none. " +
 				"--harness names the only reviewer instead of the pick and the shadow, at the model and effort of its first entry whose model is not avoided, and --model and " +
 				"--effort override that reviewer's, or without --harness, the size pick's; a --model the list names, in any spelling such as openai/gpt-6.2-astra, runs on its own entry's harness and effort, passed to the CLI as given, and one it does not at --harness's first entry; a repository whose AGENTS.md names other reviewers " +
@@ -1690,7 +1691,8 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"Every turn reviews only the branch's own change, from the merge base of HEAD with the base's tip, so " +
 				"a branch behind its base draws no findings on the base's newer code. The first round runs the " +
 				"reviewer's own review (`codex exec review` with custom instructions, or Claude Code's " +
-				"`/code-review <effort> <merge-base>...HEAD` with text after it), given the range, the base's REVIEW.md, if " +
+				"`/code-review <effort> <merge-base>...HEAD` with text after it, or for agy, which has none, a turn " +
+				"asking what the change breaks), given the range, the base's REVIEW.md, if " +
 				"any, and any responses up front, then resumes that session for one turn that reports the review in one " +
 				"JSON schema without reading anything again. --responses gives the author's fixes and refutations of " +
 				"the last round's findings, required while that round reported any; the reply settles each of those " +
@@ -1699,7 +1701,8 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"--responses only when it has some. A later round resumes the " +
 				"session and checks only what changed since the last round's head and those findings when nothing " +
 				"but the head changed: the same model, effort, and base, a merge base the last round's covers, as " +
-				"when the base moved on, and the same applicable AGENTS.md, CLAUDE.md, and REVIEW.md. Otherwise it " +
+				"when the base moved on, the same applicable AGENTS.md, CLAUDE.md, and REVIEW.md, and the last round's head " +
+				"still in the clone, which an amend and a prune can remove. Otherwise it " +
 				"starts a new session that reviews the whole change and still weighs --responses. A round that would " +
 				"resume on the head the last round reviewed, when that round found nothing, runs no reviewer and " +
 				"repeats that round, marked unchanged, so on the same head only a reviewer with findings to settle runs. " +
@@ -1714,6 +1717,23 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"each directory holding a changed path, never the checkout's, so a change cannot instruct its own " +
 				"reviewer, and is told to disregard other instructions and run no builds, tests, or quest commands. " +
 				"The base is fetched first, since the sandbox has no network.\n\n" +
+				"--harness agy reviews with Google's Antigravity CLI, which only reviews; name its --model and --effort, as " +
+				"gemini-4-neon and xhigh. It runs `agy -p` on the user's own Antigravity login, in the keyring or, over ssh, " +
+				"its configuration directory, with no ANTIGRAVITY_* or AGY_* variable, so no gateway, and GEMINI_API_KEY and " +
+				"GOOGLE_API_KEY never replace the login. Each turn and the status check, `agy models`, run in a new private " +
+				"directory outside any repository, since agy loads the agent configuration of each directory up to the " +
+				"repository's root, which makes an agent directory inside one a usage error. Each turn runs as quest's own " +
+				"agent, whose only tools are view_file and finish and which inherits none of the user's hooks, rules, plugins, or " +
+				"MCP tools, with permissions skipped, since print mode cannot approve a read outside its directory, and deny " +
+				"rules on commands, writes, web requests, MCP calls, and a read of any path outside the turn's directory that " +
+				"its start lists, such as the checkout's untracked files or another CLI's login, and the usual login paths under " +
+				"home before they exist; a file created beside its parents while the turn runs is not covered. With no shell, that directory holds an " +
+				"export of the reviewed head's tracked files, for the review turn alone, writing a symlink as a file holding " +
+				"its target, beside the directory agy runs in, files.txt listing them, and the diff of each range it reviews, " +
+				"both ignoring the head's .gitattributes. agy compares its read rules case-sensitively, so quest refuses to " +
+				"run it where a directory leading to its agent directory matches names case-insensitively, as on macOS's " +
+				"default volume, and on a Git older than 2.41, which has no --attr-source. The user's skills' text still reaches it, and their MCP servers start, with no tool it can call. A " +
+				"RESOURCE_EXHAUSTED quota error is its usage limit.\n\n" +
 				"Before the reviewers run, the head gets a risk tier, low, medium, or high, from its change alone, never " +
 				"from who wrote it. A changed path, either side of a rename, that a pattern holds makes it high: RISK.md, " +
 				"everything under .github/workflows/ and .github/actions/, and each pattern the `## High` list of the base's " +
@@ -1724,7 +1744,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				`${classifiers}, reads the diff and the base's RISK.md, which says what is customer-facing, ` +
 				"in one read-only turn and replies with a tier and its reason. One that is logged out, whose login the " +
 				"API rejects, or at its usage limit passes the turn to the next; when none is left, the run fails on the " +
-				"limit that resets first if every one hit its own, else as a usage error naming why each failed. A later round on the same head and base " +
+				"limit that resets first if every one whose CLI is installed hit its own, else as a usage error naming why each failed. A later round on the same head and base " +
 				"RISK.md reuses the tier unless --new. Each reviewer's reply judges the tier too, told the classified one, " +
 				"and can only raise it: the head's tier is the riskiest, with the reason of the first to judge it so. " +
 				"The classifier also names the class of RISK.md's ## Automatic list every changed file falls in, or none. " +
@@ -1761,7 +1781,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"such PR, several from other repositories that `HEAD` contains, or a remote off GitHub, it prints `record skipped: <why>` and changes nothing.\n\n" +
 				"Exits 0 once the round finishes, whatever it found, 2 for invalid arguments " +
 				"or a checkout that cannot be reviewed, 3 when no eligible reviewer could run, each not installed, logged " +
-				"out, its login rejected, or at its usage limit, and 1 for other failures, including a PR GitHub will not show or a record it " +
+				"out, its login rejected, at its usage limit, or unable to run on this host, and 1 for other failures, including a PR GitHub will not show or a record it " +
 				"refuses. A malformed `## Models` field the round reads, such as a Size line naming no size or an " +
 				"Implementer line naming no model it can read, is a usage error, unless --size or --exclude-model replaces it. A usage limit of the only " +
 				"eligible reviewer prints one line, " +
@@ -1774,7 +1794,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 			new Option(
 				"--harness <name>",
 				"The only reviewer to run, instead of the pick and the shadow or second reviewer",
-			).choices(HARNESSES),
+			).choices(REVIEW_HARNESSES),
 		)
 		.option("--model <model>", "Model the pick, or --harness's reviewer, runs instead")
 		.option(
@@ -1813,7 +1833,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				branch?: string;
 				override?: Tier;
 				reason?: string;
-				harness?: HarnessName;
+				harness?: ReviewHarness;
 				model?: string;
 				effort?: string;
 				excludeModel?: string[];

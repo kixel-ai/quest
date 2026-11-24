@@ -35,6 +35,10 @@ import { Worktrees, save } from "./worktree";
 export const HARNESSES = ["claude", "codex"] as const;
 export type HarnessName = (typeof HARNESSES)[number];
 
+/** The CLIs `quest review` runs: every agent harness, and Google's Antigravity CLI, `agy`, which only reviews. */
+export const REVIEW_HARNESSES = [...HARNESSES, "agy"] as const;
+export type ReviewHarness = (typeof REVIEW_HARNESSES)[number];
+
 /** Everything a launch names on its command line. */
 export interface Launch {
 	harness: HarnessName;
@@ -243,13 +247,17 @@ export class AgentInputError extends Error {}
  * A launch from inside a `quest gate` command does not admit the agent's own
  * expensive commands or give them a land check's priority, so the gate's marks
  * are dropped too, with the mbx priority a priority gate sets. Each CLI keeps the
- * user's configuration directory.
+ * user's configuration directory. An Antigravity session hands its commands its
+ * language server's address and token, which would put a launched `agy` in that
+ * session, and `AGY_` variables route `agy` to a gateway or another account.
  */
 const STRIPPED = [
 	/^CLAUDE(?!_CONFIG_DIR$)/,
 	/^ANTHROPIC/,
 	/^CODEX_(?!HOME$)/,
 	/^OPENAI_API_KEY$/,
+	/^ANTIGRAVITY_/,
+	/^AGY_/,
 	/^OP_/,
 	/^QUEST_GATE_(ADMITTED|PRIORITY)$/,
 ];
