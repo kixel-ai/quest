@@ -1667,7 +1667,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"variables Claude Code, Codex, and Antigravity each set, so Codex reviews from Claude Code and Claude Code from Codex; with --harness it is " +
 				"none. " +
 				"--harness names the only reviewer instead of the draw, taking that CLI's own draw, and --model and " +
-				"--effort override that reviewer's, or without --harness, the first seat's; a --model a rung lists, in any spelling such as openai/gpt-6.2-astra, runs on its entry's harness and effort, passed to the CLI as given, and one no rung lists needs --harness, whose first entry gives its effort; a repository whose AGENTS.md names other reviewers " +
+				"--effort override that reviewer's, or without --harness, the first seat's; a --model a rung lists, in any spelling such as openai/gpt-6.2-astra, runs on its entry's harness and effort, passed to the CLI as given, and one no rung lists at --harness's first entry, or without it in place of the first seat's draw; a repository whose AGENTS.md names other reviewers " +
 				"passes them. The seats run at once, each CLI's login checked before any turn starts, and the first to fail stops the others and fails the " +
 				"run, saving no round. The " +
 				"size is --size, else the size of the quest a quest/ branch names, read from the base's tip so a " +
@@ -1782,10 +1782,9 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		)
 		.option("--base <remote/branch>", "Base branch to review against (default: origin's default branch)")
 		.addOption(
-			new Option(
-				"--harness <name>",
-				"The only reviewer to run, instead of the run's draw",
-			).choices(REVIEW_HARNESSES),
+			new Option("--harness <name>", "The only reviewer to run, instead of the run's draw").choices(
+				REVIEW_HARNESSES,
+			),
 		)
 		.option("--model <model>", "Model the first seat, or --harness's reviewer, runs instead of its draw")
 		.option(

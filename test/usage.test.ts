@@ -199,6 +199,7 @@ describe("PR records", () => {
 		reviewer: "codex",
 		model: "gpt-6.2-sol",
 		effort: "high",
+		rung: { name: "deep", drawn: "down" },
 		branch: "quest/m0/a",
 		size: "L",
 		sizeFrom: "quest/m0/a.md",
@@ -248,10 +249,11 @@ describe("PR records", () => {
 		unchanged: false,
 	};
 
-	// The shadow: the pick one effort lower, in its own session.
+	// A second seat of the run: another model, in its own session, which a flag named.
+	const { rung: _, ...unrunged } = round;
 	const second: Round = {
-		...round,
-		shadow: true,
+		...unrunged,
+		model: "gpt-6.2-astra",
 		effort: "medium",
 		session: "thread-2",
 		round: 1,
@@ -261,20 +263,25 @@ describe("PR records", () => {
 	};
 
 	const tally = (
-		reviewer: Tally["reviewer"],
+		[reviewer, model, effort]: [Tally["reviewer"], string, string],
+		sessions: string[],
 		rounds: number,
 		findings: Tally["findings"],
 		fixed: number,
 		refuted: number,
 	): Tally => ({
 		reviewer,
-		model: "m",
-		effort: "high",
+		model,
+		effort,
+		sessions,
 		rounds,
+		last: rounds,
 		findings,
+		first: { high: 0, medium: 0, low: 0 },
 		fixed,
 		refuted,
 	});
+	const SOL = ["codex", "gpt-6.2-sol", "high"] as [Tally["reviewer"], string, string];
 	const reason = "It changes what the library returns.";
 	const risk: Risk = {
 		tier: "medium",
@@ -288,10 +295,17 @@ describe("PR records", () => {
 		sized: { size: round.size, from: round.sizeFrom },
 	};
 	const tallies = [
-		{ ...tally("codex", 3, { high: 1, medium: 1, low: 2 }, 2, 1), first: { high: 1, medium: 0, low: 1 } },
-		{ ...tally("codex", 1, { high: 0, medium: 0, low: 0 }, 0, 0), shadow: true as const },
-		// A left-out reviewer still names its session, so `quest usage` counts that session as reviewing.
-		{ ...tally("claude", 2, { high: 2, medium: 0, low: 0 }, 1, 0), session: CLAUDE },
+		{
+			// Its earlier rounds ran sessions of their own, which the record still names.
+			...tally(SOL, ["thread-0", THREAD], 3, { high: 1, medium: 1, low: 2 }, 2, 1),
+			first: { high: 1, medium: 0, low: 1 },
+		},
+		tally(["codex", "gpt-6.2-astra", "medium"], ["thread-2"], 1, { high: 0, medium: 0, low: 0 }, 0, 0),
+		// A reviewer of an earlier run still names its session, so `quest usage` counts that session as reviewing.
+		{
+			...tally(["claude", "m", "high"], [CLAUDE], 2, { high: 2, medium: 0, low: 0 }, 1, 0),
+			rung: { name: "frontier" as const, drawn: "up" as const },
+		},
 	];
 
 	const SKIP = {
@@ -308,16 +322,19 @@ describe("PR records", () => {
 		);
 		// A reviewer the run skipped is named in the header, outside the blocks parseReview reads.
 		expect(body).toContain(
-			"\n- Skipped: Claude Code, claude-opus-5-5, high effort: usage limit, resets 2026-11-18T03:00:00Z\n\n- Reviewer: Codex,",
+			"\n- Skipped: Claude Code, claude-opus-5-5, high effort: usage limit, resets 2026-11-18T03:00:00Z\n\n- Reviewer: Codex, gpt-6.2-sol, high effort, deep rung (down)\n",
 		);
+		// A reviewer a flag named has no rung, and one of an earlier run keeps its last round's.
+		expect(body).toContain("\n- Reviewer: Codex, gpt-6.2-astra, medium effort\n");
+		expect(body).toContain("\n- Reviewer: Claude Code, m, high effort, frontier rung (up)\n");
 		expect(parseReview(body)).toEqual([
 			{
 				harness: "Codex",
 				model: "gpt-6.2-sol",
 				effort: "high",
-				shadow: false,
-				second: false,
+				rung: { name: "deep", drawn: "down" },
 				session: THREAD,
+				sessions: [THREAD, "thread-0"],
 				round: 3,
 				score: 7,
 				tally: {
@@ -333,16 +350,16 @@ describe("PR records", () => {
 			},
 			{
 				harness: "Codex",
-				model: "gpt-6.2-sol",
+				model: "gpt-6.2-astra",
 				effort: "medium",
-				shadow: true,
-				second: false,
+				rung: null,
 				session: "thread-2",
+				sessions: ["thread-2"],
 				round: 1,
 				score: 10,
 				tally: {
 					rounds: 1,
-					first: null,
+					first: { high: 0, medium: 0, low: 0 },
 					findings: { high: 0, medium: 0, low: 0 },
 					fixed: 0,
 					refuted: 0,
@@ -351,19 +368,19 @@ describe("PR records", () => {
 				},
 				open: { high: 0, medium: 0, low: 0 },
 			},
-			// A reviewer the run left out, such as the pick a new one replaced, keeps its tally.
+			// A reviewer of an earlier run, which this one seated another model in place of, keeps its tally.
 			{
 				harness: "Claude Code",
 				model: "m",
 				effort: "high",
-				shadow: false,
-				second: false,
+				rung: { name: "frontier", drawn: "up" },
 				session: CLAUDE,
+				sessions: [CLAUDE],
 				round: null,
 				score: null,
 				tally: {
 					rounds: 2,
-					first: null,
+					first: { high: 0, medium: 0, low: 0 },
 					findings: { high: 2, medium: 0, low: 0 },
 					fixed: 1,
 					refuted: 0,
@@ -378,7 +395,7 @@ describe("PR records", () => {
 		// Claude's left-out tally still holds an open finding, which keeps it short too.
 		const clean = [{ ...round, findings: [] }, second];
 		expect(reviewRecord({ ...at, rounds: clean, tallies, risk, skipped: [] })).not.toContain("b".repeat(40));
-		const settledAll = [tally("codex", 3, { high: 1, medium: 1, low: 2 }, 3, 1), tallies[1]!];
+		const settledAll = [tally(SOL, [THREAD], 3, { high: 1, medium: 1, low: 2 }, 3, 1), tallies[1]!];
 		expect(reviewRecord({ ...at, rounds: clean, tallies: settledAll, risk, skipped: [] })).toContain(
 			`- Head: ${"b".repeat(40)}\n`,
 		);
@@ -386,7 +403,7 @@ describe("PR records", () => {
 		// The reviewer sessions read even from a record whose other lines this version cannot parse.
 		const newer = body.replace(/^- Rounds: 3;/m, "- Rounds: 3; first round 1 (medium 1);");
 		expect(() => parseReview(newer)).toThrow("Rounds line is malformed");
-		expect(reviewSessions(newer)).toEqual([THREAD, "thread-2", CLAUDE]);
+		expect(reviewSessions(newer)).toEqual([THREAD, "thread-0", "thread-2", CLAUDE]);
 		expect(classifierSessions(body)).toEqual([]);
 		const classified = reviewRecord({
 			...at,
@@ -687,13 +704,13 @@ describe("usage", () => {
 			"- Rounds: 1; findings 0: fixed 0, refuted 0, open 0",
 			"- Findings: none",
 			"",
-			// A reviewer the latest run left out, such as one a new size pick replaced, has only its tally.
+			// A reviewer of an earlier run has only its tally.
 			"- Reviewer: Claude Code, claude-opus-5-5, high effort",
 			"- Rounds: 1; findings 1 (medium 1): fixed 1, refuted 0, open 0",
 			"",
-			// The shadow, which measures an effort step and so stays out of the writer's accuracy, spelled as a gateway
-			// names it, which the reviewer rows fold into its listed ID.
-			"- Reviewer: Codex, openai/gpt-6.2-sol, medium effort, shadow",
+			// An earlier run's reviewer, drawn from the rung below the size's, spelled as a gateway names it, which
+			// the reviewer rows fold into its listed ID.
+			"- Reviewer: Codex, openai/gpt-6.2-sol, medium effort, standard rung (down)",
 			"- Rounds: 1; findings 3 (high 3): fixed 2, refuted 1, open 0",
 		].join("\n");
 		// #9's record and #10's tally the same branch, so the rollup counts the tally once, from #10. Only #10 has a tier.
@@ -977,20 +994,21 @@ describe("usage", () => {
 			["L", "reviewing", "codex", 1.25],
 			["L", "classifying", "claude", 7],
 		]);
+		// Every reviewer's tally counts for the writer, the down-drawn one's three findings included.
 		const tally = {
 			rounds: 2,
-			findings: { high: 1, medium: 1, low: 1 },
-			fixed: 2,
-			refuted: 1,
+			findings: { high: 4, medium: 1, low: 1 },
+			fixed: 4,
+			refuted: 2,
 			settled: 0,
 			open: 0,
 		};
 		// #10's, #7's, each deleted fork's, and #3's.
 		const five = {
 			rounds: 11,
-			findings: { high: 5, medium: 6, low: 4 },
-			fixed: 10,
-			refuted: 3,
+			findings: { high: 20, medium: 6, low: 4 },
+			fixed: 20,
+			refuted: 8,
 			settled: 1,
 			open: 1,
 		};
@@ -1013,9 +1031,9 @@ describe("usage", () => {
 			[1, 2, 0],
 			[1, 5.5, 0],
 		]);
-		// The routed Sol reviewer over #10, #5, #6, and #3, each branch's latest record, with its first rounds; its
+		// Sol at high effort over #10, #5, #6, and #3, each branch's latest record, with its first rounds; its
 		// session and sub-agent price it on #10.
-		const sol = report.reviewers.find((r) => r.size === "L" && r.model === "gpt-6.2-sol" && !r.shadow)!;
+		const sol = report.reviewers.find((r) => r.size === "L" && r.model === "gpt-6.2-sol" && r.effort === "high")!;
 		expect([sol.reviewed, sol.tally.rounds, sol.firstRounds, sol.spent.pulls, sol.spent.cost]).toEqual([
 			4,
 			9,
@@ -1023,11 +1041,17 @@ describe("usage", () => {
 			1,
 			1.25,
 		]);
-		expect(report.reviewers.filter((r) => r.size === "L").map((r) => [r.model, r.effort, r.shadow])).toEqual([
-			["claude-opus-5-5", "high", false],
-			["gpt-6.2-sol", "high", false],
-			["gpt-6.2-sol", "medium", true],
-			["gemini-3-pro", "high", false],
+		// Each row is one model and effort at the rung it was drawn from, with the later PRs that fixed what it
+		// reviewed: #11 names #10 under ## Caused by.
+		expect(
+			report.reviewers
+				.filter((r) => r.size === "L")
+				.map((r) => [r.model, r.effort, r.rung?.drawn ?? null, r.fixes]),
+		).toEqual([
+			["claude-opus-5-5", "high", null, 1],
+			["gpt-6.2-sol", "high", null, 1],
+			["gpt-6.2-sol", "medium", "down", 1],
+			["gemini-3-pro", "high", null, 1],
 		]);
 		expect(ten.online).toEqual([
 			{
@@ -1056,13 +1080,13 @@ describe("usage", () => {
 		]);
 		const text = usageLines(report).join("\n");
 		expect(text).toContain(
-			"  review: Claude Code, claude-opus-5-5, high effort; not in the latest run; rounds 1, findings 1 (medium 1): fixed 1, refuted 0, open 0\n",
+			"  review: Claude Code, claude-opus-5-5, high effort, named; not in the latest run; rounds 1, findings 1 (medium 1): fixed 1, refuted 0, open 0\n",
 		);
 		expect(text).toContain(
-			"rounds 2.0, findings 3 (high 1, medium 1, low 1): fixed 2, refuted 1, open 0, first rounds 0: 0; 0 land fixes, 1 later fixes; ~$2.00 per merged PR over 1",
+			"rounds 2.0, findings 6 (high 4, medium 1, low 1): fixed 4, refuted 2, open 0, first rounds 0: 0; 0 land fixes, 1 later fixes; ~$2.00 per merged PR over 1",
 		);
 		expect(text).toContain(
-			"   L  Codex        gpt-6.2-sol      high            4 reviewed: rounds 2.3, findings 8 (high 4, medium 1, low 3): fixed 4, refuted 2, settled 1, open 1, first rounds 4: 4 (high 4); ~$1.25 per PR reviewed over 1\n",
+			"   L  Codex        gpt-6.2-sol      high    named                 4 reviewed: rounds 2.3, findings 8 (high 4, medium 1, low 3): fixed 4, refuted 2, settled 1, open 1, first rounds 4: 4 (high 4); 1 later fixes; ~$1.25 per PR reviewed over 1\n",
 		);
 		// Spend split among seats nothing told apart is shown, so the text report does not hide it.
 		sol.spent.split = 0.5;
@@ -1070,14 +1094,14 @@ describe("usage", () => {
 			"~$1.25 per PR reviewed over 1, ~$0.50 of it split with other seats\n",
 		);
 		sol.spent.split = 0;
-		expect(ten.review.map((r) => [r.effort, r.shadow])).toEqual([
-			["high", false],
-			["high", false],
-			["high", false],
-			["medium", true],
+		expect(ten.review.map((r) => [r.effort, r.rung])).toEqual([
+			["high", null],
+			["high", null],
+			["high", null],
+			["medium", { name: "standard", drawn: "down" }],
 		]);
 		expect(text).toContain(
-			"  review: Codex, openai/gpt-6.2-sol, medium effort, shadow; not in the latest run; rounds 1, findings 3 (high 3): fixed 2, refuted 1, open 0\n",
+			"  review: Codex, openai/gpt-6.2-sol, medium effort, standard rung (down); not in the latest run; rounds 1, findings 3 (high 3): fixed 2, refuted 1, open 0\n",
 		);
 		expect(text).toContain(
 			"#10 L high merged: PR 10 (quest/m0/a)\n  risk: high, It rewrites the wire format.; raised from medium by a reviewer; class tests\n",

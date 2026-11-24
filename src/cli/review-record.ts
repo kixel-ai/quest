@@ -121,11 +121,7 @@ export function reviewRecord({ rounds, tallies, risk, skipped, head, base }: Rev
 		),
 	];
 	for (const round of rounds) {
-		lines.push(
-			"",
-			reviewerLine(round),
-			`- Session: ${code(round.session)}, round ${round.round}`,
-		);
+		lines.push("", reviewerLine(round), `- Session: ${code(round.session)}, round ${round.round}`);
 		const tally = tallies.find((each) => sameReviewer(each, round));
 		if (tally === undefined) throw new Error(`no tally for ${round.reviewer}'s round`);
 		lines.push(
@@ -264,7 +260,10 @@ export function parseReview(body: string): ReviewSummary[] {
 			rung:
 				reviewer[4] === undefined
 					? null
-					: { name: reviewer[4] as (typeof RUNG_NAMES)[number], drawn: reviewer[5] as (typeof DRAWN)[number] },
+					: {
+							name: reviewer[4] as (typeof RUNG_NAMES)[number],
+							drawn: reviewer[5] as (typeof DRAWN)[number],
+						},
 			session: session && session[2]!,
 			sessions: [...text.matchAll(/^- Session: (`+) ?(.*?) ?\1(?:, round \d+)?\r?$/gm)].map((found) => found[2]!),
 			round: session?.[3] === undefined ? null : Number(session[3]),

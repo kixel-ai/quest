@@ -958,8 +958,7 @@ function outcome(row: ReturnType<typeof noOutcomes>, each: PullRow, latest: Set<
  */
 function tallied(pulls: PullRow[], counts: (pull: PullRow) => boolean): Set<PullRow> {
 	const branch = (each: PullRow) => JSON.stringify([each.repository ?? each.number, each.branch]);
-	const rounds = (each: PullRow) =>
-		each.review.reduce((sum, review) => sum + (review.tally?.rounds ?? 0), 0);
+	const rounds = (each: PullRow) => each.review.reduce((sum, review) => sum + (review.tally?.rounds ?? 0), 0);
 	const latest = new Map<string, PullRow>();
 	for (const each of pulls) {
 		if (!counts(each) || each.review.every((review) => review.tally === null)) continue;

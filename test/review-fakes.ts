@@ -216,6 +216,8 @@ if (fake("FAKE_LIMITED")) {
 		? "exceeded retry limit, last status: 429 Too Many Requests"
 		: fake("FAKE_LIMITED") === "unknown"
 		? "You've hit your usage limit."
+		: fake("FAKE_LIMITED") === "unserved"
+		? "The '" + model + "' model is not supported when using Codex with a ChatGPT account."
 		: "You've hit your usage limit. Visit https://chatgpt.com/settings/usage to purchase more credits or try again at Nov 5th, 2026 3:15 PM.";
 	event({ type: "thread.started", thread_id: "thread-1" });
 	event({ type: "error", message });
@@ -414,6 +416,8 @@ export function setup(host: "CLAUDECODE" | "CODEX_THREAD_ID" | null = "CLAUDECOD
 	const log = join(dir, "calls");
 	mkdirSync(log);
 	vi.stubEnv("PATH", `${bin}:${process.env.PATH}`);
+	// Every draw takes its first choice: the size's rung, and each rung's models in the order listed.
+	vi.spyOn(Math, "random").mockReturnValue(0);
 	vi.stubEnv("FAKE_LOG", log);
 	// The session's own profile would change the logged-out errors.
 	const unset = [

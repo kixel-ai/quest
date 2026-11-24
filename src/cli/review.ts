@@ -399,7 +399,10 @@ export function drawing(size: Size, random: () => number): Pick<Draw, "size" | "
  * another cost. Only a rung none of whose models can take the seat, each avoided, out, or on a taken vendor, passes
  * it to the next rung outward.
  */
-export function drawSeat(draw: Draw, taken: readonly ReviewHarness[]): { reviewer: ReviewModel; rung: Rung } | undefined {
+export function drawSeat(
+	draw: Draw,
+	taken: readonly ReviewHarness[],
+): { reviewer: ReviewModel; rung: Rung } | undefined {
 	for (const rung of rungOrder(draw.size, draw.rung)) {
 		const open = draw.order[rung].filter((entry) => !taken.includes(entry.harness) && draw.usable(entry));
 		const reviewer =
@@ -413,29 +416,25 @@ export function drawSeat(draw: Draw, taken: readonly ReviewHarness[]): { reviewe
 /**
  * The one reviewer `--harness`, `--model`, or `--effort` names, which never passes its round on. `--harness` alone
  * takes that CLI's draw, and `--effort` alone the round's; `--model` and `--effort` then override its model and
- * effort. A `--model` a rung lists runs on its entry's harness and effort; one no rung lists needs `--harness`, whose
- * first entry gives its effort. An override never brings back an avoided model.
+ * effort. A `--model` a rung lists runs on its entry's harness and effort; one no rung lists runs at `--harness`'s
+ * first entry, or without it in place of the round's draw. An override never brings back an avoided model.
  */
 export function namedReviewer(choice: Choice, draw: Draw, avoided: (entry: ReviewModel) => boolean): ReviewModel {
 	const ours = (entry: ReviewModel) => choice.harness === undefined || entry.harness === choice.harness;
 	const pool = rungOrder(draw.size, draw.rung)
 		.flatMap((rung) => draw.order[rung])
 		.filter(ours);
+	const seat = () => drawSeat({ ...draw, usable: (each) => ours(each) && draw.usable(each) }, [])?.reviewer;
+	const first = choice.harness === undefined ? undefined : pool[0];
 	const entry =
 		choice.model === undefined
-			? (drawSeat({ ...draw, usable: (each) => ours(each) && draw.usable(each) }, [])?.reviewer ??
-				(choice.harness === undefined ? undefined : pool[0]))
-			: (pool.find((each) => sameModel(each.model, choice.model!)) ??
-				(choice.harness === undefined ? undefined : pool[0]));
+			? (seat() ?? first)
+			: (pool.find((each) => sameModel(each.model, choice.model!)) ?? first ?? seat());
 	const harness = choice.harness ?? entry?.harness;
 	const model = choice.model ?? entry?.model;
 	const effort = choice.effort ?? entry?.effort;
 	if (harness === undefined)
-		throw new ReviewInputError(
-			choice.model === undefined
-				? "every reviewer is avoided, as the latest writer's; pass --harness and --model"
-				: `no rung lists ${choice.model}; pass --harness and --effort`,
-		);
+		throw new ReviewInputError("every reviewer is avoided, as the latest writer's; pass --harness and --model");
 	if (model === undefined || effort === undefined)
 		throw new ReviewInputError(`no rung lists a ${harness} reviewer; pass --model and --effort`);
 	const picked = { harness, model, effort };
@@ -2667,9 +2666,14 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 			? latest
 			: [];
 	const number = kept.length > 0 ? runs : runs + 1;
-	const stood = kept.map(
-		(round): Round => ({ ...round, base, size: sized.size, sizeFrom: sized.from, usage: [], unchanged: true }),
-	);
+	const stood = kept.map((round): Round => ({
+		...round,
+		base,
+		size: sized.size,
+		sizeFrom: sized.from,
+		usage: [],
+		unchanged: true,
+	}));
 	const shared: Shared = {
 		root,
 		branch,
@@ -2701,18 +2705,17 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 		(options.harness === undefined || round.reviewer === options.harness) &&
 		(options.model === undefined || sameModel(round.model, options.model)) &&
 		(options.effort === undefined || round.effort === options.effort);
-	let { after, risk } = persist();
+	let after = tallies;
+	let risk = low;
 	// The first pass seats what the tier before the run calls for. A round that raised the tier to high gets the seat
 	// the lower tier skipped in a second pass, at once: the rounds already run are saved first, so a further reviewer
 	// that cannot run costs them nothing, and the next run seats it again.
 	for (let pass = 0; ; pass++) {
 		const first = pass === 0 && lead !== undefined && !kept.some(flagged) ? lead : undefined;
-		const count = Math.max(
-			seats(pass === 0 ? before : judged()) - kept.length - done.length,
-			first === undefined ? 0 : 1,
-		);
+		// The seats are vendors, so two standing rounds of one vendor's models, as a flag may name, fill one.
+		const taken = [...new Set([...kept, ...done].map((round) => round.reviewer))];
+		const count = Math.max(seats(pass === 0 ? before : judged()) - taken.length, first === undefined ? 0 : 1);
 		if (count === 0) break;
-		const taken = [...kept, ...done].map((round) => round.reviewer);
 		try {
 			let planned = plan(count, taken, first);
 			for (;;) {
@@ -2721,7 +2724,11 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 					break;
 				} catch (error) {
 					// A reviewer a flag named never passes its round on.
-					if (!(error instanceof ReviewerUnavailableError) || error.seat === undefined || error.seat === first)
+					if (
+						!(error instanceof ReviewerUnavailableError) ||
+						error.seat === undefined ||
+						error.seat === first
+					)
 						throw error;
 					if (error.model === null) down.add(error.harness);
 					out.add(canonicalModel(error.seat.model));
@@ -2753,6 +2760,8 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 		}
 		({ after, risk } = persist());
 	}
+	// A run that seated no one still saves the head's classification.
+	if (done.length === 0) ({ after, risk } = persist());
 	return { rounds: [...stood, ...done], tallies: after, risk, skipped, branch, head, base, sized };
 }
 
