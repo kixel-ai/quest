@@ -1725,8 +1725,9 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"repository's root, which makes an agent directory inside one a usage error. Each turn runs as quest's own " +
 				"agent, whose only tools are view_file and finish and which inherits none of the user's hooks, rules, plugins, or " +
 				"MCP tools, with permissions skipped, since print mode cannot approve a read outside its directory, and deny " +
-				"rules on commands, writes, web requests, MCP calls, and a read of any path outside the turn's directory, " +
-				"such as the checkout's untracked files or another CLI's login. With no shell, that directory holds an " +
+				"rules on commands, writes, web requests, MCP calls, and a read of any path outside the turn's directory that " +
+				"its start lists, such as the checkout's untracked files or another CLI's login, and the usual login paths under " +
+				"home before they exist; a file created beside its parents while the turn runs is not covered. With no shell, that directory holds an " +
 				"export of the reviewed head's tracked files, for the review turn alone, writing a symlink as a file holding " +
 				"its target, beside the directory agy runs in, files.txt listing them, and the diff of each range it reviews, " +
 				"both ignoring the head's .gitattributes. agy compares its read rules case-sensitively, so quest refuses to " +

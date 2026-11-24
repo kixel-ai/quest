@@ -1339,9 +1339,10 @@ const agy: Reviewer = {
 	status: ["agy", "models"],
 	isolated: true,
 	remoteStatus: true,
+	// The volume first, which the user cannot change, then Git, which they can.
 	supported: (dir) => {
-		attrSource();
 		beside(dir);
+		attrSource();
 	},
 	login: "agy",
 	credentials: [],

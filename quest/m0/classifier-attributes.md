@@ -19,6 +19,8 @@ adding `--attr-source=<empty tree>` to the diff and reverted it, since its
 review found the rest of this work:
 
 - The prompt's diff passes `--attr-source=<empty tree>`, as agy's diffs do.
+  That also covers an agy classifier, whose prompt carries the same inline
+  patch beside its workspace's own diff.
 - Past `DIFF_BUDGET`, the prompt holds only the stat and asks the classifier
   to read `git diff <range> -- <path>`. It should name
   `git --attr-source=<empty tree> diff <range> -- <path>` instead, with

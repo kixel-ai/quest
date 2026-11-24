@@ -540,6 +540,15 @@ describe("share", () => {
 			costs(share(unnamed, [gemini, { harness: "Claude Code", model: "claude-opus-5-5", effort: "high" }])),
 		).toEqual([[1, 5, 0]]);
 		expect(costs(share(unnamed, [gemini]))).toEqual([]);
+		// Nor does another harness's spend on the same model, as through a gateway.
+		expect(
+			costs(
+				share(
+					[spend("google/gemini-4-neon", "high", 5)],
+					[gemini, { harness: "Claude Code", model: "claude-opus-5-5", effort: "high" }],
+				),
+			),
+		).toEqual([[1, 5, 0]]);
 	});
 });
 
