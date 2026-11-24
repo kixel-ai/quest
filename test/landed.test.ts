@@ -2,7 +2,7 @@
 
 import { execFileSync } from "node:child_process";
 
-import { chmodSync, readdirSync } from "node:fs";
+import { chmodSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -179,7 +179,7 @@ describe("quest merge's landing check", () => {
 	/** Fix `main`'s dangling link after the branch left it, as a later landing would. */
 	function fixMain(tree: Tree, branch: string) {
 		git(tree, "switch", "--quiet", "main");
-		git(tree, "revert", "--quiet", "--no-edit", "HEAD");
+		git(tree, "revert", "--no-edit", "HEAD");
 		git(tree, "switch", "--quiet", branch);
 	}
 
@@ -195,9 +195,43 @@ describe("quest merge's landing check", () => {
 		const tree = brokenAtFork("fix/other");
 		tree.append("quest/m0/epic/two.md", "\n## Related\n\n- [Lost](/quest/m0/lost.md) - missing\n");
 		commit(tree, "another dangling link");
+		// Up to date, the merge base is the base tip.
+		expect((await inspect(tree, "fix/other")).map((finding) => finding.path)).toEqual(["quest/m0/epic/two.md"]);
 		fixMain(tree, "fix/other");
 		const findings = await inspect(tree, "fix/other");
 		expect(findings.map((finding) => finding.path)).toEqual(["quest/m0/epic/two.md"]);
+	});
+
+	test("reports a new entry whose finding reads like one the base fixed", async () => {
+		const tree = Tree.committed();
+		tree.append("quest/m0/epic/two.md", "\n## Waiting\n\n- nobody named\n");
+		commit(tree, "unattributed wait on main");
+		git(tree, "switch", "--quiet", "-c", "fix/swap");
+		tree.write("quest/m0/epic/two.md", tree.read("quest/m0/epic/two.md").replace("nobody named", "someone else"));
+		commit(tree, "swap the wait");
+		fixMain(tree, "fix/swap");
+		expect((await inspect(tree, "fix/swap")).map((finding) => finding.path)).toEqual(["quest/m0/epic/two.md"]);
+	});
+
+	test("skips a finding the base tip has that the head carries without merging it", async () => {
+		const tree = repo("fix/stacked");
+		git(tree, "switch", "--quiet", "main");
+		tree.append("quest/m0/epic/one.md", "\n## Related\n\n- [Gone](/quest/m0/gone.md) - missing\n");
+		commit(tree, "dangling link on main");
+		git(tree, "switch", "--quiet", "fix/stacked");
+		git(tree, "cherry-pick", "main");
+		expect(await inspect(tree, "fix/stacked")).toEqual([]);
+	});
+
+	test("reports a head whose quest tree it cannot read, though its merge base had the same", async () => {
+		const tree = Tree.committed();
+		writeFileSync(join(tree.path, "quest/m0/epic/one.md"), Buffer.from([0xff, 0xfe, 0x0a]));
+		commit(tree, "unreadable quest on main");
+		git(tree, "switch", "--quiet", "-c", "fix/unreadable");
+		tree.write("src.ts", "work\n");
+		commit(tree, "work");
+		fixMain(tree, "fix/unreadable");
+		expect((await inspect(tree, "fix/unreadable")).map((finding) => finding.path)).toEqual(["quest"]);
 	});
 
 	test("reports one more of a finding the merge base had", async () => {
@@ -211,6 +245,8 @@ describe("quest merge's landing check", () => {
 	test("passes a head that branched before the base adopted quests", async () => {
 		const tree = new Tree(initRepository());
 		tree.write("README.md", "hi\n");
+		// A placeholder directory holds no quest documents.
+		tree.write("quest/.gitkeep", "");
 		commit(tree, "init");
 		git(tree, "switch", "--quiet", "-c", "fix/early");
 		tree.write("src.ts", "work\n");

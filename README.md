@@ -748,10 +748,10 @@ head SHA and refuses once the head moves, or while any check on it that
 counts in `quest status` failed, required or not, naming each; pending checks do not block.
 It also refuses a head that fails `quest check --no-stubs --base <base> --branch
 <head branch>`, which it runs on git objects it fetches, so nothing from the
-head runs, and ignores findings its merge base with the base already has, so a
-head only behind the base passes; run a `quest` the PR
-cannot modify, since the head's own build could skip the check. A base without
-quests skips it. While the base requires an approval the PR lacks, such as an
+head runs, and ignores findings the base or the head's merge base with it
+already has, so being behind the base adds none; run a `quest` the PR
+cannot modify, since the head's own build could skip the check. A head without
+quests skips it when the base or its merge base has none. While the base requires an approval the PR lacks, such as an
 online reviewer's that a ruleset requires (GitHub's review decision is
 `review_required` or `changes_requested`), it only arms auto-merge, which waits
 for the approval, and refuses where nothing would wait, since an admin's token
