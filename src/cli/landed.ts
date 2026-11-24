@@ -171,7 +171,8 @@ function writable(dir: string): boolean {
 
 /**
  * A finding, keyed by its file, its message, and the source it points at: the whole entry holding its
- * line, continuation lines included, or else that line. The key survives edits elsewhere.
+ * line, continuation lines included, or else that line, under its `## ` section. The key survives
+ * edits elsewhere.
  */
 interface Keyed {
 	finding: Finding;
@@ -183,15 +184,17 @@ function treeCheck(dir: string, commit: string): Keyed[] {
 	const { sources, exists } = committedSources(dir, commit, null);
 	const docs = sources.map((source) => parse(source.path, source.text));
 	const files = new Map(
-		sources.map((source, index) => [source.path, { lines: source.text.split("\n"), entries: docs[index].entries }]),
+		sources.map((source, index) => [source.path, { lines: source.text.split("\n"), doc: docs[index] }]),
 	);
 	return check(docs, exists).map((finding) => {
 		const file = files.get(finding.path);
 		const line = finding.line;
 		if (line === null || file === undefined) return { finding, key: `${finding.path}\0${finding.message}\0` };
-		const entry = file.entries.find(({ line: start, end }) => start <= line && line <= end);
-		const text = file.lines.slice((entry?.line ?? line) - 1, entry?.end ?? line).join("\n");
-		return { finding, key: `${finding.path}\0${finding.message}\0${text}` };
+		const entry = file.doc.entries.find(({ line: start, end }) => start <= line && line <= end);
+		const start = entry?.line ?? line;
+		const section = file.doc.headings.filter((heading) => heading.line <= start).at(-1)?.text ?? "";
+		const text = file.lines.slice(start - 1, entry?.end ?? line).join("\n");
+		return { finding, key: `${finding.path}\0${finding.message}\0${section}\0${text}` };
 	});
 }
 

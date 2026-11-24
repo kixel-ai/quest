@@ -237,6 +237,16 @@ describe("quest merge's landing check", () => {
 		]);
 	});
 
+	test("reports a link the head moved under another section", async () => {
+		const tree = brokenAtFork("fix/moved");
+		tree.write("quest/m0/epic/one.md", tree.read("quest/m0/epic/one.md").replace("## Related", "## Plan"));
+		commit(tree, "move the link");
+		fixMain(tree, "fix/moved");
+		expect((await inspect(tree, "fix/moved")).map((finding) => finding.message)).toEqual([
+			"link does not resolve: /quest/m0/gone.md",
+		]);
+	});
+
 	test("skips a finding the base tip has that the head carries without merging it", async () => {
 		const tree = repo("fix/stacked");
 		git(tree, "switch", "--quiet", "main");
