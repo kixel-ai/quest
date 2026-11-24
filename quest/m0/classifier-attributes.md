@@ -23,10 +23,17 @@ review found the rest of this work:
 - The prompt's diff passes `--attr-source=<empty tree>`, as agy's diffs do.
   That also covers an agy classifier, whose prompt carries the same inline
   patch beside its workspace's own diff.
+- Both diffs also pass `--text`, since a head can plant a NUL byte in a
+  source file to trip Git's own binary detection, which ignores attributes.
+  A real binary's bytes then count against `DIFF_BUDGET` like any other
+  hunk. agy's review and classifier diffs, in `agyTurn`, take it too.
 - Past `DIFF_BUDGET`, the prompt holds only the stat and asks the classifier
   to read `git diff <range> -- <path>`. It should name
-  `git --attr-source=<empty tree> diff <range> -- <path>` instead, with
-  `classifyPrompt`'s test covering it.
+  `git --attr-source=<empty tree> diff --text <range> -- <path>` instead,
+  with `classifyPrompt`'s test covering it. An agy classifier has no shell
+  and reads that range from its turn's `diff-1.diff`, which `agyTurn`
+  already writes whole, so the prompt's command only names what that file
+  holds.
 - A tier saved before the change stays keyed to the same head, base, and
   risk file, so it's reused without the fixed diff. Add the diff's form to
   the classifier's cache key so those heads classify again.
