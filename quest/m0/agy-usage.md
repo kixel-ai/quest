@@ -7,7 +7,7 @@ reviewer's spend toward its own seat and no other: a session a `## Review`
 record names on an Antigravity seat goes to that seat, unnamed Antigravity
 spend goes to the seats of its model, and Antigravity rows stop being marked
 incomplete. Until then, Neon's spend stays off the Sol and Opus rows that
-[reviewer rungs](/quest/m0/reviewer-rungs.md) retunes from.
+`quest review`'s rungs are retuned from.
 
 ## Plan
 
@@ -41,7 +41,3 @@ right only while token-max reads none.
 ## Waiting
 
 - kixel-ai/token-max: `token-max sessions` reads `agy` sessions, priced or not, which [kixel-ai/token-max#206](https://github.com/kixel-ai/token-max/pull/206) plans. Check that an `agy` review session shows there with its session ID and usage.
-
-## Related
-
-- [Reviewer rungs](/quest/m0/reviewer-rungs.md) - retunes from the per-model spend this keeps honest

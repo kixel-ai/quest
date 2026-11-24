@@ -4,7 +4,7 @@
 
 `quest review` seats one local reviewer on a low-tier head, two on medium,
 and three on high, each from a different vendor, each drawn from the
-round's [reviewer rung](/quest/m0/reviewer-rungs.md), or the rungs outward
+run's reviewer rung, as `quest review` draws it, or the rungs outward
 from the size's when it is short of vendors that can run, with Gemini through
 `agy` among the vendors and never the writer's model. Low-tier heads get a
 local review for the first time. Once these seats find what Pullfrog finds
@@ -12,7 +12,7 @@ behind them, per dollar, Pullfrog and its required-approval ruleset retire.
 
 Non-goals: the writers, which only Claude runs since
 [kixel-ai/quest#832](https://github.com/kixel-ai/quest/pull/832); the rungs
-and their draw, which [reviewer rungs](/quest/m0/reviewer-rungs.md) builds.
+and their draw, which `quest review` has.
 
 ## Plan
 
@@ -37,20 +37,13 @@ Decided 2026-11-22 (maintainer, `/quest-plan` follow-up of
   (rejected: keep the fixed Codex, Gemini, Claude order; one seat and drop
   this quest).
 - What sets each seat's model? The round's rung, as
-  [reviewer rungs](/quest/m0/reviewer-rungs.md) draws it: each seat takes a
+  `quest review` draws it: each seat takes a
   model from it that the PR has not had yet, never the writer's, on a
   vendor no other seat that round has. An XL head that is high tier gets
   three vendors, such as Astra, Gemini, and a Claude model other than the
-  writer's. Reviewer rungs places Neon only on the M and L rungs, so at XS,
+  writer's. Neon sits only on the standard and deep rungs, M's and L's, so at XS,
   S, and XL the Gemini seat normally fills from the nearest rung outward, as
   the Guidance recommends.
-- ✅ No seat is ever weaker than the latest writer, at every size and tier
-  (maintainer, 2026-11-22, on
-  [kixel-ai/quest#819](https://github.com/kixel-ai/quest/pull/819#issuecomment-7087183777):
-  "don't have sonnet review opus, that's extremely dumb"; rejected: high
-  risk only). Interim: #819's `weaker()` and high-tier second seat route
-  reviews until [reviewer rungs](/quest/m0/reviewer-rungs.md) lands, which
-  drops the rule under rungs and deletes this line.
 - Pullfrog retires on evidence, as [routing evidence](/quest/m0/routing-evidence/README.md)
   records: compare what it still finds behind these seats per dollar, from
   its run logs' cost tables.
@@ -71,7 +64,3 @@ Guidance:
 - Dropping Pullfrog's ruleset is a change to kixel-ai/dotfiles'
   `bin/repo-settings`, not this repository; list it in the PR's
   follow-ups when the readout recommends it.
-
-## Required
-
-- [Reviewer rungs](/quest/m0/reviewer-rungs.md) - the per-round rung draw each seat takes its model from

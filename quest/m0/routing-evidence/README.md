@@ -61,31 +61,28 @@ Readout, the agent's choices for the implementer to revisit:
   arms (about 2% of PRs): report them alongside, not as the measure.
 - For each writer arm, compare first-round findings from the fixed efforts in
   `src/cli/models.ts`, review rounds, hand-backs, later `## Caused by` culprits, and cost
-  per merged PR. For each shadow pair, compare findings the routed reviewer
-  raised that the shadow missed, and the reverse, along with fixed and
-  refuted findings and cost per PR. A shadow finding that matches a routed
-  finding on the same file, within a few lines, counts as found by both;
-  check a sample of matches by hand before trusting the rule. The PR body's
-  `## Review` record keeps only tallies and the latest findings, so read
-  each finding's location from the branch's saved rounds under the clones'
-  `.git/quest/review/`. Recommend each table change to the
+  per merged PR. Recommend each table change to the
   maintainer with its tally. End the writer A/B by deleting its arms from
   `src/cli/models.ts`, with `quest models --arm`, the `arm` field of
   `quest unblocked --json`, and the arm notes in the README, guide, and
-  `/quest-run` and `/quest-iterate`. [Reviewer rungs](/quest/m0/reviewer-rungs.md)
-  ends the shadow reviewer (maintainer, 2026-11-23, rejecting keeping L's
-  shadow until its 116 first rounds), so read the shadow pairs gathered
-  until it lands, and after it compare reviewer models and efforts from
-  the rungs' draws: findings by severity, fixed against refuted, and later
-  `## Caused by` escapes, per `quest usage`'s reviewer rows. Recommend
-  moving a model up, down, or off its rung with its tally.
+  `/quest-run` and `/quest-iterate`. Reviewer rungs ended the shadow
+  reviewer (maintainer, 2026-11-23, rejecting keeping L's shadow until its
+  116 first rounds;
+  [kixel-ai/quest#858](https://github.com/kixel-ai/quest/pull/858)), so
+  compare reviewer models and efforts from the rungs' draws: findings by
+  severity, fixed against refuted, and later `## Caused by` escapes, per
+  `quest usage`'s reviewer rows, each a model and effort at the rung it
+  was drawn from and which way that lies from the size's. Recommend moving
+  a model up, down, or off its rung with its tally. The rungs' members
+  beyond the maintainer's placements are that PR's estimate from public
+  benchmarks and list prices, so check each first.
 - Carry the tallies into [the model check](/quest/m1/model-check.md)'s
   baseline.
 - Chart the arms' cost against quality as
   [the model check](/quest/m1/model-check.md)'s chart procedure describes,
   one point per arm, and link the charts with the recommendations. Its
   `quest usage --json` rows give each arm's cost per merged PR and
-  first-round findings, and each shadow pair's cost and findings per PR.
+  first-round findings, and each reviewer row's cost and findings per PR.
   Only tallies begun after
   [kixel-ai/quest#721](https://github.com/kixel-ai/quest/pull/721) merged
   record a first round, so count first rounds only over those.
@@ -174,8 +171,7 @@ three hosts' saved review rounds:
   - Astra picks for XL:
     [kixel-ai/quest#831](https://github.com/kixel-ai/quest/pull/831). Its
     Fable seat beside the L pick was dropped on 2026-11-23 for
-    [reviewer rungs](/quest/m0/reviewer-rungs.md), which seats Fable as a
-    rung member.
+    reviewer rungs, which seat Fable as a rung member.
   - Cost metric? ✅ Mean spend per merged PR, every session's, plus the
     spend of later PRs that name it under `## Caused by`, with a bootstrap
     95% interval, the median reported beside it (rejected: the median
@@ -261,6 +257,5 @@ Baseline from the 2026-11-11 audit, at API list price:
 
 ## Related
 
-- [Reviewer rungs](/quest/m0/reviewer-rungs.md) - the per-round reviewer draw whose tallies the readout compares
 - [Model check](/quest/m1/model-check.md) - retunes the tables each
   milestone from these tallies

@@ -77,7 +77,7 @@ checkpoints and outages to count by hand:
     (`handedBack / pulls`, merged PRs included), and later
     `## Caused by` escapes per merged PR (`fixes / merged`).
   - Local reviewers, one point per `reviewers` row (PR size, harness,
-    model, effort, shadow): cost per PR reviewed, `spent.cost /
+    model, effort, rung): cost per PR reviewed, `spent.cost /
     spent.pulls`, against findings per reviewed PR (`tally.findings` over
     `reviewed`) and the share fixed, `tally.fixed` over the findings
     settled one way or another (fixed, refuted, or settled).
@@ -126,7 +126,7 @@ checkpoints and outages to count by hand:
   too, since `quest agent` and `quest review` refuse `max`.
 
 - Read [routing evidence](/quest/m0/routing-evidence/README.md)'s readout
-  and baseline first: its shadow reviews and writer A/B measure the cells
+  and baseline first: its rung draws and writer A/B measure the cells
   that observational tallies cannot separate.
 - Baseline from m0's routing audit
   ([kixel-ai/quest#584](https://github.com/kixel-ai/quest/pull/584)): the 25

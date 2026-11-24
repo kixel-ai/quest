@@ -1494,87 +1494,73 @@ whole branch at the PR's size.
 
 ## Review locally
 
-`quest review` has a model other than the latest writer review the checkout's
-committed branch before it is pushed for review, at an effort set by the PR's
-size. Each size ranks its reviewers, the same for every repository:
+`quest review` has models other than the latest writer's review the checkout's
+committed branch before it is pushed for review, each run with reviewers the
+branch has not had. Reviewers sit on rungs, each a set of about equal cost and
+quality across vendors, the same for every repository:
 
-| PR size | Reviewer | When the reviewer wrote it or is weaker than its writer | Then, while those are out |
-|---|---|---|---|
-| XS | Codex `gpt-6.2-sol` medium | Claude Code `claude-opus-5-5` low | Codex `gpt-6.2-astra` medium, then Claude Code `claude-fable-5-2` medium |
-| S | Codex `gpt-6.2-sol` medium | Claude Code `claude-opus-5-5` low | Codex `gpt-6.2-astra` medium, then Claude Code `claude-fable-5-2` medium |
-| M, or none | Codex `gpt-6.2-sol` high | Claude Code `claude-opus-5-5` medium | Codex `gpt-6.2-astra` high, then Claude Code `claude-fable-5-2` high |
-| L | Codex `gpt-6.2-sol` xhigh | Claude Code `claude-opus-5-5` high | Codex `gpt-6.2-astra` xhigh, then Claude Code `claude-fable-5-2` xhigh |
-| XL | Codex `gpt-6.2-astra` high | Claude Code `claude-opus-5-5` xhigh | Codex `gpt-6.2-sol` xhigh, then Claude Code `claude-fable-5-2` xhigh |
+| Rung | Sizes | Reviewers |
+|---|---|---|
+| light | XS, S | Codex `gpt-6.2-sol` medium, Claude Code `claude-opus-5-5` low |
+| standard | M, or none | Codex `gpt-6.2-sol` high, Claude Code `claude-opus-5-5` medium, Antigravity `gemini-4-neon` medium |
+| deep | L | Codex `gpt-6.2-sol` xhigh, Claude Code `claude-opus-5-5` high, Codex `gpt-6.2-astra` medium, Antigravity `gemini-4-neon` high, Claude Code `claude-fable-5-2` medium |
+| frontier | XL | Codex `gpt-6.2-astra` high, Claude Code `claude-opus-5-5` xhigh, Claude Code `claude-fable-5-2` high |
 
-Sol is weaker than Fable and Astra, so Opus reviews what either wrote below XL.
-XL starts on Astra, which may review Fable's and Sol's work, so Opus takes
-Astra's; the rest of the row follows in order while those before it are out.
+Every run draws its rung anew: the size's half the time, the next stronger a
+quarter, and the next cheaper a quarter, which at the top or bottom rung, with
+no step past it, goes to the size's. So each model is measured on work a rung
+above and below its own, and the rungs can be retuned from what each finds.
 
-Beside it, the shadow, the pick's model one effort away on the ladder (low,
-medium, high, xhigh), reviews the same head in its own session, so the routing
-can be retuned from what each effort step finds over its neighbor. It runs one
-effort above the pick for an S or M PR (Sol high for S), one below for an L or
-XL PR (Astra medium for XL), and not at all for an XS PR or a Fable pick, whose limit also writes XL
-quests and seats high heads' second reviewer, and is skipped when no such effort is on
-the ladder, as above xhigh or for an `--effort` off it.
+Each seat of the run takes a model of that rung the branch has not had, in an
+order drawn anew each run, while one is left, then the one whose last round is
+the oldest. No two seats of a run share a vendor. A rung none of whose models
+can take the seat, each avoided, unable to run, or on a vendor another seat
+has, passes it to the size's rung, then each rung outward from it, the
+stronger first. The seats run at once, each CLI's login checked before any
+turn starts; the first to fail, such as on a usage limit, stops the others,
+and the run saves no round.
 
-It runs on the branch's first run of the pick, then reruns only while it has findings to settle, or once the pick
-changed so that it is no longer that step away; its findings are numbered,
-answered, and settled like any reviewer's. A pick with no shadow, as at XS or on a high
-head, seats the old shadow as it ran while it still has findings, so none is
-left unanswered and its session carries on, unless its model is avoided or
-cannot run, when one at the pick's effort settles them. The reviewers run at once;
-the first to fail, such as on a usage limit, stops the others, and the round
-saves none.
-
-A reviewer that cannot run passes the round to the next eligible one, so
-Astra reviews what Opus changed last while Sol is out, and Fable while all of
-Codex is. That is a failure the CLI or provider reports before any finding is
-saved, never text in the diff or a reply: a CLI that is not installed, logged
-out, or has its login rejected, or sent to a gateway with no credential,
-passes over every model of that CLI, and a
-model at its usage limit passes over only itself. The run prints a `skipped`
-line for each reviewer it passed over, and the record names it in its
-header:
+A reviewer that cannot run passes its seat on the same way. That is a failure
+the CLI or provider reports before any finding is saved, never text in the
+diff or a reply: a CLI that is not installed, logged out, or has its login
+rejected, or sent to a gateway with no credential, passes over every model of
+that CLI, so a user without `agy` reviews on the other two, and a model at its
+usage limit, or one its login or gateway does not serve, as Codex's `model is
+not supported when using Codex with a ChatGPT account`, passes over only
+itself. The run prints a `skipped` line for each reviewer it passed over, and
+the record names it in its header:
 
 ```markdown
 - Skipped: Codex, gpt-6.2-sol, high effort: usage limit, resets 2026-11-18T03:00:00Z
 ```
 
-The new reviewer settles the open findings of the one it replaces, and the
-shadow follows it. Only when every eligible reviewer is out does the run fail,
-exiting 3 with each one's error. A reviewer `--harness`, `--model`, or
-`--effort` names never passes the round on.
+Only when no reviewer is left for a seat does the run fail, exiting 3 with
+each one's error. A reviewer `--harness`, `--model`, or `--effort` names never
+passes its seat on.
 
 A quest branch takes its quest's size, read from the base branch's tip so a
 change cannot lower its own review; any other PR, such as a skill's own, takes
 the `Size:` line of the `## Models` record in its open PR's body, and a PR with
-neither gets M's reviewers. `--size` overrides both. The first reviewer whose
-model is neither the latest writer's nor weaker than it reviews: Sonnet is
-weaker than every other model and never reviews its own work, so it reviews
-nothing and no list names it, and Sol is
-weaker than Fable and Astra. The record's last `Implementer:` line
-names the latest writer, since each session moves its line last whenever it pushes, or
-`--exclude-model` names each model to avoid instead, with every model weaker
-than it. Earlier writers may review.
+neither is an M. `--size` overrides both. Only the latest writer's model is
+avoided, so a draw may seat a model weaker than the writer; earlier writers
+may review. The record's last `Implementer:` line names the latest writer,
+since each session moves its line last whenever it pushes, or
+`--exclude-model` names each model to avoid instead.
 Without a record, or when its last line names an `unknown` model, the harness
 running the command, usually the session that
 just pushed, detected from the variables Claude Code, Codex, and Antigravity
 each set, is taken to be the latest writer, so Codex reviews from Claude Code
-and Claude Code from Codex; with no model known, no weaker one is avoided, so
-the never-weaker rule needs the record. `--harness` names the only reviewer instead of
-the pick and the shadow, at the model and effort of its first entry whose model is not avoided, and
-`--model` and `--effort` override the size pick's or that reviewer's, as a
-repository whose `AGENTS.md` names other reviewers needs; a `--model` the list
-names, in any spelling such as `openai/gpt-6.2-astra`, runs on its own entry's
-harness and effort, passed to the CLI as given, and one it does not at
-`--harness`'s first entry. `--exclude-model`, records, and `quest usage` match
-a listed model by any spelling too. A `--harness` run keeps the other
-reviewers' sessions for the pick's next run, and refuses while one has
-findings to settle, so a head never passes one reviewer alone while the other's
-findings are open. When the latest writer changes the size's pick to one with
-no session on the branch, its first session settles the open findings of the
-reviewer it replaces, and the new pick's shadow settles the old shadow's. An unknown harness or a size whose
+and Claude Code from Codex. `--harness` names the only reviewer instead of
+the draw, taking that CLI's own draw, and
+`--model` and `--effort` override that reviewer's or, without `--harness`, the
+first seat's, as a
+repository whose `AGENTS.md` names other reviewers needs; a `--model` a rung
+lists, in any spelling such as `openai/gpt-6.2-astra`, runs on its own entry's
+harness and effort, passed to the CLI as given, and one no rung lists at
+`--harness`'s first entry, or without it in place of the first seat's draw.
+`--exclude-model`, records, and `quest usage` match
+a listed model by any spelling too. A reviewer a flag names records no rung.
+An unknown harness or a branch whose
 every reviewer is avoided is an error rather than a same-model review. The reviewer reaches its model as the user's own CLI does:
 Claude Code keeps `ANTHROPIC_BASE_URL`, `ANTHROPIC_CUSTOM_HEADERS`, and its
 cloud providers' `CLAUDE_CODE_USE_*` switches and settings, so a gateway such
@@ -1602,7 +1588,7 @@ A logged-out error names the profile the CLI checked, `CLAUDE_CONFIG_DIR` or
 ```sh
 quest review                                  # round 1 against origin's default branch
 quest review --responses .tmp/responses.md    # round 2: the new head, with fixes and refutations
-quest review --base origin/release --new      # a new session against another base
+quest review --base origin/release --new      # another base, dropping the last run's findings
 quest review --size S --exclude-model gpt-6.2-sol  # an S PR that Sol wrote, with no record in its body
 quest review --branch quest/m1/foo --responses .tmp/responses.md  # a detached checkout of that branch's head
 ```
@@ -1610,7 +1596,7 @@ quest review --branch quest/m1/foo --responses .tmp/responses.md  # a detached c
 Every turn reviews only the branch's own change, from the merge base of `HEAD`
 with the base's tip, so a branch behind its base draws no findings on code the
 base gained since, which a diff against its tip shows as reverted.
-The first round explores the change once. It runs the reviewer's own review,
+Each round explores the change once. It runs the reviewer's own review,
 `codex exec review` with custom instructions or Claude Code's `/code-review
 <effort> <merge-base>...HEAD` with text after the target, or for `agy`, which
 has none, a turn asking what the change breaks, given the range, the
@@ -1624,33 +1610,35 @@ findings are fixed, 4 to 6 needs rework, and 0 to 3 is the wrong approach. A
 head with no findings can still score below 10. A reply without a valid score
 fails like any malformed reply. Each finding is high, medium, or low severity;
 low is anything that would not block landing. The score informs; the findings
-and their refutations still decide when the loop ends. Later rounds take
-`--responses`, the author's free-text fixes and refutations, which a round that
-reported findings requires. A later round resumes the session and checks only
-what changed since the last round's head and its findings when nothing but the
-head changed: the same model, effort, and base, a merge base the last round's
-covers, as when the base moved on, the same applicable `AGENTS.md`,
-`CLAUDE.md`, and `REVIEW.md`, and the last round's head still in the clone,
-which an amend and a prune can remove. Otherwise it starts a new session that reviews
-the whole change and still weighs the responses. A round that would resume on
-the head the last round reviewed, when that round found nothing, runs no
-reviewer and repeats that round, marked `unchanged`. A refutation stands only
-when it cites evidence the reviewer can check. Findings are numbered across the
-reviewers, in the order the round printed them. The prompt numbers the last
-round's findings, and the reply settles each by its number as fixed, refuted,
-or still open, with a one-sentence reason; a reply that skips or repeats one,
-or keeps more open than it reports, fails like any malformed reply. A first
-round's schema has no such list. Each reviewer settles only its own findings,
-and gets `--responses` only when it has some, so on the same head only a
-reviewer with findings runs. Resuming keeps the reviewer's prompt cache; Claude
-Code is asked for its 1-hour cache, and Codex keeps its default. Each
-reviewer's session is kept per branch in the clone's common Git directory, so
-any worktree of the clone resumes it; `--new` starts new sessions, but
+and their refutations still decide when the loop ends.
+
+No round resumes another's session: each starts its own and reviews the whole
+change, so a later run costs what the first did and is another model's
+independent read. Later runs take
+`--responses`, the author's free-text fixes and refutations, which a run that
+reported findings requires. Findings are numbered across the run's
+reviewers, in the order it printed them. Every seat of the next run is given
+those findings and the responses, and its reply settles each by its number as
+fixed, refuted, or still open, with a one-sentence reason, before it reviews
+the change anew; a reply that skips or repeats one,
+or keeps more open than it reports, fails like any malformed reply. A
+refutation stands only
+when it cites evidence the reviewer can check. A run on
+the head the last run passed with no finding, under the same base and
+applicable `AGENTS.md`, `CLAUDE.md`, and `REVIEW.md`, runs no
+reviewer and repeats its rounds, marked `unchanged`, but for a seat the tier
+now calls for that they lack, or a reviewer a flag names that is not among
+them, which joins that run. Claude
+Code is asked for its 1-hour prompt cache, and Codex keeps its default. The
+branch's rounds are kept in the clone's common Git directory, so
+any worktree of the clone continues them; `--new` drops the last run's
+findings unsettled, and its classification, but
 continues each reviewer's tally of its findings on the branch, less those it
-drops unsettled, unless the saved state is one this quest cannot read.
+drops, unless the saved state is one this quest cannot read, which it
+replaces.
 `--branch` names the branch instead of the checked-out one, which a detached
 `HEAD` requires, such as a checkout of a branch another worktree holds, so its
-rounds continue that branch's session.
+rounds continue that branch's.
 
 The reviewer is read-only: Codex in its `read-only` sandbox, ignoring
 execpolicy rules, and Claude Code with only read tools and the Bash commands it
@@ -1684,8 +1672,8 @@ change cannot instruct its own reviewer. The base's `REVIEW.md` is optional,
 given at the start of each session, and chooses the review's stance, such as adversarial.
 
 `--harness agy` reviews with Google's Antigravity CLI, `agy`, which only
-reviews: name its
-model and effort, as `--model gemini-4-neon --effort xhigh`. It runs `agy -p`
+reviews, at its own draw or the model and effort named, as
+`--model gemini-4-neon --effort xhigh`. It runs `agy -p`
 on your own Antigravity login, wherever `agy` keeps it: the OS keyring, or over
 ssh its configuration directory, `~/.gemini/antigravity-cli`. Run `agy` to sign
 in. No `ANTIGRAVITY_*` or `AGY_*` variable reaches it, so no gateway either,
@@ -1747,19 +1735,19 @@ maintainer's checkout of a contributor's fork PR. It
 prints `record <url>`. The record
 names the reviewed head and the base's short SHA, the head's risk tier and who
 classified it, then for each reviewer its
-harness, model, and effort, its Reviewer line ending in `, shadow` for the
-shadow or `, second` for the second reviewer, the session and round, the score and rationale, the tier it raised the
+harness, model, and effort, its Reviewer line ending in its rung and which way
+it was drawn from the size's, as `, deep rung (up)`, unless a flag named it,
+its every session, the latest session and round, the score and rationale, the tier it raised the
 risk to and why, its tally, each finding with
 its location, and the last round's findings with their dispositions. The
 tally, as `- Rounds: 3; first round 2 (medium 2); findings 4 (high 1, medium 3): fixed 3, refuted 1, open 0`,
-counts the reviewer's rounds on the branch, its first round's findings as that
+counts the rounds on the branch of that model at that effort, its first round's findings as that
 round graded them, and each finding it raised once,
-by its latest severity, however many rounds keep it open. A tally begun before
-it kept first rounds leaves that part out. A finding counts
-for the reviewer that raised it when a new size pick's reviewer fixes or
-refutes it, but one that reviewer keeps open becomes its own, since its round
+by its latest severity, however many rounds keep it open. A finding counts
+for the reviewer that raised it when a later run's reviewer fixes or
+refutes it, as the run's first round settled it, but one that reviewer keeps open becomes its own, since its round
 reports it again. `--new` drops the findings it leaves unsettled from the
-tallies. A reviewer the run left out keeps a block with only its session and
+tallies. A reviewer of an earlier run keeps a block with only its sessions and
 tally. `quest status` takes the last full SHA the section names as the
 reviewed head, so the head appears in full only once no reviewer reports a
 finding, and model text
@@ -1800,8 +1788,8 @@ run catches what those miss.
 | Tier | Local review | Lands on |
 |---|---|---|
 | Low | None; the online reviewer only | Its own, once its class is in `RISK.md`'s `## Automatic` list; else the maintainer's pick |
-| Medium | The size's pick | The maintainer's pick |
-| High | No shadow, but a second reviewer from another vendor on the high list; the pick comes from that list too when the classifier or an override set the tier | The maintainer's pick, with the full brief |
+| Medium | One reviewer, drawn around the size's rung | The maintainer's pick |
+| High | Two reviewers of different vendors, each drawn from the run's rung | The maintainer's pick, with the full brief |
 
 `/quest-run` carries the picks.
 
@@ -1863,21 +1851,11 @@ to its block. A `- Class:` line follows when the classifier named a class.
 A low head with no finding left to settle runs no local reviewer, unless
 `--harness`, `--model`, or `--effort` names one: the record names the head in
 full, adds `- Local review: none, since a low-risk head needs only the online
-reviewer`, and `next done` says so. A high head runs no shadow but gets a
-second reviewer: the first of the `high` list (Codex `gpt-6.2-sol` xhigh,
-Claude Code `claude-opus-5-5` xhigh, Claude Code `claude-fable-5-2` xhigh,
-Codex `gpt-6.2-astra` xhigh) from a vendor other than the pick's that can
-run, so Sol and Fable review Opus's work, and Opus and Astra Sol's or
-Fable's. It is marked `second`, in a session of its own that
-reviews every head while the tier is high and settles its findings after. A
-head the classifier or `--override` holds high also takes its pick from that
-list, whatever the PR's size; a reviewer's raise changes only the second
-reviewer, so the pick, and its session, stay the same on the head, unless that
-raise ends an override, as below. `--model`
-and `--effort` change only the pick, so the second reviewer still runs; the
-one reviewer `--harness` names runs alone, at its entry in the pick's list,
-with none. A round that raises the tier to high saves its rounds and runs the
-second reviewer at once; when that review
+reviewer`, and `next done` says so. A high head seats two reviewers
+of different vendors, each drawn from the run's rung as any seat is. `--model`
+and `--effort` name only the first seat, so the second still runs; the
+one reviewer `--harness` names runs alone. A round that raises the tier to high saves its rounds and seats the
+second reviewer at once, on a vendor the head's rounds lack; when that review
 fails, as when none can run, it prints those rounds before the error, so their
 findings can be answered. When every model of the other vendor is avoided, as
 with no `## Models` record, which avoids every model of the harness running the
@@ -1940,7 +1918,7 @@ whole cost. Each session gets the record
 it, so a review's sub-agents count as reviewing. Each PR shows its `## Models` size, its risk tier and
 whether a reviewer raised it, and its implementers, and as `unread:` each Implementer line it cannot read; each reviewer the
 `quest review` record names, with its latest round and score and its tally of
-findings across every round, marked `shadow` or `second` for those seats, where a merged PR whose last round left only low
+findings across every round, with the rung it was drawn from, where a merged PR whose last round left only low
 findings open counts them settled, since `/quest-review` fixes or refutes those
 before merge without another round; the land fixer's fixes; the later merged PRs
 whose `## Caused by` names it on a bullet that opens with its link, as
@@ -1964,10 +1942,9 @@ a bot resolving its own thread or a later review leaving it out, and as
 unanswered otherwise.
 
 Rollups follow: spend by size, role, harness, model, and effort; accuracy
-by size and implementer, which sums the tallies but the shadow's, and their
-first rounds over the PRs whose every such tally records one, so it counts
-every finding the routed reviewers caught before merge, while the shadow's
-findings measure an effort step rather than the writer. Since a branch's tallies span every PR from it, only the
+by size and implementer, which sums every reviewer's tally and their
+first rounds, so it counts
+every finding the reviewers caught before merge. Since a branch's tallies span every PR from it, only the
 PR whose record holds its latest tally, by the most rounds and then the newest,
 counts them, and a record written before tallies
 counts as unreviewed. An `Implementer:` line's own size, as
@@ -1981,18 +1958,21 @@ and spend on a model no line names, such as a sub-agent on a smaller model,
 to the line that took the most. Spend that fits several lines goes to the
 first line when an implementing session spent it and to the later ones when an
 iterating one did. Local reviewers roll up the same way, by the
-PR's size and each reviewer's harness, model, effort, and shadow mark: PRs
-reviewed, tallies, first rounds, and reviewing cost per PR, where a session
-the record names, or its sub-agent, goes to that reviewer. Spend still left
-fitting several, such as a routed and a shadow reviewer at one effort whose
+PR's size and each reviewer's harness, model, effort, and rung with which way
+it was drawn, `named` for one a flag named: PRs
+reviewed, tallies, first rounds, the later PRs whose `## Caused by` names one
+it reviewed, and reviewing cost per PR, where a session
+the record names, or its sub-agent, goes to that reviewer. So one model's rows
+compare what it finds, and what slips past it, on work at its rung, a rung
+up, and a rung down. Spend still left
+fitting several, such as two reviewers on one model whose
 sessions no record names, is split evenly among them and reported as `split`.
 Each risk tier's PRs, how many merged,
 how many a reviewer raised, how many the maintainer overrode, how many a later
 PR's `## Caused by` names, and how long they waited on a person show whether
 the tiers predict what breaks and what each costs. Each `## Automatic` class
 the classifiers named gets the same numbers, and how many of its PRs were low,
-to argue for or against merging the class without a pick. A local reviewer
-row marked `second` shows what the high tier's second review catches. Each breakage a merged PR in the
+to argue for or against merging the class without a pick. Each breakage a merged PR in the
 window names under `## Caused by` follows on its own line, by culprit, even one
 older than the window, which is read from GitHub: the culprit's tier, size,
 writers, and local reviewers, who found it and the incident it closes when

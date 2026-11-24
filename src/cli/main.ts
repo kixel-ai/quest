@@ -1702,7 +1702,6 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"repeats its rounds, marked unchanged, but for a seat the tier now calls for that they lack, or a reviewer a flag names that is not among them, which joins that run. " +
 				"--new drops the last run's findings unsettled, and its classification, continuing each reviewer's tally of its findings on the branch, less those it drops, unless the saved state is one this quest cannot read. The branch's rounds are kept in the clone's common Git directory, so any worktree of the clone continues them. " +
 				"A checked-out branch with an upstream other than the base continues its upstream branch's rounds, so a " +
-				"A checked-out branch with an upstream other than the base continues its upstream branch's session, so a " +
 				"temporary branch tracking the PR's head shares the head's rounds. " +
 				"--branch names the branch instead of the checked-out one, as a detached HEAD requires, such as a " +
 				"checkout of a branch another worktree holds.\n\n" +
@@ -1712,8 +1711,8 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"each directory holding a changed path, never the checkout's, so a change cannot instruct its own " +
 				"reviewer, and is told to disregard other instructions and run no builds, tests, or quest commands. " +
 				"The base is fetched first, since the sandbox has no network.\n\n" +
-				"--harness agy reviews with Google's Antigravity CLI, which only reviews; name its --model and --effort, as " +
-				"gemini-4-neon and xhigh. It runs `agy -p` on the user's own Antigravity login, in the keyring or, over ssh, " +
+				"--harness agy reviews with Google's Antigravity CLI, which only reviews, at its " +
+				"own draw or the --model and --effort named, as gemini-4-neon and xhigh. It runs `agy -p` on the user's own Antigravity login, in the keyring or, over ssh, " +
 				"its configuration directory, with no ANTIGRAVITY_* or AGY_* variable, so no gateway, and GEMINI_API_KEY and " +
 				"GOOGLE_API_KEY never replace the login. Each turn and the status check, `agy models`, run in a new private " +
 				"directory outside any repository, since agy loads the agent configuration of each directory up to the " +
