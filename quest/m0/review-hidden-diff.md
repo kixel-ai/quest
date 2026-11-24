@@ -28,6 +28,6 @@ classifier (`--attr-source=<empty tree>` and `--text`), so both read diffs
 the same way. Test each with a fixture head that hides its change both
 ways.
 
-## Related
+## Required
 
-- [The risk classifier sees every hunk](/quest/m0/classifier-attributes.md) - owns the classifier's diff and the Git 2.41 check this reuses
+- [The risk classifier sees every hunk](/quest/m0/classifier-attributes.md) - settles the attribute flags and adds the Git 2.41 check these diffs then need
