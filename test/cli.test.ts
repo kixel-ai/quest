@@ -224,7 +224,7 @@ test("models ranks a size's writers, or the one entry that runs a PR's writer", 
 	expect(writer("L", "claude-sonnet-5-5")).toBe("claude\tclaude-sonnet-5-5\thigh\n");
 	expect(writer("XL", "claude-opus-5-5")).toBe("claude\tclaude-opus-5-5\txhigh\n");
 	// Codex only reviews, so an iterate on a PR Sol wrote takes its size's first entry instead.
-	for (const model of ["unknown", "gpt-6.1-sol"]) {
+	for (const model of ["unknown", "gpt-6.2-sol"]) {
 		const unknown = tree.run("models", "S", "--writer", model);
 		expect(unknown.code).toBe(2);
 		expect(unknown.stderr).toContain(`no write list names ${model}`);

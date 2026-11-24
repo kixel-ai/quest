@@ -134,7 +134,7 @@ test("the review record's risk reads back, and a record without one names none",
 				`- Head: ${head}`,
 				"- Base: origin/main at bbbbbbbbbbbb",
 				"- Risk: high, ``` ``ships`` to peers ```",
-				"- Classified: low by Codex, gpt-6.1-sol, low effort, session `thread-9`",
+				"- Classified: low by Codex, gpt-6.2-sol, low effort, session `thread-9`",
 			]),
 		),
 	).toEqual({

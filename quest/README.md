@@ -36,7 +36,10 @@ Codex, then Gemini write; Codex, Gemini, then Claude review; "T-shirt size
 determines model/effort, while risk determines number of reviewers"
 (rejected: a user ranking within shipped lists, which deletes
 `quest/m1/model-config.md`; lists per reasoning effort; Claude-only
-writers).
+writers). Amended 2026-11-23 (maintainer, `/quest-run` on
+[kixel-ai/quest#831](https://github.com/kixel-ai/quest/pull/831#issuecomment-7111249892)):
+reviewers draw from cross-vendor rungs each round instead of a fixed order,
+as [reviewer rungs](/quest/m0/reviewer-rungs.md) plans.
 
 Decided 2026-11-21 (maintainer, `/quest-plan` in
 [kixel-ai/kixel.quest#85](https://github.com/kixel-ai/kixel.quest/pull/85)),

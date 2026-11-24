@@ -215,7 +215,7 @@ const breakage = (extra: Partial<BreakageRecord> = {}): BreakageRecord => ({
 		tier: "low",
 		size: "S",
 		writers: [{ harness: "Claude", model: "claude-opus-5-5", effort: "medium" }],
-		reviewers: [{ harness: "Codex", model: "gpt-6.1-sol", effort: "high" }],
+		reviewers: [{ harness: "Codex", model: "gpt-6.2-sol", effort: "high" }],
 	},
 	fix: 9,
 	incident: null,

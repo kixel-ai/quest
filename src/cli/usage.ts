@@ -25,7 +25,7 @@ import {
 	WAIT_KINDS,
 } from "../core";
 import type { Arm } from "./models";
-import { recorded } from "./models-record";
+import { canonicalModel, recorded } from "./models-record";
 import { type ClaimDependencies, upstream } from "./claims";
 import { repositoryPath } from "../github/client";
 import { git } from "./git";
@@ -774,14 +774,15 @@ function spendRows(pulls: PullRow[]): SpendRow[] {
 	for (const each of pulls)
 		for (const session of each.sessions)
 			for (const spent of session.models) {
-				const id = JSON.stringify([each.size, session.role, session.harness, spent.model, spent.effort]);
+				const model = spent.model === null ? null : canonicalModel(spent.model);
+				const id = JSON.stringify([each.size, session.role, session.harness, model, spent.effort]);
 				let row = rows.get(id);
 				if (!row) {
 					row = {
 						size: each.size,
 						role: session.role,
 						harness: session.harness,
-						model: spent.model,
+						model,
 						effort: spent.effort,
 						sessions: 0,
 						...zero(),
@@ -853,12 +854,14 @@ export function share(
 		shares.set(seat, to);
 	};
 	const rest: Spent[] = [];
+	const canonical = (model: string | null) => (model === null ? null : canonicalModel(model));
 	for (const each of spent) {
 		if (each.seat !== undefined) {
 			into(each.seat, each);
 			continue;
 		}
-		const same = seats.flatMap((seat, i) => (seat.model === each.model ? [i] : []));
+		const model = canonical(each.model);
+		const same = seats.flatMap((seat, i) => (canonical(seat.model) === model ? [i] : []));
 		const effort = each.effort ?? "unknown";
 		const exact = same.filter((i) => seats[i]!.effort === effort);
 		const loose = same.filter((i) => seats[i]!.effort === "unknown" || effort === "unknown");
@@ -974,13 +977,14 @@ function accuracyRows(pulls: PullRow[]): AccuracyRow[] {
 			each.state === "merged" ? share(writing, distinct) : new Map<number, Tokens & { split: number }>();
 		for (const [i, implementer] of distinct.entries()) {
 			const size = implementer.size;
-			const id = JSON.stringify([size, implementer.harness, implementer.model, implementer.effort]);
+			const { model } = implementer;
+			const id = JSON.stringify([size, implementer.harness, model, implementer.effort]);
 			let row = rows.get(id);
 			if (!row) {
 				row = {
 					size,
 					harness: implementer.harness,
-					model: implementer.model,
+					model,
 					effort: implementer.effort,
 					...noOutcomes(),
 					spent: noSpend(),
@@ -1005,20 +1009,14 @@ function reviewerRows(pulls: PullRow[]): ReviewerRow[] {
 	const rows = new Map<string, ReviewerRow>();
 	const latest = tallied(pulls, () => true);
 	const row = (each: PullRow, review: ReviewSummary) => {
-		const id = JSON.stringify([
-			each.size,
-			review.harness,
-			review.model,
-			review.effort,
-			review.shadow,
-			review.second,
-		]);
+		const model = canonicalModel(review.model);
+		const id = JSON.stringify([each.size, review.harness, model, review.effort, review.shadow, review.second]);
 		let found = rows.get(id);
 		if (!found) {
 			found = {
 				size: each.size,
 				harness: review.harness,
-				model: review.model,
+				model,
 				effort: review.effort,
 				shadow: review.shadow,
 				second: review.second,
