@@ -321,10 +321,10 @@ export function daysBefore(now: Date, days: number): string {
 	return `${at.getFullYear()}-${String(at.getMonth() + 1).padStart(2, "0")}-${String(at.getDate()).padStart(2, "0")}`;
 }
 
-/** Run `token-max sessions` from PATH, or return null when it is not installed. */
+/** Run `token-max sessions` from PATH, or return null when it is not installed. It always reads this host. */
 export function runTokenMax(since: Date, ssh: string[]): Session[] | null {
 	const hosts = ssh.flatMap((host) => ["--ssh", host]);
-	const args = ["sessions", "--since", since.toISOString(), ...hosts, ...(ssh.length ? ["--include-local"] : [])];
+	const args = ["sessions", "--since", since.toISOString(), ...hosts];
 	const result = spawnSync("token-max", args, { encoding: "utf8", maxBuffer: 1 << 30 });
 	if ((result.error as NodeJS.ErrnoException | undefined)?.code === "ENOENT") {
 		if (ssh.length) throw new Error("token-max is not installed, so --ssh cannot read other hosts' sessions");
