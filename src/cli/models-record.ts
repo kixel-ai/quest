@@ -1,7 +1,7 @@
 // A pull request body's `## Models` record, which names the PR's size and each session that implemented it.
 
 import { SIZES } from "../core";
-import { ARMS, ARM_NAMES, type Arm, REVIEWERS, WRITERS } from "./models";
+import { ARMS, ARM_NAMES, type Arm, CLASSIFIERS, REVIEWERS, SPLITTERS, WRITERS } from "./models";
 
 const SECTION = /^## Models[ \t]*\r?$/m;
 
@@ -60,7 +60,13 @@ const key = (name: string) =>
 const RETIRED = ["gpt-6.1-sol"];
 const KNOWN = new Map(
 	[
-		...[...Object.values(WRITERS), ...Object.values(REVIEWERS), ...Object.values(ARMS).flatMap(Object.values)]
+		...[
+			...Object.values(WRITERS),
+			...Object.values(REVIEWERS),
+			...Object.values(ARMS).flatMap(Object.values),
+			CLASSIFIERS,
+			SPLITTERS,
+		]
 			.flat()
 			.map(({ model }) => model),
 		...RETIRED,

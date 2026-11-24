@@ -2090,7 +2090,13 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 	// A login or a missing CLI rules out its harness's every model; a usage limit only the model that hit it.
 	const down = new Map<HarnessName, ReviewerUnavailableError>();
 	// Models passed over this run, which no later seat falls to: an old shadow's findings pass to the pick's model.
-	const out = new Map<string, ReviewerUnavailableError>();
+	// Keyed by canonical ID, so a saved session's other spelling of a model is the same model.
+	const passedOver = new Map<string, ReviewerUnavailableError>();
+	const out = {
+		set: (model: string, error: ReviewerUnavailableError) => passedOver.set(canonicalModel(model), error),
+		has: (model: string) => passedOver.has(canonicalModel(model)),
+		get: (model: string) => passedOver.get(canonicalModel(model)),
+	};
 	const usable = (model: Model) => !avoided(model) && !down.has(model.harness) && !out.has(model.model);
 	const plan = (routed: Model, second: Model | null = null) =>
 		seatsFor({
@@ -2238,7 +2244,7 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 				continue;
 			}
 			// An old shadow kept on its own model to settle its findings passes them to the pick's model instead.
-			if (error.shadow !== null && error.shadow !== candidates[at]!.model) {
+			if (error.shadow !== null && !sameModel(error.shadow, candidates[at]!.model)) {
 				const seat = planned.seats.find((each) => each.shadow)!;
 				skipped.push({ ...seat.reviewer, reason: error.reason });
 				messages.push(error.message);

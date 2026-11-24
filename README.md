@@ -1565,8 +1565,10 @@ the never-weaker rule needs the record. `--harness` names the only reviewer inst
 the pick and the shadow, at the model and effort of its first entry whose model is not avoided, and
 `--model` and `--effort` override the size pick's or that reviewer's, as a
 repository whose `AGENTS.md` names other reviewers needs; a `--model` the list
-names runs on its own entry's harness and effort, and one it does not at
-`--harness`'s first entry. A `--harness` run keeps the other
+names, in any spelling such as `openai/gpt-6.2-astra`, runs on its own entry's
+harness and effort, passed to the CLI as given, and one it does not at
+`--harness`'s first entry. `--exclude-model`, records, and `quest usage` match
+a listed model by any spelling too. A `--harness` run keeps the other
 reviewers' sessions for the pick's next run, and refuses while one has
 findings to settle, so a head never passes one reviewer alone while the other's
 findings are open. When the latest writer changes the size's pick to one with

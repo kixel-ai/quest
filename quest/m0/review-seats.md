@@ -40,8 +40,10 @@ Decided 2026-11-22 (maintainer, `/quest-plan` follow-up of
   [reviewer rungs](/quest/m0/reviewer-rungs.md) draws it: each seat takes a
   model from it that the PR has not had yet, never the writer's, on a
   vendor no other seat that round has. An XL head that is high tier gets
-  three vendors from XL's drawn rung, such as Astra, Gemini, and a Claude
-  model other than the writer's.
+  three vendors, such as Astra, Gemini, and a Claude model other than the
+  writer's. Reviewer rungs places Neon only on the M and L rungs, so at XS,
+  S, and XL the Gemini seat normally fills from the nearest rung outward, as
+  the Guidance recommends.
 - ✅ No seat is ever weaker than the latest writer, at every size and tier
   (maintainer, 2026-11-22, on
   [kixel-ai/quest#819](https://github.com/kixel-ai/quest/pull/819#issuecomment-7087183777):

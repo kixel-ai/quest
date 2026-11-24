@@ -81,6 +81,7 @@ import {
 	questWriters,
 	writerAt,
 } from "./models";
+import { canonicalModel } from "./models-record";
 import {
 	ReviewInputError,
 	ReviewOutageError,
@@ -1397,7 +1398,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 					);
 				entries = [arms[options.arm]];
 			} else if (options.writer !== undefined) {
-				const entry = writerAt(size, options.writer);
+				const entry = writerAt(size, canonicalModel(options.writer));
 				if (entry === null) throw new UsageError(`no write list names ${options.writer}`);
 				entries = [entry];
 			}
@@ -1666,7 +1667,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"variables each sets, so Codex reviews from Claude Code and Claude Code from Codex, and with no model known no weaker one is avoided; with --harness it is " +
 				"none. " +
 				"--harness names the only reviewer instead of the pick and the shadow, at the model and effort of its first entry whose model is not avoided, and --model and " +
-				"--effort override that reviewer's, or without --harness, the size pick's; a --model the list names runs on its own entry's harness and effort, and one it does not at --harness's first entry; a repository whose AGENTS.md names other reviewers " +
+				"--effort override that reviewer's, or without --harness, the size pick's; a --model the list names, in any spelling such as openai/gpt-6.2-astra, runs on its own entry's harness and effort, passed to the CLI as given, and one it does not at --harness's first entry; a repository whose AGENTS.md names other reviewers " +
 				"passes them. A --harness run keeps the other reviewers' sessions for the next run of the pick, and refuses while one has findings to settle, as a run of the pick does while a reviewer only --harness runs has some. When the latest writer changes the size's pick to one with no session on the branch, its first session settles the open findings of the reviewer it replaces. The reviewers run at once, and the first to fail stops the others and fails the " +
 				"run, saving no round. The " +
 				"size is --size, else the size of the quest a quest/ branch names, read from the base's tip so a " +
