@@ -2302,12 +2302,15 @@ fakes("a raise to high seats the second reviewer at once, and a run that fails t
 			"reviewer claude claude-fable-5-2 medium",
 		]);
 
-		// --effort names one reviewer, which runs alone whatever tier it raises.
+		// --effort names only the first seat, so its raise still seats the second.
 		write(s.repo, "src/lib.ts", "export const x = 4;\n");
 		git(s.repo, "commit", "-qam", "a third constant");
 		const named = await quest("--root", s.repo, "review", ...OPUS_WROTE, "--effort", "high", ...responses);
 		expect(named.code, named.stderr).toBe(0);
-		expect(reviewersOf(named.stdout)).toEqual(["reviewer codex gpt-6.2-sol high"]);
+		expect(reviewersOf(named.stdout)).toEqual([
+			"reviewer codex gpt-6.2-sol high",
+			"reviewer claude claude-fable-5-2 medium",
+		]);
 	} finally {
 		vi.unstubAllGlobals();
 	}
@@ -2443,12 +2446,15 @@ fakes(
 			git(s.repo, "commit", "-qam", "another constant");
 			const kept = await quest("--root", s.repo, "review", ...OPUS_WROTE);
 			expect(kept.stdout).toContain("\nrisk high It ships tonight.\n");
-			// --effort names one reviewer, which runs alone even on a high head.
+			// --effort names only the first seat, so a high head still gets its second.
 			write(s.repo, "src/lib.ts", "export const x = 7;\n");
 			git(s.repo, "commit", "-qam", "a constant at a named effort");
 			const effort = await quest("--root", s.repo, "review", ...OPUS_WROTE, "--effort", "high");
 			expect(effort.code, effort.stderr).toBe(0);
-			expect(reviewersOf(effort.stdout)).toEqual(["reviewer codex gpt-6.2-sol high"]);
+			expect(reviewersOf(effort.stdout)).toEqual([
+				"reviewer codex gpt-6.2-sol high",
+				"reviewer claude claude-fable-5-2 medium",
+			]);
 			// A riskier change than the one overridden ends it.
 			vi.stubEnv("FAKE_RISK", JSON.stringify({ tier: "medium", reason: "It changes the output.", class: null }));
 			write(s.repo, "src/lib.ts", "export const x = 4;\n");

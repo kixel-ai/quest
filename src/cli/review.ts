@@ -2598,14 +2598,16 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 		},
 		usable: (entry) => !avoided(entry) && !down.has(entry.harness) && !out.has(canonicalModel(entry.model)),
 	};
-	/** `count` drawn seats beside those on `taken` vendors; the skips since `from` are what an outage names. */
-	const plan = (count: number, taken: ReviewHarness[], from = 0): Seat[] => {
+	/** `count` drawn seats beside those on `taken` vendors. */
+	const plan = (count: number, taken: ReviewHarness[]): Seat[] => {
 		const seats: Seat[] = [];
 		while (seats.length < count) {
 			const vendors = [...taken, ...seats.map((seat) => seat.reviewer.harness)];
 			const seat = drawSeat(draw, vendors);
 			if (seat === undefined) {
-				const passed = skipped.slice(from);
+				// The skips that leave this seat empty: those of a vendor it could have gone to, whichever pass met them.
+				const blocking = skipped.map((skip) => !vendors.includes(skip.harness));
+				const passed = skipped.filter((_, i) => blocking[i]);
 				// A CLI this host lacks could never take a further seat, so alone it leaves that seat to the avoided models,
 				// which the writer's record frees; with no seat filled, the missing CLI is what to restore.
 				const lacking = passed.every(
@@ -2616,7 +2618,11 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 					usable: (entry: ReviewModel) => !down.has(entry.harness) && !out.has(canonicalModel(entry.model)),
 				};
 				if (passed.length > 0 && !(vendors.length > 0 && lacking && drawSeat(unavoided, vendors) !== undefined))
-					throw new ReviewOutageError(SIZE_RUNGS[sized.size], passed, messages.slice(from));
+					throw new ReviewOutageError(
+						SIZE_RUNGS[sized.size],
+						passed,
+						messages.filter((_, i) => blocking[i]),
+					);
 				const guessed =
 					"when the writer was guessed from the running harness, name it in the PR's ## Models record or with --exclude-model";
 				throw new ReviewInputError(
@@ -2694,11 +2700,12 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 		return { rounds: [], tallies, risk: low, skipped: [], since, branch, head, base, sized };
 	}
 
-	// A flag's reviewer runs alone; else a high head seats two vendors, and any other one.
-	const seats = (risk: Risk) => (lead !== undefined ? 1 : overridden(risk, override).tier === "high" ? 2 : 1);
+	// A high head seats two vendors, and any other one; the reviewer --harness names runs alone.
+	const seats = (risk: Risk) =>
+		options.harness !== undefined ? 1 : overridden(risk, override).tier === "high" ? 2 : 1;
 	const one = (round: Round): ReviewModel => ({ harness: round.reviewer, model: round.model, effort: round.effort });
 	// The head the last run passed with no finding, under the same base, size's rung, instructions, and rules: its
-	// rounds stand whole, repeated as unchanged, while they are the review this run would be: the flag's reviewer
+	// rounds stand whole, repeated as unchanged, while they are the review this run would be: the flag's reviewer among
 	// alone, or else as many vendors as the tier seats, none since avoided. Otherwise a new run reviews the head.
 	const stands =
 		prior !== undefined &&
@@ -2710,9 +2717,8 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 		prior.given.instructions === given.instructions &&
 		prior.given.rules === given.rules &&
 		latest.every((round) => !avoided(one(round))) &&
-		(lead !== undefined
-			? latest.length === 1 && latest[0].reviewer === lead.harness && sameReviewer(latest[0], lead)
-			: new Set(latest.map((round) => round.reviewer)).size >= seats(before));
+		(lead === undefined || latest.some((round) => round.reviewer === lead.harness && sameReviewer(round, lead))) &&
+		new Set(latest.map((round) => round.reviewer)).size >= seats(before);
 	if (stands) {
 		save(statePath, state(prior, runs, tallies, low));
 		const rounds = latest.map((round): Round => ({
@@ -2751,21 +2757,26 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 		const count = seats(judged()) - taken.length;
 		if (count <= 0) break;
 		const passed = skipped.length;
-		let planned: Seat[] = lead === undefined ? plan(count, taken, passed) : [{ reviewer: lead }];
+		// A flag's reviewer takes the run's first seat, and any further seat is drawn on another vendor.
+		const seated = (): Seat[] =>
+			lead === undefined || taken.length > 0
+				? plan(count, taken)
+				: [{ reviewer: lead }, ...plan(count - 1, [lead.harness])];
+		let planned = seated();
 		for (;;) {
 			try {
 				done = [...done, ...carried(await runSeats(shared, planned, options.signal), earlier, raisers, open)];
 				break;
 			} catch (error) {
 				// A reviewer a flag named never passes its run on.
-				if (!(error instanceof ReviewerUnavailableError) || error.seat === undefined || lead !== undefined)
+				if (!(error instanceof ReviewerUnavailableError) || error.seat === undefined || error.seat === lead)
 					throw error;
 				if (error.model === null) down.add(error.harness);
 				out.add(canonicalModel(error.seat.model));
 				skipped.push({ ...error.seat, reason: error.reason });
 				messages.push(error.message);
 				try {
-					planned = plan(count, taken, passed);
+					planned = seated();
 				} catch (outage) {
 					// The only reviewer that could take the seat fails as itself, rather than as an outage of one.
 					throw outage instanceof ReviewOutageError && skipped.length - passed === 1 ? error : outage;

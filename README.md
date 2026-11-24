@@ -1550,7 +1550,7 @@ running the command, usually the session that
 just pushed, detected from the variables Claude Code, Codex, and Antigravity
 each set, is taken to be the latest writer, so Codex reviews from Claude Code
 and Claude Code from Codex. `--harness`, `--model`, or `--effort` names one reviewer, which runs alone, outside the draw, as a run of its
-own, even on a high head: the first entry the flags fit from the size's rung outward, in the order the rungs
+own; a high head still seats a drawn second vendor beside it unless `--harness` names it: the first entry the flags fit from the size's rung outward, in the order the rungs
 list, so the same flags name the same reviewer on every run. `--harness` alone is that CLI's first entry whose
 model is not avoided, `--model` its own entry in any spelling such as `openai/gpt-6.2-astra`, passed to the CLI
 as given, and `--effort` alone the first entry whose model is not avoided; `--model` and `--effort` then
@@ -1707,7 +1707,8 @@ such as macOS's default, `/USERS/...` passes a rule naming `/Users`: quest
 refuses to run `agy` where any directory leading to its agent directory is on
 one, or with a Git older than 2.41, which has no `--attr-source`; either passes a
 classifier turn to the next and exits 3 for `--harness agy`.
-An `agy models` that fails other than on the login fails as it is. Your skills' text
+An `agy models` that fails other than on the login, as when it cannot reach Google, is agy out: a drawn seat or a
+classifier turn passes on, and `--harness agy` exits 3. Your skills' text
 still reaches it, and your MCP servers start, with no tool it can call. A
 `RESOURCE_EXHAUSTED` quota error counts as its usage limit, resetting at the
 time it names.
@@ -1763,7 +1764,7 @@ own PRs with your own token. A record GitHub refuses fails the command after the
 round's report, with exit status 1. It exits 0 once the round
 finishes, whatever it found, 2 for invalid arguments or a checkout that
 cannot be reviewed, 3 when no eligible reviewer could run, each not installed,
-logged out, its login rejected, at its usage limit, or unable to run on this host, and 1 for other
+logged out, its login rejected, its status check failing, at its usage limit, or unable to run on this host, and 1 for other
 failures. The only eligible reviewer's usage limit prints one line,
 `error: <harness> hit its usage limit; resets <time>`, where `<time>` is the
 reset as an ISO 8601 UTC timestamp, or `unknown` when the CLI named none; with
@@ -1850,7 +1851,7 @@ A low head with no finding left to settle runs no local reviewer, unless
 `--harness`, `--model`, or `--effort` names one: the record names the head in
 full, adds `- Local review: none, since a low-risk head needs only the online
 reviewer`, and `next done` says so. A high head seats two reviewers
-of different vendors, each drawn from the run's rung as any seat is. A reviewer a flag names runs alone. A round that raises the tier to high seats the
+of different vendors, each drawn from the run's rung as any seat is. `--model` and `--effort` name only the first seat, so the second still runs; the reviewer `--harness` names runs alone. A round that raises the tier to high seats the
 second reviewer at once, in the same run; a run is saved whole or not at all, so one that fails there, as when
 none can run, leaves the branch as it was. When every model of the other vendor is avoided, as
 with no `## Models` record, which avoids every model of the harness running the
