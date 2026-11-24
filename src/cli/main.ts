@@ -81,6 +81,7 @@ import {
 	questWriters,
 	writerAt,
 } from "./models";
+import { canonicalModel } from "./models-record";
 import {
 	ReviewInputError,
 	ReviewOutageError,
@@ -1398,7 +1399,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 					);
 				entries = [arms[options.arm]];
 			} else if (options.writer !== undefined) {
-				const entry = writerAt(size, options.writer);
+				const entry = writerAt(size, canonicalModel(options.writer));
 				if (entry === null) throw new UsageError(`no write list names ${options.writer}`);
 				entries = [entry];
 			}
@@ -1428,7 +1429,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"costliest copy, and the report says how many copies it folded from which hosts; a session with a request " +
 				"token-max could not price or a line it could not read is listed, its cost a lower bound. A host that fails fails the report. " +
 				"Each PR also shows its ## Models size, its risk tier from the ## Review record and whether a reviewer raised it, its implementers, and as unread each Implementer line and ## Review record it cannot read, " +
-				"each reviewer the ## Review record names, with its latest round and score and its tally of findings across every round and in its first, marked when it is the shadow, " +
+				"each reviewer the ## Review record names, with its latest round and score and its tally of findings across every round and in its first, marked when it is the shadow or second, " +
 				"where a merged PR whose last round left only low findings open counts them settled, since the author fixes or refutes those before merge, " +
 				"the later merged PRs whose ## Caused by bullets open with its link, and each online reviewer's record from GitHub: whether it " +
 				"reviewed the last head, and its findings accepted, declined, unclassified, or unanswered. An online reviewer " +
@@ -1667,7 +1668,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"variables each sets, so Codex reviews from Claude Code and Claude Code from Codex, and with no model known no weaker one is avoided; with --harness it is " +
 				"none. " +
 				"--harness names the only reviewer instead of the pick and the shadow, at the model and effort of its first entry whose model is not avoided, and --model and " +
-				"--effort override that reviewer's, or without --harness, the size pick's; a --model the list names runs on its own entry's harness and effort, and one it does not at --harness's first entry; a repository whose AGENTS.md names other reviewers " +
+				"--effort override that reviewer's, or without --harness, the size pick's; a --model the list names, in any spelling such as openai/gpt-6.2-astra, runs on its own entry's harness and effort, passed to the CLI as given, and one it does not at --harness's first entry; a repository whose AGENTS.md names other reviewers " +
 				"passes them. A --harness run keeps the other reviewers' sessions for the next run of the pick, and refuses while one has findings to settle, as a run of the pick does while a reviewer only --harness runs has some. When the latest writer changes the size's pick to one with no session on the branch, its first session settles the open findings of the reviewer it replaces. The reviewers run at once, and the first to fail stops the others and fails the " +
 				"run, saving no round. The " +
 				"size is --size, else the size of the quest a quest/ branch names, read from the base's tip so a " +
@@ -1690,8 +1691,9 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"Every turn reviews only the branch's own change, from the merge base of HEAD with the base's tip, so " +
 				"a branch behind its base draws no findings on the base's newer code. The first round runs the " +
 				"reviewer's own review (`codex exec review` with custom instructions, or Claude Code's " +
-				"`/code-review <effort> <merge-base>...HEAD` with text after it), given the range, the base's REVIEW.md, if " +
-				"any, and any responses up front, then resumes that session for one turn that reports the review in one " +
+				"`/code-review <effort> <merge-base>...HEAD` with text after it), given the range, Quest's shared review " +
+				"rules, the base's REVIEW.md, if any (which adds to them and takes precedence), and any responses up front, " +
+				"then resumes that session for one turn that reports the review in one " +
 				"JSON schema without reading anything again. --responses gives the author's fixes and refutations of " +
 				"the last round's findings, required while that round reported any; the reply settles each of those " +
 				"findings, by its number in the prompt, as fixed, refuted, or still open. Findings are numbered across " +
@@ -1699,7 +1701,8 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"--responses only when it has some. A later round resumes the " +
 				"session and checks only what changed since the last round's head and those findings when nothing " +
 				"but the head changed: the same model, effort, and base, a merge base the last round's covers, as " +
-				"when the base moved on, and the same applicable AGENTS.md, CLAUDE.md, and REVIEW.md. Otherwise it " +
+				"when the base moved on, and the same applicable AGENTS.md, CLAUDE.md, shipped shared review rules, and " +
+				"REVIEW.md. Otherwise it " +
 				"starts a new session that reviews the whole change and still weighs --responses. A round that would " +
 				"resume on the head the last round reviewed, when that round found nothing, runs no reviewer and " +
 				"repeats that round, marked unchanged, so on the same head only a reviewer with findings to settle runs. " +

@@ -340,6 +340,7 @@ function unwrap(argv: string[], env: Set<string>): string[] | null {
 		else if (["command", "exec", "nohup", "time", "builtin", "env", "nice"].includes(name))
 			rest = dropOptions(args);
 		else if (name === "timeout") rest = dropOptions(args).slice(1);
+		else if (name === "xargs") rest = dropXargsOptions(args);
 		else if (name === "direnv" && args[0] === "exec") rest = args.slice(2);
 		else if (name === "bun" && args[0] === "run" && basename(dropOptions(args.slice(1))[0] ?? "") === "quest")
 			rest = dropOptions(args.slice(1));
@@ -368,6 +369,23 @@ function ungate(argv: string[] | null, env: Set<string>): string[] | null {
 function dropOptions(args: string[]): string[] {
 	let i = 0;
 	while (i < args.length && args[i]!.startsWith("-")) i += /^-[nskuC]$/.test(args[i]!) ? 2 : 1;
+	return args.slice(i);
+}
+
+/** `args` past `xargs`'s leading options, stopping at `--` or the launched command. */
+function dropXargsOptions(args: string[]): string[] {
+	let i = 0;
+	while (i < args.length) {
+		const arg = args[i]!;
+		if (arg === "--") return args.slice(i + 1);
+		if (!arg.startsWith("-") || arg === "-") break;
+		if (
+			/^-[adEILnPsJR]$/.test(arg) ||
+			/^--(arg-file|delimiter|eof|replace|max-lines|max-args|max-procs|max-chars|process-slot-var)$/.test(arg)
+		)
+			i += 2;
+		else i += 1;
+	}
 	return args.slice(i);
 }
 

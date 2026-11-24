@@ -1,7 +1,7 @@
 # Context
 
 Engineering rules for every task. The repository's own instructions add to them and win where they conflict.
-Topic packs (`pr`, `review`, `rust`, `ts`, `uniffi`) load lazily via hooks, or run `quest context <pack...>`.
+Language and PR topic packs (`pr`, `rust`, `ts`, `uniffi`) load lazily via hooks; run `quest context <pack...>` directly for any pack (including `review`).
 
 ## Self-improvement
 
@@ -20,7 +20,7 @@ Topic packs (`pr`, `review`, `rust`, `ts`, `uniffi`) load lazily via hooks, or r
 
 ## Required
 
-- Before editing a file, read every `AGENTS.md` on its path from the root, since not every agent loads nested ones. Read the repository's `CONTRIBUTING.md` before a PR, and its `REVIEW.md`, if any, before a review.
+- Before editing a file, read every `AGENTS.md` on its path from the root, since not every agent loads nested ones. Read the repository's `CONTRIBUTING.md` before a PR, and `quest context review` plus the repository's `REVIEW.md`, if any, before a review.
 - Reproduce a bug before fixing it, and fix it at the root cause, flaky tests included. Never work around one with a retry, sleep, timeout, or looser assertion.
 - Fail loud and early: error on unsupported or malformed input instead of warning and continuing, and decide a supported path at setup from known capabilities instead of trying one at runtime and silently falling back. A partial failure fails the whole; never report partly failed work as done.
 - Treat anything received over the network as hostile. Bound what a peer can make you hold by design, not with a constant. Run no code from a PR whose author lacks write access: it runs with your credentials.
@@ -46,17 +46,22 @@ Topic packs (`pr`, `review`, `rust`, `ts`, `uniffi`) load lazily via hooks, or r
 
 ## Workspace
 
-- Work in your own worktree; finish with a clean checkout (intended changes committed and pushed, incidental changes restored, unrelated changes preserved). Commit a checkpoint before pausing or handing off.
-- Run CPU-heavy commands (builds, tests, model checkers) through `quest gate <command>` in the foreground, reading the exit code directly, never through a pipe. Leave `quest review`, servers, and formatters ungated.
-- Never end a turn with your background work running, and never poll with `sleep` or status loops: block on the harness's wait or `quest wait` (re-running on timeout with the `--since` it printed). Back out if progress genuinely stalls.
+- Work in your own worktree, reusing a suitable one you already own; read-only discovery needs no new checkout. Finish with a clean checkout (intended changes committed and pushed, incidental changes restored, unrelated changes preserved). Before ending a task, pausing, or handing off, commit a checkpoint and report what remains and which checks passed or did not run.
+- Gate by CPU, not run time: run builds, tests, and model checkers through `quest gate <command>` in the foreground, reading the exit code directly, never through a pipe. Leave `quest review`, servers, and formatters ungated. Never work around the queue by polling the load or capping agents (`quest agent admit`'s job); cancel a gated command only once its result is unneeded.
+- Never end a turn with your background work running, and never poll with `sleep` or status loops: block on the harness's wait or `quest wait` (re-running on timeout with the `--since` it printed). A gate's queue or a long command still running is not a stall; back out only if progress genuinely stalls.
 - A sub-agent ends its turn only with a final result or a question, reporting only what its caller acts on (PR URL, state, head, open decisions with recommendations).
 
 ## Questions
 
-- Link every issue, PR, and commit by full URL (`[owner/repo#123](https://github.com/owner/repo/pull/123)`), never a bare `#123`.
-- Block on user decisions with context and a recommendation (`quest guide questions`). An agent that cannot prompt puts them in its report and under `## Waiting` in its PR.
+- Link every issue, PR, and commit you show the user by full URL (`[owner/repo#123](https://github.com/owner/repo/pull/123)`), never a bare `#123`; sub-agents report the URLs for the parent to link.
+- Block on user decisions with context and a recommendation (`quest guide questions`). An agent that cannot prompt puts each decision in its report and under `## Waiting` in its PR.
 - A plan is a starting point: when a finding undercuts it, say what changed and propose alternatives with your recommendation. When recorded decisions conflict, follow the newest and note it in the PR body.
 - Confirm closing an open PR as its own question, and comment on the PR before or with it.
+
+## Pull requests
+
+- Merge the base only when the branch conflicts with it or a landing step (`quest merge` or a merge queue) refuses the head. Before each push to a PR's branch, confirm it is still open (a push after merge restores the deleted branch).
+- Before marking a PR ready for review, exercise the change on its real surface, record `## Validation` and `## Models` (`Size: M` and `Implementer: <harness>, <model-id>, <effort>` per session, newest last), and run `/quest-review` (a model other than the latest writer reviews the committed head). See `quest context pr` for online review threads, CI rules, and `## Caused by`.
 
 ## Quests
 

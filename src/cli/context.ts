@@ -74,8 +74,14 @@ function patchPaths(patch: string): string[] {
 /** Whether a shell command interacts with pull requests (`gh pr`, `quest pr|ready|merge|review`). */
 function touchesPr(command: string): boolean {
 	for (const simple of parse(command)) {
-		const words = simple.argv.filter((word) => !/^[A-Za-z_][A-Za-z0-9_]*=/.test(word));
+		let words = simple.argv.filter((word) => !/^[A-Za-z_][A-Za-z0-9_]*=/.test(word));
 		if (words.length === 0) continue;
+		// Normalize `bun run [--silent] quest ...`, the launcher used inside the quest checkout itself.
+		if (basename(words[0]!) === "bun" && words[1] === "run") {
+			let i = 2;
+			while (words[i]?.startsWith("-")) i++;
+			if (words[i] === "quest") words = words.slice(i);
+		}
 		const name = basename(words[0]!);
 		if (name === "gh" && words[1] === "pr") return true;
 		if (name === "quest") {

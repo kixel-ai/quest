@@ -315,6 +315,8 @@ test("pkill and killall are blocked, while --help and pid-based kill pass", () =
 	expect(bash("killall node")).toEqual([RULES.pkill]);
 	expect(bash("/usr/bin/pkill -9 foo")).toEqual([RULES.pkill]);
 	expect(bash("bash -c 'pkill foo'")).toEqual([RULES.pkill]);
+	expect(bash("printf '%s\\n' vite | xargs pkill -f")).toEqual([RULES.pkill]);
+	expect(bash("printf '%s\\n' node | xargs -n 1 -I {} killall {}")).toEqual([RULES.pkill]);
 	expect(bash("pkill --help")).toEqual([]);
 	expect(bash("kill -TERM 12345")).toEqual([]);
 });

@@ -473,15 +473,16 @@ test("PreToolUse lazily injects matching topic packs once per session and resets
 	expect(JSON.parse(edit("rs/moq-ffi/src/lib.rs"))).toEqual({
 		hookSpecificOutput: { hookEventName: "PreToolUse", additionalContext: contextPacks(["uniffi"]) },
 	});
-	// A PR Bash command injects the pr pack once.
+	// A PR Bash command injects the pr pack once (including the checkout's `bun run --silent quest` launcher).
 	const prCall = {
 		hook_event_name: "PreToolUse",
 		cwd,
 		session_id: "s-packs",
 		tool_use_id: "t2",
 		tool_name: "Bash",
-		tool_input: { command: "quest pr list" },
+		tool_input: { command: "bun run --silent quest pr list" },
 	};
+	expect(hook({ ...prCall, session_id: "s-bun-other", tool_input: { command: "bun run test" } }, deps)).toBe("");
 	expect(JSON.parse(hook(prCall, deps))).toEqual({
 		hookSpecificOutput: { hookEventName: "PreToolUse", additionalContext: contextPacks(["pr"]) },
 	});
