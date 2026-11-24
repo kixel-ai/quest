@@ -70,7 +70,7 @@ Anything AI-attributed, such as an online reviewer's findings, is a suggestion, 
 Request a review only from a reviewer whose approval the base requires and that never ran on the head.
 Once you fix or refute an automated reviewer's finding, say so in its thread and resolve it, since such a reviewer may approve only after its threads are resolved.
 
-The PR body's `## Models` section records its size as `Size: M` (its quest's, or for a skill's own PR, as a quest is sized) and one `Implementer: Codex, gpt-6.1-sol, high effort` line per implementing session, moved last whenever it pushes; write the model's ID, and `unknown` for whatever the harness doesn't report.
+The PR body's `## Models` section records its size as `Size: M` (its quest's, or for a skill's own PR, as a quest is sized) and one `Implementer: Claude Code, claude-opus-5-5, high effort` line per implementing session, moved last whenever it pushes; write the model's ID, and `unknown` for whatever the harness doesn't report.
 
 Keep pull request CI read-only (a read-only `GITHUB_TOKEN`, write credentials only in environments for protected branches): quest branches live in the repository, so their workflows get its secrets. Flag a workflow that breaks this.
 

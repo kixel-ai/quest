@@ -72,9 +72,13 @@ Readout, the agent's choices for the implementer to revisit:
   maintainer with its tally. End the writer A/B by deleting its arms from
   `src/cli/models.ts`, with `quest models --arm`, the `arm` field of
   `quest unblocked --json`, and the arm notes in the README, guide, and
-  `/quest-run` and `/quest-iterate`. Keep the shadow reviewer only if the maintainer
-  chooses to: once L's pairs reach 116 first rounds, about 2026-12-20, end
-  its step down at L and XL, and read the step up at S and M below.
+  `/quest-run` and `/quest-iterate`. [Reviewer rungs](/quest/m0/reviewer-rungs.md)
+  ends the shadow reviewer (maintainer, 2026-11-23, rejecting keeping L's
+  shadow until its 116 first rounds), so read the shadow pairs gathered
+  until it lands, and after it compare reviewer models and efforts from
+  the rungs' draws: findings by severity, fixed against refuted, and later
+  `## Caused by` escapes, per `quest usage`'s reviewer rows. Recommend
+  moving a model up, down, or off its rung with its tally.
 - Carry the tallies into [the model check](/quest/m1/model-check.md)'s
   baseline.
 - Chart the arms' cost against quality as
@@ -126,6 +130,7 @@ three hosts' saved review rounds:
     since [kixel-ai/quest#802](https://github.com/kixel-ai/quest/pull/802)). XL
     keeps its step down with L. Compare the step up's pairs as the step
     down's were, counting only rounds after the retarget merged.
+    Superseded 2026-11-23 (maintainer): reviewer rungs replace the shadow.
 - Writer A/B, PRs per arm, first-round findings over the PRs counted in
   parentheses, cost as the median merged PR with any attributed spend (5
   to 27% of each arm's merged PRs had none):
@@ -166,8 +171,11 @@ three hosts' saved review rounds:
   - M ends its arm on Opus high, L gains a Fable arm, and XL writes on
     Fable, as [kixel-ai/quest#829](https://github.com/kixel-ai/quest/pull/829)
     routes them.
-  - Fable reviews L beside the pick, and Astra picks for XL:
-    [reviewer table](/quest/m0/reviewer-table.md).
+  - Astra picks for XL:
+    [kixel-ai/quest#831](https://github.com/kixel-ai/quest/pull/831). Its
+    Fable seat beside the L pick was dropped on 2026-11-23 for
+    [reviewer rungs](/quest/m0/reviewer-rungs.md), which seats Fable as a
+    rung member.
   - Cost metric? ✅ Mean spend per merged PR, every session's, plus the
     spend of later PRs that name it under `## Caused by`, with a bootstrap
     95% interval, the median reported beside it (rejected: the median
@@ -199,7 +207,11 @@ three hosts' saved review rounds:
     the maintainer has implemented and reviewed XL quests by hand with
     Fable, and those sessions' `Implementer:` lines may say Opus or
     `unknown`, so read each XL PR's sessions for its model before crediting
-    either.
+    either. The baseline's rounds were reviewed by Sol xhigh, and since
+    [kixel-ai/quest#831](https://github.com/kixel-ai/quest/pull/831) Astra
+    high reviews XL, with Astra medium its shadow, so credit Fable with no
+    change in rounds or first-round findings that the reviewer change
+    could explain.
   - Pace: report each Fable arm's fall-throughs, quests that started on
     Fable but fell to Opus at its usage limit. When they exceed a fifth of
     the L arm's quests, recommend running a quarter of L on Fable instead.
@@ -249,5 +261,6 @@ Baseline from the 2026-11-11 audit, at API list price:
 
 ## Related
 
+- [Reviewer rungs](/quest/m0/reviewer-rungs.md) - the per-round reviewer draw whose tallies the readout compares
 - [Model check](/quest/m1/model-check.md) - retunes the tables each
   milestone from these tallies

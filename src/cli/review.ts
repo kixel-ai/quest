@@ -53,7 +53,7 @@ import { GitError, discoveryEnv, git } from "./git";
 import { AGY_LIMIT, LIMIT, agyReset, codexReset } from "./limit";
 import { CLASSIFIERS, DEFAULT_SIZE, type Listing, REVIEWERS, type ReviewModel, unfit } from "./models";
 import { programEnvironment, requireProgram } from "./program";
-import type { recorded } from "./models-record";
+import { canonicalModel, type recorded, sameModel } from "./models-record";
 import { save } from "./worktree";
 
 /** A mistake in the arguments, checkout, or environment, reported as a usage error. */
@@ -342,9 +342,15 @@ export interface Choice {
  * reviewer, which then avoids nothing.
  */
 export function authored(choice: Choice, env: NodeJS.ProcessEnv, latest?: string): (entry: ReviewModel) => boolean {
-	const exclude = (choice.exclude ?? []).map(unfit);
-	if (exclude.length > 0) return (entry) => exclude.some((each) => each(entry));
-	if (latest !== undefined && latest !== "unknown") return unfit(latest);
+	// Another spelling of a model, such as `openai/gpt-6.2-sol` from a flag, a record, or a saved session, is that
+	// model; the CLI still gets the spelling given, which a gateway may need.
+	const as = (entry: ReviewModel): ReviewModel => ({ ...entry, model: canonicalModel(entry.model) });
+	const exclude = (choice.exclude ?? []).map((model) => unfit(canonicalModel(model)));
+	if (exclude.length > 0) return (entry) => exclude.some((each) => each(as(entry)));
+	if (latest !== undefined && latest !== "unknown") {
+		const avoid = unfit(canonicalModel(latest));
+		return (entry) => avoid(as(entry));
+	}
 	if (choice.harness !== undefined) return () => false;
 	const running = runningHarness(env);
 	return (entry) => entry.harness === running;
@@ -361,7 +367,7 @@ export function authored(choice: Choice, env: NodeJS.ProcessEnv, latest?: string
 export function pickReviewer(size: Listing, choice: Choice, avoided: (entry: ReviewModel) => boolean): ReviewModel {
 	const list = REVIEWERS[size];
 	const ours = list.filter((e) => choice.harness === undefined || e.harness === choice.harness);
-	const named = choice.model === undefined ? undefined : ours.find((e) => e.model === choice.model);
+	const named = choice.model === undefined ? undefined : ours.find((e) => sameModel(e.model, choice.model!));
 	const first = choice.harness === undefined ? undefined : ours[0];
 	const entry = named ?? (choice.model === undefined ? undefined : first) ?? ours.find((e) => !avoided(e)) ?? first;
 	if (entry === undefined && choice.harness === undefined) {
@@ -2151,7 +2157,8 @@ const EFFORTS = ["low", "medium", "high", "xhigh"];
 /**
  * The effort step each PR size's shadow runs from its pick, or null for none. The 2026-11-22 readout of
  * quest/m0/routing-evidence/README.md found each step down losing half or more of the pick's findings at XS to M,
- * so XS runs none, S and M test the step up, and L and XL keep the step down until L has its sample.
+ * so XS runs none, S and M test the step up, and L and XL keep the step down until quest/m0/reviewer-rungs.md
+ * replaces the shadow.
  */
 const SHADOW_STEPS: Record<Size, -1 | 1 | null> = { XS: null, S: 1, M: 1, L: -1, XL: -1 };
 
@@ -2162,7 +2169,7 @@ const SHADOW_STEPS: Record<Size, -1 | 1 | null> = { XS: null, S: 1, M: 1, L: -1,
  * reviewer of Opus's high heads.
  */
 export function shadowOf(size: Size, routed: ReviewModel): ReviewModel | null {
-	if (routed.model === "claude-fable-5-2") return null;
+	if (sameModel(routed.model, "claude-fable-5-2")) return null;
 	const step = SHADOW_STEPS[size];
 	const at = EFFORTS.indexOf(routed.effort);
 	const effort = step === null || at < 0 ? undefined : EFFORTS[at + step];
@@ -2591,7 +2598,13 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 	// A login or a missing CLI rules out its harness's every model; a usage limit only the model that hit it.
 	const down = new Map<ReviewHarness, ReviewerUnavailableError>();
 	// Models passed over this run, which no later seat falls to: an old shadow's findings pass to the pick's model.
-	const out = new Map<string, ReviewerUnavailableError>();
+	// Keyed by canonical ID, so a saved session's other spelling of a model is the same model.
+	const passedOver = new Map<string, ReviewerUnavailableError>();
+	const out = {
+		set: (model: string, error: ReviewerUnavailableError) => passedOver.set(canonicalModel(model), error),
+		has: (model: string) => passedOver.has(canonicalModel(model)),
+		get: (model: string) => passedOver.get(canonicalModel(model)),
+	};
 	const usable = (model: ReviewModel) => !avoided(model) && !down.has(model.harness) && !out.has(model.model);
 	const plan = (routed: ReviewModel, second: ReviewModel | null = null) =>
 		seatsFor({
@@ -2712,7 +2725,7 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 			const own = secondsTo(routed, avoided).find(
 				(each) =>
 					each.harness === seconded!.reviewer &&
-					each.model === seconded!.last.model &&
+					sameModel(each.model, seconded!.last.model) &&
 					!out.has(each.model) &&
 					!down.has(each.harness),
 			);
@@ -2739,7 +2752,7 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 				continue;
 			}
 			// An old shadow kept on its own model to settle its findings passes them to the pick's model instead.
-			if (error.shadow !== null && error.shadow !== candidates[at]!.model) {
+			if (error.shadow !== null && !sameModel(error.shadow, candidates[at]!.model)) {
 				const seat = planned.seats.find((each) => each.shadow)!;
 				skipped.push({ ...seat.reviewer, reason: error.reason });
 				messages.push(error.message);
@@ -2887,7 +2900,7 @@ function seatsFor({ routed, second, usable, size, auto, sessions, firsts, respon
 		shadowed !== undefined &&
 		!(
 			shadowed.reviewer === shadow.harness &&
-			shadowed.last.model === shadow.model &&
+			sameModel(shadowed.last.model, shadow.model) &&
 			shadowed.last.effort === shadow.effort
 		);
 	if (auto && (shadowed === undefined ? shadow !== null : open || stale)) {
@@ -3099,7 +3112,7 @@ async function reviewWith(shared: Shared, seat: Seat, responses: string | undefi
 		sameSeat(stored!, { reviewer: harness, shadow, second }) &&
 		stored!.given.instructions === given.instructions &&
 		stored!.given.rules === given.rules &&
-		last.model === picked.model &&
+		sameModel(last.model, picked.model) &&
 		last.effort === picked.effort &&
 		last.base.ref === shared.base.ref &&
 		covers(root, previous.mergeBase, change.mergeBase) &&

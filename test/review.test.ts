@@ -42,7 +42,7 @@ import {
 	verdict,
 } from "../src/cli/review";
 import { withReview } from "../src/cli/review-record";
-import { implementer, recorded } from "../src/cli/models-record";
+import { implementer, recorded, sameModel } from "../src/cli/models-record";
 import { tempDir } from "./fixture";
 import {
 	CLAUDE_LOGGED_OUT,
@@ -84,11 +84,11 @@ test("each size's reviewer is the first whose model is not the latest writer's",
 		const { harness, model, effort } = pickReviewer(size, {}, wrote);
 		return `${harness} ${model} ${effort}`;
 	};
-	expect(at("XS", claude)).toBe("codex gpt-6.1-sol medium");
-	expect(at("S", claude)).toBe("codex gpt-6.1-sol medium");
-	expect(at("M", claude)).toBe("codex gpt-6.1-sol high");
-	expect(at("L", claude)).toBe("codex gpt-6.1-sol xhigh");
-	expect(at("XL", claude)).toBe("codex gpt-6.1-sol xhigh");
+	expect(at("XS", claude)).toBe("codex gpt-6.2-sol medium");
+	expect(at("S", claude)).toBe("codex gpt-6.2-sol medium");
+	expect(at("M", claude)).toBe("codex gpt-6.2-sol high");
+	expect(at("L", claude)).toBe("codex gpt-6.2-sol xhigh");
+	expect(at("XL", claude)).toBe("codex gpt-6.2-astra high");
 	// Claude reviews what Sol wrote.
 	expect(at("XS", codex)).toBe("claude claude-opus-5-5 low");
 	expect(at("S", codex)).toBe("claude claude-opus-5-5 low");
@@ -97,22 +97,39 @@ test("each size's reviewer is the first whose model is not the latest writer's",
 	expect(at("XL", codex)).toBe("claude claude-opus-5-5 xhigh");
 
 	// The PR's latest recorded implementer replaces the running harness, and only it and the models weaker than it are avoided.
-	expect(at("S", authored({}, { CLAUDECODE: "1" }, "claude-opus-5-5"))).toBe("codex gpt-6.1-sol medium");
-	expect(at("S", authored({}, { CLAUDECODE: "1" }, "gpt-6.1-sol"))).toBe("claude claude-opus-5-5 low");
+	expect(at("S", authored({}, { CLAUDECODE: "1" }, "claude-opus-5-5"))).toBe("codex gpt-6.2-sol medium");
+	expect(at("S", authored({}, { CLAUDECODE: "1" }, "gpt-6.2-sol"))).toBe("claude claude-opus-5-5 low");
 	// An unknown latest writer is taken to be the running harness, usually the session that just pushed.
 	expect(at("M", authored({}, { CODEX_THREAD_ID: "t" }, "unknown"))).toBe("claude claude-opus-5-5 medium");
 	// --harness then avoids the named latest writer, passing to its next entry.
 	const opus = authored({ harness: "claude" }, {}, "claude-opus-5-5");
 	expect(pickReviewer("M", { harness: "claude" }, opus).model).toBe("claude-fable-5-2");
-	expect(at("S", authored({ exclude: ["claude-opus-5-5"] }, { CLAUDECODE: "1" }))).toBe("codex gpt-6.1-sol medium");
-	expect(at("S", authored({ exclude: ["gpt-6.1-sol"] }, { CLAUDECODE: "1" }))).toBe("claude claude-opus-5-5 low");
+	expect(at("S", authored({ exclude: ["claude-opus-5-5"] }, { CLAUDECODE: "1" }))).toBe("codex gpt-6.2-sol medium");
+	expect(at("S", authored({ exclude: ["gpt-6.2-sol"] }, { CLAUDECODE: "1" }))).toBe("claude claude-opus-5-5 low");
+	// A provider-qualified spelling of a listed model is that model, whether a record or --exclude-model names it.
+	expect(at("S", authored({}, {}, "openai/gpt-6.2-sol"))).toBe("claude claude-opus-5-5 low");
+	expect(at("S", authored({ exclude: ["openai/gpt-6.2-sol"] }, {}))).toBe("claude claude-opus-5-5 low");
+	// A qualified spelling of Fable still avoids Sol, which is weaker, and so does retired Sol 6.1.
+	expect(weaker("gpt-6.1-sol", "claude-fable-5-2")).toBe(true);
+	// A qualified --model keeps its spelling yet matches its entry, and a qualified Fable pick runs no shadow.
+	expect(pickReviewer("XL", { harness: "codex", model: "openai/gpt-6.2-sol" }, () => false)).toEqual({
+		harness: "codex",
+		model: "openai/gpt-6.2-sol",
+		effort: "xhigh",
+	});
+	expect(shadowOf("L", { harness: "claude", model: "anthropic/claude-fable-5-2", effort: "xhigh" })).toBeNull();
+	// A saved session spelled another way is still the writer's model.
+	expect(
+		authored({}, {}, "gpt-6.2-astra")({ harness: "codex", model: "openai/gpt-6.2-astra", effort: "medium" }),
+	).toBe(true);
+	expect(at("M", authored({ exclude: ["anthropic/claude-fable-5-2"] }, {}))).toBe("claude claude-opus-5-5 medium");
 	// No harness need be detected once the implementers are named.
-	expect(at("M", authored({ exclude: ["other-model"] }, {}))).toBe("codex gpt-6.1-sol high");
+	expect(at("M", authored({ exclude: ["other-model"] }, {}))).toBe("codex gpt-6.2-sol high");
 	// --exclude-model avoids every model weaker than one it names too, as the recorded writer does.
 	expect(at("M", authored({ exclude: ["claude-fable-5-2"] }, {}))).toBe("claude claude-opus-5-5 medium");
 	const sonnet = { harness: "claude" as const, model: "claude-sonnet-5-5", effort: "high" };
 	expect(authored({ exclude: ["claude-opus-5-5"] }, {})(sonnet)).toBe(true);
-	const all = authored({ exclude: ["gpt-6.1-sol", "claude-opus-5-5", "gpt-6.2-astra", "claude-fable-5-2"] }, {});
+	const all = authored({ exclude: ["gpt-6.2-sol", "claude-opus-5-5", "gpt-6.2-astra", "claude-fable-5-2"] }, {});
 	expect(() => pickReviewer("M", {}, all)).toThrow("is avoided; pass --harness and --model");
 	// A model name is looked up as data, never as one of an object's inherited keys.
 	expect(weaker("constructor", "claude-opus-5-5")).toBe(false);
@@ -123,30 +140,30 @@ test("each size's reviewer is the first whose model is not the latest writer's",
 	const byOpus = authored({}, {}, "claude-opus-5-5");
 	// Fable closes each list, so Opus's work still has a reviewer while all of Codex is out.
 	expect(ranked({}, byOpus)).toEqual([
-		"codex gpt-6.1-sol xhigh",
+		"codex gpt-6.2-sol xhigh",
 		"codex gpt-6.2-astra xhigh",
 		"claude claude-fable-5-2 xhigh",
 	]);
-	expect(ranked({}, authored({}, {}, "gpt-6.1-sol"))).toEqual([
+	expect(ranked({}, authored({}, {}, "gpt-6.2-sol"))).toEqual([
 		"claude claude-opus-5-5 high",
 		"codex gpt-6.2-astra xhigh",
 		"claude claude-fable-5-2 xhigh",
 	]);
 	// An unknown writer under Claude Code avoids every Claude model, so only Codex's models follow.
-	expect(ranked({}, claude)).toEqual(["codex gpt-6.1-sol xhigh", "codex gpt-6.2-astra xhigh"]);
+	expect(ranked({}, claude)).toEqual(["codex gpt-6.2-sol xhigh", "codex gpt-6.2-astra xhigh"]);
 	// A reviewer is never weaker than the writer: Sol never reviews Fable's work, and Sonnet reviews no one's.
 	expect(ranked({}, authored({}, {}, "claude-fable-5-2"))).toEqual([
 		"claude claude-opus-5-5 high",
 		"codex gpt-6.2-astra xhigh",
 	]);
 	expect(rankedReviewers("XS", {}, authored({}, {}, "claude-sonnet-5-5")).map((e) => e.model)).toEqual([
-		"gpt-6.1-sol",
+		"gpt-6.2-sol",
 		"claude-opus-5-5",
 		"gpt-6.2-astra",
 		"claude-fable-5-2",
 	]);
 	for (const list of Object.values(REVIEWERS)) expect(list.map((e) => e.model)).not.toContain("claude-sonnet-5-5");
-	expect(ranked({ effort: "high" }, byOpus)).toEqual(["codex gpt-6.1-sol high"]);
+	expect(ranked({ effort: "high" }, byOpus)).toEqual(["codex gpt-6.2-sol high"]);
 	expect(ranked({ model: "gpt-6-astra" }, byOpus)).toEqual(["codex gpt-6-astra xhigh"]);
 	expect(ranked({ harness: "claude" }, () => false)).toEqual(["claude claude-opus-5-5 high"]);
 
@@ -169,22 +186,22 @@ test("each size's reviewer is the first whose model is not the latest writer's",
 		effort: "high",
 	});
 	expect(pickReviewer("M", { harness: "claude", model: "claude-opus-4-7" }, byOpus).effort).toBe("medium");
-	const sol = authored({ harness: "codex", exclude: ["gpt-6.1-sol"] }, {});
+	const sol = authored({ harness: "codex", exclude: ["gpt-6.2-sol"] }, {});
 	expect(pickReviewer("M", { harness: "codex" }, sol).model).toBe("gpt-6.2-astra");
 	// Avoiding Astra avoids Sol, which is weaker, so no Codex entry is left.
 	const astra = authored({ harness: "codex", exclude: ["gpt-6.2-astra"] }, {});
 	expect(() => pickReviewer("M", { harness: "codex" }, astra)).toThrow(
-		"gpt-6.1-sol is avoided, as the latest writer's or weaker than it; pass --model",
+		"gpt-6.2-sol is avoided, as the latest writer's or weaker than it; pass --model",
 	);
 	expect(pickReviewer("M", { harness: "codex", model: "gpt-6-astra" }, sol).model).toBe("gpt-6-astra");
 	// Nor does --model bring back an avoided model.
-	expect(() => pickReviewer("M", { harness: "codex", model: "gpt-6.1-sol" }, sol)).toThrow("gpt-6.1-sol is avoided");
+	expect(() => pickReviewer("M", { harness: "codex", model: "gpt-6.2-sol" }, sol)).toThrow("gpt-6.2-sol is avoided");
 	const opusWrote = authored({ exclude: ["claude-opus-5-5"] }, {});
 	expect(() => pickReviewer("M", { model: "claude-opus-5-5" }, opusWrote)).toThrow("claude-opus-5-5 is avoided");
 	// --model and --effort override the picked entry.
 	expect(pickReviewer("XS", { effort: "high" }, claude)).toEqual({
 		harness: "codex",
-		model: "gpt-6.1-sol",
+		model: "gpt-6.2-sol",
 		effort: "high",
 	});
 });
@@ -203,12 +220,12 @@ fakes("a quest branch is reviewed at its quest's size on the base, which its own
 	const result = await quest("--root", s.repo, "review");
 	expect(result.stderr).toBe("");
 	expect(result.stdout).toMatch(/^size L quest\/m0\/big.md\n/);
-	expect(result.stdout).toContain("\nreviewer codex gpt-6.1-sol xhigh\n");
+	expect(result.stdout).toContain("\nreviewer codex gpt-6.2-sol xhigh\n");
 
 	// --size overrides the quest's.
 	const sized = await quest("--root", s.repo, "review", "--size", "S", "--new");
 	expect(sized.stdout).toMatch(/^size S --size\n/);
-	expect(sized.stdout).toContain("\nreviewer codex gpt-6.1-sol medium\n");
+	expect(sized.stdout).toContain("\nreviewer codex gpt-6.2-sol medium\n");
 	// A checkout on another branch, as the runner's review checkout is, takes the size of the branch it names.
 	git(s.repo, "checkout", "-qb", "kix-review/job1");
 	const {
@@ -233,7 +250,7 @@ fakes("a quest branch is reviewed at its quest's size on the base, which its own
 
 fakes("--exclude-model picks the reviewer from the PR's implementers instead of the running harness", async () => {
 	const s = setup(null);
-	const result = await quest("--root", s.repo, "review", "--exclude-model", "gpt-6.1-sol", "--json");
+	const result = await quest("--root", s.repo, "review", "--exclude-model", "gpt-6.2-sol", "--json");
 	expect(result.stderr).toBe("");
 	const [round] = JSON.parse(result.stdout).rounds;
 	expect([round.reviewer, round.model, round.effort, round.size, round.sizeFrom]).toEqual([
@@ -244,14 +261,31 @@ fakes("--exclude-model picks the reviewer from the PR's implementers instead of 
 		"default",
 	]);
 
-	const all = ["gpt-6.1-sol", "claude-opus-5-5", "gpt-6.2-astra", "claude-fable-5-2"].flatMap((m) => [
+	// Qualified flags compare as the listed model, Astra on its own M entry's effort with Opus avoided, and the CLI
+	// still gets the spelling given.
+	const qualified = await quest(
+		"--root",
+		s.repo,
+		"review",
+		"--exclude-model",
+		"anthropic/claude-opus-5-5",
+		"--model",
+		"openai/gpt-6.2-astra",
+		"--json",
+		"--new",
+	);
+	expect(qualified.stderr).toBe("");
+	const [astra] = JSON.parse(qualified.stdout).rounds;
+	expect([astra.reviewer, astra.model, astra.effort]).toEqual(["codex", "openai/gpt-6.2-astra", "high"]);
+
+	const all = ["gpt-6.2-sol", "claude-opus-5-5", "gpt-6.2-astra", "claude-fable-5-2"].flatMap((m) => [
 		"--exclude-model",
 		m,
 	]);
 	const none = await quest("--root", s.repo, "review", ...all, "--new");
 	expect(none.code).toBe(2);
 	expect(none.stderr).toContain(
-		"every M reviewer (gpt-6.1-sol, claude-opus-5-5, gpt-6.2-astra, claude-fable-5-2) is avoided",
+		"every M reviewer (gpt-6.2-sol, claude-opus-5-5, gpt-6.2-astra, claude-fable-5-2) is avoided",
 	);
 });
 
@@ -342,12 +376,12 @@ fakes.for([
 	[
 		"CLAUDECODE",
 		"reset",
-		`no eligible M reviewer could run: gpt-6.1-sol high and gpt-6.2-astra high (codex hit its usage limit; resets ${codexReset})`,
+		`no eligible M reviewer could run: gpt-6.2-sol high and gpt-6.2-astra high (codex hit its usage limit; resets ${codexReset})`,
 	],
 	[
 		"CLAUDECODE",
 		"unknown",
-		"no eligible M reviewer could run: gpt-6.1-sol high and gpt-6.2-astra high (codex hit its usage limit; resets unknown)",
+		"no eligible M reviewer could run: gpt-6.2-sol high and gpt-6.2-astra high (codex hit its usage limit; resets unknown)",
 	],
 	// Opus's limit falls through to Fable, which hits it too.
 	[
@@ -379,11 +413,11 @@ const OPUS_WROTE = ["--exclude-model", "claude-opus-5-5"];
 
 fakes("a reviewer at its usage limit passes the round to the next eligible one, and the record names it", async () => {
 	const s = setup(null);
-	vi.stubEnv("FAKE_FAILS", "gpt-6.1-sol");
+	vi.stubEnv("FAKE_FAILS", "gpt-6.2-sol");
 	vi.stubEnv("FAKE_LIMITED", "reset");
 	const plain = await quest("--root", s.repo, "review", ...OPUS_WROTE);
 	expect(plain.code, plain.stderr).toBe(0);
-	expect(plain.stdout).toContain(`\nskipped codex gpt-6.1-sol high usage limit, resets ${codexReset}\n`);
+	expect(plain.stdout).toContain(`\nskipped codex gpt-6.2-sol high usage limit, resets ${codexReset}\n`);
 	// Astra's shadow follows it, one effort higher for an M PR.
 	expect(plain.stdout).toContain("\nreviewer codex gpt-6.2-astra high\nsession ");
 	expect(plain.stdout).toContain("\nreviewer codex gpt-6.2-astra xhigh shadow\nsession ");
@@ -403,8 +437,8 @@ fakes("a reviewer at its usage limit passes the round to the next eligible one, 
 	const { rounds, skipped } = JSON.parse(back.stdout);
 	expect(skipped).toEqual([]);
 	expect(rounds.map((r: Round) => `${r.reviewer} ${r.model} ${r.effort}${r.shadow ? " shadow" : ""}`)).toEqual([
-		"codex gpt-6.1-sol high",
-		"codex gpt-6.1-sol xhigh shadow",
+		"codex gpt-6.2-sol high",
+		"codex gpt-6.2-sol xhigh shadow",
 	]);
 	// Sol settles Astra's finding, and Sol's shadow Astra's shadow's.
 	expect(rounds.map((r: Round) => r.earlier?.findings.map((f) => f.disposition))).toEqual([["fixed"], ["fixed"]]);
@@ -414,7 +448,7 @@ fakes("a model at its usage limit passes the round to the next model, whose shad
 	const s = setup(null);
 	vi.stubEnv("FAKE_FAILS", "claude-opus-5-5");
 	vi.stubEnv("FAKE_LIMITED", "reset");
-	const args = ["--exclude-model", "gpt-6.1-sol", "--size", "L", "--json"];
+	const args = ["--exclude-model", "gpt-6.2-sol", "--size", "L", "--json"];
 	const result = await quest("--root", s.repo, "review", ...args);
 	expect(result.code, result.stderr).toBe(0);
 	const { rounds, skipped } = JSON.parse(result.stdout);
@@ -440,7 +474,7 @@ fakes("a reviewer CLI that is not installed passes the round to the next eligibl
 	symlinkSync(execFileSync("which", ["git"], { encoding: "utf8" }).trim(), join(only, "git"));
 	symlinkSync(join(s.bin, "codex"), join(only, "codex"));
 	vi.stubEnv("PATH", only);
-	const result = await quest("--root", s.repo, "review", "--exclude-model", "gpt-6.1-sol");
+	const result = await quest("--root", s.repo, "review", "--exclude-model", "gpt-6.2-sol");
 	expect(result.code, result.stderr).toBe(0);
 	expect(result.stdout).toContain("\nskipped claude claude-opus-5-5 medium not installed\n");
 	expect(result.stdout).toContain("\nreviewer codex gpt-6.2-astra high\n");
@@ -448,7 +482,7 @@ fakes("a reviewer CLI that is not installed passes the round to the next eligibl
 
 fakes.each([
 	["--harness", "codex"],
-	["--model", "gpt-6.1-sol"],
+	["--model", "gpt-6.2-sol"],
 	["--effort", "high"],
 ])("a reviewer named with %s %s never falls through", async (flag, value) => {
 	const s = setup(null);
@@ -481,7 +515,7 @@ fakes("Codex reaches a gateway at OPENAI_BASE_URL, whose persistent 429 is the p
 	vi.stubEnv("OPENAI_BASE_URL", "http://127.0.0.1:4000/v1");
 	const pooled = await quest("--root", s.repo, "review");
 	expect(pooled.stderr).toBe(
-		"error: no eligible M reviewer could run: gpt-6.1-sol high and gpt-6.2-astra high (codex hit its usage limit; resets unknown)\n",
+		"error: no eligible M reviewer could run: gpt-6.2-sol high and gpt-6.2-astra high (codex hit its usage limit; resets unknown)\n",
 	);
 	expect(pooled.code).toBe(3);
 	vi.stubEnv("FAKE_LIMITED", undefined);
@@ -1010,7 +1044,7 @@ fakes("codex reviews read-only with the base's instructions, then reports in the
 			"risk medium the base has no RISK.md to name what is always high or customer-facing, so every change is medium",
 			"classified medium default the base has no RISK.md to name what is always high or customer-facing, so every change is medium",
 			"",
-			"reviewer codex gpt-6.1-sol high",
+			"reviewer codex gpt-6.2-sol high",
 			"session thread-1",
 			"round 1",
 			"usage findings input 100 cached 80 output 7",
@@ -1021,7 +1055,7 @@ fakes("codex reviews read-only with the base's instructions, then reports in the
 			"  average([3]) is 0.",
 			"",
 			// The shadow, the pick one effort higher for an M PR, reviews it too, in its own session.
-			"reviewer codex gpt-6.1-sol xhigh shadow",
+			"reviewer codex gpt-6.2-sol xhigh shadow",
 			"session thread-1",
 			"round 1",
 			"usage findings input 100 cached 80 output 7",
@@ -1053,7 +1087,7 @@ fakes("codex reviews read-only with the base's instructions, then reports in the
 		expect(call.argv).toContain("--ignore-rules");
 		expect(call.argv).toContain("--ignore-user-config");
 		expect(call.argv).toContain("skills.include_instructions=false");
-		expect(call.argv[call.argv.indexOf("-m") + 1]).toBe("gpt-6.1-sol");
+		expect(call.argv[call.argv.indexOf("-m") + 1]).toBe("gpt-6.2-sol");
 		expect(call.argv).toContain('model_reasoning_effort="high"');
 		expect(call.argv).not.toContain("--dangerously-bypass-approvals-and-sandbox");
 		// The session's own variables never reach the reviewer.
@@ -1574,7 +1608,7 @@ fakes.each([
 		const effort = flags.includes("--effort") ? "medium" : "high";
 		expect(at(s.calls(), effort).at(-2)!.argv[1]).toBe("review");
 		// A pick at another effort leaves the shadow two steps above it, so the shadow at one step reruns.
-		expect(round.stdout.includes("gpt-6.1-sol high shadow\n")).toBe(flags.includes("--effort"));
+		expect(round.stdout.includes("gpt-6.2-sol high shadow\n")).toBe(flags.includes("--effort"));
 	},
 );
 
@@ -1710,7 +1744,7 @@ fakes("each round rewrites the Review section of the branch's open PR, keeping t
 				"- Classified: medium by default",
 				"",
 				// The body's `## Models` record sizes the PR S.
-				"- Reviewer: Codex, gpt-6.1-sol, medium effort",
+				"- Reviewer: Codex, gpt-6.2-sol, medium effort",
 				"- Session: `thread-1`, round 1",
 				"- Score: 8/10, `Lands once the off-by-one is fixed.`",
 				"- Rounds: 1; first round 1 (high 1); findings 1 (high 1): fixed 0, refuted 0, open 1",
@@ -1718,7 +1752,7 @@ fakes("each round rewrites the Review section of the branch's open PR, keeping t
 				"  - High, `src/lib.ts:2`: `Off by one`",
 				"",
 				// The shadow runs the pick one effort higher for an S PR, and its findings count apart from the pick's.
-				"- Reviewer: Codex, gpt-6.1-sol, high effort, shadow",
+				"- Reviewer: Codex, gpt-6.2-sol, high effort, shadow",
 				"- Session: `thread-1`, round 1",
 				"- Score: 8/10, `Lands once the off-by-one is fixed.`",
 				"- Rounds: 1; first round 1 (high 1); findings 1 (high 1): fixed 0, refuted 0, open 1",
@@ -1798,7 +1832,7 @@ fakes(
 		expect(listed.code, listed.stderr).toBe(0);
 		const reason = "it changes src/lib.ts, which is always high: customers' averages run on it";
 		expect(listed.stdout).toContain(
-			`\nrisk high ${reason}\nclassified high paths ${reason}\n\nreviewer codex gpt-6.1-sol xhigh\n`,
+			`\nrisk high ${reason}\nclassified high paths ${reason}\n\nreviewer codex gpt-6.2-sol xhigh\n`,
 		);
 		expect(listed.stdout).toContain("\nreviewer claude claude-fable-5-2 xhigh second\n");
 		// An L PR's shadow would step down from the pick, but a high head runs none.
@@ -1813,7 +1847,7 @@ fakes(
 			"claude-opus-5-5",
 		);
 		expect(large.code, large.stderr).toBe(0);
-		expect(large.stdout).toContain("\nreviewer codex gpt-6.1-sol xhigh\n");
+		expect(large.stdout).toContain("\nreviewer codex gpt-6.2-sol xhigh\n");
 		expect(large.stdout).not.toContain(" shadow\n");
 		expect(classifying(s.calls())).toEqual([]);
 
@@ -1849,7 +1883,7 @@ fakes("a high head's pick that cannot run passes down the high list, and each mo
 			.sort();
 	try {
 		// Opus wrote it and Sol is at its limit: Fable picks, and Astra, the other vendor's next, is second.
-		vi.stubEnv("FAKE_FAILS", "gpt-6.1-sol");
+		vi.stubEnv("FAKE_FAILS", "gpt-6.2-sol");
 		vi.stubEnv("FAKE_LIMITED", "reset");
 		const passed = await quest("--root", s.repo, "review", "--exclude-model", "claude-opus-5-5");
 		expect(passed.code, passed.stderr).toBe(0);
@@ -1860,14 +1894,14 @@ fakes("a high head's pick that cannot run passes down the high list, and each mo
 		// Sonnet wrote it, and Sol, its pick, and Opus, its second, are both at their limits. Sol's first turn hangs, so
 		// Opus fails first as the second, and once Sol fails too the pick passes over Opus without running it again:
 		// each is named once, and Fable picks with Astra second.
-		vi.stubEnv("FAKE_FAILS", "gpt-6.1-sol,claude-opus-5-5");
+		vi.stubEnv("FAKE_FAILS", "gpt-6.2-sol,claude-opus-5-5");
 		vi.stubEnv("FAKE_HANG", join(s.bin, "..", "sol.pid"));
 		const before = s.calls().length;
 		const both = await quest("--root", s.repo, "review", "--new", "--exclude-model", "claude-sonnet-5-5");
 		expect(both.code, both.stderr).toBe(0);
 		expect(skips(both.stdout)).toEqual([
 			"skipped claude claude-opus-5-5 xhigh usage limit, resets 2030-03-17T17:46:40Z",
-			`skipped codex gpt-6.1-sol xhigh usage limit, resets ${codexReset}`,
+			`skipped codex gpt-6.2-sol xhigh usage limit, resets ${codexReset}`,
 		]);
 		expect(reviewersOf(both.stdout)).toEqual([
 			"reviewer claude claude-fable-5-2 xhigh",
@@ -1958,7 +1992,7 @@ fakes("without a logged-in Claude Code, Codex classifies", async () => {
 	vi.stubEnv("PATH", only);
 	const result = await quest("--root", s.repo, "review");
 	expect(result.code, result.stderr).toBe(0);
-	expect(result.stdout).toContain("classifier codex gpt-6.1-sol low thread-classify\n");
+	expect(result.stdout).toContain("classifier codex gpt-6.2-sol low thread-classify\n");
 	const call = s.calls().find((each) => each.argv[1] === "--json")!;
 	expect(call.argv.slice(0, 2)).toEqual(["exec", "--json"]);
 	expect(call.argv).toContain('model_reasoning_effort="low"');
@@ -2016,7 +2050,7 @@ agyFakes(
 		for (const failing of ["claude-rejected", "claude-limited", "claude-unusable"]) {
 			const passed = await run(failing);
 			expect(passed.code, passed.stderr).toBe(0);
-			expect(passed.stdout).toContain("classifier codex gpt-6.1-sol low thread-classify\n");
+			expect(passed.stdout).toContain("classifier codex gpt-6.2-sol low thread-classify\n");
 		}
 		// Gemini Flash answers last.
 		const last = await run("claude-limited,codex-limited");
@@ -2050,7 +2084,7 @@ agyFakes(
 		const unusable = await run("claude-unusable,codex-unusable,agy-unusable");
 		expect(unusable.code).toBe(2);
 		expect(unusable.stderr).toBe(
-			"error: no classifier could set the risk tier: claude claude-haiku-5-5: the classifier's reply has no risk tier with a reason; codex gpt-6.1-sol: the classifier's reply is not JSON; agy gemini-3.8-flash: the classifier's reply has no risk tier with a reason\n",
+			"error: no classifier could set the risk tier: claude claude-haiku-5-5: the classifier's reply has no risk tier with a reason; codex gpt-6.2-sol: the classifier's reply is not JSON; agy gemini-3.8-flash: the classifier's reply has no risk tier with a reason\n",
 		);
 	},
 	20_000,
@@ -2060,7 +2094,7 @@ fakes("a question no model answers usably throws with what each reply took", asy
 	const s = setup();
 	const entries = [
 		{ harness: "claude" as const, model: "claude-haiku-5-5", effort: "low" },
-		{ harness: "codex" as const, model: "gpt-6.1-sol", effort: "low" },
+		{ harness: "codex" as const, model: "gpt-6.2-sol", effort: "low" },
 	];
 	const error = await ask(entries, {
 		cwd: s.repo,
@@ -2104,7 +2138,7 @@ fakes("a reviewer raises the tier, and the record keeps the classifier's beside 
 				"- Risk: high, `It rewrites the wire format peers read.`",
 				`- Classified: medium by Claude Code, claude-haiku-5-5, low effort, session \`${session}\``,
 				"",
-				"- Reviewer: Codex, gpt-6.1-sol, medium effort",
+				"- Reviewer: Codex, gpt-6.2-sol, medium effort",
 				"- Session: `thread-1`, round 1",
 				"- Score: 8/10, `Lands once the off-by-one is fixed.`",
 				"- Raised the risk to high: `It rewrites the wire format peers read.`",
@@ -2157,9 +2191,9 @@ fakes(
 			const out = await quest("--root", s.repo, "review");
 			expect(out.code).toBe(3);
 			expect(out.stderr).toContain("no eligible high reviewer could run: claude-fable-5-2 xhigh (");
-			expect(out.stderr).not.toContain("gpt-6.1-sol");
+			expect(out.stderr).not.toContain("gpt-6.2-sol");
 			// The rounds that ran are saved and printed, so their findings can be answered.
-			expect(out.stdout).toContain("\nreviewer codex gpt-6.1-sol medium\n");
+			expect(out.stdout).toContain("\nreviewer codex gpt-6.2-sol medium\n");
 			expect(out.stdout).toContain("\nrisk high It rewrites the wire format peers read.\n");
 			expect(out.stdout).toContain("\nfindings 1\n");
 
@@ -2171,7 +2205,7 @@ fakes(
 			expect(resumed.code, resumed.stderr).toBe(0);
 			expect(seconds(resumed.stdout)).toEqual(["reviewer claude claude-fable-5-2 xhigh second"]);
 			expect(pull.body).toContain(
-				"- Reviewer: Codex, gpt-6.1-sol, medium effort\n- Session: `thread-1`, round 2",
+				"- Reviewer: Codex, gpt-6.2-sol, medium effort\n- Session: `thread-1`, round 2",
 			);
 
 			// On a new head the tier starts at medium, and the second reviewer settles its findings; when the
@@ -2206,7 +2240,7 @@ fakes("a raise to high with no other vendor's model left prints its saved rounds
 		expect(out.code).toBe(2);
 		expect(out.stderr).toContain("every such model of the high list is avoided");
 		expect(out.stdout).toContain("\nrisk high It rewrites the wire format peers read.\n");
-		expect(out.stdout).toContain("\nreviewer codex gpt-6.1-sol medium\n");
+		expect(out.stdout).toContain("\nreviewer codex gpt-6.2-sol medium\n");
 		expect(out.stdout).toContain("\nfindings 1\n");
 	} finally {
 		vi.unstubAllGlobals();
@@ -2225,7 +2259,7 @@ fakes("a raise from a reviewer the run leaves out holds while its last round rev
 	vi.stubEnv("FAKE_RAISE", "high@high");
 	const raised = "\nrisk high It rewrites the wire format peers read.\n";
 	const block = [
-		"- Reviewer: Codex, gpt-6.1-sol, high effort, shadow",
+		"- Reviewer: Codex, gpt-6.2-sol, high effort, shadow",
 		"- Session: `thread-1`",
 		"- Raised the risk to high: `It rewrites the wire format peers read.`",
 		"- Rounds: 1;",
@@ -2270,13 +2304,13 @@ fakes("a shadow with findings on a head that turned high settles them as it ran"
 	try {
 		const first = await quest("--root", s.repo, "review");
 		expect(first.code, first.stderr).toBe(0);
-		expect(first.stdout).toContain("\nreviewer codex gpt-6.1-sol xhigh shadow\n");
+		expect(first.stdout).toContain("\nreviewer codex gpt-6.2-sol xhigh shadow\n");
 
 		// The head is now high, which runs no shadow, but the old one resumes at its own effort to settle its
 		// finding, keeping its raise.
 		const settled = await quest("--root", s.repo, "review", "--responses", join(s.repo, ".tmp", "responses.md"));
 		expect(settled.code, settled.stderr).toBe(0);
-		expect(settled.stdout).toContain("\nreviewer codex gpt-6.1-sol xhigh shadow\nsession thread-1\nround 2\n");
+		expect(settled.stdout).toContain("\nreviewer codex gpt-6.2-sol xhigh shadow\nsession thread-1\nround 2\n");
 		expect(settled.stdout).toContain("\nrisk high It rewrites the wire format peers read.\n");
 	} finally {
 		vi.unstubAllGlobals();
@@ -2287,7 +2321,7 @@ fakes("an old shadow whose model is avoided or cannot run passes its findings to
 	// Opus medium picks an M PR Sol wrote, and its shadow, Opus high, leaves a finding open beside the pick's.
 	const opened = async () => {
 		const s = setup();
-		expect((await quest("--root", s.repo, "review", "--exclude-model", "gpt-6.1-sol")).code).toBe(0);
+		expect((await quest("--root", s.repo, "review", "--exclude-model", "gpt-6.2-sol")).code).toBe(0);
 		write(s.repo, ".tmp/responses.md", "1. Fixed.\n2. Fixed.\n");
 		return { s, responses: join(s.repo, ".tmp", "responses.md") };
 	};
@@ -2298,7 +2332,7 @@ fakes("an old shadow whose model is avoided or cannot run passes its findings to
 		const args = ["review", "--size", "XS", "--exclude-model", "claude-opus-5-5", "--responses", avoided.responses];
 		const moved = await quest("--root", avoided.s.repo, ...args);
 		expect(moved.code, moved.stderr).toBe(0);
-		expect(shadowOf(moved.stdout)).toEqual(["reviewer codex gpt-6.1-sol medium shadow"]);
+		expect(shadowOf(moved.stdout)).toEqual(["reviewer codex gpt-6.2-sol medium shadow"]);
 
 		// Resized to XS with Sonnet named as the writer, Opus high may settle its own findings, but is at its limit.
 		const limited = await opened();
@@ -2318,7 +2352,7 @@ fakes("an old shadow whose model is avoided or cannot run passes its findings to
 		expect(out.stdout).toContain(
 			"\nskipped claude claude-opus-5-5 high usage limit, resets 2030-03-17T17:46:40Z\n",
 		);
-		expect(shadowOf(out.stdout)).toEqual(["reviewer codex gpt-6.1-sol medium shadow"]);
+		expect(shadowOf(out.stdout)).toEqual(["reviewer codex gpt-6.2-sol medium shadow"]);
 		vi.unstubAllEnvs();
 
 		// A high head Sonnet wrote picks Sol, seconded by Opus, and keeps the old Opus shadow. Opus is at its limit, which
@@ -2350,13 +2384,13 @@ fakes("an old shadow whose model is avoided or cannot run passes its findings to
 		const opus = ["--exclude-model", "claude-opus-5-5"];
 		expect((await quest("--root", s.repo, "review", ...opus)).code).toBe(0);
 		write(s.repo, ".tmp/responses.md", "1. Fixed.\n2. Fixed.\n");
-		vi.stubEnv("FAKE_FAILS", "gpt-6.1-sol");
+		vi.stubEnv("FAKE_FAILS", "gpt-6.2-sol");
 		vi.stubEnv("FAKE_LIMITED", "reset");
 		const responses = join(s.repo, ".tmp", "responses.md");
 		const passed = await quest("--root", s.repo, "review", "--size", "XS", ...opus, "--responses", responses);
 		expect(passed.code, passed.stderr).toBe(0);
 		expect(passed.stdout.split("\n").filter((line) => line.startsWith("skipped "))).toEqual([
-			`skipped codex gpt-6.1-sol medium usage limit, resets ${codexReset}`,
+			`skipped codex gpt-6.2-sol medium usage limit, resets ${codexReset}`,
 		]);
 		expect(shadowOf(passed.stdout)).toEqual(["reviewer codex gpt-6.2-astra medium shadow"]);
 	} finally {
@@ -2410,7 +2444,7 @@ fakes(
 			const held = await quest("--root", s.repo, "review", "--override", "high", "--reason", "It ships tonight.");
 			expect(held.code, held.stderr).toBe(0);
 			expect(held.stdout).toContain("\nrisk high It ships tonight.\noverridden low by the maintainer\n");
-			expect(held.stdout).toContain("\nreviewer codex gpt-6.1-sol xhigh\n");
+			expect(held.stdout).toContain("\nreviewer codex gpt-6.2-sol xhigh\n");
 			expect(held.stdout).toContain("\nreviewer claude claude-fable-5-2 xhigh second\n");
 			expect(recordedRisk(pull.body)).toMatchObject({
 				tier: "high",
@@ -2427,7 +2461,7 @@ fakes(
 			git(s.repo, "commit", "-qam", "a constant at a named effort");
 			const effort = await quest("--root", s.repo, "review", "--effort", "high");
 			expect(effort.code, effort.stderr).toBe(0);
-			expect(effort.stdout).toContain("\nreviewer codex gpt-6.1-sol high\n");
+			expect(effort.stdout).toContain("\nreviewer codex gpt-6.2-sol high\n");
 			expect(effort.stdout).toContain("\nreviewer claude claude-fable-5-2 xhigh second\n");
 			// A riskier change than the one overridden ends it.
 			vi.stubEnv("FAKE_RISK", JSON.stringify({ tier: "medium", reason: "It changes the output.", class: null }));
@@ -2459,7 +2493,7 @@ fakes(
 			const out = await quest("--root", s.repo, "review", "--override", "high", "--reason", "It ships tonight.");
 			expect(out.code).toBe(3);
 			expect(out.stderr).toContain("no eligible high reviewer could run: claude-fable-5-2 xhigh (");
-			expect(out.stderr).not.toContain("gpt-6.1-sol");
+			expect(out.stderr).not.toContain("gpt-6.2-sol");
 		} finally {
 			vi.unstubAllGlobals();
 		}
@@ -2484,7 +2518,7 @@ fakes("a raise to the override's own tier agrees with it, so the override and th
 			"It ships tonight.",
 		);
 		expect(held.code, held.stderr).toBe(0);
-		expect(held.stdout).toContain("\nreviewer codex gpt-6.1-sol xhigh\n");
+		expect(held.stdout).toContain("\nreviewer codex gpt-6.2-sol xhigh\n");
 		vi.stubEnv("FAKE_RAISE", undefined);
 		// The next head is classified medium and raised by no one, and the override still holds it high.
 		write(s.repo, "src/lib.ts", "export const x = 9;\n");
@@ -2492,7 +2526,7 @@ fakes("a raise to the override's own tier agrees with it, so the override and th
 		const next = await quest("--root", s.repo, "review", ...opus);
 		expect(next.code, next.stderr).toBe(0);
 		expect(next.stdout).toContain("\noverridden medium by the maintainer\n");
-		expect(next.stdout).toContain("\nreviewer codex gpt-6.1-sol xhigh\n");
+		expect(next.stdout).toContain("\nreviewer codex gpt-6.2-sol xhigh\n");
 	} finally {
 		vi.unstubAllGlobals();
 	}
@@ -2656,7 +2690,7 @@ fakes("a later round checks only what changed since the reviewed head, and the o
 fakes("the PR's Models record sizes the review and names its latest writer", async () => {
 	const s = setup();
 	const body = (...lines: string[]) => ["Body.", "", "## Models", "", ...lines].join("\n");
-	const pull: FakePull = { number: 9, body: body("- Size: L", "- Implementer: Codex, gpt-6.1-sol, high effort") };
+	const pull: FakePull = { number: 9, body: body("- Size: L", "- Implementer: Codex, gpt-6.2-sol, high effort") };
 	onGitHub(s.repo, [pull]);
 	try {
 		// Sol wrote it, so Opus reviews it at L's effort, though Claude Code runs the command.
@@ -2666,33 +2700,33 @@ fakes("the PR's Models record sizes the review and names its latest writer", asy
 
 		// Flags override the record.
 		const flagged = await quest("--root", s.repo, "review", "--new", "--size", "XS", "--exclude-model", "x");
-		expect(flagged.stdout).toMatch(/^size XS --size\n[\s\S]*\nreviewer codex gpt-6.1-sol medium\n/);
+		expect(flagged.stdout).toMatch(/^size XS --size\n[\s\S]*\nreviewer codex gpt-6.2-sol medium\n/);
 
 		// Only the latest implementer is avoided, whoever wrote earlier.
-		pull.body = body("- Implementer: Codex, unknown, unknown effort", "- Implementer: Codex, gpt-6.1-sol, high");
+		pull.body = body("- Implementer: Codex, unknown, unknown effort", "- Implementer: Codex, gpt-6.2-sol, high");
 		expect((await quest("--root", s.repo, "review", "--new")).stdout).toContain(
 			"reviewer claude claude-opus-5-5 medium\n",
 		);
 		// A display name is avoided as its ID is.
-		pull.body = body("- Size: S", "- Implementer: Codex, GPT-6.1 Sol, high effort");
+		pull.body = body("- Size: S", "- Implementer: Codex, GPT-6.2 Sol, high effort");
 		expect((await quest("--root", s.repo, "review", "--new")).stdout).toContain(
 			"reviewer claude claude-opus-5-5 low\n",
 		);
 		// A latest implementer whose model is unknown may be the running harness's, which the review then skips.
-		pull.body = body("- Implementer: Codex, gpt-6.1-sol, high", "- Implementer: Codex, unknown, unknown effort");
+		pull.body = body("- Implementer: Codex, gpt-6.2-sol, high", "- Implementer: Codex, unknown, unknown effort");
 		expect((await quest("--root", s.repo, "review", "--new")).stdout).toContain(
-			"reviewer codex gpt-6.1-sol high\n",
+			"reviewer codex gpt-6.2-sol high\n",
 		);
 
 		// A malformed field fails the round, unless the flag that replaces it is given.
 		pull.body = body("- Size: XXL", "- Implementer: Codex");
-		const invalid = await quest("--root", s.repo, "review", "--new", "--exclude-model", "gpt-6.1-sol");
+		const invalid = await quest("--root", s.repo, "review", "--new", "--exclude-model", "gpt-6.2-sol");
 		expect(invalid.code).toBe(2);
 		expect(invalid.stderr).toContain("the PR's ## Models record names size XXL, not one of XS, S, M, L, XL");
 		const nameless = await quest("--root", s.repo, "review", "--new", "--size", "S");
 		expect(nameless.code).toBe(2);
 		expect(nameless.stderr).toContain("names no model it can read in: Implementer: Codex");
-		const both = await quest("--root", s.repo, "review", "--new", "--size", "S", "--exclude-model", "gpt-6.1-sol");
+		const both = await quest("--root", s.repo, "review", "--new", "--size", "S", "--exclude-model", "gpt-6.2-sol");
 		expect(both.stdout).toMatch(/^size S --size\n[\s\S]*\nreviewer claude claude-opus-5-5 low\n/);
 		pull.body = body("- Size: S", "- Size: M");
 		expect((await quest("--root", s.repo, "review", "--new")).stderr).toContain("names 2 sizes");
@@ -2767,13 +2801,22 @@ test("an Implementer line reads as agents write it", () => {
 		size: null,
 		arm: null,
 	});
-	expect(read("Codex, GPT-6.1 Sol, medium effort (iterate, XS)")).toEqual({
+	expect(read("Codex, GPT-6.2 Sol, medium effort (iterate, XS)")).toEqual({
 		harness: "Codex",
-		model: "gpt-6.1-sol",
+		model: "gpt-6.2-sol",
 		effort: "medium",
 		size: "XS",
 		arm: null,
 	});
+	// A retired model's spellings still read as its ID, as older records name it; an unlisted ID reads as written.
+	for (const name of ["GPT-6.1 Sol", "GPT 6.1  Sol", "GPT-6.1-SOL", "openai/gpt-6.1-sol"])
+		expect(read(`Codex, ${name}, high effort`)?.model).toBe("gpt-6.1-sol");
+	expect(read("Codex, openrouter/gpt-5-mini, high effort")?.model).toBe("openrouter/gpt-5-mini");
+	// Comparisons fold the spellings of a listed or retired model, and keep an unlisted one's namespace.
+	expect(sameModel("openai/gpt-6.2-astra", "gpt-6.2-astra")).toBe(true);
+	expect(sameModel("gpt-6.1-sol", "gpt-6.2-sol")).toBe(false);
+	expect(sameModel("internal/gpt-5-mini", "openai/gpt-5-mini")).toBe(false);
+	expect(read("GPT 6.2 Astra")?.model).toBe("gpt-6.2-astra");
 	expect(read("Claude Code, Opus 5.5, low effort (iterate, flow fix)")).toEqual(opus("low"));
 	expect(read("Claude Code, Opus 5.5, high effort (iterate, XS, arm B)")).toEqual({
 		...opus("high"),
@@ -2785,8 +2828,8 @@ test("an Implementer line reads as agents write it", () => {
 	expect(read("Claude Code, Opus 5.5, high effort (arm C)")).toEqual(opus("high"));
 	expect(read("unknown, Opus 5.5, high effort")).toEqual(opus("high", "unknown"));
 	expect(read("Claude Code, Fable 5.2, medium effort")?.model).toBe("claude-fable-5-2");
-	expect(read("Codex, openai/gpt-6.1-sol, high effort")?.model).toBe("gpt-6.1-sol");
-	expect(read("Codex, gpt-6.1-sol, high")?.effort).toBe("high");
+	expect(read("Codex, openai/gpt-6.2-sol, high effort")?.model).toBe("gpt-6.2-sol");
+	expect(read("Codex, gpt-6.2-sol, high")?.effort).toBe("high");
 	expect(read("unknown")).toBeNull();
 	// A lone field reads as a listed display name or an ID, keeping the size its notes give.
 	expect(read("Opus 5.5")).toEqual(opus("unknown", "unknown"));
@@ -2991,10 +3034,10 @@ test("the shadow steps up from the pick at S and M, down at L and XL, and not at
 		});
 	expect(shadows(authored({}, { CLAUDECODE: "1" }))).toEqual([
 		null,
-		"codex gpt-6.1-sol high",
-		"codex gpt-6.1-sol xhigh",
-		"codex gpt-6.1-sol high",
-		"codex gpt-6.1-sol high",
+		"codex gpt-6.2-sol high",
+		"codex gpt-6.2-sol xhigh",
+		"codex gpt-6.2-sol high",
+		"codex gpt-6.2-astra medium",
 	]);
 	expect(shadows(authored({}, { CODEX_THREAD_ID: "t" }))).toEqual([
 		null,
@@ -3193,7 +3236,7 @@ fakes("a new size pick, and its shadow, settle the open findings of the reviewer
 	// Sol wrote the fix, so Opus replaces it as the size's pick.
 	write(s.repo, "src/lib.ts", "export const x = 4;\n");
 	git(s.repo, "commit", "-qam", "fix");
-	const sol = ["--exclude-model", "gpt-6.1-sol"];
+	const sol = ["--exclude-model", "gpt-6.2-sol"];
 	const unanswered = await quest("--root", s.repo, "review", ...sol);
 	expect(unanswered.code).toBe(2);
 	expect(unanswered.stderr).toContain("the last round reported 2 finding(s)");
