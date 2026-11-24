@@ -1613,8 +1613,9 @@ base gained since, which a diff against its tip shows as reverted.
 The first round explores the change once. It runs the reviewer's own review,
 `codex exec review` with custom instructions or Claude Code's `/code-review
 <effort> <merge-base>...HEAD` with text after the target, or for `agy`, which
-has none, a turn asking what the change breaks, given the range, the
-base's `REVIEW.md`, if any, and any earlier findings and responses up front. It
+has none, a turn asking what the change breaks, given the range, Quest's shared
+review rules (`assets/REVIEW.md`), the base's `REVIEW.md`, if any (which adds to
+them and takes precedence), and any earlier findings and responses up front. It
 also asks the reviewer to name each contract the change alters and search past
 the diff for the dependents left on the old one. None returns a JSON schema
 itself, so the round resumes that session for one turn that reads nothing and
@@ -1630,8 +1631,9 @@ reported findings requires. A later round resumes the session and checks only
 what changed since the last round's head and its findings when nothing but the
 head changed: the same model, effort, and base, a merge base the last round's
 covers, as when the base moved on, the same applicable `AGENTS.md`,
-`CLAUDE.md`, and `REVIEW.md`, and the last round's head still in the clone,
-which an amend and a prune can remove. Otherwise it starts a new session that reviews
+`CLAUDE.md`, shipped shared review rules, and `REVIEW.md`, and the last round's
+head still in the clone, which an amend and a prune can remove. Otherwise it
+starts a new session that reviews
 the whole change and still weighs the responses. A round that would resume on
 the head the last round reviewed, when that round found nothing, runs no
 reviewer and repeats that round, marked `unchanged`. A refutation stands only
@@ -1680,8 +1682,9 @@ and that quest's turn reads the canaries without its read rules. It spends real 
 runs it; run it after upgrading any of the CLIs. The base is fetched first, since
 the sandbox has no network. The reviewer follows the base's `AGENTS.md` and `CLAUDE.md`, at the
 root and in each directory holding a changed path, never the checkout's, so a
-change cannot instruct its own reviewer. The base's `REVIEW.md` is optional,
-given at the start of each session, and chooses the review's stance, such as adversarial.
+change cannot instruct its own reviewer. Quest's shared review rules always come first and set the default adversarial
+stance; the base's `REVIEW.md` is optional, adds repo-specific rules, and takes
+precedence where they conflict.
 
 `--harness agy` reviews with Google's Antigravity CLI, `agy`, which only
 reviews: name its
@@ -2542,8 +2545,9 @@ Follow https://github.com/kixel-ai/quest/blob/main/SETUP.md to set up Quest here
 
 The [getting started guide](docs/getting-started.md) covers what happens next.
 
-`quest context` prints the rules agents follow in every task, and `quest guide` the
-quest format and workflow they read before working on a quest outside a skill;
+`quest context` prints the rules agents follow in every task, `quest context <pack...>`
+prints on-demand topic packs (`pr`, `review`, `rust`, `ts`, `uniffi`; `--list` lists them), and `quest guide`
+prints the quest format and workflow agents read before working on a quest outside a skill;
 `quest guide prompting` prints one section.
 
 ### Configure your agent
@@ -2585,6 +2589,7 @@ as the reason:
   line;
 - a scratch file written under `/tmp`, outside the checkout, by a redirection,
   `tee`, `mkdir`, `mktemp`, `git clone` or `worktree add`, or a file edit;
+- killing processes by name with `pkill` or `killall`, which can hit sibling agents;
 - in a checkout whose origin is on [Kixel Quest](#work-on-a-repository-kixel-quest-hosts),
   a `gh pr` or `gh api` call aimed at that repository, which `gh` cannot reach:
   one naming no repository, through `--repo`, `GH_REPO`, a PR URL, or an

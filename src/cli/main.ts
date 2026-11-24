@@ -115,6 +115,7 @@ import { heal, init, stubFindings, uninstall } from "./setup";
 import { describe, notUpstream, releaseQuest, startQuest } from "./start";
 import { KIXEL_QUEST_URL, kixelUrl, tokensPath } from "./tokens";
 import { CONTEXT, GUIDE, GUIDE_SECTIONS, SKILLS, guideSections, sectionHeading, skill } from "./skills";
+import { CONTEXT_PACKS, contextPack, contextPacks } from "./context";
 import { type Terminal, Theme } from "./theme";
 import { type Snapshot, checkout, collect, load, snapshot, under } from "./tree";
 import { pullFileLines, statusLines, viewLines } from "./status";
@@ -1692,8 +1693,9 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"a branch behind its base draws no findings on the base's newer code. The first round runs the " +
 				"reviewer's own review (`codex exec review` with custom instructions, or Claude Code's " +
 				"`/code-review <effort> <merge-base>...HEAD` with text after it, or for agy, which has none, a turn " +
-				"asking what the change breaks), given the range, the base's REVIEW.md, if " +
-				"any, and any responses up front, then resumes that session for one turn that reports the review in one " +
+				"asking what the change breaks), given the range, Quest's shared review rules, the base's REVIEW.md, if " +
+				"any (which adds to them and takes precedence), and any responses up front, then resumes that session " +
+				"for one turn that reports the review in one " +
 				"JSON schema without reading anything again. --responses gives the author's fixes and refutations of " +
 				"the last round's findings, required while that round reported any; the reply settles each of those " +
 				"findings, by its number in the prompt, as fixed, refuted, or still open. Findings are numbered across " +
@@ -1701,8 +1703,8 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"--responses only when it has some. A later round resumes the " +
 				"session and checks only what changed since the last round's head and those findings when nothing " +
 				"but the head changed: the same model, effort, and base, a merge base the last round's covers, as " +
-				"when the base moved on, the same applicable AGENTS.md, CLAUDE.md, and REVIEW.md, and the last round's head " +
-				"still in the clone, which an amend and a prune can remove. Otherwise it " +
+				"when the base moved on, the same applicable AGENTS.md, CLAUDE.md, shipped shared review rules, and " +
+				"REVIEW.md, and the last round's head still in the clone, which an amend and a prune can remove. Otherwise it " +
 				"starts a new session that reviews the whole change and still weighs --responses. A round that would " +
 				"resume on the head the last round reviewed, when that round found nothing, runs no reviewer and " +
 				"repeats that round, marked unchanged, so on the same head only a reviewer with findings to settle runs. " +
@@ -2015,14 +2017,33 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 
 	program
 		.command("context")
-		.summary("Print the engineering rules agents follow in every task, before the repository's own")
+		.summary("Print the engineering rules agents follow in every task, or on-demand topic packs")
 		.description(
 			"Print the engineering rules agents follow in every task, before the repository's own. The hooks " +
 				"`quest setup` installs add them to each Claude Code and Codex session in a repository that uses " +
 				"Quest, so its agents need not run this, and check the rules under its last section, Checked, on " +
-				"each tool call, so the context they add leaves that section out.",
+				"each tool call, so the context they add leaves that section out.\n\n" +
+				`Name one or more topic packs to print only those, in order (${CONTEXT_PACKS.map((p) => p.name).join(", ")}). ` +
+				"PreToolUse hooks inject matching packs once per session when an agent edits matching files or runs PR commands.",
 		)
-		.action(() => out.stdout(`${CONTEXT}\n${CHECKED_CONTEXT}`));
+		.argument("[pack...]", "Topic packs to print, ignoring case")
+		.option("--list", "List available topic packs")
+		.action((packs: string[], options: { list?: boolean }) => {
+			if (options.list) {
+				if (packs.length > 0) throw new UsageError("--list takes no pack names");
+				for (const pack of CONTEXT_PACKS) print(`${pack.name} - ${pack.description}`);
+				return;
+			}
+			if (packs.length === 0) return out.stdout(`${CONTEXT}\n${CHECKED_CONTEXT}`);
+			for (const name of packs) {
+				try {
+					contextPack(name);
+				} catch (error) {
+					throw new UsageError(error instanceof Error ? error.message : String(error));
+				}
+			}
+			out.stdout(contextPacks(packs));
+		});
 
 	program
 		.command("skill")

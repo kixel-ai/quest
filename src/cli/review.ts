@@ -49,6 +49,7 @@ import {
 	privateDirectory,
 	strippedEnvironment,
 } from "./agent";
+import { REVIEW } from "./context";
 import { GitError, discoveryEnv, git } from "./git";
 import { AGY_LIMIT, LIMIT, agyReset, codexReset } from "./limit";
 import { CLASSIFIERS, DEFAULT_SIZE, type Listing, REVIEWERS, type ReviewModel, unfit } from "./models";
@@ -1949,12 +1950,15 @@ export function reviewPrompt(
 ): string {
 	return [
 		scope(change),
-		// The rules outrank the built-in review's defaults; a session that resumes keeps them.
+		// The shared and repository rules outrank the built-in review's defaults; a session that resumes keeps them.
+		"The shared review rules follow. They take precedence over the review's defaults: drop the findings they exclude, " +
+			"and check anything they ask for.",
+		`<shared-review-rules>\n${REVIEW.trim()}\n</shared-review-rules>`,
 		...(rules === null
 			? []
 			: [
 					`The repository's review rules follow, read from REVIEW.md at the base branch's tip ${rules.sha}. ` +
-						"They take precedence over the review's defaults: drop the findings they exclude, and check anything they ask for.",
+						"They add to and take precedence over the shared rules and the review's defaults: drop the findings they exclude, and check anything they ask for.",
 					`<review-rules>\n${rules.text}\n</review-rules>`,
 				]),
 		...(earlier.length > 0 ? [earlierList(earlier, first), settling("in your review")] : []),
@@ -2653,7 +2657,10 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 	const files = baseInstructions(root, baseSha, changed);
 	const rules = exists(root, baseSha, "REVIEW.md") ? { sha: baseSha, text: show(root, baseSha, "REVIEW.md") } : null;
 	// Digests of content only, so a base that moved without changing them restates nothing.
-	const given = { instructions: digest(JSON.stringify(files)), rules: rules && digest(rules.text) };
+	const given = {
+		instructions: digest(JSON.stringify(files)),
+		rules: digest(JSON.stringify([REVIEW, rules?.text ?? null])),
+	};
 	// The tier picks how much review a change needs, so it is set before any reviewer runs.
 	const classified = await classify({
 		root,
