@@ -90,6 +90,12 @@ function readLog(path: string, window: "head" | "tail"): string {
 export const ADMITTED = "quest land fixer: admitted";
 
 /**
+ * A wrapper that fails prints this line, followed by its error, so a handback names the cause, such as
+ * a launcher refusing the upload, apart from the agent's output. The last one counts.
+ */
+export const FAILED = "quest land fixer: error";
+
+/**
  * The run gets `timeout` minutes from its admission, so a fixer queued for a shared launcher's slot
  * keeps its whole run. Waiting counts against a total of twice that from the spawn, which also
  * bounds a launcher that never admits the job and a wrapper that never reports admission.
@@ -123,6 +129,8 @@ export interface Process {
 	error?: string;
 	/** The tail of a failed fixer's own output, which its handback quotes so the failure names its cause. */
 	output?: string;
+	/** The error a failed wrapper reported for itself, so its handback recommends repairing the wrapper, not the PR. */
+	wrapper?: string;
 }
 
 /**
@@ -430,10 +438,13 @@ export function settle(
 				job.error = `invalid fixer result: ${String(error)}; run /quest-iterate`;
 			}
 		else {
+			job.wrapper = job.terminating === undefined ? wrapperError(path) : undefined;
 			job.error =
 				job.terminating !== undefined
 					? "fixer timed out; run /quest-iterate"
-					: `fixer ${exited(code)}${restarted}; run /quest-iterate`;
+					: job.wrapper
+						? `fixer ${exited(code)}${restarted}: ${job.wrapper}`
+						: `fixer ${exited(code)}${restarted}; run /quest-iterate`;
 			job.output = outputTail(path);
 		}
 	} else if (deps.now() > deadline(path, job, deps.now(), timeout)) {
@@ -477,6 +488,20 @@ const OUTPUT_LIMIT = 2_000;
 export function outputTail(path: string): string {
 	const tail = redactTokens(readLog(`${path}.log`, "tail").trimEnd().split("\n").slice(-OUTPUT_LINES).join("\n"));
 	return tail.length > OUTPUT_LIMIT ? tail.slice(-OUTPUT_LIMIT) : tail;
+}
+
+/** The most of a wrapper's error a handback's summary names: one line, not a dump. */
+const WRAPPER_LIMIT = 200;
+
+/** The error the fixer wrapper at job `path` last reported on a `FAILED` line, tokens redacted and bounded, or undefined. */
+export function wrapperError(path: string): string | undefined {
+	const prefix = `${FAILED} `;
+	const line = readLog(`${path}.log`, "tail")
+		.split("\n")
+		.filter((item) => item.startsWith(prefix))
+		.at(-1);
+	const error = line && redactTokens(line.slice(prefix.length)).trim().slice(0, WRAPPER_LIMIT);
+	return error || undefined;
 }
 
 /**

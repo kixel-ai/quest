@@ -33,6 +33,7 @@ import {
 	history,
 	historyPath,
 	outputTail,
+	wrapperError,
 	redactTokens,
 	saveRound,
 	type Round,
@@ -1428,6 +1429,20 @@ printf '[{"number":1,"action":"handback","diagnosis":"saw %s","recommendation":"
 		// Without a line break, the whole window is a partial line.
 		writeFileSync(`${job}.log`, `${token}${" ".repeat(16_384 - token.length + 4)}`);
 		expect(outputTail(job)).toBe("");
+	});
+	test("names the wrapper's last error line, redacted and bounded, and nothing without one", () => {
+		const job = join(tempDir(), "job");
+		expect(wrapperError(job)).toBeUndefined();
+		writeFileSync(`${job}.log`, "agent output\n  quest land fixer: error indented\nquest land fixer: error \n");
+		expect(wrapperError(job)).toBeUndefined();
+		const token = `ghp_${"A1b2".repeat(9)}`;
+		writeFileSync(
+			`${job}.log`,
+			`quest land fixer: error first\nquest land fixer: error upload ${token} ${"x".repeat(300)}\nafter\n`,
+		);
+		const error = wrapperError(job)!;
+		expect(error).toMatch(/^upload \[redacted token\] x+$/);
+		expect(error).toHaveLength(200);
 	});
 	test("bounds a fixer's import by what it added, not the history fetched at launch or its submodules", () => {
 		const root = tempDir();

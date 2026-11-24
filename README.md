@@ -992,7 +992,11 @@ that queues for a shared launcher prints `quest land fixer: admitted <unix-secon
 as one line to its output when the launcher admits the job, before any agent
 output, so the wait for a slot does not use up the run. Waiting counts against
 a total of 120 minutes from the spawn, which is also the deadline of a wrapper
-that prints no such line. On timeout the daemon sends SIGTERM, allows at
+that prints no such line. A wrapper that fails for its own reasons, such as a
+launcher refusing the upload, prints `quest land fixer: error <message>` as one
+line before it exits nonzero; the handback names the last such message, redacted
+and cut to 200 characters, and recommends repairing the wrapper instead of
+running `/quest-iterate`. On timeout the daemon sends SIGTERM, allows at
 least 10 seconds for container cleanup, then sends SIGKILL on a later collection. The payload defaults
 to `claude -p` in bare mode, loading no user or checkout configuration, hooks,
 skills, or MCP servers, and limited to the shell and file tools; `--agent <executable>` and repeatable `--agent-arg <argument>`

@@ -757,7 +757,13 @@ async function collect(
 		plan,
 		marked,
 		handback
-			? `${clip(handback, 300, ".")} Recommendation: run /quest-iterate before picking it again.`
+			? `${clip(handback, 300, ".")} Recommendation: ${
+					// A wrapper that names its own failure fails every pick until repaired, whatever the PR needs.
+					// "Repair", since `fixerText` breaks up "fix" as a closing keyword.
+					handback === job.error && job.wrapper
+						? "repair the land fixer's wrapper on the watcher's host, then pick it again."
+						: "run /quest-iterate before picking it again."
+				}`
 			: result?.action === "handback"
 				? `${clip(result.diagnosis, 200, ".")} Recommendation: ${clip(result.recommendation, 200)}`
 				: "missing result; run /quest-iterate",
