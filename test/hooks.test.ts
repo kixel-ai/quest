@@ -24,6 +24,7 @@ import {
 import { RULES } from "../src/cli/rules";
 import { init } from "../src/cli/setup";
 import { CONTEXT } from "../src/cli/skills";
+import { contextPacks } from "../src/cli/context";
 import { readCalls } from "../src/cli/calls";
 import { tempDir } from "./fixture";
 
@@ -445,6 +446,82 @@ test.each([
 	);
 	expect(hook({ ...stop, cwd: checkout(null) }, deps)).toBe("");
 	expect(() => hook({ hook_event_name: event, cwd }, deps)).toThrow("background_tasks");
+});
+
+test("PreToolUse lazily injects matching topic packs once per session and resets on compact", () => {
+	const cwd = checkout(`${REFERENCE_LINE}\n`);
+	const deps = sampled();
+	const edit = (file_path: string, extra = {}) =>
+		hook(
+			{
+				hook_event_name: "PreToolUse",
+				cwd,
+				session_id: "s-packs",
+				tool_use_id: "t1",
+				tool_name: "Edit",
+				tool_input: { file_path, old_string: "a", new_string: "b" },
+				...extra,
+			},
+			deps,
+		);
+	// First Rust edit injects the rust pack; a second Rust edit injects nothing.
+	expect(JSON.parse(edit("src/lib.rs"))).toEqual({
+		hookSpecificOutput: { hookEventName: "PreToolUse", additionalContext: contextPacks(["rust"]) },
+	});
+	expect(edit("src/main.rs")).toBe("");
+	// A UniFFI Rust edit injects only the unseen uniffi pack.
+	expect(JSON.parse(edit("rs/moq-ffi/src/lib.rs"))).toEqual({
+		hookSpecificOutput: { hookEventName: "PreToolUse", additionalContext: contextPacks(["uniffi"]) },
+	});
+	// A PR Bash command injects the pr pack once (including the checkout's `bun run --silent quest` launcher).
+	const prCall = {
+		hook_event_name: "PreToolUse",
+		cwd,
+		session_id: "s-packs",
+		tool_use_id: "t2",
+		tool_name: "Bash",
+		tool_input: { command: "bun run --silent quest pr list" },
+	};
+	expect(hook({ ...prCall, session_id: "s-bun-other", tool_input: { command: "bun run test" } }, deps)).toBe("");
+	expect(JSON.parse(hook(prCall, deps))).toEqual({
+		hookSpecificOutput: { hookEventName: "PreToolUse", additionalContext: contextPacks(["pr"]) },
+	});
+	expect(hook(prCall, deps)).toBe("");
+	// Wrapped PR commands (`nix develop --command`, `bash -c`, `env`) also inject the pr pack once.
+	for (const [session_id, command] of [
+		["s-nix-pr", "nix develop --command quest pr list"],
+		["s-sh-pr", "env FOO=1 bash -c 'gh pr list'"],
+	] as const) {
+		expect(JSON.parse(hook({ ...prCall, session_id, tool_input: { command } }, deps))).toEqual({
+			hookSpecificOutput: { hookEventName: "PreToolUse", additionalContext: contextPacks(["pr"]) },
+		});
+	}
+	// Codex apply_patch injects ts on TypeScript files.
+	expect(
+		JSON.parse(
+			hook(
+				{
+					hook_event_name: "PreToolUse",
+					cwd,
+					session_id: "s-packs",
+					turn_id: "turn-1",
+					tool_use_id: "t3",
+					tool_name: "apply_patch",
+					tool_input: { command: "*** Begin Patch\n*** Update File: src/app.ts\n-a\n+b\n*** End Patch" },
+				},
+				deps,
+			),
+		),
+	).toEqual({
+		hookSpecificOutput: { hookEventName: "PreToolUse", additionalContext: contextPacks(["ts"]) },
+	});
+	// Resume preserves injected packs; compact resets them so they re-inject on next matching edit.
+	hook({ hook_event_name: "SessionStart", cwd, session_id: "s-packs", source: "resume" }, deps);
+	expect(edit("src/lib.rs")).toBe("");
+	hook({ hook_event_name: "SessionStart", cwd, session_id: "s-packs", source: "compact" }, deps);
+	expect(JSON.parse(edit("src/lib.rs"))).toEqual({
+		hookSpecificOutput: { hookEventName: "PreToolUse", additionalContext: contextPacks(["rust"]) },
+	});
 });
 
 test("hook refuses malformed input and events it does not handle", () => {

@@ -310,6 +310,18 @@ test("a question dialog recommends an option in each question offering two or mo
 	expect(ask("Agent", labeled("A", "B"))).toEqual([]);
 });
 
+test("pkill and killall are blocked, while --help and pid-based kill pass", () => {
+	expect(bash("pkill -f vite")).toEqual([RULES.pkill]);
+	expect(bash("killall node")).toEqual([RULES.pkill]);
+	expect(bash("/usr/bin/pkill -9 foo")).toEqual([RULES.pkill]);
+	expect(bash("bash -c 'pkill foo'")).toEqual([RULES.pkill]);
+	expect(bash("printf '%s\\n' vite | xargs pkill -f")).toEqual([RULES.pkill]);
+	expect(bash("printf '%s\\n' vite | xargs --replace pkill -f {}")).toEqual([RULES.pkill]);
+	expect(bash("printf '%s\\n' node | xargs -n 1 -I {} killall {}")).toEqual([RULES.pkill]);
+	expect(bash("pkill --help")).toEqual([]);
+	expect(bash("kill -TERM 12345")).toEqual([]);
+});
+
 test("docs/context.md is the rules `quest context` prints, for agents without the CLI", () => {
 	expect(readFileSync(join(import.meta.dirname, "../docs/context.md"), "utf8")).toBe(
 		`${CONTEXT}\n${CHECKED_CONTEXT}`,
