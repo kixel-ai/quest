@@ -2168,6 +2168,64 @@ agyFakes(
 	20_000,
 );
 
+fakes(
+	"the classifier is offered only the classes whose scope holds every changed path",
+	async () => {
+		const s = setup();
+		const classes = [
+			"- `code` (`src/**`, `AGENTS.md`) - only code",
+			"- `docs` (`docs/**`, `**/*.md`) - only documentation",
+			"- `any` - anything",
+		];
+		moveBase(s.repo, (dir) => write(dir, "RISK.md", `${riskFile([])}\n## Automatic\n\n${classes.join("\n")}\n`));
+		// Low, so one reviewer's seat is the run on any host.
+		vi.stubEnv("FAKE_RISK", JSON.stringify({ tier: "low", reason: "It changes the output.", class: null }));
+		vi.stubEnv("FAKE_REPLY", JSON.stringify({ score: 10, rationale: "Lands as is.", findings: [] }));
+		const offered = async () => {
+			const result = await quest("--root", s.repo, "review");
+			expect(result.code, result.stderr).toBe(0);
+			const call = classifying(s.calls()).at(-1)!;
+			const schema = JSON.parse(call.argv[call.argv.indexOf("--json-schema") + 1]!);
+			return { names: schema.properties.class?.enum, prompt: call.stdin };
+		};
+
+		// The change touches src/lib.ts, so `docs` is never offered, and each offered class shows its scope.
+		const inside = await offered();
+		expect(inside.names).toEqual(["code", "any", null]);
+		expect(inside.prompt).toContain("already holds every changed path");
+		expect(inside.prompt).toContain("\n\n- `code` (`src/**`, `AGENTS.md`) - only code\n- `any` - anything");
+
+		// A rename out of src/ counts its old path too, so `docs` holds only the new one and is not offered. The file
+		// keeps the base's content, so git would report it as a rename.
+		write(s.repo, "src/lib.ts", "export const x = 1;\n");
+		git(s.repo, "add", "src/lib.ts");
+		git(s.repo, "mv", "src/lib.ts", "docs/lib.md");
+		git(s.repo, "commit", "-qm", "move the library to the docs");
+		expect(git(s.repo, "diff", "--name-status", "-M", "origin/main", "HEAD", "--", "src", "docs")).toBe(
+			"R100\tsrc/lib.ts\tdocs/lib.md",
+		);
+		expect((await offered()).names).toEqual(["any", null]);
+	},
+	20_000,
+);
+
+// A high head seats three vendors, Gemini among them.
+agyFakes("a submodule update the local git config hides still counts as a changed path", async () => {
+	const s = setup();
+	moveBase(s.repo, (dir) => write(dir, "RISK.md", riskFile(["- `vendor/` - vendored code ships as is"])));
+	git(s.repo, "config", "diff.ignoreSubmodules", "all");
+	const commit = git(s.repo, "rev-parse", "HEAD");
+	git(s.repo, "update-index", "--add", "--cacheinfo", `160000,${commit},vendor/lib`);
+	git(s.repo, "commit", "-qm", "vendor a library");
+	expect(git(s.repo, "diff", "--name-only", "origin/main", "HEAD", "--", "vendor")).toBe("");
+	vi.stubEnv("FAKE_REPLY", JSON.stringify({ score: 10, rationale: "Lands as is.", findings: [] }));
+	const result = await quest("--root", s.repo, "review", "--exclude-model", "claude-opus-5-5");
+	expect(result.code, result.stderr).toBe(0);
+	expect(result.stdout).toContain(
+		"\nrisk high it changes vendor/lib, which is always high: vendored code ships as is\n",
+	);
+});
+
 fakes("without a logged-in Claude Code, Codex classifies", async () => {
 	const s = setup();
 	moveBase(s.repo, (dir) => write(dir, "RISK.md", riskFile([])));

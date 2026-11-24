@@ -357,8 +357,8 @@ checks a PR with a binary built from the base passes `--no-stubs`, since that
 binary's skills would reject a PR that changes a stub; the PR's own binary
 checks them in its own `quest check`. This repository's merge queue and
 `quest merge` do so. It also reads the repository's [`RISK.md`](#risk-tiers),
-if any, and reports each `## High` item it cannot read, which would otherwise
-fail the next `quest review` on a branch from it.
+if any, and reports each `## High` or `## Automatic` item it cannot read,
+which would otherwise fail the next `quest review` on a branch from it.
 
 A link into a submodule that is not checked out, as in a fresh worktree or
 `actions/checkout` by default, resolves at the commit its gitlink pins when a
@@ -992,7 +992,15 @@ that queues for a shared launcher prints `quest land fixer: admitted <unix-secon
 as one line to its output when the launcher admits the job, before any agent
 output, so the wait for a slot does not use up the run. Waiting counts against
 a total of 120 minutes from the spawn, which is also the deadline of a wrapper
-that prints no such line. On timeout the daemon sends SIGTERM, allows at
+that prints no such line. A wrapper that fails for its own reasons, such as a
+launcher refusing the upload, writes its error as a line to file descriptor 3
+before it exits nonzero, and passes that descriptor to no payload; with the
+payload under another user, as above, no agent or check can forge it. On a
+crash, but not a timeout, a signal, or a daemon restart, the handback names the
+last such line, redacted and clipped with its summary, and recommends repairing
+the wrapper instead of running `/quest-iterate`, as it does when the wrapper is
+missing, not executable, or fails to launch. The line stays beside the log as
+`<job>.error`. On timeout the daemon sends SIGTERM, allows at
 least 10 seconds for container cleanup, then sends SIGKILL on a later collection. The payload defaults
 to `claude -p` in bare mode, loading no user or checkout configuration, hooks,
 skills, or MCP servers, and limited to the shell and file tools; `--agent <executable>` and repeatable `--agent-arg <argument>`
@@ -1804,7 +1812,8 @@ Customers run the relay and the player; the CLI is for contributors.
 
 ## Automatic
 
-- `tests` - only tests and their fixtures change
+- `docs` (`docs/**`) - only documentation no other repository reads
+- `test` - only tests and their fixtures change
 
 ## High
 
@@ -1817,8 +1826,12 @@ segment, a whole `**` segment spans any number, and a matched directory covers
 everything under it, then ` - ` and why changing it is high. The rest of the
 file is prose for the classifier, such as what is customer-facing, except
 `## Automatic`, whose items are each a backticked class name of lowercase
-words joined by hyphens, ` - `, and the rule over the diff a change meets to
-fall in it. Each section appears at most once. `quest review` reads the file
+words joined by hyphens, such as a commit type so a PR title's type reads
+beside the class it claims; optionally a scope, backticked patterns joined by
+`, ` in parentheses, where every changed path must match one of them whole,
+so a scope covers everything under a directory only through a pattern ending
+in `/` or `/**`; ` - `; and the rule over the diff a change meets to fall in
+it. Each section appears at most once. `quest review` reads the file
 from the base's tip, so a change cannot lower its own tier, and fails on one
 it cannot read, which the repository's own `quest check`
 reports first. A base with no `RISK.md` makes every change no path holds high
@@ -1826,7 +1839,12 @@ reports first. A base with no `RISK.md` makes every change no path holds high
 
 Otherwise a classifier reads the diff and the base's `RISK.md` in one read-only
 turn and replies with a tier, one sentence on why, and the `## Automatic`
-class every changed file falls in, or none: Claude Code
+class every changed file falls in, or none. It is offered only the classes
+whose scope holds every changed path, either side of a rename, checked
+before it runs so it judges just the rule and cannot widen a scope; a change
+that touches no path falls in none. The scope is checked when the head is
+classified, so a record keeps its class after the base narrows that scope
+until a review classifies the head again. It runs as Claude Code
 `claude-haiku-5-5` at low effort, then Codex `gpt-6.2-sol` at low, then
 Antigravity `gemini-3.8-flash` at low, each when those before it are missing,
 logged out, have their login rejected, or hit their usage limit. When none can
