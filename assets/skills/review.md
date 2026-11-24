@@ -26,7 +26,7 @@ It picks a reviewer other than the model that changed the branch last, at an eff
 It reads that model, and off a quest branch the size, from the PR body's `## Models` record: open the draft PR and write the record before the first round, as `Size: M` and `Implementer: Claude Code, claude-opus-5-5, high effort`.
 Pass `--exclude-model` or `--size` only for a PR whose body cannot hold the record.
 Where the repository's root instructions name other reviewers, pass them with `--harness`, `--model`, and `--effort`, which runs that reviewer alone.
-Each round rewrites the PR body's `## Review` section, so add context only after it, and write a round's record by hand only when it printed `record skipped`.
+Each round rewrites the PR body's `## Review` section, so add context only after it; when it printed `record skipped`, run it again once the PR can take the record, since `quest status` counts only the record `quest review` writes.
 
 `quest review` sets the head's risk tier before any reviewer runs: a low head gets no local reviewer, only a record saying so, and a high one gets a second reviewer from another vendor on the high list, which a round that raises the tier runs at once; a head classified high also takes its pick from that list.
 When the user overrides the tier, pass it with `--override <tier> --reason <their reason>`.

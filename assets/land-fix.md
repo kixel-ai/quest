@@ -32,7 +32,8 @@ generated files, rebuild lockfiles as [Lockfiles](#lockfiles) says, or follow a
 base rename. Merge base where practical.
 flake.nix, flake.lock, shell.nix, default.nix, nix/, .envrc, .github/, .gitmodules,
 gitlinks (submodule entries) anywhere, RISK.md, and each path the base's RISK.md
-lists under `## High` are protected. Merging the base may carry
+lists under `## High` are protected; on a PR its review record rates high, which you
+are not shown, quest land protects every path. Merging the base may carry
 the base's own changes to those paths: that is no edit of yours when they come out
 exactly as a plain `git merge` of the base leaves them, with no conflict there for you
 to edit. Prefer a fix that leaves them alone. When the mechanical fix itself must

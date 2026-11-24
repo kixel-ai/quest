@@ -285,6 +285,7 @@ function deps(world: World): GitHubDependencies {
 						data: {
 							node: {
 								number: pull.number,
+								body: pull.body ?? "",
 								repository: { nameWithOwner: "upstream/project" },
 								state: pull.state ?? "OPEN",
 								baseRefName: pull.base ?? "main",
@@ -1581,6 +1582,34 @@ describe.skipIf(process.platform === "win32")("the watcher's land fixer", () => 
 		expect(handback).toContain("off-limits fixer edit");
 		expect(handback).toContain("`quest land apply 5`");
 		expect(parseResolution(handback)).toMatchObject({ head, base: head });
+	});
+
+	test("any fix to a PR whose review record rates it high, or is malformed, is handed back unpushed", async () => {
+		const record = (risk: string) =>
+			`## Review\n\n- Head: abcdef012345\n- Risk:${risk}\n- Classified: medium by the always-high paths\n`;
+		for (const body of [record(" high, `it changes the sandbox`"), record("dire")]) {
+			const { repo, state, fix, context } = setup();
+			const base = repo.main();
+			const head = repo.pull(5, { "feature.txt": "new\n" });
+			const pull: Pull = {
+				number: 5,
+				head,
+				body,
+				enqueues: [{ createdAt: at(1), actor: "maintainer" }],
+				removals: [
+					{ id: "R1", createdAt: at(5), reason: "failed_checks", actor: "github-merge-queue", before: head },
+				],
+			};
+			const github = { ...world([pull], [failedRun(5, at(3), base)]), origin: repo.origin };
+			github.now = Date.parse(at(6));
+			fix.round(5, fixScript("fixed.txt"));
+			await watchPass(REPOSITORY, { state }, deps(github), context);
+			await exited(state);
+			github.now = Date.parse(at(10));
+			expect(await watchPass(REPOSITORY, { state }, deps(github), context)).toEqual(["handback 5"]);
+			expect(git(repo.origin, "rev-parse", "refs/heads/branch-5")).toBe(head);
+			expect(github.comments[5].at(-1)!.body).toContain("off-limits fixer edit");
+		}
 	});
 
 	test("a quest-file conflict is merged with the quest driver, and a code conflict goes to the fixer", async () => {
