@@ -50,7 +50,7 @@ Guidance:
 - Detect `agy`'s usage-limit and logged-out errors from its structured output as a `ReviewLimitError` or `ReviewerUnavailableError`, so the round passes over an unavailable reviewer.
 - Ultra is a flat plan and token-max prices only Claude Code and Codex sessions, so a culprits-per-dollar comparison needs a per-token price. Recommended: price `agy` sessions from the usage their stream reports, at Google's API list price for the model, through token-max if it gains them first, else in `quest eval`.
 - Run `quest eval run` with the base's build and the head's, per `AGENTS.md`. Put both scores, the per-size catch rates, and their cost in `## Validation`.
-- Keep the harness opt-in until the eval moves an `agy` model into `REVIEWERS`, or onto a rung once reviewer rungs has landed. Update `README.md`'s reviewer list and `quest review --help`.
+- Keep the harness opt-in until the eval moves an `agy` model into `REVIEWERS`. Once reviewer rungs has landed, place Carbon on a rung from public benchmarks and list prices instead, as that quest seats every model, with no eval. Update `README.md`'s reviewer list and `quest review --help`.
 
 ## Hosts
 

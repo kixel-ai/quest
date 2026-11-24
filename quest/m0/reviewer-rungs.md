@@ -57,14 +57,16 @@ and [for eval](https://github.com/kixel-ai/quest/pull/831#issuecomment-711801176
   seat a model weaker than the writer; only the writer's own model stays
   excluded (rejected: keep the never-weaker rule as a constraint on the
   draw). [kixel-ai/quest#819](https://github.com/kixel-ai/quest/pull/819)'s
-  `weaker()` in `src/cli/models.ts`, its `--exclude-model` and help text
-  on weaker models, and its never-weaker line in
-  [review seats](/quest/m0/review-seats.md) are interim routing until
-  rungs land: this quest deletes them.
+  `weaker()` in `src/cli/models.ts`, its widening of `--exclude-model` to
+  every model weaker than the one named, its help text on weaker models,
+  and its never-weaker line in [review seats](/quest/m0/review-seats.md)
+  are interim routing until rungs land: this quest deletes them, and
+  `--exclude-model` again avoids only the models it names.
 - Measure rungs how? ✅ From real PRs' stats in `quest usage`, with no
   `quest eval` run (rejected: score each rung change with `quest eval
   run`). The maintainer: "we don't want to waste tokens on throw-away
-  reviews/code".
+  reviews/code". This overrides `AGENTS.md`'s rule that a reviewer change
+  runs `quest eval run`, which a separate PR deletes with `quest eval`.
 
 Recommendations, the implementer's to revisit:
 
