@@ -17,7 +17,7 @@ import { afterEach, expect, test, vi } from "vitest";
 
 import type { ReviewHarness } from "../src/cli/agent";
 import { RUNGS, type ReviewModel, type Rung, drawRung, drawnFrom, rungOrder } from "../src/cli/models";
-import { SEATS, SIZES, type Size, TIERS, recordedRisk } from "../src/core";
+import { SEATS, SIZES, type Size, TIERS, passed, recordedRisk, recordedRun } from "../src/core";
 import {
 	type Draw,
 	type Finding,
@@ -2548,6 +2548,56 @@ agyFakes("a raise to high seats the third reviewer at once, and a run that fails
 			"reviewer agy gemini-4-neon medium",
 			"reviewer claude claude-fable-5-2 medium",
 		]);
+	} finally {
+		vi.unstubAllGlobals();
+	}
+});
+
+agyFakes("a high head whose vendors fail their status checks names each in its outage", async () => {
+	const s = setup();
+	moveBase(s.repo, (dir) => write(dir, "RISK.md", riskFile(["- `src/` - customers' averages run on it"])));
+	vi.stubEnv("FAKE_LOGGED_OUT", "1");
+	vi.stubEnv("FAKE_FAILS", "codex,agy");
+	try {
+		// Both checks settle before either seat passes on, so the outage names both vendors, not the first alone.
+		const out = await quest("--root", s.repo, "review", ...OPUS);
+		expect(out.code).toBe(3);
+		expect(out.stderr).toBe(
+			"error: no eligible standard reviewer could run: gpt-6.2-sol high (codex is not logged in to its default profile (CODEX_HOME is unset); run `codex login`), gemini-4-neon medium (agy is not logged in; run `agy`)\n",
+		);
+	} finally {
+		vi.unstubAllGlobals();
+	}
+});
+
+agyFakes("a failed run's raise unpublishes the head's pass at the lower tier", async () => {
+	const s = setup();
+	const pull = {
+		number: 7,
+		body: "Fixes averaging.\n\n## Models\n\n- Size: S\n- Implementer: Claude Code, claude-opus-5-5, high effort\n",
+	};
+	onGitHub(s.repo, [pull]);
+	vi.stubEnv("FAKE_REPLY", JSON.stringify({ score: 10, rationale: "Lands as is.", findings: [] }));
+	try {
+		// The medium head passes on its two vendors, so the record names it in full.
+		const head = git(s.repo, "rev-parse", "HEAD");
+		const passedRun = await quest("--root", s.repo, "review", ...OPUS);
+		expect(passedRun.code, passedRun.stderr).toBe(0);
+		expect(pull.body).toContain(`- Head: ${head}\n`);
+		// A fresh run on that head raises it to high, then cannot seat a third vendor.
+		vi.stubEnv("FAKE_RAISE", "high");
+		vi.stubEnv("FAKE_LIMITED", "reset");
+		vi.stubEnv("FAKE_FAILS", "claude-fable-5-2");
+		const failed = await quest("--root", s.repo, "review", ...OPUS, "--new");
+		expect(failed.code).toBe(3);
+		expect(failed.stderr).toBe("error: claude hit its usage limit; resets 2030-03-17T17:46:40Z\n");
+		// The record no longer names the head in full, and carries the raised tier, so the two-vendor pass no longer counts.
+		expect(pull.body).not.toContain(head);
+		expect(pull.body).toContain(
+			`- Head: ${head.slice(0, 12)}, named in full once reviewers from 3 vendors pass it\n`,
+		);
+		expect(pull.body).toContain("- Risk: high, `It rewrites the wire format peers read.`\n");
+		expect(passed(recordedRun(pull.body)!)).toBe(false);
 	} finally {
 		vi.unstubAllGlobals();
 	}

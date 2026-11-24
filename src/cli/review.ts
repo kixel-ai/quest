@@ -509,6 +509,17 @@ export interface ReviewDependencies {
 	models?: (root: string, base: string, branch: string) => Promise<PullModels | null>;
 	/** A number in [0, 1) for each draw: the round's rung, then each rung's order. Defaults to `Math.random`. */
 	random?: () => number;
+	/** Records a raise a failed run made, so a published review of the head at a lower tier no longer counts. */
+	raised?: (raise: HeldRaise) => Promise<void>;
+}
+
+/** A raise a failed run made on `head`, of the branch reviewed against `base`. */
+export interface HeldRaise {
+	base: string;
+	branch: string;
+	head: string;
+	tier: Tier;
+	reason: string;
 }
 
 export const processDependencies = (): ReviewDependencies => ({ env: process.env });
@@ -2811,13 +2822,14 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 	// the others and fails the run, which saves no round, though a raise a finished round made holds on the head.
 	const controller = new AbortController();
 	const signal = options.signal ? AbortSignal.any([options.signal, controller.signal]) : controller.signal;
-	// Each seat's reviewer, by seat, the skips it met, and its round once it finishes.
+	// Each seat's reviewer, by seat, the seats whose reviewer was ruled out and not yet replaced, and each round once
+	// it finishes.
 	const holding: Seat[] = [];
-	const met: number[] = [];
+	const vacant = new Set<number>();
 	const finished: Round[] = [];
 	const judged = () => settle(classified.value, [...onHead, ...finished.filter(Boolean)], held);
-	/** Seat `at` handed from its reviewer, which `error` says cannot run, to the next the draw gives. */
-	const passOn = (at: number, error: unknown) => {
+	/** Record that seat `at`'s reviewer cannot run, as `error` says, unless the seat may not pass on. */
+	const skip = (at: number, error: unknown) => {
 		const { reviewer } = holding[at]!;
 		// A reviewer a flag named never passes its seat on, and a stopped run passes nothing on.
 		if (!(error instanceof ReviewerUnavailableError) || reviewer === lead || signal.aborted) throw error;
@@ -2825,20 +2837,24 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 		out.add(canonicalModel(reviewer.model));
 		skipped.push({ ...reviewer, reason: error.reason });
 		messages.push(error.message);
+		vacant.add(at);
+	};
+	/** Seat `at`, whose reviewer `error` ruled out, handed to the next the draw gives on a vendor no other seat holds. */
+	const passOn = (at: number, error: unknown) => {
 		try {
 			holding[at] = plan(
 				1,
-				holding.filter((_, each) => each !== at).map((seat) => seat.reviewer.harness),
+				holding.filter((_, each) => !vacant.has(each)).map((seat) => seat.reviewer.harness),
 			)[0]!;
+			vacant.delete(at);
 		} catch (outage) {
-			// The only reviewer that could take the seat fails as itself, rather than as an outage of one.
-			throw outage instanceof ReviewOutageError && met[at]! === 0 ? error : outage;
+			// An outage of one reviewer fails as that reviewer itself.
+			throw outage instanceof ReviewOutageError && outage.skipped.length === 1 ? error : outage;
 		}
-		met[at]!++;
 	};
 	/**
 	 * The CLIs of the seats `at`, each status check passed, a seat whose check fails passing on until one passes. Each
-	 * check settles, so the CLIs that can run are known whichever failed first, and the first seat's failure passes on first.
+	 * check settles, and every failure is recorded before any seat passes on, so an outage names each vendor it lacks.
 	 */
 	const check = async (at: number[]): Promise<Cli[]> => {
 		const clis = new Map<number, Cli>();
@@ -2851,15 +2867,17 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 					return cli;
 				}),
 			);
-			const failed: number[] = [];
-			for (const [i, result] of results.entries()) {
-				if (result.status === "fulfilled") clis.set(waiting[i]!, result.value);
-				else {
-					passOn(waiting[i]!, result.reason);
-					failed.push(waiting[i]!);
+			const failed = waiting.flatMap((each, i) => {
+				const result = results[i]!;
+				if (result.status === "fulfilled") {
+					clis.set(each, result.value);
+					return [];
 				}
-			}
-			waiting = failed;
+				skip(each, result.reason);
+				return [{ each, error: result.reason as unknown }];
+			});
+			for (const { each, error } of failed) passOn(each, error);
+			waiting = failed.map(({ each }) => each);
 		}
 		return at.map((each) => clis.get(each)!);
 	};
@@ -2877,6 +2895,7 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 				finished[at] = await reviewWith(shared, holding[at]!, cli);
 				break;
 			} catch (error) {
+				skip(at, error);
 				passOn(at, error);
 				[cli] = await check([at]);
 			}
@@ -2889,7 +2908,6 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 			holding.map((each) => each.reviewer.harness),
 		)) {
 			holding.push(seat);
-			met.push(0);
 		}
 		const added = holding.slice(from).map((_, i) => from + i);
 		const clis = await check(added);
@@ -2901,7 +2919,6 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 		holding.push(
 			...(lead === undefined ? plan(count, []) : [{ reviewer: lead }, ...plan(count - 1, [lead.harness])]),
 		);
-		met.push(...holding.map(() => 0));
 		const clis = await check(holding.map((_, at) => at));
 		for (const [at, cli] of clis.entries()) start(play(at, cli));
 		// A raise adds tasks while these run.
@@ -2911,12 +2928,14 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 		// Every finished round's raise, even one whose peer then failed, and the saved state otherwise as it was, so a
 		// failed --new drops nothing.
 		const raised = judged();
-		if (raised.raisedBy !== undefined && riskier(raised.tier, before.tier))
+		if (raised.raisedBy !== undefined && riskier(raised.tier, before.tier)) {
 			save(statePath, {
 				...(saved ?? { branch, runs, tallies: [] }),
 				classified: { key: classified.key, value },
 				raised: { head, tier: raised.tier, reason: raised.reason, by: raised.raisedBy },
 			});
+			await deps.raised?.({ base: baseRef, branch, head, tier: raised.tier, reason: raised.reason });
+		}
 		throw error;
 	}
 	const done = carried(finished, earlier, raisers, open);
