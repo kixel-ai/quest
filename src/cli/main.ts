@@ -1716,17 +1716,18 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"reviewer, and is told to disregard other instructions and run no builds, tests, or quest commands. " +
 				"The base is fetched first, since the sandbox has no network.\n\n" +
 				"--harness agy reviews with Google's Antigravity CLI, which only reviews; name its --model and --effort, as " +
-				"gemini-4-carbon and high. It runs `agy -p` on the user's own Antigravity login, in the keyring or, over ssh, " +
+				"gemini-4-neon and xhigh. It runs `agy -p` on the user's own Antigravity login, in the keyring or, over ssh, " +
 				"its configuration directory, with no ANTIGRAVITY_* or AGY_* variable, so no gateway, and GEMINI_API_KEY and " +
 				"GOOGLE_API_KEY never replace the login. Each turn and the status check, `agy models`, run in a new private " +
 				"directory outside any repository, since agy loads the agent configuration of each directory up to the " +
 				"repository's root, which makes an agent directory inside one a usage error. Each turn runs as quest's own " +
 				"agent, whose only tools are view_file and finish and which inherits none of the user's hooks, rules, plugins, or " +
 				"MCP tools, with permissions skipped, since print mode cannot approve a read outside its directory, and deny " +
-				"rules on commands, writes, web requests, MCP calls, and a read of any path outside the checkout and that " +
-				"directory, such as another CLI's login. With no shell, its directory holds files.txt, the " +
-				"checkout's tracked files, and the diff of each range it reviews, and it reads the checkout's files by absolute " +
-				"path. The user's skills' text still reaches it, and their MCP servers start, with no tool it can call. A " +
+				"rules on commands, writes, web requests, MCP calls, and a read of any path outside the turn's directory, " +
+				"such as the checkout's untracked files or another CLI's login. With no shell, that directory holds an " +
+				"export of the reviewed head's tracked files as committed, ignoring every .gitattributes and writing a " +
+				"symlink as a file holding its target, beside the directory agy runs in, files.txt listing them, and the " +
+				"diff of each range it reviews. The user's skills' text still reaches it, and their MCP servers start, with no tool it can call. A " +
 				"RESOURCE_EXHAUSTED quota error is its usage limit.\n\n" +
 				"Before the reviewers run, the head gets a risk tier, low, medium, or high, from its change alone, never " +
 				"from who wrote it. A changed path, either side of a rename, that a pattern holds makes it high: RISK.md, " +

@@ -1103,23 +1103,23 @@ fakes("--base reviews against another branch, fetched first, with that branch's 
 	expect(unknown.stderr).toContain("--base must be <remote>/<branch>");
 });
 
-test("agy's read rules leave every path outside its roots under a denied one, and none inside", () => {
+test("agy's read rules leave every path outside the turn's directory under a denied one, and none inside", () => {
 	const dir = realpathSync(tempDir());
-	for (const path of ["a/x/in.txt", "a/y/out.txt", "a/x-sibling/out.txt", "b/in.txt", "c/out.txt", "top.txt"])
+	for (const path of ["a/x/in.txt", "a/y/out.txt", "a/x-sibling/out.txt", "c/out.txt", "top.txt"])
 		write(dir, path, "");
 	symlinkSync(join(dir, "c"), join(dir, "a", "x", "link"));
-	// Paths that may appear during a turn: one beside the roots, one a root's parent, and one inside a root.
-	const later = ["d/login.json", "a", "b/new.txt"].map((path) => join(dir, path));
-	const denied = beside([join(dir, "a", "x"), join(dir, "b")], later);
+	// Paths that may appear during a turn: one beside the root, one its parent, and one inside it.
+	const later = ["d/login.json", "a", "a/x/new.txt"].map((path) => join(dir, path));
+	const denied = beside(join(dir, "a", "x"), later);
 	expect(denied).toContain(join(dir, "d/login.json"));
 	expect(denied).not.toContain(join(dir, "a"));
-	expect(denied).not.toContain(join(dir, "b/new.txt"));
+	expect(denied).not.toContain(join(dir, "a/x/new.txt"));
 	// Antigravity matches a rule by whole components, so `a/x` never covers `a/x-sibling`.
 	const blocked = (path: string) => denied.some((rule) => path === rule || path.startsWith(`${rule}/`));
-	for (const path of ["a/x/in.txt", "b/in.txt"]) expect(blocked(join(dir, path)), path).toBe(false);
+	expect(blocked(join(dir, "a/x/in.txt"))).toBe(false);
 	for (const path of ["a/y/out.txt", "a/x-sibling/out.txt", "c/out.txt", "top.txt"])
 		expect(blocked(join(dir, path)), path).toBe(true);
-	// A link inside a root resolves outside it, where the rule beside its target matches.
+	// A link inside the root resolves outside it, where the rule beside its target matches.
 	expect(blocked(realpathSync(join(dir, "a", "x", "link", "out.txt")))).toBe(true);
 	// Above the tree too, as the system's own directories.
 	const top = dir.split("/")[1]!;
@@ -1129,12 +1129,10 @@ test("agy's read rules leave every path outside its roots under a denied one, an
 // Root lists any directory, so the refusal only shows for another user.
 test.skipIf(process.getuid?.() === 0)("agy's read rules refuse a parent they cannot list", () => {
 	const dir = realpathSync(tempDir());
-	write(dir, "hidden/checkout/in.txt", "");
+	write(dir, "hidden/turn/in.txt", "");
 	chmodSync(join(dir, "hidden"), 0o311);
 	try {
-		expect(() => beside([join(dir, "hidden", "checkout")])).toThrow(
-			`since ${join(dir, "hidden")} cannot be listed`,
-		);
+		expect(() => beside(join(dir, "hidden", "turn"))).toThrow(`since ${join(dir, "hidden")} cannot be listed`);
 	} finally {
 		chmodSync(join(dir, "hidden"), 0o755);
 	}
@@ -1192,19 +1190,29 @@ fakes("claude reviews read-only with the base's instructions, then reports in th
 	}
 });
 
-const AGY = ["--harness", "agy", "--model", "gemini-4-carbon", "--effort", "high"];
+const AGY = ["--harness", "agy", "--model", "gemini-4-neon", "--effort", "high"];
 
 fakes(
-	"agy reviews from a workspace of its own, reading the change from files, then reports in the schema",
+	"agy reviews from a directory of its own, reading an export of the head, then reports in the schema",
 	async () => {
 		const s = setup("CLAUDECODE");
+		// A head that would hide a file from an archive, run one of the user's filter drivers, and link out of the
+		// export, beside a file the checkout ignores.
+		const login = join(realpathSync(homedir()), ".codex");
+		write(s.repo, ".gitattributes", "src/lib.ts export-ignore\n* filter=plant\n");
+		symlinkSync(login, join(s.repo, "link"));
+		git(s.repo, "add", ".gitattributes", "link");
+		git(s.repo, "commit", "-qm", "attributes");
+		const smudged = join(s.repo, ".tmp", "smudged");
+		git(s.repo, "config", "filter.plant.smudge", `touch ${smudged}; cat`);
+		write(s.repo, ".tmp/secret.env", "UNTRACKED-SECRET\n");
 		// An Antigravity session's own state and an Antigravity gateway never reach the reviewer.
 		vi.stubEnv("ANTIGRAVITY_LS_ADDRESS", "127.0.0.1:1");
 		vi.stubEnv("AGY_LLM_GATEWAY_URL", "http://127.0.0.1:9");
 		const result = await quest("--root", s.repo, "review", ...AGY, "--json");
 		expect(result.code, result.stderr).toBe(0);
 		const [round] = JSON.parse(result.stdout).rounds;
-		expect(round).toMatchObject({ reviewer: "agy", model: "gemini-4-carbon", effort: "high", score: 8 });
+		expect(round).toMatchObject({ reviewer: "agy", model: "gemini-4-neon", effort: "high", score: 8 });
 		expect(round.findings).toEqual([FINDING]);
 		// Input counts the cached tokens, which agy reports apart; output already holds thinking.
 		expect(round.usage).toEqual([
@@ -1225,40 +1233,57 @@ fakes(
 		expect(second!.argv[second!.argv.indexOf("--conversation") + 1]).toBe("conversation-1");
 		const schemaFile = second!.argv[second!.argv.indexOf("--json-schema") + 1]!;
 		expect(JSON.parse(readFileSync(schemaFile, "utf8")).required).toContain("risk");
+		const repo = realpathSync(s.repo);
+		// What the head tracks, apart from what the checkout ignores or keeps in .git.
+		const tracked = git(s.repo, "ls-tree", "-r", "--name-only", "HEAD").split("\n").sort();
 		for (const call of [first!, second!]) {
 			const flag = (name: string) => call.argv[call.argv.indexOf(name) + 1];
+			// The turn runs in a workspace inside its own directory, which holds the head's export beside it.
+			const dir = dirname(call.cwd);
+			expect(call.cwd).toBe(join(dir, "workspace"));
 			expect(call.argv.slice(0, 3)).toEqual(["-p", "", "--input-format"]);
 			expect(flag("--agent")).toBe("quest-reviewer");
 			expect(call.argv).toContain("--dangerously-skip-permissions");
 			expect(call.argv).toContain("--disable-slash-commands");
-			expect(flag("--settings")).toBe(join(call.cwd, "settings.json"));
+			expect(flag("--settings")).toBe(join(dir, "settings.json"));
 			const deny: string[] = JSON.parse(call.workspace!["settings.json"]!).permissions.deny;
 			expect(deny).toEqual(expect.arrayContaining(["command(*)", "write_file(*)", "read_url(*)", "mcp(*)"]));
-			// Reads stay in the checkout and the workspace: what lies beside them is denied, and nothing in them.
-			const repo = realpathSync(s.repo);
-			expect(deny).toContain(`read_file(${join(dirname(repo), "origin.git")})`);
+			// Reads stay in the turn's directory: the checkout and what lies beside it are denied, and nothing in it.
+			const blocked = (path: string) =>
+				deny.some((rule) => rule === `read_file(${path})` || path.startsWith(`${rule.slice(10, -1)}/`));
+			for (const path of [repo, join(repo, ".git", "config"), join(dirname(repo), "origin.git")])
+				expect(blocked(path), path).toBe(true);
 			// A login created while the turn runs, as by signing in to Codex, is denied before it exists.
-			expect(deny).toContain(`read_file(${join(realpathSync(homedir()), ".codex")})`);
-			const inside = (dir: string) => (rule: string) =>
-				rule === `read_file(${dir})` || rule.startsWith(`read_file(${dir}/`);
-			expect(deny.filter(inside(repo))).toEqual([]);
-			expect(deny.filter(inside(call.cwd))).toEqual([]);
-			expect(flag("--model")).toBe("gemini-4-carbon");
+			expect(blocked(join(realpathSync(homedir()), ".codex"))).toBe(true);
+			expect(deny.filter((rule) => rule === `read_file(${dir})` || rule.startsWith(`read_file(${dir}/`))).toEqual(
+				[],
+			);
+			expect(flag("--model")).toBe("gemini-4-neon");
 			expect(flag("--effort")).toBe("high");
 			// It runs outside the checkout, in a directory removed after the turn.
 			expect(call.cwd.startsWith(s.repo)).toBe(false);
-			expect(existsSync(call.cwd)).toBe(false);
-			const agent = call.workspace![".agents/agents/quest-reviewer.md"]!;
+			expect(existsSync(dir)).toBe(false);
+			const agent = call.workspace!["workspace/.agents/agents/quest-reviewer.md"]!;
 			expect(agent).toContain("tools:\n  - view_file\n  - finish\n");
 			expect(agent).toContain("inheritCustomizations: false");
 			expect(agent).toContain("BASE-ROOT rule");
 			expect(agent).not.toContain("HEAD-ROOT rule");
-			expect(call.workspace!["files.txt"]!.split("\n")).toContain("src/lib.ts");
+			// The export holds exactly the head's tracked files, as committed, and the list names each.
+			const exported = Object.keys(call.workspace!)
+				.filter((name) => name.startsWith("head/"))
+				.map((name) => name.slice("head/".length))
+				.sort();
+			expect(exported).toEqual(tracked);
+			expect(call.workspace!["files.txt"]!.split("\n").sort()).toEqual(tracked);
+			expect(call.workspace!["head/src/lib.ts"]).toBe("export const x = 2;\n");
+			// A link is a file holding its target, which no filter driver touched.
+			expect(call.workspace!["head/link"]).toBe(login);
+			expect(existsSync(smudged)).toBe(false);
 			expect(call.workspace!["diff-1.diff"]).toContain("+export const x = 2;");
-			expect(call.stdin).toContain(`The repository's checkout is ${s.repo}`);
-			// A resumed conversation still names the first turn's removed workspace, so each file is named in full.
-			expect(call.stdin).toContain(`\`${call.cwd}/files.txt\` lists its tracked files`);
-			expect(call.stdin).toContain(`\`${call.cwd}/diff-1.diff\` holds \`git diff ${mergeBase}..${head}\``);
+			expect(call.stdin).not.toContain(s.repo);
+			// A resumed conversation still names the first turn's removed directory, so each file is named in full.
+			expect(call.stdin).toContain(`tracked files are in \`${dir}/head\`, which \`${dir}/files.txt\` lists`);
+			expect(call.stdin).toContain(`\`${dir}/diff-1.diff\` holds \`git diff ${mergeBase}..${head}\``);
 			expect(Object.keys(call.env).filter((name) => /^(ANTIGRAVITY|AGY)_/.test(name))).toEqual([]);
 		}
 
@@ -1272,8 +1297,9 @@ fakes(
 		const resumed = s.calls().at(-1)!;
 		expect(resumed.argv[resumed.argv.indexOf("--conversation") + 1]).toBe("conversation-1");
 		const now = git(s.repo, "rev-parse", "HEAD");
-		expect(resumed.stdin).toContain(`\`${resumed.cwd}/diff-2.diff\` holds \`git diff ${head} ${now}\``);
+		expect(resumed.stdin).toContain(`\`${dirname(resumed.cwd)}/diff-2.diff\` holds \`git diff ${head} ${now}\``);
 		expect(resumed.workspace!["diff-2.diff"]).toContain("+export const x = 4;");
+		expect(resumed.workspace!["head/src/lib.ts"]).toBe("export const x = 4;\n");
 	},
 );
 
@@ -1855,6 +1881,8 @@ fakes("with only Antigravity installed, Gemini Flash classifies, reading the dif
 		"reason",
 	]);
 	expect(call.workspace!["diff-1.diff"]).toContain("+export const x = 2;");
+	// The question carries the patch, so no head is exported.
+	expect(Object.keys(call.workspace!).filter((name) => name.startsWith("head/") || name === "files.txt")).toEqual([]);
 });
 
 fakes(

@@ -241,7 +241,7 @@ if (argv[1] === "review") {
 	event({ type: "turn.completed", usage: { input_tokens: 100, cached_input_tokens: 80, output_tokens: 7 } });
 }
 `,
-	// Antigravity's print mode: the prompt is one stream-json line on stdin, and the workspace is logged as it stood,
+	// Antigravity's print mode: the prompt is one stream-json line on stdin, and the turn's directory is logged as it stood,
 	// since quest removes it after the turn. FAKE_DENIED ends a turn on a denied command, as print mode does.
 	agy: `
 const fs = require("node:fs");
@@ -252,7 +252,8 @@ const stdin = raw ? JSON.parse(raw).message.content : "";
 const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => /^(CLAUDE|CODEX|ANTHROPIC|ANTIGRAVITY|AGY|FAKE_HOST|PATH$)/.test(k)));
 const walk = (dir) => fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) =>
 	entry.isDirectory() ? walk(path.join(dir, entry.name)).map((name) => entry.name + "/" + name) : [entry.name]);
-const workspace = argv[0] === "models" ? null : Object.fromEntries(walk(".").map((name) => [name, fs.readFileSync(name, "utf8")]));
+// A turn runs in its directory's workspace, so the whole directory, its export included, is logged.
+const workspace = argv[0] === "models" ? null : Object.fromEntries(walk("..").map((name) => [name, fs.readFileSync(path.join("..", name), "utf8")]));
 logged({ argv, stdin, env, cwd: process.cwd(), workspace });
 const model = argv.includes("--model") ? argv[argv.indexOf("--model") + 1] : undefined;
 const only = process.env.FAKE_FAILS?.split(",");
@@ -263,7 +264,7 @@ if (argv[0] === "models") {
 		console.log("Error: Please sign in to view available models. Launch the CLI without arguments to sign in.");
 		process.exit(1);
 	}
-	console.log("gemini-4-carbon-high\\tGemini 4 Carbon (High)");
+	console.log("gemini-4-neon-xhigh\\tGemini 4 Neon (XHigh)");
 	process.exit(0);
 }
 const at = (flag) => (argv.includes(flag) ? argv[argv.indexOf(flag) + 1] : undefined);
@@ -285,7 +286,7 @@ const fail = (error) => {
 	console.error("error: " + error);
 	process.exit(1);
 };
-const QUOTA = (reset) => "Error 429, Message: Quota exhausted for gemini-4-carbon., Status: RESOURCE_EXHAUSTED, Details: [map[@type:type.googleapis.com/google.rpc.ErrorInfo domain:cloudcode-pa.googleapis.com metadata:map[" + reset + "] reason:QUOTA_EXHAUSTED]]";
+const QUOTA = (reset) => "Error 429, Message: Quota exhausted for gemini-4-neon., Status: RESOURCE_EXHAUSTED, Details: [map[@type:type.googleapis.com/google.rpc.ErrorInfo domain:cloudcode-pa.googleapis.com metadata:map[" + reset + "] reason:QUOTA_EXHAUSTED]]";
 event({ event: "init", conversation_id: conversation, init: { model, cwd: process.cwd(), tools: [], permission_mode: "always-proceed" } });
 if (fake("FAKE_REJECTED")) fail("authentication failed or timed out");
 const failing = (process.env.FAKE_CLASSIFY ?? "").split(",");
@@ -333,7 +334,7 @@ export interface Call {
 	stdin: string;
 	env: Record<string, string>;
 	cwd: string;
-	/** The files of an Antigravity turn's working directory, as it ran. */
+	/** The files of an Antigravity turn's directory, beside and in its working directory, as it ran. */
 	workspace?: Record<string, string> | null;
 }
 

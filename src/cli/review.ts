@@ -9,7 +9,7 @@
 // head and the author's responses, checking only what changed and the open findings,
 // so the reviewer keeps its context and its prompt cache, and a finding the author
 // refuted with evidence does not recur.
-import { execFile, spawn } from "node:child_process";
+import { execFile, spawn, spawnSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import {
 	existsSync,
@@ -49,7 +49,7 @@ import {
 	privateDirectory,
 	strippedEnvironment,
 } from "./agent";
-import { discoveryEnv, git } from "./git";
+import { GitError, discoveryEnv, git } from "./git";
 import { AGY_LIMIT, LIMIT, agyReset, codexReset } from "./limit";
 import { CLASSIFIERS, DEFAULT_SIZE, type Listing, REVIEWERS, type ReviewModel, unfit } from "./models";
 import { programEnvironment, requireProgram } from "./program";
@@ -556,8 +556,10 @@ export interface Context {
 	 * the branch's own change, never the base's newer commits.
 	 */
 	mergeBase: string;
-	/** The checkout at the reviewed head, which a reviewer with no shell reads by path. */
+	/** The checkout at the reviewed head. */
 	root: string;
+	/** The reviewed head, whose tracked files a reviewer with no shell reads from an export; none for a question. */
+	head?: string;
 	/** Each `git diff` range the prompt names, as it names it, which a reviewer with no shell is handed as a file. */
 	ranges: string[];
 	/** The base's agent instructions, given in place of the checkout's. */
@@ -580,8 +582,11 @@ interface Turn {
 	argv: string[];
 	stdin: string;
 	env: NodeJS.ProcessEnv;
-	/** A private directory outside any repository the turn runs in instead of the checkout, removed once it ends. */
-	workspace?: string;
+	/**
+	 * A private directory outside any repository, removed once the turn ends, and the directory in it the turn runs in
+	 * instead of the checkout.
+	 */
+	workspace?: { dir: string; cwd: string };
 }
 
 interface Reply {
@@ -999,7 +1004,8 @@ const AGY_AGENT = "quest-reviewer";
 
 /**
  * Where, under the home directory, CLIs and tools keep a login or key, denied even before one exists: the rules hold
- * only what a turn's start lists, and a sign-in while the turn runs, as to Codex, creates its directory then.
+ * only what a turn's start lists, so a sign-in while the turn runs, as to Codex, would otherwise be readable where
+ * the turn's directory lies under the home directory, as when TMPDIR does.
  */
 const HOME_CREDENTIALS = [
 	".aws",
@@ -1021,17 +1027,15 @@ const HOME_CREDENTIALS = [
 ];
 
 /**
- * Every path beside the directories leading to `roots`, so a path outside them all lies under one, since it parts from
+ * Every path beside the directories leading to `root`, so a path outside it lies under one, since it parts from
  * them in some directory those lead through, and each of `later`, paths that may appear while a turn runs, that leads
- * to no root and lies in none. Each path is resolved.
+ * to `root` and lies outside it. `root` is resolved.
  */
-export function beside(roots: string[], later: string[] = []): string[] {
-	const through = new Set<string>();
-	for (const root of roots) for (let up = root; !through.has(up); up = dirname(up)) through.add(up);
-	const outside = (path: string) => !through.has(path) && !roots.some((root) => path.startsWith(`${root}/`));
-	const listed = [...through]
-		.filter((dir) => !roots.includes(dir))
-		.flatMap((dir) => entries(dir).map((name) => join(dir, name)));
+export function beside(root: string, later: string[] = []): string[] {
+	const through: string[] = [];
+	for (let up = dirname(root); !through.includes(up); up = dirname(up)) through.push(up);
+	const outside = (path: string) => !through.includes(path) && path !== root && !path.startsWith(`${root}/`);
+	const listed = through.flatMap((dir) => entries(dir).map((name) => join(dir, name)));
 	return [...new Set([...listed, ...later].filter(outside))].sort();
 }
 
@@ -1041,8 +1045,8 @@ function entries(dir: string): string[] {
 		return readdirSync(dir);
 	} catch (error) {
 		throw new ReviewInputError(
-			`the reviewer's reads cannot be kept to the checkout and its workspace, since ${dir} cannot be listed ` +
-				`(${(error as Error).message}); review from a checkout, and with an agent directory, whose every parent you can list`,
+			`the reviewer's reads cannot be kept to its workspace, since ${dir} cannot be listed ` +
+				`(${(error as Error).message}); set XDG_RUNTIME_DIR, or TMPDIR without it, to a directory whose every parent you can list`,
 		);
 	}
 }
@@ -1050,12 +1054,12 @@ function entries(dir: string): string[] {
 /**
  * Deny rules, which hold in every mode, past `--dangerously-skip-permissions`, and over any allow rule: no command,
  * write, web request, or MCP call runs, should a release hand the reviewer agent a tool beyond its list, and no read
- * leaves the checkout and the workspace, since a hostile change could ask the reviewer to quote a credential, such as
- * another CLI's login, in a finding. Antigravity has no rule that allows only some paths, so each read rule denies a
- * path beside those two, which it matches by whole components against the path a read resolves to past symlinks and
- * `..`.
+ * leaves the turn's directory `dir`, since a hostile change could ask the reviewer to quote a credential, such as
+ * another CLI's login or a file the checkout ignores, in a finding. Antigravity has no rule that allows only some
+ * paths, so each read rule denies a path beside `dir`'s parents, which it matches by whole components against the path
+ * a read resolves to past symlinks and `..`.
  */
-function agySettings(roots: string[]): string {
+function agySettings(dir: string): string {
 	const home = existsSync(homedir()) ? realpathSync(homedir()) : undefined;
 	return JSON.stringify({
 		permissions: {
@@ -1066,12 +1070,48 @@ function agySettings(roots: string[]): string {
 				"execute_url(*)",
 				"download_url(*)",
 				"mcp(*)",
-				...beside(roots, home ? HOME_CREDENTIALS.map((name) => join(home, name)) : []).map(
+				...beside(dir, home ? HOME_CREDENTIALS.map((name) => join(home, name)) : []).map(
 					(path) => `read_file(${path})`,
 				),
 			],
 		},
 	});
+}
+
+/**
+ * Write the tracked files of `head` in the checkout at `root` to `into` as committed, from a scratch index beside it,
+ * so the checkout's own stays untouched. Attributes come from the empty tree, since a `.gitattributes` the head plants
+ * could otherwise run one of the user's filter drivers or convert a file, and an archive would leave out what it marks
+ * `export-ignore`. A symlink becomes a file holding its target, so no read follows one.
+ */
+function exportHead(root: string, head: string, into: string): void {
+	const empty = git(root, ["hash-object", "-t", "tree", "--stdin"], "");
+	const index = `${into}.index`;
+	const env = { ...discoveryEnv(), GIT_TERMINAL_PROMPT: "0", GIT_INDEX_FILE: index };
+	const scratch = (command: string, args: string[]) => {
+		const result = spawnSync("git", ["-C", root, ...args], {
+			encoding: "utf8",
+			env,
+			stdio: ["ignore", "pipe", "pipe"],
+		});
+		if (result.error) throw result.error;
+		if (result.status !== 0) throw new GitError(command, result.status, result.stdout, result.stderr);
+	};
+	try {
+		scratch("read-tree", ["read-tree", head]);
+		scratch("checkout-index", [
+			"-c",
+			"core.symlinks=false",
+			"-c",
+			"core.autocrlf=false",
+			`--attr-source=${empty}`,
+			"checkout-index",
+			"--all",
+			`--prefix=${into}/`,
+		]);
+	} finally {
+		rmSync(index, { force: true });
+	}
 }
 
 /** What an Antigravity review turn asks for, which has no built-in review command to run. */
@@ -1107,13 +1147,15 @@ function agyAgent(context: Context): string {
  * One Antigravity turn, run from a workspace of its own outside the checkout, whose agent configuration Antigravity
  * would otherwise load, and whose files its permission checks would refuse to read without approval, which print mode
  * cannot give, so permissions are skipped and the agent's tool list and `agySettings` bound it. With no shell, the
- * workspace holds what `git` would show: the checkout's tracked files, and the diff of each range the prompt names,
- * each named by absolute path, since a resumed conversation still sees the earlier turn's workspace, now removed. The
+ * turn's directory holds what `git` would show: an export of the reviewed head beside the workspace, so no
+ * configuration it plants lies under the workspace, its file list, and the diff of each range the prompt names,
+ * each named by absolute path, since a resumed conversation still sees the earlier turn's directory, now removed. The
  * prompt arrives on stdin, since an argument holds no more than 128 KiB on Linux.
  */
 export function agyTurn(context: Context, prompt: string, flags: string[]): Turn {
-	const files: Record<string, string> = { [`.agents/agents/${AGY_AGENT}.md`]: agyAgent(context) };
-	files["files.txt"] = git(context.root, ["ls-files"]);
+	const files: Record<string, string> = { [`workspace/.agents/agents/${AGY_AGENT}.md`]: agyAgent(context) };
+	if (context.head !== undefined)
+		files["files.txt"] = git(context.root, ["ls-tree", "-r", "--name-only", "--full-tree", context.head]);
 	for (const [index, range] of context.ranges.entries())
 		files[`diff-${index + 1}.diff`] = git(context.root, [
 			"diff",
@@ -1122,23 +1164,28 @@ export function agyTurn(context: Context, prompt: string, flags: string[]): Turn
 			"--no-color",
 			...range.split(" "),
 		]);
-	// Created last, since a turn that is never run leaves its workspace behind.
+	// Created last, since a turn that is never run leaves its directory behind.
 	const dir = workspace(files);
 	// A file, since the rules can outgrow the 128 KiB an argument holds on Linux, as beside a crowded /tmp.
 	const settings = join(dir, "settings.json");
 	try {
-		writeFileSync(settings, agySettings([realpathSync(context.root), dir]), { mode: 0o600 });
+		if (context.head !== undefined) exportHead(context.root, context.head, join(dir, "head"));
+		writeFileSync(settings, agySettings(dir), { mode: 0o600 });
 	} catch (error) {
 		rmSync(dir, { recursive: true, force: true });
 		throw error;
 	}
+	const head =
+		context.head === undefined
+			? ""
+			: ` The reviewed head's tracked files are in \`${dir}/head\`, which \`${dir}/files.txt\` lists: read them ` +
+				"by absolute path, and name each file by its path inside that directory.";
 	const content =
-		`You have no shell, so run no command. The repository's checkout is ${context.root}: read its files by ` +
-		`absolute path. \`${dir}/files.txt\` lists its tracked files` +
+		`You have no shell, so run no command.${head}` +
 		context.ranges
-			.map((range, index) => `, and \`${dir}/diff-${index + 1}.diff\` holds \`git diff ${range}\``)
+			.map((range, index) => ` \`${dir}/diff-${index + 1}.diff\` holds \`git diff ${range}\`.`)
 			.join("") +
-		`.\n\n${prompt}`;
+		`\n\n${prompt}`;
 	return {
 		argv: [
 			"agy",
@@ -1162,7 +1209,7 @@ export function agyTurn(context: Context, prompt: string, flags: string[]): Turn
 		],
 		stdin: `${JSON.stringify({ event: "user", message: { role: "user", content } })}\n`,
 		env: {},
-		workspace: dir,
+		workspace: { dir, cwd: join(dir, "workspace") },
 	};
 }
 
@@ -1463,9 +1510,10 @@ async function turn(cli: Cli, call: Turn, cwd: string, model: string): Promise<R
 	const reader = cli.reviewer.reader();
 	let ran: { code: number; stderr: string };
 	try {
-		ran = await run(call.argv, call.workspace ?? cwd, { ...cli.env, ...call.env }, call.stdin, reader, cli.signal);
+		const at = call.workspace?.cwd ?? cwd;
+		ran = await run(call.argv, at, { ...cli.env, ...call.env }, call.stdin, reader, cli.signal);
 	} finally {
-		if (call.workspace) rmSync(call.workspace, { recursive: true, force: true });
+		if (call.workspace) rmSync(call.workspace.dir, { recursive: true, force: true });
 	}
 	const { code, stderr } = ran;
 	const reply = reader.reply(code, stderr);
@@ -2955,6 +3003,7 @@ async function reviewWith(shared: Shared, seat: Seat, responses: string | undefi
 		mergeBase: change.mergeBase,
 		root,
 		// As the prompts name them: the change, and for a later round what changed since the last.
+		head: change.head,
 		ranges: [`${change.mergeBase}..${change.head}`, ...(resume ? [`${previous!.head} ${change.head}`] : [])],
 		instructions: instructionsPrompt(shared.base.sha, shared.files),
 		model: picked.model,
@@ -3080,6 +3129,7 @@ export async function firstRound(
 	const context: Context = {
 		mergeBase: change.mergeBase,
 		root,
+		head: change.head,
 		ranges: [`${change.mergeBase}..${change.head}`],
 		instructions: instructionsPrompt(change.mergeBase, opening.files),
 		model: reviewer.model,

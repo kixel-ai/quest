@@ -572,13 +572,10 @@ export function tallies(scored: Scored[], combined: boolean): Pick<EvalReport, "
 /**
  * Google's API list price in dollars per million tokens of each model Antigravity reviews with, newest first, each from
  * its first day, since token-max prices no agy session. Output includes thinking; caching is implicit. From
- * https://aistudio.google.com/docs/pricing, read 2026-11-23, whose introductory prices end on the later entries' days.
+ * https://aistudio.google.com/docs/pricing, read 2026-11-23, where Flash's prices double from 2027.
  */
 const AGY_PRICES: Record<string, { from: string; input: number; cached: number; output: number }[]> = {
-	"gemini-4-carbon": [
-		{ from: "2026-12-01", input: 4, cached: 0.2, output: 20 },
-		{ from: "", input: 2, cached: 0.1, output: 10 },
-	],
+	"gemini-4-neon": [{ from: "", input: 3, cached: 0.15, output: 15 }],
 	"gemini-3.8-flash": [
 		{ from: "2027-01-01", input: 1.5, cached: 0.15, output: 7.5 },
 		{ from: "", input: 0.75, cached: 0.075, output: 3.75 },
@@ -587,8 +584,8 @@ const AGY_PRICES: Record<string, { from: string; input: number; cached: number; 
 
 /** The list price of an agy seat's reported tokens on `at`'s day, or null for a model without a known price. */
 export function agyCost(model: string, usage: Usage[], at: Date): number | null {
-	// A model ID may carry its effort, as `gemini-4-carbon-high`.
-	const prices = AGY_PRICES[model.replace(/-(?:low|medium|high)$/, "")];
+	// A model ID may carry its effort, as `gemini-4-neon-xhigh`.
+	const prices = AGY_PRICES[model.replace(/-(?:low|medium|x?high)$/, "")];
 	const day = at.toISOString().slice(0, 10);
 	const price = prices?.find((each) => day >= each.from);
 	if (price === undefined) return null;

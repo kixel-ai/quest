@@ -1162,7 +1162,7 @@ describe("usage", () => {
 			"Rewritten by `quest review` after each round.",
 			"",
 			`- Head: ${"a".repeat(40)}`,
-			"- Reviewer: Antigravity, gemini-4-carbon, high effort",
+			"- Reviewer: Antigravity, gemini-4-neon, high effort",
 			"- Rounds: 1; findings 0: fixed 0, refuted 0, open 0",
 			"",
 		].join("\n");
@@ -1171,7 +1171,7 @@ describe("usage", () => {
 		});
 		const report = await usage(root, { since: "2026-11-05" }, deps(sessions));
 		const row = report.reviewers.find((each) => each.harness === "Antigravity")!;
-		expect(row).toMatchObject({ model: "gemini-4-carbon", reviewed: 1 });
+		expect(row).toMatchObject({ model: "gemini-4-neon", reviewed: 1 });
 		expect(row.spent.complete).toBe(false);
 	});
 

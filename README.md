@@ -1678,7 +1678,7 @@ given at the start of each session, and chooses the review's stance, such as adv
 
 `--harness agy` reviews with Google's Antigravity CLI, `agy`, which only
 reviews: name its
-model and effort, as `--model gemini-4-carbon --effort high`. It runs `agy -p`
+model and effort, as `--model gemini-4-neon --effort xhigh`. It runs `agy -p`
 on your own Antigravity login, wherever `agy` keeps it: the OS keyring, or over
 ssh its configuration directory, `~/.gemini/antigravity-cli`. Run `agy` to sign
 in. No `ANTIGRAVITY_*` or `AGY_*` variable reaches it, so no gateway either,
@@ -1691,17 +1691,21 @@ and an agent directory inside a repository is a usage error naming
 only tools are `view_file` and `finish` and which inherits none of your hooks,
 rules, plugins, or MCP tools. Print mode cannot approve a read outside that
 directory, so permissions are skipped, and deny rules on commands, writes, web
-requests, and MCP calls back up the tool list. `agy` has no rule that allows only
-some paths, so a read rule denies each path beside the directories leading to
-the checkout and that directory, and nothing outside those two, such as another
-CLI's login, can be read. The rules hold what each turn's start lists, so the
-usual login and key paths under your home, such as `~/.codex` and `~/.ssh`, are
-denied even before they exist, and a parent that cannot be listed is a usage
-error; anything else created beside those directories while a turn runs is not
-covered. With no shell, the directory
-holds what `git` would show, `files.txt` with the checkout's tracked files and
-each reviewed range's diff, and the reviewer reads the checkout's files by
-absolute path; `agy` 1.5.14 gives an agent no search tool. Your skills' text
+requests, and MCP calls back up the tool list. With no shell, the turn's
+directory holds what `git` would show: an export of the reviewed head's tracked
+files as committed, beside the directory `agy` runs in so none of its
+configuration loads, `files.txt` listing them, and each reviewed range's diff;
+`agy` 1.5.14 gives an agent no search tool. The export ignores every
+`.gitattributes`, so a head can neither hide a file from it nor run a filter
+driver, and writes each symlink as a file holding its target. `agy` has no rule
+that allows only some paths, so a read rule denies each path beside the
+directories leading to the turn's directory, and nothing outside it, such as the
+checkout's untracked files, its `.git`, or another CLI's login, can be read. The
+rules hold what each turn's start lists, so the usual login and key paths under
+your home, such as `~/.codex` and `~/.ssh`, are denied even before they exist,
+and a parent that cannot be listed is a usage error; anything else created
+beside those directories while a turn runs, such as in the runtime directory, is
+not covered. Your skills' text
 still reaches it, and your MCP servers start, with no tool it can call. A
 `RESOURCE_EXHAUSTED` quota error counts as its usage limit, resetting at the
 time it names.

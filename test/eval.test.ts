@@ -245,22 +245,23 @@ test("agy seats are priced from their reported tokens at Google's list price on 
 	const clean = { pull: 4, ...base, clean: true } as EvalCase;
 	const run = (model: string, at: string) =>
 		priced(null, [{ case: clean, seats: [agy(model, usage)] }], new Date(at));
-	expect(agyCost("gemini-4-carbon", usage, new Date("2026-11-30T23:00:00Z"))).toBeCloseTo(2 + 0.1 + 10);
-	expect(run("gemini-4-carbon", "2026-12-01T00:00:00Z")).toEqual({
-		usd: expect.closeTo(4 + 0.2 + 20),
+	expect(agyCost("gemini-4-neon", usage, new Date("2026-11-30T23:00:00Z"))).toBeCloseTo(3 + 0.15 + 15);
+	expect(run("gemini-4-neon", "2027-06-01T00:00:00Z")).toEqual({
+		usd: expect.closeTo(3 + 0.15 + 15),
 		complete: true,
 		priced: 1,
 		sessions: 1,
 	});
 	// The effort may ride on the model ID.
-	expect(run("gemini-4-carbon-high", "2026-11-23T00:00:00Z")?.usd).toBeCloseTo(12.1);
+	expect(run("gemini-4-neon-high", "2026-11-23T00:00:00Z")?.usd).toBeCloseTo(18.15);
+	expect(run("gemini-4-neon-xhigh", "2026-11-23T00:00:00Z")?.usd).toBeCloseTo(18.15);
 	expect(run("gemini-3.8-flash", "2026-12-31T12:00:00Z")?.usd).toBeCloseTo(0.75 + 0.075 + 3.75);
 	expect(run("gemini-3.8-flash", "2027-01-01T00:00:00Z")?.usd).toBeCloseTo(1.5 + 0.15 + 7.5);
 	expect(run("gemini-9", "2026-11-23T00:00:00Z")).toEqual({ usd: 0, complete: false, priced: 0, sessions: 1 });
 	// Beside a seat token-max prices, both count, and the run is unpriced without token-max.
-	const mixed: Scored[] = [{ case: clean, seats: [seat([], []), agy("gemini-4-carbon", usage)] }];
+	const mixed: Scored[] = [{ case: clean, seats: [seat([], []), agy("gemini-4-neon", usage)] }];
 	const codex = { harness: "codex", id: "s1", parent: null, cost: 1, complete: true } as Session;
-	expect(priced([codex], mixed, AT)).toEqual({ usd: expect.closeTo(13.1), complete: true, priced: 2, sessions: 2 });
+	expect(priced([codex], mixed, AT)).toEqual({ usd: expect.closeTo(19.15), complete: true, priced: 2, sessions: 2 });
 	expect(priced(null, mixed, AT)).toBeNull();
 });
 
