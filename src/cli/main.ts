@@ -1561,9 +1561,9 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		run: (command: string, args: string[]) => {
 			execFileSync(command, args, { stdio: ["ignore", "inherit", "inherit"] });
 		},
-		tryRun: (command: string, args: string[]) => {
-			spawnSync(command, args, { stdio: "ignore" });
-		},
+		tryRun: (command: string, args: string[]) => spawnSync(command, args, { stdio: "ignore" }).status === 0,
+		now: () => performance.now(),
+		sleep: (ms: number) => void Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms),
 	});
 	recordsCommand
 		.command("install")
