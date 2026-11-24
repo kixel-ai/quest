@@ -603,12 +603,15 @@ const agyControl = () => ({
 	codewords: ["AGENTSMD", "GEMINIMD", "RULE-agents"],
 });
 
-/** The reply and the files read of an `agy -p --output-format stream-json` run. */
-/** A turn's reply, each read it tried, and each read agy refused under a deny rule, which reports it and goes on. */
+/**
+ * An `agy -p --output-format stream-json` run's reply, and of each read it tried, by attempt, those agy refused under
+ * a deny rule, which it reports and goes on, and those that returned a file.
+ */
 function agyRun(run: SpawnSyncReturns<string>): {
 	response: string;
 	reads: string[];
 	denied: string[];
+	returned: string[];
 	output: string;
 } {
 	const events = (run.stdout ?? "")
@@ -628,10 +631,12 @@ function agyRun(run: SpawnSyncReturns<string>): {
 				/Matches user-configured deny rule/.test(step.tool_info?.error?.message ?? ""),
 		)
 		.map(path);
+	const returned = steps.filter((step) => step?.state === "DONE").map(path);
 	return {
 		response,
 		reads,
 		denied,
+		returned,
 		output: `exit ${run.status}\nresponse:\n${response}\nstderr:\n${tail(run.stderr)}`,
 	};
 }
@@ -726,12 +731,9 @@ describe("agy", () => {
 	const REFUSED = "matches names case-insensitively and agy matches its read rules case-sensitively";
 
 	const recordedAgy = () => readdirSync(markers).sort();
-	/** The reads of a canary, however its path is spelled, that agy did not deny. */
-	const allowed = (run: { reads: string[]; denied: string[] }) =>
-		run.reads.filter(
-			(path) =>
-				[canary, other, untracked].some((each) => path.endsWith(basename(each))) && !run.denied.includes(path),
-		);
+	/** The reads that returned a canary's file, however its path is spelled. */
+	const leaked = (run: { returned: string[] }) =>
+		run.returned.filter((path) => [canary, other, untracked].some((each) => path.endsWith(basename(each))));
 	const clearAgy = () => {
 		rmSync(markers, { recursive: true });
 		mkdirSync(markers);
@@ -825,7 +827,7 @@ describe("agy", () => {
 		expect(recordedAgy(), `planted configuration or a command ran\n${open.output}`).toEqual([]);
 		expect(open.response, `the canary was not read without the read rules\n${open.output}`).toContain(secret);
 		// The reads that reached the canaries count as let through, so a denial below is agy's.
-		expect(allowed(open), `no read of a canary was let through without the read rules\n${open.output}`).not.toEqual(
+		expect(leaked(open), `no read of a canary was let through without the read rules\n${open.output}`).not.toEqual(
 			[],
 		);
 		expect(open.response, `the other canary was not read without the read rules\n${open.output}`).toContain(
@@ -843,8 +845,9 @@ describe("agy", () => {
 			clearAgy();
 			const run = agyRun(await turn(read(path)));
 			expect(run.reads, `the reviewer never tried to read ${what}\n${run.output}`).toContain(path);
-			// Every read of a canary, so none reached it unquoted.
-			expect(allowed(run), `agy let a read of ${what} through\n${run.output}`).toEqual([]);
+			expect(run.denied, `agy never reported the read of ${what} denied\n${run.output}`).toContain(path);
+			// No read of a canary returned its file, so none reached the reviewer unquoted.
+			expect(leaked(run), `agy let a read of ${what} through\n${run.output}`).toEqual([]);
 			for (const each of [secret, otherSecret, untrackedSecret])
 				expect(run.response, `the reviewer quoted ${what}`).not.toContain(each);
 			expect(recordedAgy(), `planted configuration or a command ran\n${run.output}`).toEqual([]);
@@ -859,7 +862,7 @@ describe("agy", () => {
 		const climb = agyRun(await turn(read(`@CLIMB@${other.slice(1)}`)));
 		if (!climb.reads.some((path) => path.endsWith(basename(other))))
 			console.warn(`the reviewer refused the climbing read, so it shows nothing:\n${climb.response}`);
-		expect(allowed(climb), `agy let a read through \`..\` through\n${climb.output}`).toEqual([]);
+		expect(leaked(climb), `agy let a read through \`..\` through\n${climb.output}`).toEqual([]);
 		for (const each of [secret, otherSecret, untrackedSecret])
 			expect(climb.response, "the reviewer quoted a file through `..`").not.toContain(each);
 		expect(recordedAgy(), `planted configuration or a command ran\n${climb.output}`).toEqual([]);

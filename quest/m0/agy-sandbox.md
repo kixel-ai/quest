@@ -2,8 +2,9 @@
 
 ## Goal
 
-`quest review --harness agy` keeps the reviewer's reads to its turn's
-directory with an OS sandbox on Linux and macOS, rather than relying only on
+Every agy turn quest runs, for `quest review --harness agy` and for the risk
+classifier when it falls through to agy, keeps the reviewer's reads to its
+turn's directory with an OS sandbox on Linux and macOS, rather than relying only on
 agy's own deny rules. The sandbox also covers a file created beside the turn
 directory's parents while the turn runs, and a Mac's default
 case-insensitive APFS volume. Quest then drops its refusal of
