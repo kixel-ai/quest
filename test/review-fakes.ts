@@ -1,6 +1,7 @@
 // The fake Codex and Claude Code CLIs and the fixture clone the review tests run them in.
 import { execFileSync } from "node:child_process";
-import { chmodSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test, vi } from "vitest";
 
@@ -9,6 +10,12 @@ import { tempDir } from "./fixture";
 
 /** The fake CLIs are shebang scripts found on a POSIX PATH, which Windows cannot run. */
 export const fakes = test.skipIf(process.platform === "win32");
+
+/** Whether the temporary directory matches names case-insensitively, as macOS's default volume does. */
+export const caseInsensitive = existsSync(realpathSync(tmpdir()).toUpperCase());
+
+/** A fake-CLI test that runs agy, which quest refuses where names match case-insensitively. */
+export const agyFakes = test.skipIf(process.platform === "win32" || caseInsensitive);
 
 export const FINDING = {
 	file: "src/lib.ts",

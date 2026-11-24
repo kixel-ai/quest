@@ -50,6 +50,8 @@ import {
 	type Call,
 	at,
 	effortOf,
+	agyFakes,
+	caseInsensitive,
 	fakes,
 	git,
 	quest,
@@ -1105,44 +1107,51 @@ fakes("--base reviews against another branch, fetched first, with that branch's 
 	expect(unknown.stderr).toContain("--base must be <remote>/<branch>");
 });
 
-test("agy's read rules leave every path outside the turn's directory under a denied one, and none inside", () => {
-	const dir = realpathSync(tempDir());
-	for (const path of ["a/x/in.txt", "a/y/out.txt", "a/x-sibling/out.txt", "c/out.txt", "top.txt"])
-		write(dir, path, "");
-	symlinkSync(join(dir, "c"), join(dir, "a", "x", "link"));
-	// Paths that may appear during a turn: one beside the root, one its parent, and one inside it.
-	const later = ["d/login.json", "a", "a/x/new.txt"].map((path) => join(dir, path));
-	const denied = beside(join(dir, "a", "x"), later);
-	expect(denied).toContain(join(dir, "d/login.json"));
-	expect(denied).not.toContain(join(dir, "a"));
-	expect(denied).not.toContain(join(dir, "a/x/new.txt"));
-	// Antigravity matches a rule by whole components, so `a/x` never covers `a/x-sibling`.
-	const blocked = (path: string) => denied.some((rule) => path === rule || path.startsWith(`${rule}/`));
-	expect(blocked(join(dir, "a/x/in.txt"))).toBe(false);
-	for (const path of ["a/y/out.txt", "a/x-sibling/out.txt", "c/out.txt", "top.txt"])
-		expect(blocked(join(dir, path)), path).toBe(true);
-	// A link inside the root resolves outside it, where the rule beside its target matches.
-	expect(blocked(realpathSync(join(dir, "a", "x", "link", "out.txt")))).toBe(true);
-	// Above the tree too, as the system's own directories.
-	const top = dir.split("/")[1]!;
-	for (const name of readdirSync("/").filter((name) => name !== top)) expect(blocked(`/${name}`), name).toBe(true);
-});
+test.skipIf(caseInsensitive)(
+	"agy's read rules leave every path outside the turn's directory under a denied one, and none inside",
+	() => {
+		const dir = realpathSync(tempDir());
+		for (const path of ["a/x/in.txt", "a/y/out.txt", "a/x-sibling/out.txt", "c/out.txt", "top.txt"])
+			write(dir, path, "");
+		symlinkSync(join(dir, "c"), join(dir, "a", "x", "link"));
+		// Paths that may appear during a turn: one beside the root, one its parent, and one inside it.
+		const later = ["d/login.json", "a", "a/x/new.txt"].map((path) => join(dir, path));
+		const denied = beside(join(dir, "a", "x"), later);
+		expect(denied).toContain(join(dir, "d/login.json"));
+		expect(denied).not.toContain(join(dir, "a"));
+		expect(denied).not.toContain(join(dir, "a/x/new.txt"));
+		// Antigravity matches a rule by whole components, so `a/x` never covers `a/x-sibling`.
+		const blocked = (path: string) => denied.some((rule) => path === rule || path.startsWith(`${rule}/`));
+		expect(blocked(join(dir, "a/x/in.txt"))).toBe(false);
+		for (const path of ["a/y/out.txt", "a/x-sibling/out.txt", "c/out.txt", "top.txt"])
+			expect(blocked(join(dir, path)), path).toBe(true);
+		// A link inside the root resolves outside it, where the rule beside its target matches.
+		expect(blocked(realpathSync(join(dir, "a", "x", "link", "out.txt")))).toBe(true);
+		// Above the tree too, as the system's own directories.
+		const top = dir.split("/")[1]!;
+		for (const name of readdirSync("/").filter((name) => name !== top))
+			expect(blocked(`/${name}`), name).toBe(true);
+	},
+);
 
-test("agy's read rules refuse a directory that matches names case-insensitively, since agy's rules do not", () => {
-	const dir = realpathSync(tempDir());
-	write(dir, "a/x/in.txt", "");
-	write(dir, "a/Name", "");
-	// A link reaching the same entry with the case swapped, as a case-insensitive volume resolves any name.
-	linkSync(join(dir, "a", "Name"), join(dir, "a", "nAME"));
-	expect(() => beside(join(dir, "a", "x"))).toThrow(`since ${join(dir, "a")} matches names case-insensitively`);
-	// Two entries that differ only in case are a case-sensitive directory.
-	rmSync(join(dir, "a", "nAME"));
-	write(dir, "a/nAME", "");
-	expect(beside(join(dir, "a", "x"))).toContain(join(dir, "a", "nAME"));
-});
+test.skipIf(caseInsensitive)(
+	"agy's read rules refuse a directory that matches names case-insensitively, since agy's rules do not",
+	() => {
+		const dir = realpathSync(tempDir());
+		write(dir, "a/x/in.txt", "");
+		write(dir, "a/Name", "");
+		// A link reaching the same entry with the case swapped, as a case-insensitive volume resolves any name.
+		linkSync(join(dir, "a", "Name"), join(dir, "a", "nAME"));
+		expect(() => beside(join(dir, "a", "x"))).toThrow(`since ${join(dir, "a")} matches names case-insensitively`);
+		// Two entries that differ only in case are a case-sensitive directory.
+		rmSync(join(dir, "a", "nAME"));
+		write(dir, "a/nAME", "");
+		expect(beside(join(dir, "a", "x"))).toContain(join(dir, "a", "nAME"));
+	},
+);
 
 // Root lists any directory, so the refusal only shows for another user.
-test.skipIf(process.getuid?.() === 0)("agy's read rules refuse a parent they cannot list", () => {
+test.skipIf(process.getuid?.() === 0 || caseInsensitive)("agy's read rules refuse a parent they cannot list", () => {
 	const dir = realpathSync(tempDir());
 	write(dir, "hidden/turn/in.txt", "");
 	chmodSync(join(dir, "hidden"), 0o311);
@@ -1207,7 +1216,7 @@ fakes("claude reviews read-only with the base's instructions, then reports in th
 
 const AGY = ["--harness", "agy", "--model", "gemini-4-neon", "--effort", "high"];
 
-fakes(
+agyFakes(
 	"agy reviews from a directory of its own, reading an export of the head, then reports in the schema",
 	async () => {
 		const s = setup("CLAUDECODE");
@@ -1221,6 +1230,8 @@ fakes(
 		git(s.repo, "commit", "-qm", "attributes");
 		const smudged = join(s.repo, ".tmp", "smudged");
 		git(s.repo, "config", "filter.plant.smudge", `touch ${smudged}; cat`);
+		// The user's own attributes name the filter too, which no export runs either.
+		write(s.repo, ".git/info/attributes", "* filter=plant\n");
 		write(s.repo, ".tmp/secret.env", "UNTRACKED-SECRET\n");
 		// An Antigravity session's own state and an Antigravity gateway never reach the reviewer.
 		vi.stubEnv("ANTIGRAVITY_LS_ADDRESS", "127.0.0.1:1");
@@ -1309,8 +1320,9 @@ fakes(
 		}
 		for (const call of [first!, second!]) {
 			const dir = dirname(call.cwd);
-			// The head's `-diff` hides none of its hunks.
+			// The head's `-diff` hides none of its hunks, and a path is written as the export names it.
 			expect(call.workspace!["diff-1.diff"]).toContain("+export const x = 2;");
+			expect(call.workspace!["diff-1.diff"]).toContain("+++ b/docs/café.md");
 			expect(call.stdin).toContain(`\`${dir}/diff-1.diff\` holds \`git diff ${mergeBase}..${head}\``);
 			expect(Object.keys(call.env).filter((name) => /^(ANTIGRAVITY|AGY)_/.test(name))).toEqual([]);
 		}
@@ -1331,7 +1343,7 @@ fakes(
 	},
 );
 
-fakes("a round whose last head is gone, as an amend pruned away, reviews the whole change anew", async () => {
+agyFakes("a round whose last head is gone, as an amend pruned away, reviews the whole change anew", async () => {
 	const s = setup("CLAUDECODE");
 	expect((await quest("--root", s.repo, "review", ...AGY)).code).toBe(0);
 	const gone = git(s.repo, "rev-parse", "HEAD");
@@ -1349,7 +1361,7 @@ fakes("a round whose last head is gone, as an amend pruned away, reviews the who
 	expect(Object.keys(review!.workspace!)).not.toContain("diff-2.diff");
 });
 
-fakes.for([
+agyFakes.for([
 	["FAKE_LOGGED_OUT", "1", "error: agy is not logged in; run `agy`"],
 	["FAKE_REJECTED", "1", "error: agy is not logged in; run `agy`"],
 	["FAKE_LIMITED", "reset", "error: agy hit its usage limit; resets 2030-03-17T17:46:40Z"],
@@ -1366,7 +1378,7 @@ fakes.for([
 	},
 );
 
-fakes("agy is refused where a directory leading to its workspace matches names case-insensitively", async () => {
+agyFakes("agy is refused where a directory leading to its workspace matches names case-insensitively", async () => {
 	const s = setup("CLAUDECODE");
 	// A link reaching the same entry with the case swapped, as a case-insensitive volume resolves any name.
 	const parent = join(s.bin, "..", "insensitive");
@@ -1379,7 +1391,7 @@ fakes("agy is refused where a directory leading to its workspace matches names c
 	expect(s.calls().filter((call) => call.argv[0] !== "models")).toEqual([]);
 });
 
-fakes("agy's status check failing other than on its login fails as it is, rather than as logged out", async () => {
+agyFakes("agy's status check failing other than on its login fails as it is, rather than as logged out", async () => {
 	const s = setup("CLAUDECODE");
 	vi.stubEnv("FAKE_OFFLINE", "1");
 	const result = await quest("--root", s.repo, "review", ...AGY);
@@ -1388,7 +1400,7 @@ fakes("agy's status check failing other than on its login fails as it is, rather
 	expect(result.stderr).not.toContain("not logged in");
 });
 
-fakes(
+agyFakes(
 	"a workspace inside a repository is refused before agy runs, since agy would load its configuration",
 	async () => {
 		const s = setup("CLAUDECODE");
@@ -1913,7 +1925,7 @@ fakes("without a logged-in Claude Code, Codex classifies", async () => {
 	expect(JSON.parse(readFileSync(reportFile, "utf8")).required).toContain("risk");
 });
 
-fakes("with only Antigravity installed, Gemini Flash classifies, reading the diff from its workspace", async () => {
+agyFakes("with only Antigravity installed, Gemini Flash classifies, reading the diff from its workspace", async () => {
 	const s = setup();
 	moveBase(s.repo, (dir) => write(dir, "RISK.md", riskFile([])));
 	const only = join(s.bin, "..", "agy-only");
@@ -1935,7 +1947,7 @@ fakes("with only Antigravity installed, Gemini Flash classifies, reading the dif
 	expect(Object.keys(call.workspace!).filter((name) => name.startsWith("head/") || name === "files.txt")).toEqual([]);
 });
 
-fakes(
+agyFakes(
 	"a classifier whose turn fails on its login or usage limit, or replies unusably, passes the turn to the next",
 	async () => {
 		const s = setup();
@@ -2819,6 +2831,9 @@ test("the verdict is checked field by field, settling each earlier finding once"
 		"does not match",
 	);
 	expect(() => verdict({ text: '{"verdict":"approve"}' }, 0)).toThrow("no findings list");
+	// An agy reviewer naming a file by its path in the head's export names it in the repository.
+	const exported = { ...FINDING, file: "/run/user/1000/quest/agent/review-AbC123/head/src/lib.ts" };
+	expect(verdict({ structured: { ...scored, findings: [exported] } }, 0).findings[0]!.file).toBe("src/lib.ts");
 	for (const score of [-1, 11, 7.5, "7", undefined]) {
 		expect(() => verdict({ structured: { ...scored, score, findings: [] } }, 0)).toThrow("no score from 0 to 10");
 	}

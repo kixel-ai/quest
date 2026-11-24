@@ -1607,10 +1607,11 @@ with the base's tip, so a branch behind its base draws no findings on code the
 base gained since, which a diff against its tip shows as reverted.
 The first round explores the change once. It runs the reviewer's own review,
 `codex exec review` with custom instructions or Claude Code's `/code-review
-<effort> <merge-base>...HEAD` with text after the target, given the range, the
+<effort> <merge-base>...HEAD` with text after the target, or for `agy`, which
+has none, a turn asking what the change breaks, given the range, the
 base's `REVIEW.md`, if any, and any earlier findings and responses up front. It
 also asks the reviewer to name each contract the change alters and search past
-the diff for the dependents left on the old one. Neither returns a JSON schema
+the diff for the dependents left on the old one. None returns a JSON schema
 itself, so the round resumes that session for one turn that reads nothing and
 reports the review in one schema, with a score from 0 to 10 for how ready the
 head is to land and one sentence on why: 10 lands as is, 7 to 9 lands after the

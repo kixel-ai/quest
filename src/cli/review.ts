@@ -620,6 +620,8 @@ interface Reviewer {
 	 * `unauthorized`, and any other, as of the network, fails as it is.
 	 */
 	remoteStatus?: true;
+	/** Throws when this host cannot run the CLI as quest confines it, given the status check's empty workspace. */
+	supported?(workspace: string): void;
 	/** How the user logs in. */
 	login: string;
 	/** The variable naming the configuration directory, and so the stored login, the status check reads, if any. */
@@ -1011,6 +1013,9 @@ const AGY_AGENT = "quest-reviewer";
 /** The settings file in a turn's directory, which holds its deny rules. */
 const AGY_SETTINGS = "settings.json";
 
+/** The head's export in a turn's directory, should an agy reviewer name a finding's file by its absolute path. */
+const IN_EXPORT = /^\/.*\/review-[^/]+\/head\//;
+
 /** The empty tree in `root`'s object format, whose attributes are none. */
 const emptyTree = (root: string) => git(root, ["hash-object", "-t", "tree", "--stdin"], "");
 
@@ -1065,17 +1070,19 @@ const swapped = (name: string) =>
  * reaching the same entry with its case swapped.
  */
 function caseSensitive(dir: string, names: string[]): void {
-	const name = [...names].sort().find((each) => swapped(each) !== each);
-	if (name === undefined) return;
-	const variant = lstatSync(join(dir, swapped(name)), { throwIfNoEntry: false });
-	const entry = lstatSync(join(dir, name));
-	if (variant !== undefined && variant.ino === entry.ino && variant.dev === entry.dev)
+	// The first name still there, since another run's directory can go between the listing and the check.
+	for (const name of [...names].sort().filter((each) => swapped(each) !== each)) {
+		const entry = lstatSync(join(dir, name), { throwIfNoEntry: false });
+		if (entry === undefined) continue;
+		const variant = lstatSync(join(dir, swapped(name)), { throwIfNoEntry: false });
+		if (variant === undefined || variant.ino !== entry.ino || variant.dev !== entry.dev) return;
 		throw new ReviewerUnavailableError(
 			"agy",
 			"not supported",
 			`agy cannot be kept to its workspace, since ${dir} matches names case-insensitively and agy matches its ` +
 				"read rules case-sensitively; review with agy only where every directory leading to quest's agent directory is case-sensitive, as on Linux",
 		);
+	}
 }
 
 /** The names in `dir`, which must be listed, since a path in it that no rule names could be read. */
@@ -1120,38 +1127,61 @@ function agySettings(dir: string): string {
 }
 
 /**
- * Write the tracked files of `head` in the checkout at `root` to `into` as committed, from a scratch index beside it,
- * so the checkout's own stays untouched. Attributes come from the empty tree, since a `.gitattributes` the head plants
- * could otherwise run one of the user's filter drivers or convert a file, and an archive would leave out what it marks
- * `export-ignore`. A symlink becomes a file holding its target, so no read follows one.
+ * Write the tracked files of `head` in the checkout at `root` to `into` exactly as committed. A scratch Git directory
+ * beside it borrows the checkout's objects and reads no configuration or attributes: the head's `.gitattributes`
+ * could otherwise run a filter driver or hide a file, as an archive leaves out what it marks `export-ignore`, and the
+ * user's could run one the head's own attributes turn off. The checkout's own index stays untouched. A symlink becomes
+ * a file holding its target, so no read follows one.
  */
 function exportHead(root: string, head: string, into: string): void {
+	// The scratch directory has no refs, so the head is named by its commit.
+	const commit = git(root, ["rev-parse", "--verify", `${head}^{commit}`]);
+	const objects = join(git(root, ["rev-parse", "--path-format=absolute", "--git-common-dir"]), "objects");
+	const format = git(root, ["rev-parse", "--show-object-format"]);
 	const empty = emptyTree(root);
-	const index = `${into}.index`;
-	const env = { ...discoveryEnv(), GIT_TERMINAL_PROMPT: "0", GIT_INDEX_FILE: index };
-	const scratch = (command: string, args: string[]) => {
-		const result = spawnSync("git", ["-C", root, ...args], {
+	const scratch = `${into}.git`;
+	mkdirSync(join(scratch, "objects", "info"), { recursive: true, mode: 0o700 });
+	mkdirSync(join(scratch, "refs"), { mode: 0o700 });
+	writeFileSync(join(scratch, "HEAD"), "ref: refs/heads/export\n");
+	writeFileSync(join(scratch, "objects", "info", "alternates"), `${objects}\n`);
+	if (format !== "sha1")
+		writeFileSync(
+			join(scratch, "config"),
+			`[core]\n\trepositoryformatversion = 1\n[extensions]\n\tobjectFormat = ${format}\n`,
+		);
+	// None of the caller's Git variables, such as GIT_CONFIG_PARAMETERS, carries configuration in.
+	const env = {
+		...Object.fromEntries(Object.entries(process.env).filter(([name]) => !name.startsWith("GIT_"))),
+		GIT_DIR: scratch,
+		GIT_INDEX_FILE: join(scratch, "index"),
+		GIT_CONFIG_NOSYSTEM: "1",
+		GIT_CONFIG_GLOBAL: "/dev/null",
+		GIT_ATTR_NOSYSTEM: "1",
+		GIT_TERMINAL_PROMPT: "0",
+	};
+	const run = (command: string, args: string[]) => {
+		const result = spawnSync("git", args, {
+			cwd: dirname(into),
 			encoding: "utf8",
 			env,
+			maxBuffer: 1 << 30,
 			stdio: ["ignore", "pipe", "pipe"],
 		});
 		if (result.error) throw result.error;
 		if (result.status !== 0) throw new GitError(command, result.status, result.stdout, result.stderr);
 	};
 	try {
-		scratch("read-tree", ["read-tree", head]);
-		scratch("checkout-index", [
+		run("read-tree", ["read-tree", commit]);
+		run("checkout-index", [
 			"-c",
 			"core.symlinks=false",
-			"-c",
-			"core.autocrlf=false",
 			`--attr-source=${empty}`,
 			"checkout-index",
 			"--all",
 			`--prefix=${into}/`,
 		]);
 	} finally {
-		rmSync(index, { force: true });
+		rmSync(scratch, { recursive: true, force: true });
 	}
 }
 
@@ -1195,8 +1225,8 @@ function agyAgent(context: Context): string {
  */
 export function agyTurn(context: Context, prompt: string, flags: string[]): Turn {
 	const files: Record<string, string> = { [`workspace/.agents/agents/${AGY_AGENT}.md`]: agyAgent(context) };
-	// Unquoted, since the reviewer reads each path as listed, and with no attributes, so the head can mark none of its
-	// own hunks binary.
+	// Unquoted, since the reviewer reads each path as written, and the diffs with no attributes, so the head can mark
+	// none of its own hunks binary.
 	if (context.head !== undefined)
 		files["files.txt"] = git(context.root, [
 			"-c",
@@ -1210,6 +1240,8 @@ export function agyTurn(context: Context, prompt: string, flags: string[]): Turn
 	const empty = context.ranges.length > 0 ? emptyTree(context.root) : "";
 	for (const [index, range] of context.ranges.entries())
 		files[`diff-${index + 1}.diff`] = git(context.root, [
+			"-c",
+			"core.quotePath=false",
 			`--attr-source=${empty}`,
 			"diff",
 			"--no-ext-diff",
@@ -1222,8 +1254,9 @@ export function agyTurn(context: Context, prompt: string, flags: string[]): Turn
 	// A file, since the rules can outgrow the 128 KiB an argument holds on Linux, as beside a crowded /tmp.
 	const settings = join(dir, AGY_SETTINGS);
 	try {
-		if (context.head !== undefined) exportHead(context.root, context.head, join(dir, "head"));
+		// The rules first, since they refuse a host agy cannot be confined on before any export.
 		writeFileSync(settings, agySettings(dir), { mode: 0o600 });
+		if (context.head !== undefined) exportHead(context.root, context.head, join(dir, "head"));
 	} catch (error) {
 		rmSync(dir, { recursive: true, force: true });
 		throw error;
@@ -1277,6 +1310,7 @@ const agy: Reviewer = {
 	status: ["agy", "models"],
 	isolated: true,
 	remoteStatus: true,
+	supported: (dir) => void beside(dir),
 	login: "agy",
 	credentials: [],
 	routeCredentials: [],
@@ -1521,6 +1555,8 @@ async function prepare(
 			reply: () => ({}),
 		};
 		try {
+			// A host that cannot run the CLI is that, whatever its login.
+			reviewer.supported?.(dir);
 			const { code, stderr } = await run(reviewer.status, dir, env, "", reader, signal);
 			const output = `${printed}${stderr}`.trim();
 			if (code !== 0 && reviewer.remoteStatus && !reviewer.unauthorized.test(output))
@@ -1628,7 +1664,7 @@ export function verdict(reply: { structured?: unknown; text?: string }, earlier:
 			throw new Error(`the reviewer's finding ${index + 1} does not match the schema`);
 		}
 		return {
-			file: finding.file,
+			file: finding.file.replace(IN_EXPORT, ""),
 			line: line as number | null,
 			severity: finding.severity as Finding["severity"],
 			title: finding.title,

@@ -1932,7 +1932,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"run's cost at API list price as token-max prices its sessions, and an agy reviewer's from the tokens it " +
 				"reported at Google's price on the run's day, or unpriced when a reviewer needs token-max and it is not installed. --json prints " +
 				"one object. Exits as quest review does: 2 for invalid arguments or a set that cannot be read, 3 for a " +
-				"reviewer that is not installed, logged out, or at its usage limit, 1 for other failures.",
+				"reviewer that is not installed, logged out, at its usage limit, or unable to run on this host, 1 for other failures.",
 		)
 		.option("--set <file>", `The eval set (default: ${EVAL_FILE} at the checkout's root)`)
 		.addOption(
