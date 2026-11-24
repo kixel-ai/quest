@@ -536,8 +536,8 @@ function highPaths(root: string, base: string): HighPath[] {
 
 /**
  * New commits descend from the pin. A head that takes no history of `base`, the base the fixer was given, keeps the
- * pin's protected content and modes; one that does merges all of `base`, resolves no conflict in a protected path, and
- * keeps the plain merge's. With `high`, for a head its PR's review record rates high, every path is protected.
+ * pin's protected content and modes; one that does merges all of `base`, resolves no conflict in a protected path or
+ * one naming no path, and keeps the plain merge's. With `high`, for a head its PR's review record rates high, every path is protected.
  */
 export function validateFix(root: string, entry: Pick<Entry, "head">, head: string, base: string, high = false): void {
 	if (!contains(root, entry.head, head) || head === entry.head)
@@ -579,6 +579,9 @@ export function validateFix(root: string, entry: Pick<Entry, "head">, head: stri
 	}
 	// With the base's history in the head, the pin's copy of a path the base changed reverts that change.
 	if (!contains(root, base, head)) throw new Error("a fix that merges base history must merge all of the base");
+	// Some conflicts, such as a directory rename split, name no path, so one may fall in a protected path.
+	if (merged.status === 1 && conflicts.length === 0)
+		throw new ProtectedEdit("off-limits fixer edit: it resolves a conflict that names no path");
 	if (conflicts.some((path) => protectedPath(path) || gitlinks.has(path)))
 		throw new ProtectedEdit("off-limits fixer edit: it resolves a conflict in a protected path");
 	if (sets[0] !== sets[2])

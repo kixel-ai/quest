@@ -1984,6 +1984,24 @@ ${requeueScript}
 			"resolves a conflict in a protected path",
 		);
 	});
+	test("refuses resolving a conflict that lists no path", async () => {
+		const forge = new Forge();
+		forge.advance({ "dir/a": "a\n", "dir/b": "b\n" });
+		forge.pull("one", { "dir/a": null, "dir/b": null, "x/a": "a\n", "y/b": "b\n" });
+		const deps = await forge.deps();
+		const plan = await resolveQueue(REPOSITORY, SQUASH, deps);
+		forge.advance({ "dir/c": "c\n" });
+		const root = forge.clone();
+		const entry = plan.queue[0];
+		git(root, "checkout", "--quiet", "--detach", entry.head);
+		// The PR splits `dir` between two directories, so where the base's new file goes is a conflict on no path.
+		expect(() => git(root, "merge", "--no-edit", forge.main())).toThrow();
+		expect(git(root, "diff", "--name-only", "--diff-filter=U")).toBe("");
+		git(root, "commit", "-qm", "take git's merge");
+		expect(() => validateFix(root, entry, git(root, "rev-parse", "HEAD"), forge.main())).toThrow(
+			"resolves a conflict that names no path",
+		);
+	});
 	test("refuses a base merge that keeps the pin's copy of a protected path the base changed", async () => {
 		const forge = new Forge();
 		forge.advance({ "flake.nix": "old" });

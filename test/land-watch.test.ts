@@ -1612,6 +1612,36 @@ describe.skipIf(process.platform === "win32")("the watcher's land fixer", () => 
 		}
 	});
 
+	test("a fix the watcher crashed before pushing is checked again against the review record read then", async () => {
+		const { repo, state, fix, context } = setup();
+		const base = repo.main();
+		const head = repo.pull(5, { "feature.txt": "new\n" });
+		const pull: Pull = {
+			number: 5,
+			head,
+			enqueues: [{ createdAt: at(1), actor: "maintainer" }],
+			removals: [
+				{ id: "R1", createdAt: at(5), reason: "failed_checks", actor: "github-merge-queue", before: head },
+			],
+		};
+		const github = { ...world([pull], [failedRun(5, at(3), base)]), origin: repo.origin };
+		github.now = Date.parse(at(6));
+		fix.round(5, fixScript("fixed.txt"));
+		await watchPass(REPOSITORY, { state }, deps(github), context);
+		await exited(state);
+		// The job as a watcher leaves it when it dies between validating the fix against an unrated PR and pushing it.
+		const [name] = readdirSync(state).filter((file) => /^watch-job-.*\.json$/.test(file));
+		const job = JSON.parse(readFileSync(join(state, name), "utf8"));
+		const [result] = JSON.parse(readFileSync(join(job.checkout, "quest-land-result.json"), "utf8"));
+		git(context.root, "fetch", "--quiet", job.checkout, result.head);
+		writeFileSync(join(state, name), JSON.stringify({ ...job, result, published: result.head }));
+		pull.body = "## Review\n\n- Head: abcdef012345\n- Risk: high, `it changes the sandbox`\n";
+		github.now = Date.parse(at(10));
+		expect(await watchPass(REPOSITORY, { state }, deps(github), context)).toEqual(["handback 5"]);
+		expect(git(repo.origin, "rev-parse", "refs/heads/branch-5")).toBe(head);
+		expect(github.comments[5].at(-1)!.body).toContain("off-limits fixer edit");
+	});
+
 	test("a quest-file conflict is merged with the quest driver, and a code conflict goes to the fixer", async () => {
 		const { repo, state, fix, context } = setup(1);
 		const quests = repo.pull(3, {
