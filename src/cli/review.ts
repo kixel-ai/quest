@@ -1573,9 +1573,11 @@ export function classifyPrompt(
 			? [
 					"Also report as `class` the one class below whose rule every changed file meets, judged by what the " +
 						"diff does rather than its title or description, or null when no single class covers the whole " +
-						"change or you are unsure. These are the risk file's `## Automatic` classes whose path scope, in " +
-						"parentheses where a class has one, already holds every changed path, so judge only the rule. A " +
-						"class lets a low change land without a person, so between a class and null, pick null.\n\n" +
+						"change or you are unsure. These are the risk file's `## Automatic` classes whose path scope, the " +
+						"parentheses between a class's name and ` - ` where it has one, already holds every changed path, " +
+						"so judge only the rule for a scoped class; for one with no scope, no path was checked, so judge " +
+						"from the rule whether each changed path belongs. A class lets a low change land without a " +
+						"person, so between a class and null, pick null.\n\n" +
 						classes
 							.map(({ name, scope, rule }) => {
 								const within = scope === null ? "" : ` (${scope.map(codeSpan).join(", ")})`;

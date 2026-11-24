@@ -193,6 +193,10 @@ test("a risk file's ## Automatic list names each class, its scope, and its rule"
 		"- `refactor`",
 		"  (`src/**`) - code that behaves the same",
 		"- `ticked` (``a`b``, `c/`) - (`f()` still returns the same) prose",
+		"- `wrapped` ( `a/**`,",
+		"  `b/**`",
+		"  ) -",
+		"  a scope and rule wrapped anywhere",
 	].join("\n");
 	expect(parseRiskFile(text)).toEqual({
 		high: [],
@@ -206,6 +210,7 @@ test("a risk file's ## Automatic list names each class, its scope, and its rule"
 			{ name: "refactor", scope: ["src/**"], rule: "code that behaves the same" },
 			// Any backtick run delimits a pattern, and a rule may open with parenthesized prose.
 			{ name: "ticked", scope: ["a`b", "c/"], rule: "(`f()` still returns the same) prose" },
+			{ name: "wrapped", scope: ["a/**", "b/**"], rule: "a scope and rule wrapped anywhere" },
 		],
 		problems: [],
 	});
@@ -261,6 +266,10 @@ test("a change may fall only in the classes whose scope holds every path it chan
 	// A scope names whole paths: a file pattern never covers a directory that fits it, and `src/` covers what it holds.
 	expect(classesFor(classes, ["tools.md/build.sh"])).toEqual([any]);
 	expect(classesFor([{ ...code, scope: ["src"] }], ["src/main.ts"])).toEqual([]);
+	// A directory pattern holds only what lies strictly under a directory it names, never a file that fits it.
+	const scratch = { name: "scratch", scope: ["*/**"], rule: "anything in a directory" };
+	expect(classesFor([scratch], ["package.json"])).toEqual([]);
+	expect(classesFor([scratch], ["notes/a.txt"])).toEqual([scratch]);
 	// A change that touches no path falls in no class, not even an unscoped one.
 	expect(classesFor(classes, [])).toEqual([]);
 });

@@ -1770,7 +1770,7 @@ Customers run the relay and the player; the CLI is for contributors.
 
 ## Automatic
 
-- `docs` (`docs/**`, `**/*.md`) - only documentation no other repository reads
+- `docs` (`docs/**`) - only documentation no other repository reads
 - `test` - only tests and their fixtures change
 
 ## High
@@ -1800,7 +1800,9 @@ turn and replies with a tier, one sentence on why, and the `## Automatic`
 class every changed file falls in, or none. It is offered only the classes
 whose scope holds every changed path, either side of a rename, checked
 before it runs so it judges just the rule and cannot widen a scope; a change
-that touches no path falls in none. It runs as Claude Code
+that touches no path falls in none. The scope is checked when the head is
+classified, so a record keeps its class after the base narrows that scope
+until a review classifies the head again. It runs as Claude Code
 `claude-haiku-5-5` at low effort, or Codex `gpt-6.2-sol` at low when Claude
 Code is missing, logged out, has its login rejected, or hit its usage limit.
 When neither can run, the review fails on the limit that resets first if both

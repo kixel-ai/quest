@@ -58,11 +58,18 @@ export function matches(pattern: string, path: string): boolean {
 }
 
 /**
- * Whether `pattern` names `path` itself, or a directory holding it when the pattern ends in `/`: unlike
- * {@link matches}, a file pattern such as `*.md` never covers a directory whose name happens to fit it.
+ * Whether `pattern` names `path` itself, or, when it ends in `/` or `/**`, a directory strictly holding it: unlike
+ * {@link matches}, a file pattern such as `*.md` never covers a directory whose name fits it, and a directory pattern
+ * such as `*` + `/**` never a file whose name does.
  */
 function names(pattern: string, path: string): boolean {
-	return new RegExp(`^${patternSource(pattern)}${pattern.endsWith("/") ? "(?:/.*)?" : ""}$`, "s").test(path);
+	const directory = pattern.endsWith("/**")
+		? pattern.slice(0, -3)
+		: pattern.endsWith("/")
+			? pattern.slice(0, -1)
+			: null;
+	const source = directory === null ? patternSource(pattern) : `${patternSource(directory)}/.+`;
+	return new RegExp(`^${source}$`, "s").test(path);
 }
 
 /** A regular expression's source for the paths `pattern` matches, not counting what lies under them. */
@@ -169,7 +176,7 @@ function codeItem(text: string, item: ListItem): { code: string; after: string }
 
 /** The text after the ` - ` that opens `after`, on one line, or null when `after` does not open with one. */
 function dashed(after: string): string | null {
-	return /^[ \t]+-[ \t]+(\S[\s\S]*)$/.exec(after)?.[1]?.replace(/\s+/g, " ").trim() ?? null;
+	return /^\s+-\s+(\S[\s\S]*)$/.exec(after)?.[1]?.replace(/\s+/g, " ").trim() ?? null;
 }
 
 /** One `## High` item, or why it is not one. */
@@ -202,7 +209,7 @@ function automaticClass(text: string, item: ListItem): Class | string {
 	if (opening?.type === "text" && /^\s*\(/.test(opening.value)) {
 		if (/^\s*\(\s*\)/.test(opening.value))
 			return `\`${name}\`'s scope is empty: list its patterns, or drop the parentheses`;
-		const list = spanList(inline);
+		const list = spanList(text, inline);
 		if (list === null) return `\`${name}\`'s scope is not backticked path patterns joined by \`, \``;
 		for (const pattern of list.spans) {
 			const problem = patternError(pattern);
@@ -217,24 +224,25 @@ function automaticClass(text: string, item: ListItem): Class | string {
 			: `\`${name}\` must be followed by its optional scope in parentheses, \` - \`, and the rule over the diff`;
 	// A scope after the dash would read as prose the classifier judges, not a scope the code checks.
 	const [lead] = markdown(rule).children;
-	if (lead?.type === "paragraph" && spanList((lead as Paragraph).children) !== null)
+	if (lead?.type === "paragraph" && spanList(rule, (lead as Paragraph).children) !== null)
 		return `\`${name}\`'s scope goes before \` - \`, not at the start of its rule`;
 	return { name, scope, rule };
 }
 
 /**
- * The code spans of the parenthesized list joined by `, ` that `nodes` open with, and the source offset just past its
- * `)`, or null when they open with no such list. A span may use any backtick run, so it may hold a backtick.
+ * The code spans of the parenthesized list joined by `, ` that `nodes`, parsed from `text`, open with, and the offset
+ * in `text` just past its `)`, or null when they open with no such list. Whitespace and line breaks may pad the list,
+ * and a span may use any backtick run, so it may hold a backtick.
  */
-function spanList(nodes: PhrasingContent[]): { spans: string[]; end: number } | null {
-	if (nodes[0]?.type !== "text" || !/^\s*\($/.test(nodes[0].value)) return null;
+function spanList(text: string, nodes: PhrasingContent[]): { spans: string[]; end: number } | null {
+	if (nodes[0]?.type !== "text" || !/^\s*\(\s*$/.test(nodes[0].value)) return null;
 	const spans: string[] = [];
 	for (let index = 1; ; index += 2) {
 		const [code, next] = [nodes[index], nodes[index + 1]];
 		if (code?.type !== "inlineCode" || next?.type !== "text") return null;
 		spans.push(code.value);
-		if (next.value.startsWith(")")) return { spans, end: next.position!.start.offset! + 1 };
-		if (!/^,\s+$/.test(next.value)) return null;
+		if (/^\s*\)/.test(next.value)) return { spans, end: text.indexOf(")", next.position!.start.offset!) + 1 };
+		if (!/^\s*,\s+$/.test(next.value)) return null;
 	}
 }
 

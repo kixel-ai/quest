@@ -61,10 +61,11 @@ on, so they are low.
 ## Automatic
 
 A low PR whose author has write access lands without the maintainer's pick
-when its whole diff falls in one class below. Each is named for the
-commit type a PR in it is titled with. Only a PR the maintainer picks
-changes this list, proposed with `quest usage`'s numbers for the class: its
-PRs merged, the culprits among them, and their wait on a person.
+when its whole diff falls in one class below, judged by the diff alone:
+a PR title's commit type is only the author's claim. Only a PR the
+maintainer picks changes this list, proposed with `quest usage`'s numbers
+for the class: its PRs merged, the culprits among them, and their wait on a
+person.
 
 - `test` - only tests, their fixtures, or benchmarks change
 - `quest` - only plans under `quest/` change, which no user or other
