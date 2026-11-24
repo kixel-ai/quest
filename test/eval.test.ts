@@ -92,10 +92,13 @@ test("a finding finds a defect only on one of its places' lines in its file", ()
 	expect(foundDefects([defect], [finding("src/a.ts", null), finding("src/c.ts", 11)])).toEqual([]);
 });
 
-test("the pick avoids the case's writer, and --harness runs alone at its size's entry", () => {
+test("the pick avoids the case's writer, and --harness runs alone at its list's entry", () => {
 	const entry = { pull: 3, ...base, size: "S", clean: true } as EvalCase;
 	const names = (seats: ReturnType<typeof evalSeats>) =>
-		seats.map(({ reviewer, shadow }) => `${reviewer.model} ${reviewer.effort}${shadow ? " shadow" : ""}`);
+		seats.map(
+			({ reviewer, shadow, second }) =>
+				`${reviewer.model} ${reviewer.effort}${shadow ? " shadow" : second ? " second" : ""}`,
+		);
 	expect(names(evalSeats(entry, {}))).toEqual(["gpt-6.1-sol medium", "gpt-6.1-sol high shadow"]);
 	expect(names(evalSeats({ ...entry, writer: "gpt-6.1-sol" }, {}))).toEqual([
 		"claude-opus-5-5 low",
@@ -103,6 +106,21 @@ test("the pick avoids the case's writer, and --harness runs alone at its size's 
 	]);
 	expect(names(evalSeats({ ...entry, writer: "gpt-6.1-sol" }, { harness: "codex" }))).toEqual(["gpt-6.1-sol medium"]);
 	expect(names(evalSeats(entry, { harness: "claude", effort: "high" }))).toEqual(["claude-opus-5-5 high"]);
+
+	// A high case gets the high list's pick and a second reviewer from another vendor, as quest review seats them.
+	const high = { ...entry, tier: "high", writer: "claude-opus-5-5" } as EvalCase;
+	expect(names(evalSeats(high, {}))).toEqual(["gpt-6.1-sol xhigh", "claude-fable-5-2 xhigh second"]);
+	// An L case's shadow would step down from the pick, but a high case runs none.
+	expect(names(evalSeats({ ...high, size: "L" }, {}))).toEqual([
+		"gpt-6.1-sol xhigh",
+		"claude-fable-5-2 xhigh second",
+	]);
+	// Sol never reviews Fable's work, so Opus picks and Astra is the other vendor's.
+	expect(names(evalSeats({ ...high, writer: "claude-fable-5-2" }, {}))).toEqual([
+		"claude-opus-5-5 xhigh",
+		"gpt-6.2-astra xhigh second",
+	]);
+	expect(names(evalSeats(high, { harness: "claude" }))).toEqual(["claude-opus-5-5 xhigh"]);
 });
 
 const seat = (found: number[], findings: Finding[], shadow = false): Seated => ({
@@ -157,6 +175,27 @@ test("tallies count defects found and clean findings per seat, size, and tier, a
 			.concat(["shadow M", "shadow S", "shadow low", "shadow medium"])
 			.sort(),
 	);
+});
+
+test("a high case's second reviewer tallies as its own seat, and either counts what it found", () => {
+	const high = {
+		pull: 6,
+		...base,
+		tier: "high",
+		defects: [defect, { ...defect, at: [{ file: "src/b.ts", from: 5, to: 5 }] }],
+	} as EvalCase;
+	const second: Seated = { ...seat([1], [finding("src/b.ts", 5)]), second: true, session: "s3" };
+	const { totals, by } = tallies([{ case: high, seats: [seat([0], [finding("src/a.ts", 10)]), second] }], true);
+	expect(totals.second).toEqual({
+		culprits: 1,
+		found: 1,
+		defects: 2,
+		clean: 0,
+		noise: { high: 0, medium: 0, low: 0 },
+	});
+	expect(totals.either).toMatchObject({ culprits: 1, found: 2, defects: 2 });
+	expect(by["second high"]).toMatchObject({ culprits: 1, found: 1 });
+	expect(totals.shadow).toBeUndefined();
 });
 
 test("either counts a case whose pick has no shadow, and a run of one named reviewer has none", () => {

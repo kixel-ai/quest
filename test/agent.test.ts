@@ -326,6 +326,8 @@ test("start runs claude with every launch setting on its own login", async () =>
 		"high",
 		"--permission-mode",
 		"auto",
+		"--settings",
+		'{"crossSessionInbound":"refuse","permissions":{"deny":["SendMessage","ListAgents"]}}',
 		"--session-id",
 		session,
 	]);
@@ -377,6 +379,10 @@ test("an account at its usage limit exits 3, and the session resumes once it res
 	expect(call.argv).toContain("--resume");
 	expect(call.argv).toContain(session);
 	expect(call.argv).not.toContain("--session-id");
+	// A resumed session is closed to other sessions as a started one is.
+	expect((call.argv as string[])[(call.argv as string[]).indexOf("--settings") + 1]).toBe(
+		'{"crossSessionInbound":"refuse","permissions":{"deny":["SendMessage","ListAgents"]}}',
+	);
 	expect(call.stdin).toBe("continue");
 });
 

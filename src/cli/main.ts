@@ -52,7 +52,6 @@ import {
 	type ForgeDependencies,
 	type Located,
 	forgeFor,
-	liveFor,
 	hostedForge,
 	hostedRepository,
 	locate as locatePull,
@@ -118,7 +117,6 @@ import { KIXEL_QUEST_URL, kixelUrl, tokensPath } from "./tokens";
 import { CONTEXT, GUIDE, GUIDE_SECTIONS, SKILLS, guideSections, sectionHeading, skill } from "./skills";
 import { type Terminal, Theme } from "./theme";
 import { type Snapshot, checkout, collect, load, snapshot, under } from "./tree";
-import { baseRiskFile, suiteFor } from "./suite";
 import { pullFileLines, statusLines, viewLines } from "./status";
 import { TOKEN_MAX_MISSING, daysBefore, runTokenMax, usage, usageDependencies, usageLines } from "./usage";
 import { waitForActivity, WaitTimeout } from "./wait";
@@ -158,7 +156,6 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 	const claimDependencies = (): ClaimDependencies => ({
 		github: () => gitHubDependencies(warn),
 		forge: (repository) => forgeFor(repository, forgeDependencies()),
-		live: (repository) => liveFor(repository, forgeDependencies()),
 		kixel: {
 			hosted: (url) => hostedRepository(kixelUrl(process.env), url),
 			forge: (repository) => hostedForge(repository, forgeDependencies()),
@@ -727,42 +724,6 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				);
 		});
 
-	program
-		.command("suite")
-		.summary("Print the full-suite command a PR's risk tier calls for")
-		.description(
-			"Print the command in the ## Full suite section of the base's RISK.md when the PR's head needs the " +
-				"repository's whole test suite beyond the checks its diff reaches: its ## Review record names it high " +
-				"risk, or names no tier that covers the head, as when it is missing, malformed, stale, or cannot be compared. " +
-				"Prints nothing for a low or medium head, or when RISK.md names no full suite, so a repository's gate " +
-				"runs `cmd=$(quest suite <pr>)` and then the command when one printed. The tier is the PR body's, which " +
-				"its author writes, so a gate gives a PR from an author without write access the full suite itself. " +
-				"RISK.md is read from --base, fetched first, by default origin's default branch.\n\n" +
-				"Uses GH_TOKEN, GITHUB_TOKEN, or gh auth token. " +
-				FORGE_READS.replace("these reads", "the read") +
-				"Exits 0 whatever it prints, 2 for invalid arguments, and 1 for other failures, such as a RISK.md it " +
-				"cannot read.",
-		)
-		.argument("<pr>", PR_ARGUMENT)
-		.option("--base <remote/branch>", "Base branch whose RISK.md to read (default: origin's default branch)")
-		.action((value: string, options: { base?: string }) => {
-			const { pull: pr, hosted } = locatePull(value, root(), process.env);
-			pending = Promise.all([
-				forgeFor(pr, forgeDependencies(), Infinity, hosted).then((forge) => forge.status(pr)),
-				baseRiskFile(root(), options.base),
-			]).then(
-				([{ value: status }, file]) => {
-					const command = suiteFor(status.risk, file);
-					if (command !== null) print(command);
-					return 0;
-				},
-				(error: unknown) => {
-					warn(error instanceof Error ? error.message : String(error));
-					return 1;
-				},
-			);
-		});
-
 	const OWNERSHIP =
 		"Before a session pushes to an existing PR, it takes the PR with iterate, and hands it back with " +
 		"release. A taken PR carries the quest:active label; iterate prints a hold token, the ID of the timeline " +
@@ -1013,18 +974,15 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"line, as a header line and its text: the body under a body line, each comment " +
 				"(comment <author> <time> <url>) and review (review <state> <reviewer> <time> <url>) by time, and each " +
 				"review thread (thread <id> current|outdated resolved|unresolved <path>:<line>) followed by its " +
-				"comments. --json prints the same as one deterministic object. It reads the forge itself, never Kixel " +
-				"Quest's index, so a comment just posted shows.",
+				"comments. --json prints the same as one deterministic object. It reads GitHub itself, through Kixel " +
+				"Quest where it serves the repository, never its index, so a comment shows once GitHub's webhook for it arrives.",
 		)
 		.argument("<pr>", PR_ARGUMENT)
 		.option("--json", "Print a deterministic JSON object")
 		.action((value: string, options: { json?: boolean }) => {
 			const { pull, hosted } = locatePull(value, root(), process.env);
 			settle(
-				(async () =>
-					(hosted ? hostedForge(pull, forgeDependencies()) : await liveFor(pull, forgeDependencies())).view(
-						pull,
-					))(),
+				(async () => (await forgeFor(pull, forgeDependencies(), Infinity, hosted)).view(pull))(),
 				({ value: view }) => {
 					if (options.json) print(JSON.stringify(view));
 					else for (const line of viewLines(view)) print(line);
@@ -1046,8 +1004,8 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 					const up = await upstream(root(), requireRemote(root(), "origin"), claimDependencies());
 					if (up.hosting === null)
 						throw new InputError("origin names neither a github.com repository nor one on Kixel Quest");
-					// Verifies a search, so it reads GitHub itself, never an index that may lag.
-					return (await up.hosting.live()).files(up.hosting.repository);
+					// Verifies a search, so it reads GitHub itself, through Kixel Quest where it serves the repository, never an index.
+					return (await up.hosting.forge()).files(up.hosting.repository);
 				})(),
 				({ value: pulls }) => {
 					if (options.json) print(JSON.stringify(pulls));
@@ -1662,9 +1620,9 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 			else for (const line of messageLines(found)) print(line);
 		});
 
-	const reviewers = SIZES.map(
-		(size) => `${size} ${REVIEWERS[size].map((e) => `${e.harness} ${e.model} ${e.effort}`).join(", then ")}`,
-	).join("; ");
+	const reviewers = [...SIZES, "high" as const]
+		.map((list) => `${list} ${REVIEWERS[list].map((e) => `${e.harness} ${e.model} ${e.effort}`).join(", then ")}`)
+		.join("; ");
 	const classifiers = CLASSIFIERS.map((e) => `${e.harness} ${e.model} ${e.effort}`).join(", then ");
 	/** quest review's exit code for `error`: 2 for a usage error, 3 when no reviewer could run, else 1. */
 	const reviewFailure = (error: unknown, json = false): number => {
@@ -1688,7 +1646,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		.summary("Have a model other than the latest writer review the committed branch, read-only")
 		.description(
 			"Review the checkout's committed branch against its base with a reviewer its size picks, never the " +
-				`model that changed it last. Each size ranks its reviewers (harness, model, effort): ${reviewers}. The ` +
+				`model that changed it last. Each size, and the high list a high head uses, ranks its reviewers (harness, model, effort): ${reviewers}. The ` +
 				"first whose model is not avoided reviews. One that cannot run, as its CLI or provider reports before any " +
 				"finding is saved, passes the round to the next whose model is not avoided: a CLI that is not installed, " +
 				"logged out, or has its login rejected, or sent to a gateway with no credential, passes over every model of that CLI, and a model at its usage limit " +
@@ -1696,20 +1654,21 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"or --effort names never passes the round on. Beside the reviewer, on the same head in its own session, runs the shadow, " +
 				"which follows the round to the reviewer it passes to: " +
 				"the pick's model one effort (low, medium, high, xhigh) above it for an S or M PR, below it for an L or XL " +
-				"PR, and none for an XS PR, skipped when no such effort is on that ladder, so each effort step can be " +
+				"PR, and none for an XS PR or a Fable pick, skipped when no such effort is on that ladder, so each effort step can be " +
 				"compared with its neighbor. The shadow runs on a " +
 				"branch's first run of the pick, then only while it has findings to settle or once the pick changed so it is " +
 				"no longer that step away; its findings are numbered and settled like any reviewer's, its session carries " +
-				"over to the new shadow, and a pick with no shadow seats one at its own effort while the old " +
-				"shadow still has findings. " +
-				"--exclude-model names each model to avoid; without it, the " +
-				"latest writer is avoided: the model the last Implementer line names in the `## Models` record of the body of the branch's open PR. " +
+				"over to the new shadow, and a pick with no shadow seats the old one as it ran while it still has " +
+				"findings, unless its model is avoided or cannot run, when it seats one at the pick's own effort. " +
+				"--exclude-model names each model to avoid, with every model weaker than it; without it, the " +
+				"latest writer is avoided, with every model weaker than it (Sonnet than any other, Sol than Fable and Astra), " +
+				"so a reviewer is never weaker than the writer: the model the last Implementer line names in the `## Models` record of the body of the branch's open PR. " +
 				"When it names none or an `unknown` model, " +
 				"it is any model of the harness running this command, usually the session that just pushed, detected from the " +
-				"variables Claude Code, Codex, and Antigravity each set, so Codex reviews from Claude Code and Claude Code from Codex; with --harness it is " +
+				"variables Claude Code, Codex, and Antigravity each set, so Codex reviews from Claude Code and Claude Code from Codex, and with no model known no weaker one is avoided; with --harness it is " +
 				"none. " +
-				"--harness names the only reviewer instead of the pick and the shadow, at its entry's model and effort, and --model and " +
-				"--effort override that reviewer's, or without --harness, the size pick's; a repository whose AGENTS.md names other reviewers " +
+				"--harness names the only reviewer instead of the pick and the shadow, at the model and effort of its first entry whose model is not avoided, and --model and " +
+				"--effort override that reviewer's, or without --harness, the size pick's; a --model the list names runs on its own entry's harness and effort, and one it does not at --harness's first entry; a repository whose AGENTS.md names other reviewers " +
 				"passes them. A --harness run keeps the other reviewers' sessions for the next run of the pick, and refuses while one has findings to settle, as a run of the pick does while a reviewer only --harness runs has some. When the latest writer changes the size's pick to one with no session on the branch, its first session settles the open findings of the reviewer it replaces. The reviewers run at once, and the first to fail stops the others and fails the " +
 				"run, saving no round. The " +
 				"size is --size, else the size of the quest a quest/ branch names, read from the base's tip so a " +
@@ -1784,13 +1743,16 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"and can only raise it: the head's tier is the riskiest, with the reason of the first to judge it so. " +
 				"The classifier also names the class of RISK.md's ## Automatic list every changed file falls in, or none. " +
 				"The tier scales the review: a low head with no finding to settle runs no reviewer unless --harness, " +
-				"--model, or --effort names one, and a high head also gets a second reviewer: the first of the size's list " +
-				"on a model other than the pick's that can run, in its own session, which reviews every head while the " +
-				"tier is high and settles its findings after. --model and --effort change only the pick, so the second " +
-				"reviewer still runs; the one reviewer --harness names runs alone, with none. A round that raises the tier to high saves its rounds and " +
-				"runs it at once, printing those rounds before the error when that review fails, as when no second reviewer can run. " +
+				"--model, or --effort names one, and a high head runs no shadow but gets a second reviewer: the first of the " +
+				"high list from a vendor other than the pick's that can run, in its own session, which reviews " +
+				"every head while the tier is high and settles its findings after. A head the classifier or the " +
+				"maintainer's override holds high also takes its pick from that list, whatever the PR's size; a " +
+				"reviewer's raise changes only the second reviewer, so the pick stays the same on the head, unless that raise ends the override. --model and " +
+				"--effort change only the pick, so the second reviewer still runs; the one reviewer --harness names runs " +
+				"alone, at its entry in the pick's list, with none. A round that raises the tier to high saves its rounds and " +
+				"runs the second reviewer at once, printing those rounds before the error when that review fails, as when no second reviewer can run. " +
 				"--override and --reason record the maintainer's tier for the branch, which holds until the reviewed " +
-				"tier grows riskier than the one overridden.\n\n" +
+				"tier grows riskier than the one overridden, other than to the override's own tier.\n\n" +
 				"Prints the size and where it came from, base, and head, its risk tier and reason, the classifier's tier, " +
 				"an overridden line with the tier the maintainer overrode, " +
 				"how it was set (model, paths, or default), and reason, a class line naming the class, and for a model a classifier line (harness, model, " +
@@ -1818,20 +1780,20 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"Implementer line naming no model it can read, is a usage error, unless --size or --exclude-model replaces it. A usage limit of the only " +
 				"eligible reviewer prints one line, " +
 				"`error: <harness> hit its usage limit; resets <time>`, where <time> is the reset as an ISO 8601 UTC " +
-				"timestamp, or `unknown` when the CLI named none; with several, it prints `error: no eligible <size> " +
-				"reviewer could run: <model> <effort> (<error>), ...`, each error as the only reviewer's would read.",
+				"timestamp, or `unknown` when the CLI named none; with several, it prints `error: no eligible <list> " +
+				"reviewer could run: <model> <effort> (<error>), ...`, where <list> is the PR's size or high for a high head's list, each error as the only reviewer's would read.",
 		)
 		.option("--base <remote/branch>", "Base branch to review against (default: origin's default branch)")
 		.addOption(
 			new Option(
 				"--harness <name>",
-				"The only reviewer to run, instead of the size's pick and the shadow",
+				"The only reviewer to run, instead of the pick and the shadow or second reviewer",
 			).choices(REVIEW_HARNESSES),
 		)
-		.option("--model <model>", "Model the size's pick, or --harness's reviewer, runs instead")
+		.option("--model <model>", "Model the pick, or --harness's reviewer, runs instead")
 		.option(
 			"--effort <level>",
-			"Reasoning effort the size's pick, or --harness's reviewer, runs at instead, never max",
+			"Reasoning effort the pick, or --harness's reviewer, runs at instead, never max",
 			effortLevel,
 		)
 		.option(
@@ -1955,12 +1917,13 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"session: the base's AGENTS.md and CLAUDE.md at the case's merge base, its classified tier, and the prompts of " +
 				"this build, with the review rules of this checkout, its committed REVIEW.md at HEAD, so a change to the " +
 				"reviewer table, the prompts, or REVIEW.md is scored before it lands. The reviewers are the size's pick, " +
-				"avoiding the case's writer, and its shadow, as quest review runs them, or --harness's alone, at its " +
-				"entry's model and effort unless --model and --effort override them. A reviewer that cannot run fails the run " +
+				"avoiding the case's writer, and its shadow, or for a high case no shadow but a second reviewer from another vendor, " +
+				"both from the high list, as quest review runs them, or --harness's alone, at its tier's " +
+				"entry's model and effort unless --model and --effort override them; a --model its list names runs at its own entry's effort. A reviewer that cannot run fails the run " +
 				"rather than passing the case to the next, so the score measures the reviewers it names. Cases run one at a time, their reviewers " +
 				"at once, and the first failure stops the run and fails it.\n\n" +
-				"Prints the set's counts and rules, a line per seat (pick, shadow, and, without --harness, either: what " +
-				"the case's seats found together, as a run of the pick and its shadow finds it) with defects found and clean findings by severity, the same by size and tier, " +
+				"Prints the set's counts and rules, a line per seat (pick, shadow, second, and, without --harness, " +
+				"either: what the case's seats found together, as a run of them all finds it) with defects found and clean findings by severity, the same by size and tier, " +
 				"each case's rounds with score, defects found, findings, tokens the CLI reported, and session, and the " +
 				"run's cost at API list price as token-max prices its sessions, and an agy reviewer's from the tokens it " +
 				"reported at Google's price on the run's day, or unpriced when a reviewer needs token-max and it is not installed. --json prints " +
@@ -1969,12 +1932,17 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		)
 		.option("--set <file>", `The eval set (default: ${EVAL_FILE} at the checkout's root)`)
 		.addOption(
-			new Option("--harness <name>", "The only reviewer, instead of the pick and shadow").choices(
-				REVIEW_HARNESSES,
-			),
+			new Option(
+				"--harness <name>",
+				"The only reviewer, instead of the pick and the shadow or second reviewer",
+			).choices(REVIEW_HARNESSES),
 		)
-		.option("--model <model>", "Model --harness's reviewer runs instead of its size's")
-		.option("--effort <level>", "Reasoning effort --harness's reviewer runs at instead of its size's", effortLevel)
+		.option("--model <model>", "Model --harness's reviewer runs instead of its list's entry")
+		.option(
+			"--effort <level>",
+			"Reasoning effort --harness's reviewer runs at instead of its list's entry",
+			effortLevel,
+		)
 		.option("--pr <number>", "Only this case; repeat for each", (value: string, previous: number[] = []) => [
 			...previous,
 			positiveInteger("--pr")(value),

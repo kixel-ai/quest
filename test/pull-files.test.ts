@@ -114,11 +114,11 @@ describe("quest pr list in a fork on GitHub", () => {
 		vi.stubEnv("GH_TOKEN", "token");
 		vi.stubEnv("XDG_CACHE_HOME", tempDir());
 		const asked: string[] = [];
-		vi.stubGlobal("fetch", async (input: URL | string, init?: { body?: string }) => {
+		vi.stubGlobal("fetch", async (input: URL | string, init?: RequestInit & { body?: string }) => {
 			const url = new URL(input);
-			asked.push(url.pathname);
 			// Kixel Quest does not serve this repository, so the person's own token reads it.
-			if (url.pathname === "/installation-token") return new Response("{}", { status: 404 });
+			if (url.origin === KIXEL) return kixel.fetch(input, init);
+			asked.push(url.pathname);
 			if (url.pathname === "/repos/me/project")
 				return json(info("me/project", { fork: true, parent: info("example/project") }));
 			if (url.pathname === "/repos/example/project") return json(info("example/project"));
@@ -153,6 +153,31 @@ describe("quest pr list in a fork on GitHub", () => {
 		});
 		expect(asked).toContain("graphql example/project");
 		expect(asked).not.toContain("graphql me/project");
+		expect(kixel.requests).toEqual(["GET /forge"]);
+	});
+
+	test("reads files through the Kixel Quest serving the upstream, never GitHub's lists or a minted token", async () => {
+		vi.stubEnv("GH_TOKEN", "token");
+		kixel.served = ["example/project"];
+		const pull = kixel.add({ branch: "quest/m0/a", files: ["quest/m0/a.md"] });
+		const asked: string[] = [];
+		vi.stubGlobal("fetch", async (input: URL | string, init?: RequestInit) => {
+			const url = new URL(input);
+			if (url.origin === KIXEL) return kixel.fetch(input, init);
+			asked.push(url.pathname);
+			if (url.pathname === "/repos/example/project") return json(info("example/project"));
+			if (url.pathname === "/repos/example/project/contents/quest/README.md") return json({});
+			throw new Error(`unexpected request ${url.pathname}`);
+		});
+		const work = checkout("https://github.com/example/project.git");
+
+		expect(await cli("--root", work, "pr", "list")).toEqual({
+			code: 0,
+			stdout: `file ${kixel.url(pull.number)} quest/m0/a.md\n`,
+			stderr: "",
+		});
+		expect(kixel.requests).toEqual(["GET /forge", "POST /forge/files"]);
+		expect(asked).toEqual(["/repos/example/project"]);
 	});
 });
 

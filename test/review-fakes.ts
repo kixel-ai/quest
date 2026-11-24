@@ -180,7 +180,8 @@ const model = argv.includes("--model") ? argv[argv.indexOf("--model") + 1] : arg
 const only = process.env.FAKE_FAILS?.split(",");
 const fake = (name) => (!only || only.includes("codex") || only.includes(model) ? process.env[name] : undefined);
 if (argv[0] === "login") process.exit(fake("FAKE_LOGGED_OUT") && !process.env.CODEX_ACCESS_TOKEN ? 1 : 0);
-if (process.env.FAKE_HANG) {
+// FAKE_HANG hangs the first turn until it is stopped, writing its pid there, and lets later turns run.
+if (process.env.FAKE_HANG && !fs.existsSync(process.env.FAKE_HANG)) {
 	// It takes a while to exit when asked to, as a CLI saving its session does.
 	process.on("SIGTERM", () => setTimeout(() => process.exit(143), 300));
 	fs.writeFileSync(process.env.FAKE_HANG, String(process.pid));

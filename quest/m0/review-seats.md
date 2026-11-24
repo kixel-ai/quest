@@ -23,7 +23,7 @@ Decided 2026-11-22 (maintainer, `/quest-plan` follow-up of
   the same counts with seats picked by eval alone, which may seat one
   vendor twice; today's counts). Counting Pullfrog, today's setup is
   already 1, 2, and 3 once [kixel-ai/quest#819](https://github.com/kixel-ai/quest/pull/819)
-  seats Opus xhigh as a second reviewer on high heads. Pullfrog's catches
+  seats a second reviewer from another vendor on high heads. Pullfrog's catches
   behind a mostly-Sol pick (147 of 272 high and 148 of 549 medium merged
   PRs, 93% accepted) suggest vendor diversity is what finds them.
 - Seat order? Amended 2026-11-22 (maintainer, `/quest-plan` in
@@ -36,8 +36,19 @@ Decided 2026-11-22 (maintainer, `/quest-plan` follow-up of
   review, in the shipped order. An XL head that is high tier gets all
   three: Astra high, Gemini, and a Claude model other than the writer's,
   such as Opus xhigh for a Fable-written XL quest. The Claude seat never
-  takes the writer's model: on an Opus-written head it is Sonnet or Fable,
-  as kixel-ai/quest#819 already seats Sonnet high when Opus wrote the branch.
+  takes the writer's model: on an Opus-written head it is Fable, as
+  kixel-ai/quest#819's interim second seat is on a high head.
+- ✅ No seat is ever weaker than the latest writer, at every size and tier
+  (maintainer, 2026-11-22, on
+  [kixel-ai/quest#819](https://github.com/kixel-ai/quest/pull/819#issuecomment-7087183777):
+  "don't have sonnet review opus, that's extremely dumb"; rejected: high
+  risk only). Sonnet is weaker than every other model and never reviews its
+  own work, so it reviews nothing, and Sol is weaker than Fable and Astra. kixel-ai/quest#819
+  puts the rule in `weaker()` in `src/cli/models.ts`. Its high-tier second
+  seat is interim: the reviewer rungs quest that
+  [kixel-ai/quest#831](https://github.com/kixel-ai/quest/pull/831) adds draws
+  each round's seats from rungs instead of fixed per-vendor models, while the
+  tier still sets how many seats run.
 - Pullfrog retires on evidence, as [routing evidence](/quest/m0/routing-evidence/README.md)
   records: compare what it still finds behind these seats per dollar, from
   its run logs' cost tables.

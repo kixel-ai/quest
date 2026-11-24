@@ -14,7 +14,9 @@ import { githubRepository, readRemote, remoteRepository } from "../src/cli/githu
 import { type GitHubDependencies, type ObjectValue, reading } from "../src/github/client";
 import { GitHubForge } from "../src/github/forge";
 import { type Output, main } from "../src/cli/main";
-import { Refusal } from "../src/core";
+import { Refusal, type Repository } from "../src/core";
+import { forgeFor } from "../src/cli/forge";
+import { pullModels } from "../src/cli/review-record";
 import { releaseQuest, startQuest } from "../src/cli/start";
 import { Worktrees } from "../src/cli/worktree";
 import { ago } from "../src/github/hold";
@@ -203,6 +205,10 @@ class FakeGitHub {
 			return json(201, { ...pull, title: body.title, baseRef: body.base });
 		}
 		match = /^\/repos\/([^/]+\/[^/]+)\/pulls\/(\d+)$/.exec(url.pathname);
+		if (match && method === "GET") {
+			const pull = this.pulls.find((p) => p.base === match![1] && p.number === Number(match![2]));
+			return pull ? json(200, pull) : json(404, { message: "Not Found" });
+		}
 		if (match && method === "PATCH") {
 			const pull = this.pulls.find((p) => p.base === match![1] && p.number === Number(match![2]))!;
 			Object.assign(pull, body);
@@ -216,7 +222,6 @@ function deps(github: FakeGitHub, warnings: string[] = []) {
 	return {
 		github: () => github.deps(),
 		forge: async () => new GitHubForge(reading(github.deps())),
-		live: async () => new GitHubForge(reading(github.deps())),
 		warn: (message: string) => warnings.push(message),
 	};
 }
@@ -279,23 +284,6 @@ describe("start on GitHub", () => {
 			{ base: "example/project", head: { ref: BRANCH, repo: { full_name: "example/project" } }, draft: true },
 		]);
 		expect(github.pulls[0].body).toBe(`Claims [${ONE}](https://github.com/example/project/blob/main/${ONE}).`);
-	});
-
-	test("a live read that fails before the PR opens, such as a refused mint, takes the branch back and opens none", async () => {
-		const bare = upstream();
-		const github = new FakeGitHub();
-		const work = clone(UPSTREAM, { [UPSTREAM]: bare });
-		const dependencies = {
-			...deps(github),
-			live: async (): Promise<GitHubForge> => {
-				throw new Error("Kixel Quest refused the mint");
-			},
-		};
-		await expect(
-			startQuest(work, await target(work, "origin", dependencies), ONE, "[S] One", dependencies),
-		).rejects.toThrow("Kixel Quest refused the mint");
-		expect(github.pulls).toEqual([]);
-		expect(tip(bare)).toBe("");
 	});
 
 	test("links the quest by its repository path when the tree is below the top level", async () => {
@@ -816,6 +804,114 @@ describe("start on Kixel Quest", () => {
 	});
 });
 
+describe("start on GitHub, read through the Kixel Quest serving it", () => {
+	/** A clone of the GitHub repository, whose reads Kixel Quest serves, with each GitHub request recorded. */
+	function served(): { bare: string; work: string; kixel: FakeKixelQuest; github: FakeGitHub; asked: string[] } {
+		const kixel = new FakeKixelQuest();
+		kixel.served = ["example/project"];
+		const github = new FakeGitHub();
+		const asked: string[] = [];
+		for (const [name, value] of Object.entries(kixelEnv())) vi.stubEnv(name, value);
+		vi.stubEnv("QUEST_FORGE", "");
+		vi.stubEnv("GH_TOKEN", "person");
+		vi.stubGlobal("fetch", async (input: string | URL | Request, init?: RequestInit) => {
+			const url = new URL(String(input));
+			if (url.origin === KIXEL) return kixel.fetch(input, init);
+			asked.push(`${init?.method ?? "GET"} ${url.pathname}`);
+			return github.deps().fetch(input, init);
+		});
+		const bare = upstream();
+		return { bare, work: clone(UPSTREAM, { [UPSTREAM]: bare }), kixel, github, asked };
+	}
+	afterEach(() => {
+		vi.unstubAllEnvs();
+		vi.unstubAllGlobals();
+	});
+
+	test("claims and releases on open-PR lists from the forge, never a GitHub list or a minted token", async () => {
+		const { bare, work, kixel, github, asked } = served();
+		// The forge's list predates the new PR's webhook, so the claim stands without seeing its own PR there.
+		const first = await cli("--root", work, "start", ONE);
+		expect(first).toEqual({
+			code: 0,
+			stdout: `https://github.com/example/project/pull/1\n${worktreeOf(work)}\n`,
+			stderr: "",
+		});
+		expect(kixel.calls.map(({ call }) => call)).toEqual(["held", "pulls"]);
+
+		// Once the webhook lands, the forge lists it, and the release closes it on GitHub.
+		kixel.add({ branch: BRANCH, draft: true, title: "One" });
+		const released = await cli("--root", work, "start", "--release", ONE);
+		expect(released.code, released.stderr).toBe(0);
+		expect(tip(bare)).toBe("");
+		expect(github.pulls[0]!.state).toBe("closed");
+		expect(kixel.calls.map(({ call }) => call)).toEqual(["held", "pulls", "pulls"]);
+		expect(kixel.requests.filter((request) => !/ \/forge(\/\w+)?$/.test(request))).toEqual([]);
+		// The person's own token makes only the upstream lookups and the writes.
+		expect(asked.filter((request) => request.startsWith("GET") && request.endsWith("/pulls"))).toEqual([]);
+		expect(asked).toContain("POST /repos/example/project/pulls");
+		expect(asked).toContain("PATCH /repos/example/project/pulls/1");
+	});
+
+	test("an earlier PR only the list after the open sees keeps the claim, closing this one", async () => {
+		const { bare, work, kixel, github } = served();
+		// The racing claimer's PR is #1, so this one opens as #2.
+		github.closed("example/project", "older", "b".repeat(40), true);
+		const earlier = kixel.add({ branch: BRANCH, draft: true, created: 0 });
+		// Opened elsewhere after the held check, as a racing claimer's is.
+		kixel.pulls.pop();
+		github.onCreate = () => kixel.pulls.push(earlier);
+		const out = await cli("--root", work, "start", ONE);
+		expect(out.code, out.stderr).toBe(3);
+		expect(out.stderr).toContain(`${kixel.url(earlier.number)} claimed ${ONE} first`);
+		expect(github.pulls[1]!.state).toBe("closed");
+		expect(tip(bare)).toBe("");
+	});
+
+	test("a rate-limited list read takes the claim back and names when to retry", async () => {
+		const { bare, work, kixel, github } = served();
+		kixel.fail = { status: 429, error: "read budget spent", call: "pulls", retryAfter: "90" };
+		const out = await cli("--root", work, "start", ONE);
+		expect(out).toEqual({
+			code: 1,
+			stdout: "",
+			stderr: `quest: Kixel Quest (${KIXEL}) failed POST /forge/pulls: it is rate limiting your requests (HTTP 429, read budget spent); try again in 90 seconds; set QUEST_FORGE=github to read GitHub\n`,
+		});
+		expect(github.pulls[0]!.state).toBe("closed");
+		expect(tip(bare)).toBe("");
+	});
+
+	test("a claim that cannot be taken back after a failed list read names both failures", async () => {
+		const { work, kixel } = served();
+		kixel.fail = { status: 429, error: "read budget spent", call: "pulls", retryAfter: "90" };
+		const served_ = globalThis.fetch;
+		vi.stubGlobal("fetch", async (input: string | URL | Request, init?: RequestInit) =>
+			init?.method === "PATCH"
+				? Response.json({ message: "Validation Failed" }, { status: 422 })
+				: served_(input, init),
+		);
+		const out = await cli("--root", work, "start", ONE);
+		expect(out.code).toBe(1);
+		expect(out.stderr).toContain("try again in 90 seconds");
+		expect(out.stderr).toContain("taking back the claim on https://github.com/example/project/pull/1 then failed");
+	});
+
+	test("quest review finds its branch's PR on the forge's list, and its body on the PR itself", async () => {
+		const { work, kixel, github: fake, asked } = served();
+		// The forge's list predates the `## Models` record just written, which GitHub already has.
+		kixel.add({ branch: "feature", body: "Does it." });
+		fake.open("example/project", "feature", "example/project", { body: "Does it.\n\n## Models\n\n- Size: S\n" });
+		// Through the stubbed fetch, which records each GitHub request.
+		const github = () => ({ ...fake.deps(), fetch: globalThis.fetch });
+		const forge = { env: process.env, fetch: globalThis.fetch, now: Date.now, sleep: async () => {}, github };
+		const deps = { github, forge: (repository: Repository) => forgeFor(repository, forge), warn: () => {} };
+		expect(await pullModels(work, "origin/main", "feature", deps)).toEqual({ sizes: ["S"], implementers: [] });
+		expect(kixel.calls.map(({ call }) => call)).toEqual(["pulls"]);
+		expect(asked.filter((request) => request.startsWith("GET") && request.endsWith("/pulls"))).toEqual([]);
+		expect(asked).toContain("GET /repos/example/project/pulls/1");
+	});
+});
+
 describe("start on another forge", () => {
 	/** A clone whose origin is a plain bare repository path. */
 	function plain(): { bare: string; work: string } {
@@ -991,7 +1087,6 @@ test("openDrafts skips drafts with a warning when GitHub cannot be read", async 
 			throw new Error("set GH_TOKEN or GITHUB_TOKEN, or sign in with gh auth login");
 		},
 		forge: async () => new GitHubForge(reading(offline.github())),
-		live: async () => new GitHubForge(reading(offline.github())),
 		warn: (message: string) => warnings.push(message),
 	};
 	expect(await openDrafts(work, "origin", offline)).toEqual([]);

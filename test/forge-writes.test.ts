@@ -231,7 +231,6 @@ describe("where a PR lives", () => {
 		const found = await upstream(work, remote, {
 			github,
 			forge: github,
-			live: github,
 			kixel: { hosted: (url) => hostedRepository(KIXEL, url), forge: github },
 			warn: () => undefined,
 		});
