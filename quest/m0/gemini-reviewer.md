@@ -2,7 +2,7 @@
 
 ## Goal
 
-`quest review --harness agy --model <id> [--effort <level>]` reviews a branch through Google's Antigravity CLI (`agy -p`), read-only, isolated from the checkout's and the user's config, on the user's own Antigravity login, so a contributor with a Google AI plan can review with Gemini 4 Carbon. The PR scores Gemini 4 Carbon with `quest eval run` against the current reviewers, and moves it ahead of the size's Codex entry (Sol, or Astra at XL) in each PR size's `REVIEWERS` ranking where it catches more culprits per dollar. Once [reviewer rungs](/quest/m0/reviewer-rungs.md) has landed, the eval places Carbon on a rung instead, and the draw seats it.
+`quest review --harness agy --model <id> [--effort <level>]` reviews a branch through Google's Antigravity CLI (`agy -p`), read-only, isolated from the checkout's and the user's config, on the user's own Antigravity login, so a contributor with a Google AI plan can review with Gemini 4 Carbon. The PR scores Gemini 4 Carbon with `quest eval run` against the current reviewers, and moves it ahead of the size's Codex entry (Sol, or Astra at XL) in each PR size's `REVIEWERS` ranking where it catches more culprits per dollar. Once [reviewer rungs](/quest/m0/reviewer-rungs.md) has landed, Carbon joins a rung instead, and the draw seats it.
 
 Non-goals: `agy` as a writer, iterate, or land-fixer harness; models other than Gemini in the ranking, which [the model check](/quest/m1/model-check.md) can add from its own evidence once the harness exists.
 
@@ -11,7 +11,7 @@ Non-goals: `agy` as a writer, iterate, or land-fixer harness; models other than 
 Decided 2026-11-16 (user, /quest-plan), still standing. The user reports Gemini 4 Carbon catching bugs that Claude Opus 5.5 at medium effort missed in their own work.
 
 - ✅ An opt-in reviewer harness, scored with `quest eval run` before any ranking change (rejected: Gemini in the default ranking right away, with no eval, which `AGENTS.md` requires for a change to `src/cli/models.ts`; a generic any-model harness, which [kixel-ai/quest#701](https://github.com/kixel-ai/quest/pull/701) removed).
-- ✅ The eval decides and this PR moves Carbon ahead of Codex Sol where it wins (rejected: post the scores and leave the ranking to a `Maintainer:` decision). Amended 2026-11-23 by [kixel-ai/quest#831](https://github.com/kixel-ai/quest/pull/831#issuecomment-7111249892): XL's Codex entry is now Astra high, and once [reviewer rungs](/quest/m0/reviewer-rungs.md) has landed, the eval places Carbon on a rung instead of ranking it.
+- ✅ The eval decides and this PR moves Carbon ahead of Codex Sol where it wins (rejected: post the scores and leave the ranking to a `Maintainer:` decision). Amended 2026-11-23 by [kixel-ai/quest#831](https://github.com/kixel-ai/quest/pull/831#issuecomment-7111249892): XL's Codex entry is now Astra high, and once [reviewer rungs](/quest/m0/reviewer-rungs.md) has landed, Carbon joins a rung instead of a ranking.
 - ✅ m1 (rejected: m0, m2): contributors must be able to run `quest review` on their forks, including those whose only plan is Google's.
 
 Decided 2026-11-21 (maintainer, /quest-plan), carried over from the Cursor plan: ✅ a review reaches the login where the CLI keeps it, never a copy, so the refresh token stays in one place (rejected: a copied credential file, which splits it). The isolation test must also show a hostile checkout cannot read other credentials that store holds. ✅ The implementing agent may run `quest eval run` on the maintainer's plan.

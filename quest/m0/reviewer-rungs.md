@@ -48,6 +48,24 @@ which dropped its live Fable candidate seat for this quest):
   and drop review seats). Until review seats lands, the round's seat count
   stays as it is.
 
+Decided 2026-11-23 (maintainer, `/quest-run`, recorded on kixel-ai/quest#831
+[for the writer rule](https://github.com/kixel-ai/quest/pull/831#issuecomment-7118052876)
+and [for eval](https://github.com/kixel-ai/quest/pull/831#issuecomment-7118011769)):
+
+- Never weaker than the writer? ✅ Drop that rule under rungs: "each
+  reviewer can be a random rung. drop it under rungs." A down-draw may
+  seat a model weaker than the writer; only the writer's own model stays
+  excluded (rejected: keep the never-weaker rule as a constraint on the
+  draw). [kixel-ai/quest#819](https://github.com/kixel-ai/quest/pull/819)'s
+  `weaker()` in `src/cli/models.ts`, its `--exclude-model` and help text
+  on weaker models, and its never-weaker line in
+  [review seats](/quest/m0/review-seats.md) are interim routing until
+  rungs land: this quest deletes them.
+- Measure rungs how? ✅ From real PRs' stats in `quest usage`, with no
+  `quest eval` run (rejected: score each rung change with `quest eval
+  run`). The maintainer: "we don't want to waste tokens on throw-away
+  reviews/code".
+
 Recommendations, the implementer's to revisit:
 
 - Draw with an injected random source, so tests fix the draw rather than
@@ -72,16 +90,11 @@ Recommendations, the implementer's to revisit:
 - Delete the shadow end to end: its seat, its state and record fields,
   `quest usage`'s shadow rows and accuracy exclusion, the README, and the
   quests that read it, such as the model check's chart.
-- `quest eval run` scores every model on each case's rung except the
-  case's writer, so a rung change is measured before it lands. Put the
-  base's and head's scores and cost in `## Validation`, as `AGENTS.md`
-  requires.
+- Seat the initial rungs from public benchmarks and list prices, and
+  retune them only from `quest usage`'s per-model tallies on real PRs.
 - [kixel-ai/quest#838](https://github.com/kixel-ai/quest/pull/838)'s Gemini
-  harness and [kixel-ai/quest#819](https://github.com/kixel-ai/quest/pull/819)'s
-  rule that no seat is weaker than the latest writer both change how
-  `src/cli/models.ts` routes reviewers. Whichever lands first, carry it
-  into the rungs: Gemini as a rung member, and the weaker-model rule as a
-  constraint on the draw.
+  harness changes how `src/cli/models.ts` routes reviewers. If it lands
+  first, carry Gemini into the rungs as a rung member.
 
 ## Related
 
