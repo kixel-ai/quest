@@ -10,6 +10,8 @@ run past the diff budget.
 
 ## Plan
 
+Decided 2026-11-23 (maintainer, [on kixel-ai/quest#838's review checkpoint](https://github.com/kixel-ai/quest/pull/838#issuecomment-7123306069)): ✅ keep this quest; on a Git older than 2.41, `quest review` fails with a usage error naming 2.41, checked once at the start (rejected: classify anyway, with the plain diff there; drop the quest).
+
 Found in [kixel-ai/quest#838](https://github.com/kixel-ai/quest/pull/838):
 with `src/lib.ts -diff` in the head's `.gitattributes`, the classifier's
 prompt (`classify` in `src/cli/review.ts`) shows `Binary files a/src/lib.ts
@@ -30,15 +32,7 @@ review found the rest of this work:
   the classifier's cache key so those heads classify again.
 - `--attr-source` needs Git 2.41 (June 2023), and every `quest review` that
   reaches the classifier would then need it. Ubuntu 22.04 ships 2.34 and
-  Debian 12 ships 2.39. agy already refuses an older Git, since #838.
-
-## Waiting
-
-- Maintainer: pick what `quest review` does on a Git older than 2.41.
-  - A usage error naming 2.41, checked once at the start (recommended). It
-    fails loud and early, and the dev shell's Git is newer.
-  - The plain diff there, which leaves the gap open on old Git and is a
-    silent fallback the context's rules advise against.
-
-  An agent can't pick, since it sets the oldest Git contributors can review
-  with. Check: this quest's Plan records the pick.
+  Debian 12 ships 2.39. Check the version once, before any classifier runs,
+  and name 2.41 in the usage error and the README. agy already refuses an
+  older Git, since #838, through `attrSource()` in `src/cli/review.ts`, which
+  this check can replace.

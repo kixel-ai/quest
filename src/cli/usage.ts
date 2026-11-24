@@ -860,7 +860,8 @@ export function share(
 	const read = (seat: number) => seats[seat]!.harness !== HARNESSES.agy;
 	const canonical = (model: string | null) => (model === null ? null : canonicalModel(model));
 	for (const each of spent) {
-		if (each.seat !== undefined) {
+		// Even a session a record names on an Antigravity seat, as by hand, belongs to some other seat.
+		if (each.seat !== undefined && read(each.seat)) {
 			into(each.seat, each);
 			continue;
 		}

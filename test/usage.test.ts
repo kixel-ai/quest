@@ -540,6 +540,15 @@ describe("share", () => {
 			costs(share(unnamed, [gemini, { harness: "Claude Code", model: "claude-opus-5-5", effort: "high" }])),
 		).toEqual([[1, 5, 0]]);
 		expect(costs(share(unnamed, [gemini]))).toEqual([]);
+		// Nor does a session a record names on that seat, which token-max could not have read.
+		expect(
+			costs(
+				share(
+					[{ ...spend("gpt-6.2-sol", "high", 5), seat: 0 }],
+					[gemini, { harness: "Claude Code", model: "claude-opus-5-5", effort: "high" }],
+				),
+			),
+		).toEqual([[1, 5, 0]]);
 		// Nor does another harness's spend on the same model, as through a gateway.
 		expect(
 			costs(
