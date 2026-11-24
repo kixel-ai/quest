@@ -10,7 +10,9 @@ while its release is live is a risk every behavior change carries, and
 medium covers it, including a bug in a record, comment, or upload `quest`
 already writes. What a revert cannot undo is what a change newly makes
 `quest` or its agents do beyond the repository: merge, post, upload, or
-spend where they did not before.
+spend where they did not before. The agent instructions `quest` ships
+are the exception: every repository's agents act on their wording at once,
+so the `## High` list below holds them.
 
 What others rely on here:
 
@@ -32,11 +34,9 @@ A change is high when it:
   what a consumer must now supply, such as a required member of an
   interface it implements or an argument it passes. Such a change marks
   its title with `!`, though a `!` for a CLI flag alone is not this.
-- changes anything under `assets/`: its rules, guide, skills, and audits
-  load in every agent session of every repository running `quest`, about
-  2k a week, so one bad line misleads them all before a revert ships.
 - changes when an agent may push, merge, post, or spend without asking,
-  in the code that acts on `assets/`.
+  in any instructions, such as `AGENTS.md` or `CONTRIBUTING.md`, or in the
+  code that acts on them.
 - changes the reviewer's sandbox or the credentials an agent gets, or
   sends a new kind of data off the host or into a public comment, such as
   a new upload destination or command output it now posts. New fields in
@@ -45,7 +45,9 @@ A change is high when it:
 A change is medium when behavior others rely on changes and a revert
 undoes it, such as an export, an optional field, or an output line that
 existing consumers keep parsing, a new or changed command or option, a bug
-fix, or a routine dependency or pin bump.
+fix, a change to this repository's own agent instructions, such as
+`AGENTS.md`, `CONTRIBUTING.md`, or `.claude/rules/`, or a routine
+dependency or pin bump.
 
 Tests, plans under `quest/`, and documentation change nothing others rely
 on, so they are low.
@@ -62,13 +64,17 @@ class: its PRs merged, the culprits among them, and their wait on a person.
   no user, contributor, or other repository reads change
 - `refactor` - code changes that keep every behavior and output the same,
   such as a rename inside a module or a simplification
-- `trivial` - a dependency or pin bump, or another change as small, from
-  any author, which lands at any tier once Pullfrog approves its head
+- `trivial` - a dependency or pin bump, or another change as small outside
+  the `## High` list's instructions, from any author, which lands at any
+  tier once Pullfrog approves its head
 
 ## High
 
-- `assets/CONTEXT.md` - every agent session in every repository using
-  Quest loads these rules, including when it may write remotely or merge
+- `assets/` - the rules, guide, skills, and audits every repository's
+  agents load from `quest`, including when they may write remotely or merge
+- `docs/context.md` - the copy of `quest context` agents read without the CLI
+- `src/cli/rules.ts` - the rules `quest context` prints and `quest hook`
+  enforces on every agent's tool calls
 - `scripts/installer.sh` - users pipe it to a shell, and a release
   publishes it as it is
 - `scripts/release-plan.sh` - it decides which merges publish a release
