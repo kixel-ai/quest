@@ -2,7 +2,7 @@
 
 ## Goal
 
-`quest review --harness agy --model <id> [--effort <level>]` reviews a branch through Google's Antigravity CLI (`agy -p`), read-only, isolated from the checkout's and the user's config, on the user's own Antigravity login, so a contributor with a Google AI plan can review with Gemini 4 Carbon. The PR scores Gemini 4 Carbon with `quest eval run` against the current reviewers, and moves it ahead of the size's Codex entry (Sol, or Astra at XL) in each PR size's `REVIEWERS` ranking where it catches more culprits per dollar. Once [reviewer rungs](/quest/m0/reviewer-rungs.md) has landed, its rung placement, by cost and quality, decides whether Carbon reviews by default instead.
+`quest review --harness agy --model <id> [--effort <level>]` reviews a branch through Google's Antigravity CLI (`agy -p`), read-only, isolated from the checkout's and the user's config, on the user's own Antigravity login, so a contributor with a Google AI plan can review with Gemini 4 Carbon. The harness ships opt-in; whether Carbon moves ahead of the size's Codex entry (Sol, or Astra at XL) in a PR size's `REVIEWERS` ranking is judged later from real PRs, by the culprits per dollar `quest usage` shows. Once [reviewer rungs](/quest/m0/reviewer-rungs.md) has landed, its rung placement, by cost and quality, decides that instead.
 
 Non-goals: `agy` as a writer, iterate, or land-fixer harness; models other than Gemini in the ranking, which [the model check](/quest/m1/model-check.md) can add from its own evidence once the harness exists.
 
@@ -10,11 +10,11 @@ Non-goals: `agy` as a writer, iterate, or land-fixer harness; models other than 
 
 Decided 2026-11-16 (user, /quest-plan), still standing. The user reports Gemini 4 Carbon catching bugs that Claude Opus 5.5 at medium effort missed in their own work.
 
-- ✅ An opt-in reviewer harness, scored with `quest eval run` before any ranking change (rejected: Gemini in the default ranking right away, with no eval, which `AGENTS.md` requires for a change to `src/cli/models.ts`; a generic any-model harness, which [kixel-ai/quest#701](https://github.com/kixel-ai/quest/pull/701) removed).
-- ✅ The eval decides and this PR moves Carbon ahead of Codex Sol where it wins (rejected: post the scores and leave the ranking to a `Maintainer:` decision). Amended 2026-11-23 by [kixel-ai/quest#831](https://github.com/kixel-ai/quest/pull/831#issuecomment-7111249892): XL's Codex entry is now Astra high, and once [reviewer rungs](/quest/m0/reviewer-rungs.md) has landed, its rung placement decides instead of a ranking.
+- ✅ An opt-in reviewer harness before any ranking change (rejected: Gemini in the default ranking right away; a generic any-model harness, which [kixel-ai/quest#701](https://github.com/kixel-ai/quest/pull/701) removed).
+- Amended 2026-11-23 (maintainer, [on kixel-ai/quest#831](https://github.com/kixel-ai/quest/pull/831#issuecomment-7118011769)): ✅ no eval scores Carbon and this PR leaves the ranking as it is; real-PR stats decide a ranking change later (was: an eval decides and this PR moves Carbon ahead of Codex Sol where it wins). Amended 2026-11-23 by [kixel-ai/quest#831](https://github.com/kixel-ai/quest/pull/831#issuecomment-7111249892): XL's Codex entry is now Astra high, and once [reviewer rungs](/quest/m0/reviewer-rungs.md) has landed, its rung placement decides instead of a ranking.
 - ✅ m1 (rejected: m0, m2): contributors must be able to run `quest review` on their forks, including those whose only plan is Google's.
 
-Decided 2026-11-21 (maintainer, /quest-plan), carried over from the Cursor plan: ✅ a review reaches the login where the CLI keeps it, never a copy, so the refresh token stays in one place (rejected: a copied credential file, which splits it). The isolation test must also show a hostile checkout cannot read other credentials that store holds. ✅ The implementing agent may run `quest eval run` on the maintainer's plan.
+Decided 2026-11-21 (maintainer, /quest-plan), carried over from the Cursor plan: ✅ a review reaches the login where the CLI keeps it, never a copy, so the refresh token stays in one place (rejected: a copied credential file, which splits it). The isolation test must also show a hostile checkout cannot read other credentials that store holds.
 
 Decided 2026-11-22 (maintainer, /quest-run on [kixel-ai/quest#805](https://github.com/kixel-ai/quest/pull/805), then /quest-plan):
 
@@ -27,7 +27,7 @@ Decided 2026-11-22 (maintainer, /quest-run on [kixel-ai/quest#805](https://githu
   - Google's FAQ (https://antigravity.google/docs/faq, read 2026-11-22) says "Wrapping `agy` inside third-party coding agents or applications, or automating account rotation, is not supported under consumer plans", and that using third-party software to access Antigravity "can result in suspension or termination of your account". It recommends an API key for third-party agents. The maintainer chose the Ultra login knowing this.
 - ✅ Close #805, which holds only a claim commit and the Cursor findings, once this replan merges (rejected: leave it open).
 
-Decided 2026-11-22 (maintainer, `/quest-plan` of the routing audit in [kixel-ai/quest#826](https://github.com/kixel-ai/quest/pull/826)): ✅ m0 (rejected: leave it in m1), since [review seats](/quest/m0/review-seats.md) seats Gemini on every high-tier PR, and on medium where the eval ranks it in the first two, once this harness exists. Since 2026-11-23, review seats draws each seat from the round's rung instead of a ranking.
+Decided 2026-11-22 (maintainer, `/quest-plan` of the routing audit in [kixel-ai/quest#826](https://github.com/kixel-ai/quest/pull/826)): ✅ m0 (rejected: leave it in m1), since [review seats](/quest/m0/review-seats.md) seats Gemini on every medium- and high-tier PR once this harness exists. Since 2026-11-23, review seats draws each seat from the round's rung instead of a ranking.
 
 The maintainer's Ultra login (kixelated@gmail.com) was signed in on 2026-11-22 on the Linux workstation that runs agent sessions (`agy` 1.5.14) and on the macOS laptop (`agy` 1.5.6, run from the dotfiles flake, since the laptop's Nix profile predates `agy`). `agy models` lists `gemini-4-carbon-low`, `-medium`, and `-high` on both. The CI host and the desktop are not signed in.
 
@@ -48,7 +48,7 @@ Guidance:
 - The reviewers run nothing from a reviewed head. Verify it with a test like `test/live/review-sandbox.test.ts`, on Linux and macOS: an untrusted checkout whose rules, skills, plugins, MCP config, hooks, and helper binaries try to read outside the review snapshot or run a process. If the pinned CLI cannot reliably keep out both user and checkout config, record that under `## Waiting` instead of shipping the harness.
 - Append a cheap `agy`-served classifier last in `CLASSIFIERS`, so a contributor with only `agy` can still classify risk.
 - Detect `agy`'s usage-limit and logged-out errors from its structured output as a `ReviewLimitError` or `ReviewerUnavailableError`, so the round passes over an unavailable reviewer.
-- Ultra is a flat plan and token-max prices only Claude Code and Codex sessions, so a culprits-per-dollar comparison needs a per-token price. Recommended: price `agy` sessions from the usage their stream reports, at Google's API list price for the model, through token-max if it gains them first, else in `quest eval`.
+- Ultra is a flat plan and token-max prices only Claude Code and Codex sessions, so a culprits-per-dollar comparison needs a per-token price. Recommended: price `agy` sessions from the usage their stream reports, at Google's API list price for the model, through token-max if it gains them first, else in `quest usage`.
 - Keep the harness opt-in: no `agy` model enters `REVIEWERS` in this PR. Update `README.md`'s reviewer list and `quest review --help`.
 
 ## Hosts
@@ -58,7 +58,7 @@ Guidance:
 
 ## Waiting
 
-- kixel-ai/token-max: `token-max sessions` prices `agy` sessions. Check that an `agy` review session shows a nonzero cost there. If that stalls, the Plan's fallback prices them in `quest eval`.
+- kixel-ai/token-max: `token-max sessions` prices `agy` sessions. Check that an `agy` review session shows a nonzero cost there. If that stalls, the Plan's fallback prices them in `quest usage`.
 
 ## Related
 
