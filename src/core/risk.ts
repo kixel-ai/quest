@@ -18,32 +18,37 @@ export const SEATS: Record<Tier, number> = { low: 1, medium: 2, high: 3 };
 
 /** A review run of a head: its tier, each seat's vendor, and how many findings it left that still need a round. */
 export interface Run {
-	tier: Tier;
+	/** Null when a record's tier or reviewer lines do not parse, which passes nothing. */
+	tier: Tier | null;
 	vendors: string[];
 	open: number;
 }
 
 /** Whether a run passed its head: every seat its tier needs ran, each on a vendor of its own, with no finding open. */
-export const passed = (run: Run): boolean => run.open === 0 && new Set(run.vendors).size >= SEATS[run.tier];
+export const passed = (run: Run): boolean =>
+	run.tier !== null && run.open === 0 && new Set(run.vendors).size >= SEATS[run.tier];
 
 /**
- * The latest run `body`'s `## Review` record names, or null when it names no tier: the reviewers whose session line
- * names a round, and the high and medium findings they left open, since the low ones a later line settles without a
- * round, as `next finish` asks.
+ * The latest run `body`'s `## Review` record names: the reviewers whose session line names a round, and the high and
+ * medium findings they left open, since the low ones a later line settles without a round, as `next finish` asks.
+ * Null when the record names no run, neither a tier nor a reviewer, as a recorded skip.
  */
 export function recordedRun(body: string): Run | null {
 	const risk = recordedRisk(body);
 	const section = reviewSection(body);
-	if (risk === null || "malformed" in risk || section === null) return null;
+	if (section === null) return null;
 	const blocks = body
 		.slice(section.start, section.end)
 		.split(/^(?=- Reviewer: )/m)
-		.slice(1)
-		.filter((block) => /^- Session: (`+) ?.*? ?\1, round \d+\r?$/m.test(block));
+		.slice(1);
+	if (risk === null && blocks.length === 0) return null;
+	const ran = blocks.filter((block) => /^- Session: (`+) ?.*? ?\1, round \d+\r?$/m.test(block));
+	const vendors = ran.map((block) => /^- Reviewer: (.+?), \S+, \S+ effort\b/.exec(block)?.[1]);
+	const parsed = risk !== null && !("malformed" in risk) && vendors.every((vendor) => vendor !== undefined);
 	return {
-		tier: risk.tier,
-		vendors: blocks.map((block) => /^- Reviewer: (.+?),/.exec(block)![1]!),
-		open: blocks.reduce((sum, block) => sum + (block.match(/^ {2}- (?:High|Medium), /gm)?.length ?? 0), 0),
+		tier: parsed ? risk.tier : null,
+		vendors: vendors.filter((vendor) => vendor !== undefined),
+		open: ran.reduce((sum, block) => sum + (block.match(/^ {2}- (?:High|Medium), /gm)?.length ?? 0), 0),
 	};
 }
 

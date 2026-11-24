@@ -26,7 +26,7 @@ Otherwise, review the committed branch with `quest review --base <remote>/<base>
 It draws a reviewer the branch has not had, never the model that changed the branch last, from the rung the PR's size sets or the one beside it.
 It reads that model, and off a quest branch the size, from the PR body's `## Models` record: open the draft PR and write the record before the first round, as `Size: M` and `Implementer: Claude Code, claude-opus-5-5, high effort`.
 Pass `--exclude-model` or `--size` only for a PR whose body cannot hold the record.
-Where the repository's root instructions name other reviewers, pass them with `--harness`, `--model`, and `--effort`, which runs that reviewer alone.
+Where the repository's root instructions name other reviewers, run each with `--harness`, `--model`, and `--effort`, which runs that reviewer alone and never counts for a medium or high head, then the drawn run, whose record counts.
 Each round rewrites the PR body's `## Review` section, so add context only after it, and write a round's record by hand only when it printed `record skipped`.
 
 `quest review` sets the head's risk tier before any reviewer runs and seats one reviewer on a low head, two on medium, and three on high, each on a different vendor, the extra of which a round that raises the tier seats at once.

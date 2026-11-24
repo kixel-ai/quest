@@ -839,6 +839,13 @@ describe("the review record", () => {
 		expect(await line(high(vendors, ", open until the next round settles them:\n  - Low, `a:1`: `x`"))).toBe(
 			`review-record current ${A}`,
 		);
+		// A record whose reviewer or risk line does not parse passes nothing, and status still reads.
+		expect(await line(high(vendors).replace("- Reviewer: Codex, m, high effort", "- Reviewer: Codex"))).toBe(
+			"review-record -",
+		);
+		expect(await line(high(vendors).replace("- Risk: high, `wire`", "- Risk:dire"))).toBe("review-record -");
+		// A recorded skip names no run, so its SHA counts as the review skill has it.
+		expect(await line(`## Review\n\nSkipped as trivial: a typo, at ${A}.`)).toBe(`review-record current ${A}`);
 		// A reviewer of an earlier run, its session naming no round, takes no seat.
 		expect(
 			await line(high(["Codex", "Claude Code"]) + "\n\n- Reviewer: Antigravity, m, high effort\n- Session: `s`"),
