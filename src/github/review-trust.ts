@@ -39,11 +39,15 @@ export async function trustedReview(
 	return "";
 }
 
-/** What a walk reads with: the repository's client and PR, and each account's permission once asked. */
-interface Reading {
+/**
+ * What a walk reads with: the repository's client and PR, each account's permission once asked, and each line of the
+ * current section, by count, not yet traced to the edit that added it.
+ */
+interface Walk {
 	github: GitHubReader;
 	pr: PullRequest;
 	permissions: Map<string, Promise<string | 403 | 404>>;
+	pending: Map<string, number>;
 }
 
 /** One version of the body: who saved it, and its section's text, null without one, or why it cannot be read. */
@@ -52,17 +56,26 @@ interface Version {
 	text: string | null | { unreadable: string };
 }
 
+/** Each line of `text` that says something, by count: not blank, and not a land fixer line, which readers skip. */
+function lines(text: string | null): Map<string, number> {
+	const counts = new Map<string, number>();
+	for (const line of text?.split("\n") ?? [])
+		if (line.trim() !== "" && line.replace(FIX_LINE, "") !== "") counts.set(line, (counts.get(line) ?? 0) + 1);
+	return counts;
+}
+
 /**
  * Why the section is untrusted, or null when writers wrote it. Walking the body's versions newest first, each edit
- * that changes the section's text must be a writer's. A writer's edit that only adds lines vouches for those alone, so
- * the walk goes on to whoever wrote the rest; any other edit by a writer, or the section's creation, ends it.
+ * that changes the section's text must be a writer's, and vouches only for the lines it added; the walk ends once
+ * every line of the current section is traced to the writer who added it. A writer's edit of a line therefore
+ * launders no line a non-writer added before it.
  */
 async function untrusted(github: GitHubReader, pr: PullRequest, body: string, text: string): Promise<string | null> {
 	let newer: Version | undefined;
 	let after: string | null = null;
 	let read = 0;
 	let time = Infinity;
-	const reading: Reading = { github, pr, permissions: new Map() };
+	const walk: Walk = { github, pr, permissions: new Map(), pending: lines(text) };
 	for (;;) {
 		const data = await github.graphql(EDITS_QUERY, { owner: pr.owner, repo: pr.repo, number: pr.number, after });
 		const pull = object(object(data.repository).pullRequest);
@@ -83,7 +96,7 @@ async function untrusted(github: GitHubReader, pr: PullRequest, body: string, te
 						: { unreadable: edit.deletedAt == null ? "is unreadable" : "was deleted" },
 			};
 			if (newer !== undefined) {
-				const verdict = await change(reading, newer, version);
+				const verdict = await change(walk, newer, version);
 				if (verdict !== undefined) return verdict;
 			}
 			newer = version;
@@ -91,10 +104,8 @@ async function untrusted(github: GitHubReader, pr: PullRequest, body: string, te
 		const info = object(edits.pageInfo);
 		if (info.hasNextPage !== true)
 			// The oldest edit is the PR's creation, by its author; a body never edited has none. Creating the section
-			// settles the walk, so it never reads on from here.
-			return (
-				(await change(reading, newer ?? { editor: pull.author, text }, { editor: null, text: null })) ?? null
-			);
+			// adds every line, so the walk never reads on from here.
+			return (await change(walk, newer ?? { editor: pull.author, text }, { editor: null, text: null })) ?? null;
 		if (read >= EDITS) return `its newest ${EDITS} edits leave unknown who wrote all of its section`;
 		after = string(info.endCursor);
 	}
@@ -102,40 +113,37 @@ async function untrusted(github: GitHubReader, pr: PullRequest, body: string, te
 
 /**
  * What the edit from `older` to `newer`, a version already read, says: why the section is untrusted, null once
- * writers wrote all of it, or undefined to read on. A bot's edit that only adds or drops land fixer lines changes
- * nothing, since `quest land` writes them as a bot.
+ * writers added every line of it, or undefined to read on. A bot's edit that only adds or drops land fixer lines
+ * changes nothing, since `quest land` writes them as a bot.
  */
-async function change(reading: Reading, newer: Version, older: Version): Promise<string | null | undefined> {
+async function change(walk: Walk, newer: Version, older: Version): Promise<string | null | undefined> {
 	const text = newer.text as string | null;
 	if (typeof older.text === "object" && older.text !== null)
 		return `a revision in its edit history ${older.text.unreadable}`;
 	if (text === older.text) return undefined;
 	const fixes = (section: string | null) => section?.replace(FIX_LINE, "").trim() ?? null;
 	if (kind(newer.editor) === "Bot" && fixes(text) === fixes(older.text)) return undefined;
-	const why = await writer(reading, newer.editor);
+	const why = await writer(walk, newer.editor);
 	if (why !== null) return why;
-	return older.text !== null && text !== null && adds(older.text, text) ? undefined : null;
-}
-
-/** Whether `newer` holds every line of `older` in order, with lines added around them. */
-function adds(older: string, newer: string): boolean {
-	const lines = newer.split("\n");
-	let at = 0;
-	for (const line of older.split("\n")) {
-		while (at < lines.length && lines[at] !== line) at++;
-		if (at++ >= lines.length) return false;
+	const before = lines(older.text);
+	for (const [line, count] of lines(text)) {
+		const added = count - (before.get(line) ?? 0);
+		const waiting = walk.pending.get(line);
+		if (added <= 0 || waiting === undefined) continue;
+		if (waiting > added) walk.pending.set(line, waiting - added);
+		else walk.pending.delete(line);
 	}
-	return true;
+	return walk.pending.size === 0 ? null : undefined;
 }
 
 const kind = (actor: unknown) => (actor === null ? null : object(actor).__typename);
 
 /** Why `actor`, who changed the section, is not a user with write access to `pr`'s repository, or null when it is. */
-async function writer({ github, pr, permissions }: Reading, actor: unknown): Promise<string | null> {
+async function writer({ github, pr, permissions }: Walk, actor: unknown): Promise<string | null> {
 	if (actor === null) return "the account that changed its section is gone";
 	const name = string(object(actor).login);
 	if (kind(actor) !== "User") return `${name}, who changed its section, is a ${String(kind(actor))}, not a user`;
-	// A walk past a writer's additions asks about the same account again.
+	// A walk through several of a writer's edits asks about the same account again.
 	if (!permissions.has(name)) permissions.set(name, permission(github, pr, name));
 	const found = await permissions.get(name)!;
 	if (typeof found === "number")

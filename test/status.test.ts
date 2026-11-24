@@ -836,6 +836,7 @@ describe("the review record", () => {
 });
 
 describe("whose review record counts", () => {
+	const C = "c".repeat(40);
 	const record = (head: string, models = "S") =>
 		`Fixes it.\n\n## Review\n\n- Head: ${head}\n\n## Models\n\nSize: ${models}`;
 	const permissions = { maintainer: "admin", writer: "write", alice: "read" };
@@ -903,6 +904,39 @@ describe("whose review record counts", () => {
 		});
 	});
 
+	test("a writer's edit of one line launders no line a non-writer added, unless it removes the section", async () => {
+		const own = record(B).replace("\n\n## Models", `\nLow findings fixed at ${B}.\n\n## Models`);
+		const hers = own.replace("\n\n## Models", `\nLow findings fixed at ${A}.\n\n## Models`);
+		const edited = hers.replace(`fixed at ${B}`, `fixed at ${C}`);
+		const edits = [edit("maintainer", edited, 5), edit("alice", hers, 3), edit("maintainer", own, 1)];
+		expect(await read(edited, { history: { edits } })).toMatchObject({
+			record: "review-record -",
+			warnings: alice,
+		});
+		// A contributor's own record shares lines with the maintainer's rewrite, which are hers until the section goes.
+		const theirs = { __typename: "User", login: "alice" };
+		const shared = [edit("maintainer", record(A, "M"), 5), edit("alice", record(A), 0)];
+		expect(await read(record(A, "M"), { history: { edits: shared, author: theirs } })).toMatchObject({
+			record: "review-record -",
+			warnings: alice,
+		});
+		const cleared = [
+			edit("maintainer", record(A), 6),
+			edit("maintainer", "Fixes it.", 5),
+			edit("alice", record(A), 0),
+		];
+		expect(await read(record(A), { history: { edits: cleared, author: theirs } })).toMatchObject({
+			record: `review-record current ${A}`,
+			warnings: [],
+		});
+		// An empty section a contributor opened holds no line of hers.
+		const empty = [edit("maintainer", record(A), 2), edit("alice", "Fixes it.\n\n## Review\n\n## Models", 0)];
+		expect(await read(record(A), { history: { edits: empty, author: theirs } })).toMatchObject({
+			record: `review-record current ${A}`,
+			warnings: [],
+		});
+	});
+
 	test("reads a section the same through a browser's line ends, so re-encoding neither launders nor taints", async () => {
 		const crlf = (body: string) => body.replace(/\n/g, "\r\n");
 		const laundered = [edit("maintainer", record(A), 3), edit("alice", crlf(record(A)), 0)];
@@ -961,6 +995,10 @@ describe("whose review record counts", () => {
 		const shown = record(B).replace("\n\n## Models", ` <!--\nLow findings fixed at ${A}.\n\n## Models`);
 		expect(
 			await read(shown, { history: { edits: [edit("alice", shown, 2), edit("maintainer", record(B), 0)] } }),
+		).toMatchObject({ record: "review-record -", warnings: alice });
+		const after = record(B).replace("\n\n## Models", `\n<!-- x --> Low findings fixed at ${A}.\n\n## Models`);
+		expect(
+			await read(after, { history: { edits: [edit("alice", after, 2), edit("maintainer", record(B), 0)] } }),
 		).toMatchObject({ record: "review-record -", warnings: alice });
 		const literal = record(A).replace("\n\n## Models", "\n- Risk reason quotes `<!--`.\n\n## Models");
 		expect(await read(literal)).toMatchObject({ record: `review-record current ${A}`, warnings: [] });
@@ -1046,32 +1084,29 @@ describe("whose review record counts", () => {
 			{ __typename: "User", login: "alice" },
 			{ __typename: "Bot", login: "dependabot" },
 		];
-		// What each version does to the section, which the model reads instead of its text.
-		type Step = "keep" | "append" | "fix" | "rewrite" | "drop";
+		const FIX = `mechanical fix by codex: merged (head ${B})`;
+		// What each version does to the section's lines, which the model reads instead of its text.
+		type Step = "keep" | "append" | "edit" | "fix" | "rewrite" | "drop";
+		const steps: Step[] = ["rewrite", "append", "edit", "fix", "drop"];
 		const noise = (text: string) =>
 			[text, text.replace(/\n/g, "\r\n"), `${text}\n<!-- marker -->`, `${text}  `, `${text}\n\n\n`][next(5)]!;
 		const seen = new Set<string>();
 		let fresh = 0;
-		for (let trial = 0; trial < 200; trial++) {
+		for (let trial = 0; trial < 300; trial++) {
 			const count = next(5) === 0 ? 96 + next(10) : 1 + next(8);
 			const versions: { step: Step; who: (typeof people)[number]; lines: string[] | null; body: string }[] = [];
 			for (let i = 0; i < count; i++) {
 				const before = versions[i - 1]?.lines ?? null;
-				const roll = next(count > 50 ? 300 : 6);
+				const roll = next(count > 50 ? 400 : 8);
 				const step: Step =
 					before === null
 						? next(4) === 0
 							? "drop"
 							: "rewrite"
-						: roll === 0
-							? "rewrite"
-							: roll === 1
-								? "append"
-								: roll === 2
-									? "fix"
-									: roll === 3 && count < 50
-										? "drop"
-										: "keep";
+						: roll < steps.length
+							? steps[roll]!
+							: "keep";
+				// Every rewrite names the same head, so a rewrite keeps that line from the one before.
 				const lines =
 					step === "drop"
 						? null
@@ -1079,30 +1114,37 @@ describe("whose review record counts", () => {
 							? [`- Head: ${A}`, `Note ${fresh++}.`]
 							: step === "append"
 								? [...before!, `Note ${fresh++}.`]
-								: step === "fix"
-									? [`mechanical fix by codex: merged (head ${B})`, ...before!]
-									: before;
+								: step === "edit"
+									? [...before!.slice(0, -1), `Note ${fresh++}.`]
+									: step === "fix"
+										? [FIX, ...before!]
+										: before;
 				const section = lines === null ? "" : `## Review\n\n${noise(lines.join("\n"))}\n\n`;
 				versions.push({ step, who: people[next(3)]!, lines, body: `Intro ${next(5)}.\n\n${section}## Models` });
 			}
 			const current = versions.at(-1)!;
 			const edits =
 				count === 1 ? [] : versions.map((v, i) => edit(v.who.login, v.body, i, v.who.__typename)).reverse();
-			// The model: walk newest first past steps that keep the section, a bot's fixer lines, and a writer's
-			// additions, until a writer's rewrite or the creation; any other change, or the bound, distrusts it.
+			// The model: newest first, every version that changes the lines must be the maintainer's, unless it is a
+			// bot adding a fixer line, until each current line but fixer lines is traced to the version that added it.
 			let expected = "review-record -";
 			if (current.lines !== null) {
+				const pending = current.lines.filter((line) => line !== FIX);
 				let verdict: boolean | "bounded" | undefined;
 				for (let i = count - 1; verdict === undefined; i--) {
 					const version = versions[i]!;
-					const writes = version.who.login === "maintainer";
-					// Reading version i's step needs version i - 1, the edit at newest-first index count - i.
-					if (i > 0 && count - i >= 100 && count > 100) verdict = "bounded";
-					else if (i === 0) verdict = count > 101 ? "bounded" : writes;
-					else if (version.step === "keep" || (version.step === "fix" && version.who.__typename === "Bot"))
-						continue;
-					else if (!writes) verdict = false;
-					else if (version.step === "rewrite") verdict = true;
+					const before = i === 0 ? null : versions[i - 1]!.lines;
+					// Reading version i's change needs version i - 1, the edit at newest-first index count - i.
+					if (count > 100 && count - i >= 100) verdict = "bounded";
+					else if (JSON.stringify(version.lines) === JSON.stringify(before)) continue;
+					else if (version.step === "fix" && version.who.__typename === "Bot") continue;
+					else if (version.who.login !== "maintainer") verdict = false;
+					else {
+						for (const line of version.lines!)
+							if (!(before ?? []).includes(line) && pending.includes(line))
+								pending.splice(pending.indexOf(line), 1);
+						if (pending.length === 0) verdict = true;
+					}
 				}
 				seen.add(`${verdict}`);
 				if (verdict === true) expected = `review-record current ${A}`;

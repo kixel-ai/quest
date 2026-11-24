@@ -23,8 +23,7 @@ Do not edit `CONTRIBUTING.md`, `assets/CONTEXT.md`, `assets/AGENTS.md`, or
   /quest-merge pick: the user's, the one /quest-plan's interview gives its own
   PR, or the standing one /quest-run gives a low-risk PR in a class
   `RISK.md` lists under `## Automatic` that adds or expands no quests, or a
-  trivial PR that `RISK.md`'s `trivial` class admits once a maintainer's
-  local `quest review` record passes on its head; and
+  trivial PR as `RISK.md`'s `trivial` class admits it; and
   only after repository checks and reviews pass.
 - Pull requests land as squash merges.
 - Do not comment on repositories outside kixelated, moq-dev, and kixel-ai without approval.

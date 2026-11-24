@@ -72,7 +72,8 @@ class: its PRs merged, the culprits among them, and their wait on a person.
   such as a rename inside a module or a simplification
 - `trivial` - a dependency or pin bump at any tier, or another change as
   small that is not high, from any author, which lands once a
-  maintainer's local `quest review` record passes on its head
+  maintainer's `quest review` record of a local reviewer's round passes
+  on its head; a low head's record with no reviewer is not enough
 
 ## High
 

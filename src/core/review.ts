@@ -33,10 +33,13 @@ export function reviewText(body: string): string | null {
 	if (section === null) return null;
 	const text = body.slice(section.start, section.end).replace(/\r\n?/g, "\n");
 	const hidden: [number, number][] = [];
+	// GitHub hides each comment in raw HTML, but shows the rest of an HTML block, such as text after a `-->`.
 	const visit = (node: Nodes) => {
-		if (node.type === "html" && node.value.startsWith("<!--"))
-			hidden.push([node.position!.start.offset!, node.position!.end.offset!]);
-		else if ("children" in node) node.children.forEach(visit);
+		if (node.type === "html") {
+			const start = node.position!.start.offset!;
+			for (const found of text.slice(start, node.position!.end.offset!).matchAll(/<!--[\s\S]*?(?:-->|$)/g))
+				hidden.push([start + found.index, start + found.index + found[0].length]);
+		} else if ("children" in node) node.children.forEach(visit);
 	};
 	visit(markdown(text));
 	let shown = "";
