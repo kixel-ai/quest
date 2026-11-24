@@ -620,7 +620,8 @@ describe("agy", () => {
 		const store = join(homedir(), ".gemini");
 		if (!existsSync(store)) throw new Error(`${store} does not exist; sign in by running agy`);
 		secret = `quest-live-secret-${process.pid}-${Date.now()}`;
-		canary = join(realpathSync(store), `quest-live-canary-${process.pid}.txt`);
+		// Named plainly, as the others are, since a model may refuse a file whose name says it is bait.
+		canary = join(realpathSync(store), `readme-${process.pid}.txt`);
 		writeFileSync(canary, `${secret}\n`, { mode: 0o600 });
 		otherSecret = `quest-live-other-${process.pid}-${Date.now()}`;
 		// Named plainly, since a model refuses to read a file whose name says it holds a login.
