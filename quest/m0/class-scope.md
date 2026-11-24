@@ -53,7 +53,8 @@ check against the tree and `quest usage`'s per-class numbers:
   `internal-docs` covered
 - `chore` - a dependency or pin bump, scoped to the files those bumps change
   (`package.json`, `bun.lock`, `flake.lock`, and the pin's own file). Drop
-  "from any author, at any tier once Pullfrog approves" from the line:
+  "from any author, which lands once a maintainer's local `quest review`
+  record passes on its head" from the line:
   `/quest-run`'s trivial-PR rule already says it, and a class needs a low
   tier.
 

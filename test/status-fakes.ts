@@ -127,6 +127,13 @@ export function setup(
 		runs?: Node[];
 		/** The open PRs as the duplicate read lists them, and each `<head>:<path>` blob's text. */
 		open?: { pulls: Node[]; blobs?: Record<string, string>; files?: Record<number, Node[]> };
+		/**
+		 * The PR body's edit history, newest first, and its author; by default never edited, by `maintainer`. `body`
+		 * overrides the body the history read returns.
+		 */
+		history?: { edits?: Node[]; author?: Node | null; body?: string };
+		/** Each login's permission on the repository, or the status GitHub refuses it with; by default `maintainer` is an admin. */
+		permissions?: Record<string, string | number>;
 	} = {},
 ) {
 	const queries: Record<string, unknown>[] = [];
@@ -137,6 +144,8 @@ export function setup(
 	const eventPages = [...(options.eventPages ?? [])];
 	const activityPages = [...(options.activity ?? [])];
 	const activityRequests: string[] = [];
+	const historyQueries: Record<string, unknown>[] = [];
+	const permissionRequests: string[] = [];
 	const deps: GitHubReadDependencies = {
 		readToken: "test-token",
 		quota: "wait",
@@ -162,6 +171,16 @@ export function setup(
 					: Response.json({ protection: { enabled: false } });
 			if (path.pathname === "/repos/example/project/rules/branches/main")
 				return Response.json(options.rules ?? []);
+			const permission = /^\/repos\/example\/project\/collaborators\/([^/]+)\/permission$/.exec(path.pathname);
+			if (permission) {
+				const login = decodeURIComponent(permission[1]!);
+				permissionRequests.push(login);
+				const value = (options.permissions ?? { maintainer: "admin" })[login];
+				if (value === undefined) return Response.json({ message: "Not Found" }, { status: 404 });
+				return typeof value === "number"
+					? Response.json({ message: "Must have push access" }, { status: value })
+					: Response.json({ permission: value, user: { login } });
+			}
 			const changed = /^\/repos\/example\/project\/pulls\/(\d+)\/files$/.exec(path.pathname);
 			if (changed) return Response.json(options.open?.files?.[Number(changed[1])] ?? []);
 			if (path.pathname === "/repos/example/project/actions/runs") {
@@ -221,6 +240,31 @@ export function setup(
 					},
 				});
 			}
+			if (request.query.includes("query BodyEdits(")) {
+				historyQueries.push(request.variables);
+				if (!last) throw new Error("history read before PR state");
+				const edits = options.history?.edits ?? [];
+				// The cursor is the index of the page's first edit; quest status reads 10 a page.
+				const from = Number(request.variables.after ?? 0);
+				const to = from + 10;
+				return Response.json({
+					data: {
+						repository: {
+							pullRequest: {
+								body: options.history?.body ?? last.data.repository.pullRequest.body,
+								author:
+									options.history?.author === undefined
+										? { __typename: "User", login: "maintainer" }
+										: options.history.author,
+								userContentEdits: {
+									pageInfo: { hasNextPage: to < edits.length, endCursor: String(to) },
+									nodes: edits.slice(from, to),
+								},
+							},
+						},
+					},
+				});
+			}
 			if (request.query.includes("query HoldOwnership(")) {
 				holdQueries.push(request.variables);
 				if (!last) throw new Error("ownership read before PR state");
@@ -246,5 +290,15 @@ export function setup(
 			return Response.json(body);
 		},
 	};
-	return { deps, queries, texts, holdQueries, eventRequests, activityRequests };
+	return { deps, queries, texts, holdQueries, eventRequests, activityRequests, historyQueries, permissionRequests };
+}
+
+/** One version of the PR body in its edit history, `minute` minutes in, by `login` of GraphQL type `kind`. */
+export function edit(login: string, diff: string | null, minute: number, kind = "User") {
+	return {
+		editedAt: new Date(Date.UTC(2026, 10, 24, 0, minute)).toISOString(),
+		deletedAt: diff === null ? "2026-11-25T00:00:00Z" : null,
+		editor: { __typename: kind, login },
+		diff,
+	};
 }

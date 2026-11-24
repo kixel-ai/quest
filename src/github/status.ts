@@ -30,6 +30,7 @@ import {
 import { readHoldStatus } from "./hold";
 import { readSignals } from "./signals";
 import { duplicateQuests } from "./duplicates";
+import { trustedReview } from "./review-trust";
 
 /**
  * One query covers the PR; each connection pages by its own cursor, and a
@@ -166,8 +167,10 @@ export async function pullRequestStatus(
 			? { checks: [], workflows: [] }
 			: (base?.needs ?? (await requiredOf(github, pr, baseRef)));
 	const status = summarize(first!, rollup, current, needs, reviewNodes, threadNodes);
-	status.reviewRecord = await reviewRecord(github, pr, first!, deps.warn);
-	status.risk = risk(typeof first!.body === "string" ? first!.body : "", head, status.reviewRecord);
+	// The record is read from the text a writer last set, so no one else's edit names a reviewed head or risk.
+	const trusted = await trustedReview(github, pr, typeof first!.body === "string" ? first!.body : "", deps.warn);
+	status.reviewRecord = await reviewRecord(github, pr, { ...first!, body: trusted }, deps.warn);
+	status.risk = risk(trusted, head, status.reviewRecord);
 	if (status.autoMerge !== null) status.autoMerge.head = await enabledHead(github, first!, deps.warn);
 	const signaled = (await readSignals(github, pr, [pr.number])).get(pr.number)!;
 	if (signaled.head !== first!.headRefOid)

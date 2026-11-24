@@ -4,7 +4,7 @@ import { GitHubReader } from "../src/github/client";
 import { main } from "../src/cli/main";
 import { statusLines } from "../src/cli/status";
 import { pullRequestStatus, requiredOf } from "../src/github/status";
-import { A, B, pr, URL_, type Node, page, CI, pull, run, review, thread, setup } from "./status-fakes";
+import { A, B, pr, URL_, type Node, page, CI, pull, run, review, thread, setup, edit } from "./status-fakes";
 
 test("reports checks by requiredness, each reviewer's latest review against the head, and open threads", async () => {
 	const fixture = setup(
@@ -832,6 +832,232 @@ describe("the review record", () => {
 
 	test("reads only the Review section, so a SHA elsewhere names no review", async () => {
 		expect(await line(`Fixes ${A}.\n\n## Review\n\nSkipped.\n\n## Models\n\n${C}`)).toBe("review-record -");
+	});
+});
+
+describe("whose review record counts", () => {
+	const C = "c".repeat(40);
+	const record = (head: string, models = "S") =>
+		`Fixes it.\n\n## Review\n\n- Head: ${head}\n\n## Models\n\nSize: ${models}`;
+	const permissions = { maintainer: "admin", writer: "write", alice: "read" };
+	const read = async (body: string, options: Parameters<typeof setup>[1] = {}) => {
+		const warnings: string[] = [];
+		const fixture = setup([pull({ body, checks: null, reviews: page([]), threads: page([]) })], {
+			warnings,
+			permissions,
+			...options,
+		});
+		const lines = statusLines(await pullRequestStatus(pr, fixture.deps));
+		const line = (type: string) => lines.find((l) => l.startsWith(`${type} `));
+		return { record: line("review-record"), risk: line("risk"), warnings, fixture };
+	};
+	const untrusted = (why: string) => [`example/project#1's ## Review record does not count: ${why}`];
+
+	test("counts a never-edited body's record only when its author can write", async () => {
+		const own = await read(record(A));
+		expect(own).toMatchObject({ record: `review-record current ${A}`, warnings: [] });
+		expect(own.fixture.permissionRequests).toEqual(["maintainer"]);
+		const theirs = await read(record(A), { history: { author: { __typename: "User", login: "alice" } } });
+		expect(theirs).toMatchObject({
+			record: "review-record -",
+			warnings: untrusted("alice, who last changed its section, has read access to example/project, not write"),
+		});
+	});
+
+	test("counts no record a non-writer wrote, and hides its risk", async () => {
+		const body = `Fixes it.\n\n## Review\n\n- Head: ${A}\n- Risk: low, \`x\`\n- Classified: low by Claude Code, m, low effort`;
+		const forged = await read(body, {
+			history: { edits: [edit("alice", body, 2), edit("maintainer", "Fixes it.", 0)] },
+		});
+		expect(forged).toMatchObject({ record: "review-record -", risk: "risk -" });
+		expect(forged.warnings).toEqual(
+			untrusted("alice, who last changed its section, has read access to example/project, not write"),
+		);
+	});
+
+	test("counts a writer's record on a contributor's PR", async () => {
+		const history = {
+			author: { __typename: "User", login: "alice" },
+			edits: [edit("writer", record(A), 3), edit("alice", `Fixes it.\n\n## Review\n\n- Head: ${B}`, 0)],
+		};
+		const written = await read(record(A), { history });
+		expect(written).toMatchObject({ record: `review-record current ${A}`, warnings: [] });
+		expect(written.fixture.permissionRequests).toEqual(["writer"]);
+	});
+
+	test("a writer's later edit elsewhere launders no forgery", async () => {
+		const body = record(A, "M");
+		const edits = [edit("maintainer", body, 5), edit("alice", record(A), 3), edit("maintainer", record(B), 1)];
+		const laundered = await read(body, { history: { edits } });
+		expect(laundered).toMatchObject({
+			record: "review-record -",
+			warnings: untrusted("alice, who last changed its section, has read access to example/project, not write"),
+		});
+	});
+
+	test("counts no record a bot changed, but a bot's hidden markers and land fixes change none", async () => {
+		const bot = await read(record(A), {
+			history: { edits: [edit("dependabot", record(A), 2, "Bot"), edit("maintainer", record(B), 0)] },
+		});
+		expect(bot).toMatchObject({
+			record: "review-record -",
+			warnings: untrusted("dependabot, who last changed its section, is a Bot, not a user"),
+		});
+		const marked = `Fixes it.\n\n## Review\n\n- Head: ${A}\n\n<!-- auto-generated -->\n\n## Summary by CodeRabbit\n\nIt fixes it.`;
+		const summarized = await read(marked, {
+			history: {
+				edits: [
+					edit("coderabbitai", marked, 2, "Bot"),
+					edit("maintainer", `Fixes it.\n\n## Review\n\n- Head: ${A}\n`, 0),
+				],
+			},
+		});
+		expect(summarized).toMatchObject({ record: `review-record current ${A}`, warnings: [] });
+		// A record with an open finding names no full SHA, and the fixer's line names its head in full.
+		const open = `Fixes it.\n\n## Review\n\n- Head: ${B.slice(0, 12)}, named in full once no reviewer reports a finding`;
+		const fixed = open.replace(
+			"## Review\n\n",
+			`## Review\n\nmechanical fix by codex: merged the base (head ${A})\n`,
+		);
+		const land = await read(fixed, {
+			history: { edits: [edit("moq-bot", fixed, 2, "Bot"), edit("maintainer", open, 0)] },
+		});
+		expect(land).toMatchObject({ record: "review-record -", warnings: [] });
+		expect(land.fixture.historyQueries).toEqual([]);
+	});
+
+	test("reads the record as its writer left it, so a SHA hidden in a comment names no reviewed head", async () => {
+		const hidden = record(B).replace("\n\n## Models", `\n<!-- ${A} -->\n\n## Models`);
+		const read_ = await read(hidden, {
+			diffs: { [A]: "new", [B]: "old" },
+			history: { edits: [edit("alice", hidden, 2), edit("maintainer", record(B), 0)] },
+		});
+		expect(read_).toMatchObject({ record: `review-record stale ${B}`, warnings: [] });
+	});
+
+	test("leaves the writer unknown behind a deleted revision, a gone account, or an unreadable permission", async () => {
+		const deleted = await read(record(A), {
+			history: {
+				edits: [edit("maintainer", record(A), 2), edit("alice", null, 1), edit("maintainer", "Fixes it.", 0)],
+			},
+		});
+		expect(deleted.warnings).toEqual(untrusted("a revision in its edit history was deleted"));
+		const gone = await read(record(A), {
+			history: { edits: [{ ...edit("x", record(A), 2), editor: null }, edit("maintainer", "Fixes it.", 0)] },
+		});
+		expect(gone.warnings).toEqual(untrusted("the account that last changed its section is gone"));
+		const hidden = await read(record(A), { permissions: { maintainer: 403 } });
+		expect(hidden).toMatchObject({
+			record: "review-record -",
+			warnings: untrusted("cannot read the permission of maintainer, who last changed its section (HTTP 403)"),
+		});
+	});
+
+	test("reads the edit history by page, up to its newest 100 edits", async () => {
+		const others = (count: number, from: number) =>
+			Array.from({ length: count }, (_, i) => edit("alice", `${record(A)}\n\nNote ${i}.`, from - i));
+		const paged = await read(`${record(A)}\n\nNote 0.`, {
+			history: {
+				edits: [...others(29, 200), edit("maintainer", record(A), 2), edit("maintainer", "Fixes it.", 0)],
+			},
+		});
+		expect(paged).toMatchObject({ record: `review-record current ${A}`, warnings: [] });
+		expect(paged.fixture.historyQueries.map((query) => query.after)).toEqual([null, "10", "20", "30"]);
+		const long = await read(`${record(A)}\n\nNote 0.`, {
+			history: { edits: [...others(101, 200), edit("maintainer", record(A), 2)] },
+		});
+		expect(long.warnings).toEqual(
+			untrusted("its newest 100 edits all leave the section as it is, so who wrote it is unknown"),
+		);
+		expect(long.fixture.historyQueries).toHaveLength(10);
+	});
+
+	test("fails on a history it cannot read as GitHub documents it", async () => {
+		const fails = (options: Parameters<typeof setup>[1]) =>
+			pullRequestStatus(
+				pr,
+				setup([pull({ body: record(A), checks: null, reviews: page([]), threads: page([]) })], {
+					permissions,
+					...options,
+				}).deps,
+			);
+		await expect(
+			fails({ history: { edits: [edit("maintainer", record(A), 0), edit("maintainer", "Fixes it.", 1)] } }),
+		).rejects.toThrow("edits are not newest first");
+		await expect(fails({ history: { edits: [edit("maintainer", record(B), 1)] } })).rejects.toThrow(
+			"newest edit is not its body",
+		);
+		await expect(fails({ history: { body: record(B) } })).rejects.toThrow("changed while reading its edit history");
+		await expect(fails({ permissions: { maintainer: "push" } })).rejects.toThrow('unknown permission "push"');
+	});
+
+	test("reads no history for a section that records nothing", async () => {
+		const skipped = await read("## Review\n\nSkipped.");
+		expect(skipped.fixture.historyQueries).toEqual([]);
+		expect(skipped.fixture.permissionRequests).toEqual([]);
+	});
+
+	test("agrees with a model of who last changed the section across random histories", async () => {
+		// mulberry32, seeded, so every run replays the same histories.
+		let seed = 7;
+		const next = (n: number) => {
+			seed = (seed + 0x6d2b79f5) | 0;
+			let t = Math.imul(seed ^ (seed >>> 15), seed | 1);
+			t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+			return ((t ^ (t >>> 14)) >>> 0) % n;
+		};
+		const seen = new Set<string>();
+		// Label 0 is a section recording nothing, and -1 no section.
+		const records = ["Nothing yet.", `- Head: ${A}`, `- Head: ${B}`];
+		const noise = ["", "\n", "\n<!-- marker -->", `\nmechanical fix by codex: merged (head ${C})`];
+		const people = [
+			{ __typename: "User", login: "maintainer" },
+			{ __typename: "User", login: "alice" },
+			{ __typename: "Bot", login: "dependabot" },
+		];
+		for (let trial = 0; trial < 150; trial++) {
+			const count = next(5) === 0 ? 96 + next(10) : 1 + next(8);
+			const versions: { label: number; who: (typeof people)[number]; body: string }[] = [];
+			for (let i = 0; i < count; i++) {
+				// A long history keeps its section for long runs, so some outlast the bound.
+				const keep = i > 0 && next(count > 50 ? 60 : 3) > 0;
+				const label = keep ? versions[i - 1]!.label : next(records.length + 1) - 1;
+				const section = label < 0 ? "" : `## Review\n\n${records[label]}${noise[next(noise.length)]}\n\n`;
+				versions.push({
+					label,
+					who: people[next(3)]!,
+					body: `Intro ${next(5)}.\n\n${section}## Models\n\nSize: S`,
+				});
+			}
+			const current = versions.at(-1)!;
+			const edits =
+				count === 1 ? [] : versions.map((v, i) => edit(v.who.login, v.body, i, v.who.__typename)).reverse();
+			// The model: the newest version whose label differs from the one before it set the record.
+			let expected = "review-record -";
+			if (current.label > 0) {
+				const newestFirst = [...versions].reverse();
+				const k = newestFirst.findIndex((v) => v.label !== current.label);
+				const bounded = count > 1 && (k < 0 ? edits.length > 100 : k >= 100);
+				const setter = k < 0 ? versions[0]! : newestFirst[k - 1]!;
+				seen.add(bounded ? "bounded" : `${k < 0 ? "creation" : "edit"} by ${setter.who.login}`);
+				if (!bounded && setter.who.login === "maintainer")
+					expected = current.label === 1 ? `review-record current ${A}` : `review-record stale ${B}`;
+			}
+			const result = await read(current.body, {
+				diffs: { [A]: "new", [B]: "old" },
+				history: { edits, author: versions[0]!.who },
+			});
+			expect(result.record, `trial ${trial}`).toBe(expected);
+		}
+		expect([...seen].sort()).toEqual([
+			"bounded",
+			"creation by alice",
+			"creation by dependabot",
+			"creation by maintainer",
+			"edit by alice",
+			"edit by dependabot",
+			"edit by maintainer",
+		]);
 	});
 });
 

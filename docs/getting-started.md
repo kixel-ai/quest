@@ -68,7 +68,7 @@ queues it to land once a review covers its head and checks pass.
 `/quest-run` queues a writer's PR that changes no user-facing behavior,
 such as one editing only quests or tests, without asking, unless your
 `CONTRIBUTING.md` opts out, and the same way any trivial PR, such as a
-dependency bump, once Pullfrog approves its head.
+dependency bump, once a local review you ran covers its head.
 The quest is complete, its plan leaves the tree, and the quests that required it
 can become ready.
 

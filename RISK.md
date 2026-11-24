@@ -71,8 +71,8 @@ class: its PRs merged, the culprits among them, and their wait on a person.
 - `refactor` - code changes that keep every behavior and output the same,
   such as a rename inside a module or a simplification
 - `trivial` - a dependency or pin bump at any tier, or another change as
-  small that is not high, from any author, which lands once Pullfrog
-  approves its head
+  small that is not high, from any author, which lands once a
+  maintainer's local `quest review` record passes on its head
 
 ## High
 

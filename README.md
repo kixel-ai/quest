@@ -579,7 +579,7 @@ comes last, and a missing value prints as `-`:
 | --- | --- |
 | `url`, `state`, `draft`, `head` | The PR URL; `open`, `closed`, or `merged`; `true` or `false`; the head SHA. |
 | `mergeable`, `merge-state`, `review-decision` | GitHub's values, lowercased. |
-| `review-record` | Whether the PR body's [`## Review` record](#review-locally) still covers the head, and the head it names last: `current` when it is the head, `diff-identical` when `git diff <base>...<head>` prints the same as for it, `stale` otherwise, or `unknown` when GitHub cannot compare them, such as a diff too large; `-` when the record names no full SHA. Whose record counts is the reader's call. |
+| `review-record` | Whether the PR body's [`## Review` record](#review-locally) still covers the head, and the head it names last: `current` when it is the head, `diff-identical` when `git diff <base>...<head>` prints the same as for it, `stale` otherwise, or `unknown` when GitHub cannot compare them, such as a diff too large; `-` when the record names no full SHA, or when someone without write access to the base repository, such as a bot or the PR's contributor, last changed the section's text, which `quest status` reads from the body's edit history and warns about. HTML comments and [`quest land`](#the-watchers-own-queue)'s fixer lines are no part of that text, so a bot adding them changes no record. |
 | `risk` | The record's [risk tier](#risk-tiers), `low`, `medium`, or `high`; the same state as `review-record` for the head it names; the tier its classifier set before any reviewer raised it; and the reason. `-` when the record names none, and `- malformed -` with why when its risk lines do not parse, which `quest merge` refuses. |
 | `class` | The `## Automatic` class of the base's `RISK.md` the record's classifier found the change in, or `-`. |
 | `auto-merge` | Method, who enabled it, when, and the head it was enabled on. |
@@ -1773,9 +1773,9 @@ text to `quest status` and the record alike; the rest of the body stays as writt
 gains it at the end, unless it ends inside an unclosed code fence or HTML
 comment, which fails the record. With no such PR, or a remote off GitHub, it changes nothing
 and prints `record skipped: <why>`. It edits as the user the GitHub token names
-(`GH_TOKEN`, `GITHUB_TOKEN`, or `gh auth token`), and `/quest-merge` counts the
-record only on a PR whose author has write access, so review your
-own PRs with your own token. A record GitHub refuses fails the command after the
+(`GH_TOKEN`, `GITHUB_TOKEN`, or `gh auth token`), and `quest status` counts the
+record only while a user with write access last changed it, so a
+contributor's own record counts for nothing. A record GitHub refuses fails the command after the
 round's report, with exit status 1. It exits 0 once the round
 finishes, whatever it found, 2 for invalid arguments or a checkout that
 cannot be reviewed, 3 when no eligible reviewer could run, each not installed,
