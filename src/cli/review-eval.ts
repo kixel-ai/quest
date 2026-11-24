@@ -14,7 +14,7 @@ import type { HarnessName } from "./agent";
 import { git } from "./git";
 import { type ClaimDependencies, upstream } from "./claims";
 import { readRemote, remoteRepository, requireRemote } from "./github";
-import type { Model } from "./models";
+import { type Model, unfit } from "./models";
 import { recorded } from "./models-record";
 import {
 	type Assessment,
@@ -27,6 +27,8 @@ import {
 	firstRound,
 	pickReviewer,
 	reviewSize,
+	listing,
+	secondsTo,
 	shadowOf,
 } from "./review";
 import type { Session } from "./usage";
@@ -322,7 +324,10 @@ export interface EvalOptions {
 	root: string;
 	/** The set's path; defaults to {@link EVAL_FILE} at the checkout's root. */
 	set?: string;
-	/** The only reviewer, at its size's entry, with `model` and `effort` overriding it; else the pick and its shadow. */
+	/**
+	 * The only reviewer, at its entry in the case's list, its size's or the high one, with `model` and `effort`
+	 * overriding it; else the pick and its shadow, or for a high case the pick and the second reviewer.
+	 */
 	harness?: HarnessName;
 	model?: string;
 	effort?: string;
@@ -341,6 +346,8 @@ export interface Seated {
 	effort: string;
 	/** The size's pick one effort away, beside the pick as `quest review` runs it. */
 	shadow?: true;
+	/** A high case's reviewer from a vendor other than the pick's, as `quest review` runs it. */
+	second?: true;
 	session: string;
 	usage: Usage[];
 	score: number;
@@ -372,23 +379,41 @@ export interface EvalReport {
 	rules: { sha: string } | null;
 	scored: Scored[];
 	/**
-	 * Each seat over every case: `pick`, `shadow`, and, unless `--harness` named one reviewer, `either`, what the
-	 * case's seats found together, as a run of the pick and its shadow finds it.
+	 * Each seat over every case: `pick`, `shadow`, `second`, and, unless `--harness` named one reviewer, `either`, what
+	 * the case's seats found together, as a run of all of them finds it.
 	 */
 	totals: Record<string, Tally>;
-	/** Each seat by the case's size and tier, as `pick M` or `shadow high`. */
+	/** Each seat by the case's size and tier, as `pick M`, `shadow medium`, or `second high`. */
 	by: Record<string, Tally>;
 	/** The cost of the run's sessions at API list price, as token-max prices them, or null when it is not installed. */
 	cost: { usd: number; complete: boolean; priced: number; sessions: number } | null;
 }
 
-/** The reviewers a case gets: `harness`'s alone, or the size's pick, avoiding its writer, and the pick's shadow. */
-export function evalSeats(entry: EvalCase, options: Pick<EvalOptions, "harness" | "model" | "effort">) {
-	if (options.harness !== undefined)
-		return [{ reviewer: pickReviewer(entry.size, options, () => false), shadow: undefined }];
-	const pick = pickReviewer(entry.size, {}, (model: Model) => model.model === entry.writer);
-	const shadow = shadowOf(entry.size, pick);
-	return [{ reviewer: pick, shadow: undefined }, ...(shadow ? [{ reviewer: shadow, shadow: true as const }] : [])];
+/**
+ * The reviewers a case gets, as `quest review` seats them for its classified tier: `harness`'s alone, or the pick,
+ * avoiding its writer, and its shadow, or for a high case no shadow but a second reviewer from another vendor, both from
+ * the high list.
+ */
+export function evalSeats(
+	entry: EvalCase,
+	options: Pick<EvalOptions, "harness" | "model" | "effort">,
+): { reviewer: Model; shadow?: true; second?: true }[] {
+	const listed = listing(entry.size, entry.tier);
+	if (options.harness !== undefined) return [{ reviewer: pickReviewer(listed, options, () => false) }];
+	const avoided = entry.writer === null ? () => false : unfit(entry.writer);
+	const pick = pickReviewer(listed, {}, avoided);
+	const seats: { reviewer: Model; shadow?: true; second?: true }[] = [{ reviewer: pick }];
+	const shadow = entry.tier === "high" ? null : shadowOf(entry.size, pick);
+	if (shadow) seats.push({ reviewer: shadow, shadow: true });
+	if (entry.tier === "high") {
+		const second = secondsTo(pick, avoided)[0];
+		if (second === undefined)
+			throw new ReviewInputError(
+				`#${entry.pull} is high, and no model of the ${listed} list from a vendor other than ${pick.harness}'s may review it`,
+			);
+		seats.push({ reviewer: second, second: true });
+	}
+	return seats;
 }
 
 /** The indexes of `defects` a finding names a line of. */
@@ -472,13 +497,14 @@ async function reviewCase(
 		const controller = new AbortController();
 		const signal = options.signal ? AbortSignal.any([options.signal, controller.signal]) : controller.signal;
 		const results = await Promise.allSettled(
-			seats.map(({ reviewer, shadow }) =>
+			seats.map(({ reviewer, shadow, second }) =>
 				firstRound(reviewer, { ...opening, signal }).then(
 					({ session, usage, verdict }): Seated => ({
 						reviewer: reviewer.harness,
 						model: reviewer.model,
 						effort: reviewer.effort,
 						...(shadow && { shadow }),
+						...(second && { second }),
 						session,
 						usage,
 						score: verdict.score,
@@ -513,8 +539,8 @@ function count(tally: Tally, entry: EvalCase, found: number[], findings: Finding
 }
 
 /**
- * The run's tallies: each seat in all, and by size and tier, with `either` for what a run of the pick and its shadow
- * found together when `combined`, every case counting, as one whose pick has no shadow.
+ * The run's tallies: each seat in all, and by size and tier, with `either` for what a run of the case's seats found
+ * together when `combined`, every case counting, as one whose pick has no shadow.
  */
 export function tallies(scored: Scored[], combined: boolean): Pick<EvalReport, "totals" | "by"> {
 	const totals: Record<string, Tally> = {};
@@ -528,7 +554,8 @@ export function tallies(scored: Scored[], combined: boolean): Pick<EvalReport, "
 			count((into[key] ??= empty()), entry, found, findings);
 	};
 	for (const { case: entry, seats } of scored) {
-		for (const seat of seats) add(seat.shadow ? "shadow" : "pick", entry, seat.found, seat.findings);
+		for (const seat of seats)
+			add(seat.shadow ? "shadow" : seat.second ? "second" : "pick", entry, seat.found, seat.findings);
 		// A case whose pick has no shadow, as one at low effort, still counts toward what the run found.
 		if (combined) {
 			const found = [...new Set(seats.flatMap((seat) => seat.found))];
@@ -595,7 +622,7 @@ export function evalLines(report: EvalReport): string[] {
 		const kind = entry.clean ? "clean" : `${entry.defects!.length} defect(s)`;
 		lines.push(`#${entry.pull} ${entry.size} ${entry.tier} ${kind}`);
 		for (const seat of seats) {
-			const name = `${seat.reviewer} ${seat.model} ${seat.effort}${seat.shadow ? " shadow" : ""}`;
+			const name = `${seat.reviewer} ${seat.model} ${seat.effort}${seat.shadow ? " shadow" : seat.second ? " second" : ""}`;
 			const result = entry.clean ? "" : ` found ${seat.found.length}/${entry.defects!.length},`;
 			lines.push(
 				`  ${name}: score ${seat.score},${result} ${seat.findings.length} findings; ${tokens(seat.usage)}; session ${seat.session}`,
