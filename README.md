@@ -752,7 +752,8 @@ head runs, and ignores findings the base or the head's merge base with it
 already has in a list entry or line the head left unchanged, so being behind
 the base adds none, while an entry the head edits owns its findings; run a `quest` the PR
 cannot modify, since the head's own build could skip the check. A head without
-quests skips it when the base or its merge base has none. While the base requires an approval the PR lacks, such as an
+quests skips it when the base or its merge base has none, and one whose quest
+documents cannot be read is refused. While the base requires an approval the PR lacks, such as an
 online reviewer's that a ruleset requires (GitHub's review decision is
 `review_required` or `changes_requested`), it only arms auto-merge, which waits
 for the approval, and refuses where nothing would wait, since an admin's token
