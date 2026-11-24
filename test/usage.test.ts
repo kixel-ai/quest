@@ -1152,6 +1152,30 @@ describe("usage", () => {
 		);
 	});
 
+	test("an Antigravity reviewer's spend is a lower bound, since token-max reads none of its sessions", async () => {
+		const body = [
+			"## Models",
+			"",
+			"- Size: M",
+			"",
+			"## Review",
+			"",
+			"Rewritten by `quest review` after each round.",
+			"",
+			`- Head: ${"a".repeat(40)}`,
+			"- Reviewer: Antigravity, gemini-4-carbon, high effort",
+			"- Rounds: 1; findings 0: fixed 0, refuted 0, open 0",
+			"",
+		].join("\n");
+		const { root, deps, sessions } = setup({
+			pulls: [pr(40, "quest/m0/gemini", body, "2026-11-06T00:00:00Z", { updated_at: "2026-11-07T00:00:00Z" })],
+		});
+		const report = await usage(root, { since: "2026-11-05" }, deps(sessions));
+		const row = report.reviewers.find((each) => each.harness === "Antigravity")!;
+		expect(row).toMatchObject({ model: "gemini-4-carbon", reviewed: 1 });
+		expect(row.spent.complete).toBe(false);
+	});
+
 	test("rolls up the writer A/B by size and arm, leaving out a PR a writer ran off its arm", async () => {
 		const models = (...lines: string[]) =>
 			[

@@ -1025,7 +1025,8 @@ function reviewerRows(pulls: PullRow[]): ReviewerRow[] {
 				reviewed: 0,
 				tally: noCounts(),
 				firstRounds: noFirst(),
-				spent: noSpend(),
+				// token-max reads no Antigravity session, so what an Antigravity reviewer spent is never all counted.
+				spent: review.harness === "Antigravity" ? { ...noSpend(), complete: false } : noSpend(),
 			};
 			rows.set(id, found);
 		}

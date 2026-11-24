@@ -1563,7 +1563,8 @@ Without a record, or when its last line names an `unknown` model, the harness
 running the command, usually the session that
 just pushed, detected from the variables Claude Code, Codex, and Antigravity
 each set, is taken to be the latest writer, so Codex reviews from Claude Code
-and Claude Code from Codex. `--harness` names the only reviewer instead of
+and Claude Code from Codex where Sol leads the size, and Carbon reviews from
+either at M. `--harness` names the only reviewer instead of
 the pick and the shadow, at its entry's model and effort, and `--model` and `--effort`
 override the size pick's or that reviewer's, as a repository whose `AGENTS.md`
 names other reviewers needs. A `--harness` run keeps the other

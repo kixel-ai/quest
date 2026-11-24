@@ -25,9 +25,13 @@ const sonnet = (effort: string): Model => ({ harness: "claude", model: "claude-s
 const fable = (effort: string): Model => ({ harness: "claude", model: "claude-fable-5-2", effort });
 const carbon = (effort: string): ReviewModel => ({ harness: "agy", model: "gemini-4-carbon", effort });
 
-/** The efforts a model offers when they are fewer than the whole ladder, as `agy models` lists Carbon's. */
+/**
+ * The efforts a model offers when they are fewer than the whole ladder, as `agy models` lists them for the
+ * Antigravity models quest names; any other Antigravity model's are unknown, so it runs no shadow.
+ */
 export const MODEL_EFFORTS: Readonly<Record<string, readonly string[]>> = {
 	"gemini-4-carbon": ["low", "medium", "high"],
+	"gemini-3.8-flash": ["low", "medium", "high"],
 };
 
 /**

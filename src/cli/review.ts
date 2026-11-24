@@ -1152,6 +1152,15 @@ const reported = (usage: Omit<Usage, "turn"> | undefined): usage is Omit<Usage, 
 /** The longest stderr tail kept for an error message. */
 const TAIL = 16 * 1024;
 
+/** Where `harness`'s CLI is on PATH, else the error that it is not installed, which passes the round on. */
+function installed(harness: string, env: NodeJS.ProcessEnv): string {
+	try {
+		return requireProgram(harness, env);
+	} catch (error) {
+		throw new ReviewerUnavailableError(harness as ReviewHarness, "not installed", (error as Error).message);
+	}
+}
+
 /**
  * Run one turn in `cwd`, forwarding termination signals so the reviewer never
  * outlives the command. The CLI is found on PATH's absolute directories, never
@@ -1173,9 +1182,9 @@ function run(
 		}
 		let program: string;
 		try {
-			program = requireProgram(argv[0], env);
+			program = installed(argv[0]!, env);
 		} catch (error) {
-			reject(new ReviewerUnavailableError(argv[0] as ReviewHarness, "not installed", (error as Error).message));
+			reject(error);
 			return;
 		}
 		const child = spawn(program, argv.slice(1), {
@@ -1311,6 +1320,8 @@ async function prepare(
 	const host = managed ? ", ignoring the host-managed provider's route" : "";
 	const loggedOut = `${harness} is not logged in${profile(reviewer, env)}${through}${host}; run \`${reviewer.login}\``;
 	const loggedIn = async (env: NodeJS.ProcessEnv) => {
+		// A CLI that is not installed passes the round on before its workspace can fail the run.
+		if (reviewer.isolated) installed(reviewer.status[0]!, env);
 		const dir = reviewer.isolated ? workspace({}) : cwd;
 		try {
 			return (await run(reviewer.status, dir, env, "", undefined, signal)).code === 0;
@@ -1889,11 +1900,12 @@ const SHADOW_STEPS: Record<Size, -1 | 1 | null> = { XS: null, S: 1, M: 1, L: -1,
 /**
  * The shadow of `routed`, the pick for a PR of `size`: its model one effort away by `SHADOW_STEPS`, or null when the
  * size runs none or no effort is known there, as below Opus low, above xhigh, above the efforts its model offers,
- * such as Carbon's high, or off the ladder, such as Codex's `minimal`.
+ * such as Carbon's high, on an Antigravity model whose efforts are unknown, or off the ladder, such as Codex's
+ * `minimal`.
  */
 export function shadowOf(size: Size, routed: ReviewModel): ReviewModel | null {
 	const step = SHADOW_STEPS[size];
-	const ladder = MODEL_EFFORTS[routed.model] ?? EFFORTS;
+	const ladder = MODEL_EFFORTS[routed.model] ?? (routed.harness === "agy" ? [] : EFFORTS);
 	const at = ladder.indexOf(routed.effort);
 	const effort = step === null || at < 0 ? undefined : ladder[at + step];
 	return effort === undefined ? null : { ...routed, effort };
