@@ -604,9 +604,12 @@ describe("readT3Messages", () => {
 
 	test("reads no further into another project's rows than their project", () => {
 		const path = join(tempDir(), "statev2.sqlite");
-		t3State(path, "/elsewhere", [{ id: "a", at: "2026-11-06T10:00:00.000Z", payload: { createdBy: "robot" } }]);
+		t3State(path, "/elsewhere", [{ id: "a", at: "2026-11-06T10:00:00.000Z", payload: {} }]);
+		const db = new DatabaseSync(path);
+		db.exec("UPDATE orchestration_v2_projection_messages SET payload_json = '{'");
+		db.close();
 		expect(readT3Messages(path, SINCE, { ...repositories({}, "acme/proj"), name: (dir) => dir })).toEqual([]);
-		expect(() => readT3Messages(path, SINCE, plain)).toThrow(/unknown sender: robot/);
+		expect(() => readT3Messages(path, SINCE, plain)).toThrow(SyntaxError);
 	});
 
 	test("fails on a sender or client it does not know", () => {
@@ -764,6 +767,7 @@ describe("messages", () => {
 		expect(repositories({}, null).keep(null)).toBe(true);
 		const local = repositories({ QUEST_KIXEL_URL: "http://localhost:8787" }, "localhost:8787/Acme/Proj");
 		expect(local.keep("localhost:8787/acme/proj")).toBe(true);
+		expect(repositories({}, "[::1]:8787/Acme/Proj").keep("[::1]:8787/acme/proj")).toBe(true);
 		expect(["Acme/Proj", "kixel.quest/acme/proj", "/work/acme/proj"].map((name) => scope.keep(name))).toEqual([
 			true,
 			false,

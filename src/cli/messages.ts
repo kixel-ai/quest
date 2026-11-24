@@ -3,11 +3,11 @@
 // drives, Claude Code's `origin` for the rest of its sessions, and Codex's content provenance for its interactive ones.
 // Answers come from each harness's own log, which keeps the question's options. Output goes to stdout only.
 import { closeSync, existsSync, openSync, readdirSync, readSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { hostedRepository } from "./forge";
 import { GitError } from "./git";
-import { type Remote, type RemoteHost, githubRepository, readRemote, remoteHost } from "./github";
+import { type RemoteHost, githubRepository, readRemote, remoteHost } from "./github";
 import { RECOMMENDED } from "./rules";
 import { kixelUrl } from "./tokens";
 
@@ -177,8 +177,8 @@ export function claudeText(content: unknown): string | null {
  */
 const WORKTREE = /^(.+?)[/\\](?:\.claude[/\\]worktrees|\.worktrees)[/\\][^/\\]+(?:[/\\].*)?$/;
 
-/** A repository's name as `keep` compares it: both forges ignore case in `owner/name`, a directory keeps it. */
-const folded = (name: string) => (/^(?:[\w.-]+(?::\d+)?\/)?[\w.-]+\/[\w.-]+$/.test(name) ? name.toLowerCase() : name);
+/** A repository's name as `keep` compares it: both forges ignore case in their names, a directory keeps it. */
+const folded = (name: string) => (isAbsolute(name) ? name : name.toLowerCase());
 
 /**
  * Names each directory's repository by its checkout's configured `origin`, before `insteadOf` rewrites, as
@@ -200,15 +200,16 @@ export function repositories(env: NodeJS.ProcessEnv, wanted: string | null): Rep
 			let name = cache.get(dir);
 			if (name === undefined) {
 				const checkout = existsSync(dir) ? dir : WORKTREE.exec(dir)?.[1];
-				let remote: Remote | null = null;
+				let host: RemoteHost | null = null;
 				if (checkout !== undefined && existsSync(checkout))
 					try {
-						remote = readRemote(checkout, "origin");
+						const remote = readRemote(checkout, "origin");
+						host = remote === null ? null : remoteHost(remote, hosted);
 					} catch (error) {
 						// A directory git cannot read, such as a worktree whose repository moved, is named by itself.
 						if (!(error instanceof GitError)) throw error;
 					}
-				name = named(remote === null ? null : remoteHost(remote, hosted)) ?? dir;
+				name = named(host) ?? dir;
 				cache.set(dir, name);
 			}
 			return name;
