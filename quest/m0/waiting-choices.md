@@ -49,6 +49,15 @@ Decided by the planning agent, 2026-11-24, with the maintainer away:
   `(Recommended)`, matched case-insensitively and ending the label (rejected:
   any nested list, which would turn checklists such as moq-dev/moq's deploy
   steps into choices). An item may hold detail lists beside it.
+- ✅ A plain `Maintainer:` item whose lead text ends in `?` asks a question, so
+  a nested list under it with no `(Recommended)` bullet is a choice list
+  missing its recommendation, which `quest check` rejects by line; a lead
+  that is not a question keeps its nested lists as detail, such as a
+  checklist (rejected: leaving the unmarked list as prose, which drops the
+  decision's buttons silently, as CodeRabbit found on
+  [kixel-ai/quest#854](https://github.com/kixel-ai/quest/pull/854#discussion_r4676485153)).
+  Decided by the `/quest-run` coordinator under the maintainer's "afk merge"
+  grant, 2026-11-24, so reviewable.
 - ✅ `quest check` rejects, by line: a choice list under anything but a plain
   `Maintainer:` item; fewer than two choices; other than exactly one
   `(Recommended)`; `(Recommended)` anywhere but the end of a label; an empty
@@ -93,7 +102,7 @@ Agent's recommendations, for the implementer to revisit:
 
 Tests: a decision parses its question and choices, the recommended one
 flagged, from a quest and from a draft; a choice list beside a detail list;
-a detail list alone stays prose; each `quest check` rejection by line; a
+a detail list alone stays prose; a question's unmarked nested list is rejected while a non-question's stays detail; each `quest check` rejection by line; a
 broken hand-back list reads as prose with a warning; `(action)` and `(PC)`
 are actions, only `(PC)` dropped by `--no-pc`; an unknown qualifier still
 fails.
