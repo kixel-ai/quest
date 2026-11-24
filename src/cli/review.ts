@@ -2166,7 +2166,8 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 	}
 
 	// A head classified or overridden high takes its pick from the high list. A reviewer's raise adds only
-	// the second reviewer, so the pick, and its session, never flip between lists on the same head.
+	// the second reviewer, so the pick, and its session, stay on one list on the same head, unless a raise above the
+	// tier the maintainer judged, yet below their override, ends the override.
 	const listed = listing(sized.size, overridden(settle(classified.value, []), override).tier);
 	if (listed !== sized.size) candidates = rankedReviewers(listed, options, avoided);
 	// A high head gets its two reviewers from different vendors and no shadow.

@@ -1821,7 +1821,8 @@ Fable's. It is marked `second`, in a session of its own that
 reviews every head while the tier is high and settles its findings after. A
 head the classifier or `--override` holds high also takes its pick from that
 list, whatever the PR's size; a reviewer's raise changes only the second
-reviewer, so the pick, and its session, stay the same on the head. `--model`
+reviewer, so the pick, and its session, stay the same on the head, unless that
+raise ends an override, as below. `--model`
 and `--effort` change only the pick, so the second reviewer still runs; the
 one reviewer `--harness` names runs alone, at its entry in the pick's list,
 with none. A round that raises the tier to high saves its rounds and runs the
@@ -1836,7 +1837,9 @@ branch in place of the reviewed one, as `- Risk: <tier>, <reason>` and
 `- Overridden: from <tier> by the maintainer`. It holds across heads until
 the reviewed tier grows riskier than the one overridden, other than to the
 override's own tier, which agrees with it, and `quest usage`
-counts overrides as a reading of the tier's accuracy.
+counts overrides as a reading of the tier's accuracy. So a raise to medium on
+a head overridden from low to high ends the override, and the next run on that
+head picks from the PR's size list again.
 
 ### Score the reviewer
 

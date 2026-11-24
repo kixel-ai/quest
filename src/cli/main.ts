@@ -1738,7 +1738,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"high list from a vendor other than the pick's that can run, in its own session, which reviews " +
 				"every head while the tier is high and settles its findings after. A head the classifier or the " +
 				"maintainer's override holds high also takes its pick from that list, whatever the PR's size; a " +
-				"reviewer's raise changes only the second reviewer, so the pick stays the same on the head. --model and " +
+				"reviewer's raise changes only the second reviewer, so the pick stays the same on the head, unless that raise ends the override. --model and " +
 				"--effort change only the pick, so the second reviewer still runs; the one reviewer --harness names runs " +
 				"alone, at its entry in the pick's list, with none. A round that raises the tier to high saves its rounds and " +
 				"runs the second reviewer at once, printing those rounds before the error when that review fails, as when no second reviewer can run. " +

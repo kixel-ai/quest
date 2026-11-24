@@ -1524,9 +1524,12 @@ fakes("a high head's pick that cannot run passes down the high list, and each mo
 			"reviewer claude claude-fable-5-2 xhigh",
 			"reviewer codex gpt-6.2-astra xhigh second",
 		]);
-		// Sonnet wrote it, and Sol, its pick, and Opus, its second, are both at their limits: each is named once, and
-		// Fable picks with Astra second.
+		// Sonnet wrote it, and Sol, its pick, and Opus, its second, are both at their limits. Sol's first turn hangs, so
+		// Opus fails first as the second, and once Sol fails too the pick passes over Opus without running it again:
+		// each is named once, and Fable picks with Astra second.
 		vi.stubEnv("FAKE_FAILS", "gpt-6.1-sol,claude-opus-5-5");
+		vi.stubEnv("FAKE_HANG", join(s.bin, "..", "sol.pid"));
+		const before = s.calls().length;
 		const both = await quest("--root", s.repo, "review", "--new", "--exclude-model", "claude-sonnet-5-5");
 		expect(both.code, both.stderr).toBe(0);
 		expect(skips(both.stdout)).toEqual([
@@ -1537,6 +1540,12 @@ fakes("a high head's pick that cannot run passes down the high list, and each mo
 			"reviewer claude claude-fable-5-2 xhigh",
 			"reviewer codex gpt-6.2-astra xhigh second",
 		]);
+		// Opus ran one attempt, its review turn and the findings turn that hit the limit.
+		const opus = s
+			.calls()
+			.slice(before)
+			.filter((c) => effortOf(c) !== null && c.argv[c.argv.indexOf("--model") + 1] === "claude-opus-5-5");
+		expect(opus).toHaveLength(2);
 	} finally {
 		vi.unstubAllGlobals();
 	}
