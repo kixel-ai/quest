@@ -86,7 +86,9 @@ const logged = (call) => {
  * CODEX_ACCESS_TOKEN but not CODEX_API_KEY. FAKE_REJECTED has the API
  * reject the login in each turn with the real CLI's error, in the style it
  * names. FAKE_LIMITED fails a turn on the account's usage limit with the real
- * CLI's error, naming its reset unless set to `unknown`. FAKE_CLASSIFY fails
+ * CLI's error, naming its reset unless set to `unknown`; for agy, `stderr`
+ * reports success but exits 1 with the error only on stderr, and
+ * FAKE_EMPTY_ERROR fails its first turn with an empty error. FAKE_CLASSIFY fails
  * the classifier's turn of each `<harness>-rejected` or `<harness>-limited` it
  * lists, the same way. FAKE_FAILS limits FAKE_LOGGED_OUT, FAKE_REJECTED, and
  * FAKE_LIMITED to the harnesses and models it lists, comma-separated, so one
@@ -307,12 +309,22 @@ if (at("--json-schema") && !at("--conversation")) {
 	const reply = failing.includes("agy-unusable") ? JSON.stringify({ tier: "huge", reason: "x" }) : ${RISK_REPLY};
 	result({ response: reply + "\\n", structured_output: JSON.parse(reply) }, tokens(40, 3, 1, 0));
 } else if (!at("--conversation")) {
+	if (process.env.FAKE_EMPTY_ERROR) {
+		result({ status: "ERROR", error: "" });
+		console.error("error: something broke");
+		process.exit(1);
+	}
 	if (process.env.FAKE_DENIED) {
 		result({ denied_actions: [{ action: "command", display_name: "Bash" }] });
 		process.exit(0);
 	}
 	result({ response: "Found an off-by-one.\\n" }, tokens(60, 30, 25, 10), tokens(30, 20, 15, 0));
 } else {
+	if (fake("FAKE_LIMITED") === "stderr") {
+		result({});
+		console.error("error: " + QUOTA("quotaResetTimeStamp:2030-03-17T17:46:40Z"));
+		process.exit(1);
+	}
 	if (fake("FAKE_LIMITED")) fail(QUOTA(fake("FAKE_LIMITED") === "unknown" ? "" : "quotaResetDelay:3600s quotaResetTimeStamp:2030-03-17T17:46:40Z"));
 	${REPLY}
 	result(

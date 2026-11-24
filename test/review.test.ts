@@ -1151,47 +1151,53 @@ test.skipIf(caseInsensitive)(
 	},
 );
 
-test.skipIf(caseInsensitive)("agy's export fetches what a partial clone lacks of the head, in one batch", () => {
-	const dir = realpathSync(tempDir());
-	const run = (cwd: string, ...args: string[]) =>
-		execFileSync("git", ["-C", cwd, ...args], {
-			encoding: "utf8",
-			env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
-		});
-	const source = join(dir, "source");
-	run(dir, "init", "-q", source);
-	write(source, "top.txt", "top\n");
-	write(source, "sub/inner.txt", "inner\n");
-	run(source, "add", "-A");
-	run(source, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "one");
-	run(source, "config", "uploadpack.allowFilter", "true");
-	run(source, "config", "uploadpack.allowAnySHA1InWant", "true");
-	const part = join(dir, "part");
-	run(dir, "clone", "-q", "--no-local", "--filter=blob:none", "--sparse", `file://${source}`, part);
-	const head = run(part, "rev-parse", "HEAD").trim();
-	// The sparse checkout leaves sub/inner.txt's blob behind.
-	expect(run(part, "rev-list", "--objects", "--missing=print", "--no-walk", head)).toMatch(/^\?/m);
-	const call = agyTurn(
-		{
-			mergeBase: head,
-			root: part,
-			head,
-			ranges: [],
-			instructions: "",
-			model: "m",
-			effort: "low",
-			schema: {},
-			schemaFile: "",
-		},
-		"",
-		[],
-	);
-	try {
-		expect(readFileSync(join(call.workspace!.dir, "head", "sub", "inner.txt"), "utf8")).toBe("inner\n");
-	} finally {
-		rmSync(call.workspace!.dir, { recursive: true, force: true });
-	}
-});
+test.skipIf(caseInsensitive)(
+	"agy's export fetches what a partial clone lacks of the head, in one batch, in the caller's runtime directory",
+	() => {
+		const dir = realpathSync(tempDir());
+		const run = (cwd: string, ...args: string[]) =>
+			execFileSync("git", ["-C", cwd, ...args], {
+				encoding: "utf8",
+				env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
+			});
+		const source = join(dir, "source");
+		run(dir, "init", "-q", source);
+		write(source, "top.txt", "top\n");
+		write(source, "sub/inner.txt", "inner\n");
+		run(source, "add", "-A");
+		run(source, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "one");
+		run(source, "config", "uploadpack.allowFilter", "true");
+		run(source, "config", "uploadpack.allowAnySHA1InWant", "true");
+		const part = join(dir, "part");
+		run(dir, "clone", "-q", "--no-local", "--filter=blob:none", "--sparse", `file://${source}`, part);
+		const head = run(part, "rev-parse", "HEAD").trim();
+		// The sparse checkout leaves sub/inner.txt's blob behind.
+		expect(run(part, "rev-list", "--objects", "--missing=print", "--no-walk", head)).toMatch(/^\?/m);
+		const call = agyTurn(
+			{
+				mergeBase: head,
+				root: part,
+				head,
+				ranges: [],
+				instructions: "",
+				model: "m",
+				effort: "low",
+				schema: {},
+				schemaFile: "",
+				// The caller's environment, not the process's, places the turn.
+				env: { ...process.env, XDG_RUNTIME_DIR: join(dir, "run") },
+			},
+			"",
+			[],
+		);
+		try {
+			expect(call.workspace!.dir.startsWith(join(dir, "run", "quest", "agent", "review-"))).toBe(true);
+			expect(readFileSync(join(call.workspace!.dir, "head", "sub", "inner.txt"), "utf8")).toBe("inner\n");
+		} finally {
+			rmSync(call.workspace!.dir, { recursive: true, force: true });
+		}
+	},
+);
 
 // Root lists any directory, so the refusal only shows for another user.
 test.skipIf(process.getuid?.() === 0 || caseInsensitive)("agy's read rules refuse a parent they cannot list", () => {
@@ -1413,6 +1419,8 @@ agyFakes.for([
 	["FAKE_REJECTED", "1", "error: agy is not logged in; run `agy`"],
 	["FAKE_LIMITED", "reset", "error: agy hit its usage limit; resets 2030-03-17T17:46:40Z"],
 	["FAKE_LIMITED", "unknown", "error: agy hit its usage limit; resets unknown"],
+	["FAKE_LIMITED", "stderr", "error: agy hit its usage limit; resets 2030-03-17T17:46:40Z"],
+	["FAKE_EMPTY_ERROR", "1", "quest: agy failed: agy reported ERROR"],
 	["FAKE_DENIED", "1", "quest: agy failed: agy denied command, which ended the turn"],
 ] as const)(
 	"agy's login, quota, and denied actions fail its round as the real CLI reports them (%s=%s)",
@@ -1421,7 +1429,7 @@ agyFakes.for([
 		vi.stubEnv(flag, value);
 		const result = await quest("--root", s.repo, "review", ...AGY);
 		expect(result.stderr).toBe(`${message}\n`);
-		expect(result.code).toBe(flag === "FAKE_DENIED" ? 1 : 3);
+		expect(result.code).toBe(flag === "FAKE_DENIED" || flag === "FAKE_EMPTY_ERROR" ? 1 : 3);
 	},
 );
 
@@ -3322,6 +3330,7 @@ test("a question about data alone runs with no tools on either CLI", () => {
 		schemaFile: "/s.json",
 		root: "/r",
 		ranges: [],
+		env: {},
 	};
 	const claude = claudeFlags({ ...context, tools: "" });
 	expect(claude[claude.indexOf("--tools") + 1]).toBe("");

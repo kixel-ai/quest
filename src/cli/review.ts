@@ -22,7 +22,6 @@ import {
 	rmSync,
 	writeFileSync,
 } from "node:fs";
-import { homedir } from "node:os";
 import { dirname, join, posix } from "node:path";
 import { promisify } from "node:util";
 
@@ -570,8 +569,8 @@ export interface Context {
 	/** The reply's schema, and where `--output-schema` reads it from. */
 	schema: object;
 	schemaFile: string;
-	/** The gateway Codex sends its requests to, from OPENAI_BASE_URL, which Codex itself no longer reads. */
-	openaiBaseUrl?: string;
+	/** The environment the reviewer's CLI runs in. */
+	env: NodeJS.ProcessEnv;
 	/**
 	 * The tools Claude may call, comma-separated; a reviewer's by default. Empty asks a question about data alone,
 	 * which Codex answers with its tools off.
@@ -1003,7 +1002,10 @@ export function codexFlags(context: Context): string[] {
 		context.model,
 		"-c",
 		`model_reasoning_effort=${JSON.stringify(context.effort)}`,
-		...(context.openaiBaseUrl ? ["-c", `openai_base_url=${JSON.stringify(context.openaiBaseUrl)}`] : []),
+		// Codex itself no longer reads OPENAI_BASE_URL, so the gateway is passed as its setting.
+		...(context.env.OPENAI_BASE_URL
+			? ["-c", `openai_base_url=${JSON.stringify(context.env.OPENAI_BASE_URL)}`]
+			: []),
 	];
 }
 
@@ -1105,8 +1107,8 @@ function entries(dir: string): string[] {
  * paths, so each read rule denies a path beside `dir`'s parents, which it matches by whole components against the path
  * a read resolves to past symlinks and `..`.
  */
-function agySettings(dir: string): string {
-	const home = existsSync(homedir()) ? realpathSync(homedir()) : undefined;
+function agySettings(dir: string, env: NodeJS.ProcessEnv): string {
+	const home = env.HOME && existsSync(env.HOME) ? realpathSync(env.HOME) : undefined;
 	// The rules name what lies beside the turn's directory, which no finding should quote.
 	return JSON.stringify({
 		permissions: {
@@ -1258,12 +1260,12 @@ export function agyTurn(context: Context, prompt: string, flags: string[]): Turn
 			...range.split(" "),
 		]);
 	// Created last, since a turn that is never run leaves its directory behind.
-	const dir = workspace(files);
+	const dir = workspace(files, context.env);
 	// A file, since the rules can outgrow the 128 KiB an argument holds on Linux, as beside a crowded /tmp.
 	const settings = join(dir, AGY_SETTINGS);
 	try {
 		// The rules first, since they refuse a host agy cannot be confined on before any export.
-		writeFileSync(settings, agySettings(dir), { mode: 0o600 });
+		writeFileSync(settings, agySettings(dir, context.env), { mode: 0o600 });
 		if (context.head !== undefined) exportHead(context.root, context.head, join(dir, "head"));
 	} catch (error) {
 		rmSync(dir, { recursive: true, force: true });
@@ -1346,7 +1348,7 @@ const agy: Reviewer = {
 				const usage = record(step?.usage);
 				if (usage !== undefined) steps.set(step!.step_index, usage);
 			},
-			reply(_code, stderr) {
+			reply(code, stderr) {
 				const limit = (failure: string) =>
 					AGY_LIMIT.test(failure) ? { until: agyReset(failure, new Date()) } : undefined;
 				if (result === undefined) return { error: "agy printed no result", limited: limit(stderr) };
@@ -1355,7 +1357,7 @@ const agy: Reviewer = {
 				);
 				const error =
 					result.status !== "SUCCESS"
-						? (text(result.error) ?? `agy reported ${String(result.status)}`)
+						? text(result.error) || `agy reported ${String(result.status)}`
 						: denied.length > 0
 							? `agy denied ${names(denied)}, which ended the turn`
 							: undefined;
@@ -1368,7 +1370,7 @@ const agy: Reviewer = {
 					// Its input tokens leave out the cached ones; its output tokens include thinking.
 					usage: { input: sum("input_tokens") + cached, cached, output: sum("output_tokens") },
 					error,
-					limited: error === undefined ? undefined : limit(`${error}\n${stderr}`),
+					limited: error === undefined && code === 0 ? undefined : limit(`${error ?? ""}\n${stderr}`),
 				};
 			},
 		};
@@ -1498,8 +1500,8 @@ function profile(reviewer: Reviewer, env: NodeJS.ProcessEnv): string {
  * can write, and outside any repository, since Antigravity loads the agent configuration of every directory from its
  * working directory, symlinks resolved, up to the one holding `.git`.
  */
-function workspace(files: Record<string, string>): string {
-	const dir = realpathSync(mkdtempSync(join(privateDirectory(agentDirectory()), "review-")));
+function workspace(files: Record<string, string>, env: NodeJS.ProcessEnv): string {
+	const dir = realpathSync(mkdtempSync(join(privateDirectory(agentDirectory(env)), "review-")));
 	try {
 		for (let up = dir; up !== dirname(up); up = dirname(up))
 			if (existsSync(join(up, ".git")))
@@ -1554,7 +1556,7 @@ async function prepare(
 	const loggedIn = async (env: NodeJS.ProcessEnv) => {
 		// A CLI that is not installed passes the round on before its workspace can fail the run.
 		if (reviewer.isolated) installed(reviewer.status[0]!, env);
-		const dir = reviewer.isolated ? workspace({}) : cwd;
+		const dir = reviewer.isolated ? workspace({}, env) : cwd;
 		let printed = "";
 		const reader: Reader = {
 			line: (line) => {
@@ -2451,7 +2453,7 @@ export async function ask<T>(entries: readonly ReviewModel[], question: Question
 				schema: question.schema,
 				schemaFile,
 				...(question.tools !== undefined && { tools: question.tools }),
-				...(cli.env.OPENAI_BASE_URL && { openaiBaseUrl: cli.env.OPENAI_BASE_URL }),
+				env: cli.env,
 			};
 			reply = await turn(
 				cli,
@@ -3125,7 +3127,7 @@ async function reviewWith(shared: Shared, seat: Seat, responses: string | undefi
 		effort: picked.effort,
 		schema: replySchema,
 		schemaFile,
-		...(cli.env.OPENAI_BASE_URL && { openaiBaseUrl: cli.env.OPENAI_BASE_URL }),
+		env: cli.env,
 	};
 
 	const usage: Usage[] = [];

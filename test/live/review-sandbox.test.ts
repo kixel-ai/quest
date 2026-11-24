@@ -388,6 +388,7 @@ describe.each(["codex", "claude"] as const)("%s", (harness) => {
 				schemaFile: "",
 				root: fixture.clone,
 				ranges: [],
+				env: process.env,
 			};
 			const [program, ...args] = claudeFlags(context);
 			run = spawnSync(program, args, {
@@ -443,6 +444,7 @@ describe.each(["codex", "claude"] as const)("%s", (harness) => {
 				schemaFile: "",
 				root: fixture.clone,
 				ranges: [],
+				env: process.env,
 			};
 			const [program, ...args] = claudeFlags(context);
 			run = spawnSync(program, args, {
@@ -709,6 +711,7 @@ describe("agy", () => {
 	 * path that starts inside the head's export and climbs with `..` to the root.
 	 */
 	const turn = async (prompt: string, deny?: (rules: string[]) => string[]) => {
+		const env = await reviewerEnvironment("agy", clone, process.env);
 		const call = agyTurn(
 			{
 				mergeBase: "origin/main",
@@ -720,6 +723,7 @@ describe("agy", () => {
 				root: clone,
 				head: "HEAD",
 				ranges: ["origin/main..HEAD"],
+				env,
 			},
 			prompt,
 			[],
@@ -735,7 +739,7 @@ describe("agy", () => {
 		try {
 			return spawnSync(call.argv[0]!, call.argv.slice(1), {
 				cwd: call.workspace!.cwd,
-				env: await reviewerEnvironment("agy", clone, process.env),
+				env,
 				input: call.stdin,
 				encoding: "utf8",
 				timeout: 10 * 60_000,

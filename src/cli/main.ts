@@ -1690,7 +1690,8 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"Every turn reviews only the branch's own change, from the merge base of HEAD with the base's tip, so " +
 				"a branch behind its base draws no findings on the base's newer code. The first round runs the " +
 				"reviewer's own review (`codex exec review` with custom instructions, or Claude Code's " +
-				"`/code-review <effort> <merge-base>...HEAD` with text after it), given the range, the base's REVIEW.md, if " +
+				"`/code-review <effort> <merge-base>...HEAD` with text after it, or for agy, which has none, a turn " +
+				"asking what the change breaks), given the range, the base's REVIEW.md, if " +
 				"any, and any responses up front, then resumes that session for one turn that reports the review in one " +
 				"JSON schema without reading anything again. --responses gives the author's fixes and refutations of " +
 				"the last round's findings, required while that round reported any; the reply settles each of those " +
