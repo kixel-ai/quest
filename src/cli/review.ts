@@ -11,8 +11,16 @@
 // refuted with evidence does not recur.
 import { execFile, spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
+import {
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	readdirSync,
+	readFileSync,
+	realpathSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
 import { dirname, join, posix } from "node:path";
 import { promisify } from "node:util";
 
@@ -964,21 +972,28 @@ export function codexFlags(context: Context): string[] {
 const AGY_AGENT = "quest-reviewer";
 
 /**
- * The directories that hold the login a review runs on, and so other credentials beside it: Antigravity's own, which
- * keeps the login when no keyring does, as over ssh, and every conversation, and the OS keyrings' files.
+ * Every path beside the directories leading to `roots`, so a path outside them all lies under one, since it parts from
+ * them in some directory those lead through. Each root is a resolved path.
  */
-const AGY_STORES = [".gemini", ".local/share/keyrings", "Library/Keychains"];
+export function beside(roots: string[]): string[] {
+	const through = new Set<string>();
+	for (const root of roots) for (let up = root; !through.has(up); up = dirname(up)) through.add(up);
+	return [...through]
+		.filter((dir) => !roots.includes(dir))
+		.flatMap((dir) => readdirSync(dir).map((name) => join(dir, name)))
+		.filter((path) => !through.has(path))
+		.sort();
+}
 
 /**
- * Deny rules, which hold in every mode, past `--dangerously-skip-permissions`: no command, write, web request, or MCP
- * call runs, should a release hand the reviewer agent a tool beyond its list, and no read reaches a credential store,
- * which a hostile change could ask the reviewer to quote in a finding. A read rule names a directory, matched against
- * the path a read resolves to past symlinks and `..`, so each store is resolved too.
+ * Deny rules, which hold in every mode, past `--dangerously-skip-permissions`, and over any allow rule: no command,
+ * write, web request, or MCP call runs, should a release hand the reviewer agent a tool beyond its list, and no read
+ * leaves the checkout and the workspace, since a hostile change could ask the reviewer to quote a credential, such as
+ * another CLI's login, in a finding. Antigravity has no rule that allows only some paths, so each read rule denies a
+ * path beside those two, which it matches by whole components against the path a read resolves to past symlinks and
+ * `..`.
  */
-function agySettings(): string {
-	const stores = AGY_STORES.map((store) => join(homedir(), store)).map((dir) =>
-		existsSync(dir) ? realpathSync(dir) : dir,
-	);
+function agySettings(roots: string[]): string {
 	return JSON.stringify({
 		permissions: {
 			deny: [
@@ -988,7 +1003,7 @@ function agySettings(): string {
 				"execute_url(*)",
 				"download_url(*)",
 				"mcp(*)",
-				...stores.map((dir) => `read_file(${dir})`),
+				...beside(roots).map((path) => `read_file(${path})`),
 			],
 		},
 	});
@@ -1044,6 +1059,14 @@ export function agyTurn(context: Context, prompt: string, flags: string[]): Turn
 		]);
 	// Created last, since a turn that is never run leaves its workspace behind.
 	const dir = workspace(files);
+	// A file, since the rules can outgrow the 128 KiB an argument holds on Linux, as beside a crowded /tmp.
+	const settings = join(dir, "settings.json");
+	try {
+		writeFileSync(settings, agySettings([realpathSync(context.root), dir]), { mode: 0o600 });
+	} catch (error) {
+		rmSync(dir, { recursive: true, force: true });
+		throw error;
+	}
 	const content =
 		`You have no shell, so run no command. The repository's checkout is ${context.root}: read its files by ` +
 		`absolute path. \`${dir}/files.txt\` lists its tracked files` +
@@ -1069,7 +1092,7 @@ export function agyTurn(context: Context, prompt: string, flags: string[]): Turn
 			"--dangerously-skip-permissions",
 			"--disable-slash-commands",
 			"--settings",
-			agySettings(),
+			settings,
 			...flags,
 		],
 		stdin: `${JSON.stringify({ event: "user", message: { role: "user", content } })}\n`,
@@ -1541,6 +1564,16 @@ export function baseInstructions(root: string, base: string, changed: string[]):
 }
 
 const show = (root: string, base: string, path: string) => git(root, ["show", `${base}:${path}`]);
+
+/** Whether the checkout holds commit `sha`, which a head force-pushed away before this clone fetched it is not. */
+function present(root: string, sha: string): boolean {
+	try {
+		git(root, ["cat-file", "-e", `${sha}^{commit}`]);
+		return true;
+	} catch {
+		return false;
+	}
+}
 
 /** Whether a change from `earlier`'s merge base spans one from `later`'s: `later` descends from it, as when the base moved on. */
 function covers(root: string, earlier: string, later: string): boolean {
@@ -2232,11 +2265,12 @@ function unanswered(
 	spent: Answer<unknown>["spent"],
 ): Error {
 	const limits = failures.filter((each) => each instanceof ReviewLimitError);
-	const installed = failures.filter(
+	// A CLI the user never installed is no reason the question went unanswered, so only the rest count.
+	const blocking = failures.filter(
 		(each) => !(each instanceof ReviewerUnavailableError && each.reason === "not installed"),
 	);
 	// Every model at its limit replied to nothing, so nothing was spent.
-	if (limits.length > 0 && limits.length === installed.length)
+	if (limits.length > 0 && limits.length === blocking.length)
 		return limits.sort((a, b) => (a.until ?? Infinity) - (b.until ?? Infinity))[0]!;
 	return new UnansweredError(`no ${who} could ${task}: ${failures.map((each) => each.message).join("; ")}`, spent);
 }
@@ -2769,8 +2803,9 @@ async function reviewWith(shared: Shared, seat: Seat, responses: string | undefi
 	// Responses answer findings by number; a reviewer with none of its own would read others' as its own.
 	const answered = earlier.length > 0 ? responses : undefined;
 	// A round checks only what changed since the last one when nothing but the head changed: the same
-	// reviewer, base, instructions, and REVIEW.md, and a range the last round's covers. Anything else starts a
-	// new session that reviews the whole change, since a resumed one keeps its first instructions.
+	// reviewer, base, instructions, and REVIEW.md, a range the last round's covers, and its head still here to diff
+	// against. Anything else starts a new session that reviews the whole change, since a resumed one keeps its first
+	// instructions.
 	const last = stored?.last;
 	const resume =
 		previous !== undefined &&
@@ -2781,7 +2816,8 @@ async function reviewWith(shared: Shared, seat: Seat, responses: string | undefi
 		last.model === picked.model &&
 		last.effort === picked.effort &&
 		last.base.ref === shared.base.ref &&
-		covers(root, previous.mergeBase, change.mergeBase);
+		covers(root, previous.mergeBase, change.mergeBase) &&
+		present(root, previous.head);
 
 	// The last round already passed this head, and has nothing left to settle; it repeats against the run's base
 	// and size.

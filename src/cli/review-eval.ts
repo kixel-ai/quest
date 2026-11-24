@@ -544,7 +544,8 @@ export function tallies(scored: Scored[], combined: boolean): Pick<EvalReport, "
 
 /**
  * Google's API list price in dollars per million tokens of each model Antigravity reviews with, newest first, each from
- * its first day, since token-max prices no agy session. Output includes thinking; caching is implicit.
+ * its first day, since token-max prices no agy session. Output includes thinking; caching is implicit. From
+ * https://aistudio.google.com/docs/pricing, read 2026-11-23, whose introductory prices end on the later entries' days.
  */
 const AGY_PRICES: Record<string, { from: string; input: number; cached: number; output: number }[]> = {
 	"gemini-4-carbon": [

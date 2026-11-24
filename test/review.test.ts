@@ -1,5 +1,14 @@
 import { execFileSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+	chmodSync,
+	existsSync,
+	mkdirSync,
+	readdirSync,
+	readFileSync,
+	realpathSync,
+	symlinkSync,
+	writeFileSync,
+} from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { afterEach, expect, test, vi } from "vitest";
 
@@ -14,6 +23,7 @@ import {
 	ask,
 	authored,
 	baseInstructions,
+	beside,
 	claudeFlags,
 	codexFlags,
 	nextStep,
@@ -1034,6 +1044,24 @@ fakes("--base reviews against another branch, fetched first, with that branch's 
 	expect(unknown.stderr).toContain("--base must be <remote>/<branch>");
 });
 
+test("agy's read rules leave every path outside its roots under a denied one, and none inside", () => {
+	const dir = realpathSync(tempDir());
+	for (const path of ["a/x/in.txt", "a/y/out.txt", "a/x-sibling/out.txt", "b/in.txt", "c/out.txt", "top.txt"])
+		write(dir, path, "");
+	symlinkSync(join(dir, "c"), join(dir, "a", "x", "link"));
+	const denied = beside([join(dir, "a", "x"), join(dir, "b")]);
+	// Antigravity matches a rule by whole components, so `a/x` never covers `a/x-sibling`.
+	const blocked = (path: string) => denied.some((rule) => path === rule || path.startsWith(`${rule}/`));
+	for (const path of ["a/x/in.txt", "b/in.txt"]) expect(blocked(join(dir, path)), path).toBe(false);
+	for (const path of ["a/y/out.txt", "a/x-sibling/out.txt", "c/out.txt", "top.txt"])
+		expect(blocked(join(dir, path)), path).toBe(true);
+	// A link inside a root resolves outside it, where the rule beside its target matches.
+	expect(blocked(realpathSync(join(dir, "a", "x", "link", "out.txt")))).toBe(true);
+	// Above the tree too, as the system's own directories.
+	const top = dir.split("/")[1]!;
+	for (const name of readdirSync("/").filter((name) => name !== top)) expect(blocked(`/${name}`), name).toBe(true);
+});
+
 test("review refuses max effort", async () => {
 	const result = await quest("review", "--harness", "claude", "--model", "opus", "--effort", "max");
 	expect(result.code).toBe(2);
@@ -1123,16 +1151,16 @@ fakes(
 			expect(flag("--agent")).toBe("quest-reviewer");
 			expect(call.argv).toContain("--dangerously-skip-permissions");
 			expect(call.argv).toContain("--disable-slash-commands");
-			expect(JSON.parse(flag("--settings")).permissions.deny).toEqual(
-				expect.arrayContaining([
-					"command(*)",
-					"write_file(*)",
-					"read_url(*)",
-					"mcp(*)",
-					// Antigravity's own store, where it keeps the login over ssh.
-					expect.stringMatching(/^read_file\(\/.*\/\.gemini\)$/),
-				]),
-			);
+			expect(flag("--settings")).toBe(join(call.cwd, "settings.json"));
+			const deny: string[] = JSON.parse(call.workspace!["settings.json"]!).permissions.deny;
+			expect(deny).toEqual(expect.arrayContaining(["command(*)", "write_file(*)", "read_url(*)", "mcp(*)"]));
+			// Reads stay in the checkout and the workspace: what lies beside them is denied, and nothing in them.
+			const repo = realpathSync(s.repo);
+			expect(deny).toContain(`read_file(${join(dirname(repo), "origin.git")})`);
+			const inside = (dir: string) => (rule: string) =>
+				rule === `read_file(${dir})` || rule.startsWith(`read_file(${dir}/`);
+			expect(deny.filter(inside(repo))).toEqual([]);
+			expect(deny.filter(inside(call.cwd))).toEqual([]);
 			expect(flag("--model")).toBe("gemini-4-carbon");
 			expect(flag("--effort")).toBe("high");
 			// It runs outside the checkout, in a directory removed after the turn.
@@ -1166,6 +1194,24 @@ fakes(
 		expect(resumed.workspace!["diff-2.diff"]).toContain("+export const x = 4;");
 	},
 );
+
+fakes("a round whose last head is gone, as an amend pruned away, reviews the whole change anew", async () => {
+	const s = setup("CLAUDECODE");
+	expect((await quest("--root", s.repo, "review", ...AGY)).code).toBe(0);
+	const gone = git(s.repo, "rev-parse", "HEAD");
+	write(s.repo, "src/lib.ts", "export const x = 4;\n");
+	git(s.repo, "commit", "-q", "--amend", "-am", "change");
+	git(s.repo, "reflog", "expire", "--expire=now", "--all");
+	git(s.repo, "gc", "-q", "--prune=now");
+	expect(() => git(s.repo, "cat-file", "-e", `${gone}^{commit}`)).toThrow();
+	write(s.repo, ".tmp/responses.md", "Fixed at src/lib.ts:1.\n");
+	const later = await quest("--root", s.repo, "review", ...AGY, "--responses", join(s.repo, ".tmp", "responses.md"));
+	expect(later.code, later.stderr).toBe(0);
+	const [review] = s.calls().slice(-2);
+	expect(review!.argv).not.toContain("--conversation");
+	expect(review!.stdin).toContain("Review the change for what it breaks");
+	expect(Object.keys(review!.workspace!)).not.toContain("diff-2.diff");
+});
 
 fakes.for([
 	["FAKE_LOGGED_OUT", "1", "error: agy is not logged in; run `agy`"],

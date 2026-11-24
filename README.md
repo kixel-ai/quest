@@ -1662,11 +1662,11 @@ as one in the macOS keychain, needs the CLI's credential exported instead:
 `CLAUDE_CODE_OAUTH_TOKEN` from `claude setup-token`, or `CODEX_API_KEY`. For
 Antigravity it plants hooks, MCP servers, plugins, rules, and skills in every
 directory `agy` reads them from, with `AGENTS.md`, `GEMINI.md`, and helper
-binaries, and a change asking the reviewer to quote a canary it writes beside
-your login in `~/.gemini`; on your own login and home, it fails if a plant
-runs, the checkout's instructions reach the reviewer, or the reviewer quotes
-the canary, after showing that `agy`'s defaults load them all and that quest's
-turn reads the canary without its deny rules. It spends real usage, so CI never
+binaries, and a change asking the reviewer to quote canaries it writes beside
+your login in `~/.gemini` and beside the checkout; on your own login and home,
+it fails if a plant runs, the checkout's instructions reach the reviewer, or
+the reviewer quotes a canary, after showing that `agy`'s defaults load them all
+and that quest's turn reads the canaries without its read rules. It spends real usage, so CI never
 runs it; run it after upgrading any of the CLIs. The base is fetched first, since
 the sandbox has no network. The reviewer follows the base's `AGENTS.md` and `CLAUDE.md`, at the
 root and in each directory holding a changed path, never the checkout's, so a
@@ -1688,7 +1688,10 @@ and an agent directory inside a repository is a usage error naming
 only tools are `view_file` and `finish` and which inherits none of your hooks,
 rules, plugins, or MCP tools. Print mode cannot approve a read outside that
 directory, so permissions are skipped, and deny rules on commands, writes, web
-requests, and MCP calls back up the tool list. With no shell, the directory
+requests, and MCP calls back up the tool list. `agy` has no rule that allows only
+some paths, so a read rule denies each path beside the directories leading to
+the checkout and that directory, and nothing outside those two, such as another
+CLI's login, can be read. With no shell, the directory
 holds what `git` would show, `files.txt` with the checkout's tracked files and
 each reviewed range's diff, and the reviewer reads the checkout's files by
 absolute path; `agy` 1.5.14 gives an agent no search tool. Your skills' text

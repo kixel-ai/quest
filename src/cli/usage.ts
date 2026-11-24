@@ -36,6 +36,7 @@ import { githubRepository, requireRemote } from "./github";
 import { type GitHub, type ObjectValue, link, object } from "../github/client";
 import { type OnlineReview, readOnlineReviews } from "../github/online-review";
 import {
+	HARNESSES,
 	type Counts,
 	type ReviewSummary,
 	classifierSessions,
@@ -1026,7 +1027,7 @@ function reviewerRows(pulls: PullRow[]): ReviewerRow[] {
 				tally: noCounts(),
 				firstRounds: noFirst(),
 				// token-max reads no Antigravity session, so what an Antigravity reviewer spent is never all counted.
-				spent: review.harness === "Antigravity" ? { ...noSpend(), complete: false } : noSpend(),
+				spent: review.harness === HARNESSES.agy ? { ...noSpend(), complete: false } : noSpend(),
 			};
 			rows.set(id, found);
 		}

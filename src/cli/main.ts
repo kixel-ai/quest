@@ -1764,7 +1764,8 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"repository's root, which makes an agent directory inside one a usage error. Each turn runs as quest's own " +
 				"agent, whose only tools are view_file and finish and which inherits none of the user's hooks, rules, plugins, or " +
 				"MCP tools, with permissions skipped, since print mode cannot approve a read outside its directory, and deny " +
-				"rules on commands, writes, web requests, and MCP calls. With no shell, its directory holds files.txt, the " +
+				"rules on commands, writes, web requests, MCP calls, and a read of any path outside the checkout and that " +
+				"directory, such as another CLI's login. With no shell, its directory holds files.txt, the " +
 				"checkout's tracked files, and the diff of each range it reviews, and it reads the checkout's files by absolute " +
 				"path. The user's skills' text still reaches it, and their MCP servers start, with no tool it can call. A " +
 				"RESOURCE_EXHAUSTED quota error is its usage limit.\n\n" +
