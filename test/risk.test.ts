@@ -1,6 +1,16 @@
 import { expect, test } from "vitest";
 
-import { ALWAYS_HIGH, matches, parseRiskFile, patternError, recordedRisk, riskier } from "../src/core";
+import {
+	ALWAYS_HIGH,
+	classesFor,
+	codeSpan,
+	matches,
+	parseRiskFile,
+	patternError,
+	recordedRisk,
+	riskier,
+} from "../src/core";
+import { markdown } from "../src/core/doc";
 
 test("a pattern is a path from the root whose * stays in a segment and whose ** spans segments", () => {
 	const cases: [string, string, boolean][] = [
@@ -178,7 +188,7 @@ test("the review record's risk reads back, and a record without one names none",
 	});
 });
 
-test("a risk file's ## Automatic list names each class and its rule", () => {
+test("a risk file's ## Automatic list names each class, its scope, and its rule", () => {
 	const text = [
 		"# Risk",
 		"",
@@ -186,15 +196,31 @@ test("a risk file's ## Automatic list names each class and its rule", () => {
 		"",
 		"Each class below lands without a pick once low.",
 		"",
-		"- `tests` - only tests and their fixtures",
-		"- `internal-docs` - documentation no user reads,",
-		"  such as plans",
+		"- `test` - only tests and their fixtures",
+		"- `internal-docs` (`docs/**`, `**/*.md`,",
+		"  `notes(old)/`) - documentation no user reads,",
+		"  such as plans (under `quest/`)",
+		"- `refactor`",
+		"  (`src/**`) - code that behaves the same",
+		"- `ticked` (``a`b``, `c/`) - (`f()` still returns the same) prose",
+		"- `wrapped` ( `a/**`,",
+		"  `b/**`",
+		"  ) -",
+		"  a scope and rule wrapped anywhere",
 	].join("\n");
 	expect(parseRiskFile(text)).toEqual({
 		high: [],
 		classes: [
-			{ name: "tests", rule: "only tests and their fixtures" },
-			{ name: "internal-docs", rule: "documentation no user reads, such as plans" },
+			{ name: "test", scope: null, rule: "only tests and their fixtures" },
+			{
+				name: "internal-docs",
+				scope: ["docs/**", "**/*.md", "notes(old)/"],
+				rule: "documentation no user reads, such as plans (under `quest/`)",
+			},
+			{ name: "refactor", scope: ["src/**"], rule: "code that behaves the same" },
+			// Any backtick run delimits a pattern, and a rule may open with parenthesized prose.
+			{ name: "ticked", scope: ["a`b", "c/"], rule: "(`f()` still returns the same) prose" },
+			{ name: "wrapped", scope: ["a/**", "b/**"], rule: "a scope and rule wrapped anywhere" },
 		],
 		problems: [],
 	});
@@ -207,17 +233,66 @@ test("a risk file's ## Automatic list names each class and its rule", () => {
 			"- tests - not backticked",
 			"- `docs` - one",
 			"- `docs` - twice",
+			"- `empty` () - no patterns",
+			"- `bare` (docs/**) - unbackticked",
+			"- `spaced` (`a/**` `b/**`) - no comma",
+			"- `rooted` (`docs/**`, `/src`) - a pattern patternError refuses",
+			"- `between` (`docs/**`) and more - text after the scope",
+			"- `dashless`: a colon",
+			"- `late` - (`quest/**`) a scope after the dash",
+			"- `later` - (``docs/**``): a scope after the dash, then punctuation",
+			"- `invalid` - (`/docs/**`) a misplaced scope whose pattern is no pattern",
+			"- `entity` (`docs/**`&#41; or (`notes/**`) - an entity is no delimiter",
 		].join("\n"),
 	);
 	expect(broken.classes).toEqual([
-		{ name: "docs", rule: "one" },
-		{ name: "docs", rule: "twice" },
+		{ name: "docs", scope: null, rule: "one" },
+		{ name: "docs", scope: null, rule: "twice" },
 	]);
 	expect(broken.problems).toEqual([
 		"RISK.md:3: `Tests` is no class name: use lowercase words joined by hyphens",
-		"RISK.md:4: an `## Automatic` item is a backticked class name, ` - `, and the rule over the diff",
+		"RISK.md:4: an `## Automatic` item is a backticked class name, optionally a scope of backticked path patterns in parentheses, ` - `, and the rule over the diff",
+		"RISK.md:7: `empty`'s scope is empty: list its patterns, or drop the parentheses",
+		"RISK.md:8: `bare`'s scope is not backticked path patterns joined by `, `",
+		"RISK.md:9: `spaced`'s scope is not backticked path patterns joined by `, `",
+		"RISK.md:10: `/src` in `rooted`'s scope is no pattern: it starts with /, but a pattern is a path from the repository root",
+		"RISK.md:11: `between`'s scope must be followed by ` - ` and the rule, with nothing between",
+		"RISK.md:12: `dashless` must be followed by its optional scope in parentheses, ` - `, and the rule over the diff",
+		"RISK.md:13: `late`'s scope goes before ` - `, not at the start of its rule",
+		"RISK.md:14: `later`'s scope goes before ` - `, not at the start of its rule",
+		"RISK.md:15: `invalid`'s scope goes before ` - `, not at the start of its rule",
+		"RISK.md:16: `entity`'s scope is not backticked path patterns joined by `, `",
 		"RISK.md lists the class `docs` twice",
 	]);
+});
+
+test("a change may fall only in the classes whose scope holds every path it changes", () => {
+	const any = { name: "any", scope: null, rule: "anything" };
+	const docs = { name: "docs", scope: ["docs/**", "**/*.md"], rule: "only documentation" };
+	const code = { name: "code", scope: ["src/"], rule: "only code" };
+	const classes = [any, docs, code];
+	expect(classesFor(classes, ["docs/guide.txt", "src/README.md"])).toEqual([any, docs]);
+	expect(classesFor(classes, ["src/a/b.ts"])).toEqual([any, code]);
+	// One path outside a scope rules its class out, however many fit.
+	expect(classesFor(classes, ["docs/guide.txt", "src/main.ts"])).toEqual([any]);
+	// A scope names whole paths: a file pattern never covers a directory that fits it, and `src/` covers what it holds.
+	expect(classesFor(classes, ["tools.md/build.sh"])).toEqual([any]);
+	expect(classesFor([{ ...code, scope: ["src"] }], ["src/main.ts"])).toEqual([]);
+	// A directory pattern holds only what lies strictly under a directory it names, never a file that fits it.
+	const scratch = { name: "scratch", scope: ["*/**"], rule: "anything in a directory" };
+	expect(classesFor([scratch], ["package.json"])).toEqual([]);
+	expect(classesFor([scratch], ["notes/a.txt"])).toEqual([scratch]);
+	// A change that touches no path falls in no class, not even an unscoped one.
+	expect(classesFor(classes, [])).toEqual([]);
+});
+
+test("a code span renders its text whole, whatever backticks or edge spaces it holds", () => {
+	for (const text of ["a", "a`b", "``", "`a", "a`", " a", "a ", " a ", "  a  ", " `a` ", " ", "  "]) {
+		const paragraph = markdown(codeSpan(text)).children[0];
+		expect(paragraph?.type === "paragraph" && paragraph.children).toEqual([
+			expect.objectContaining({ type: "inlineCode", value: text }),
+		]);
+	}
 });
 
 test("the review record's class and override read back", () => {

@@ -15,6 +15,7 @@ export {
 	children,
 	entries,
 	has,
+	codeSpan,
 	holds,
 	type Host,
 	hosts,
@@ -39,6 +40,7 @@ export { reviewSection } from "./review";
 export {
 	ALWAYS_HIGH,
 	type Class,
+	classesFor,
 	DEFAULT,
 	type HighPath,
 	PATHS,
