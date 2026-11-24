@@ -39,9 +39,10 @@ A change is high when it:
 - changes when an agent may push, merge, post, or spend without asking,
   in any instructions, such as `AGENTS.md` or `CONTRIBUTING.md`, or in the
   code that acts on them.
-- changes the text `quest` gives agents from code, such as the line
-  `quest init` plants, skill stubs, hook messages, and the reviewer's and
-  classifier's prompts.
+- changes instructions that code plants in a repository or injects into
+  an agent's context, such as the line `quest init` plants, skill stubs,
+  hook context, and the reviewer's and classifier's prompts. A command's
+  output is not this.
 - changes the reviewer's sandbox or the credentials an agent gets, or
   sends a new kind of data off the host or into a public comment, such as
   a new upload destination or command output it now posts. New fields in
@@ -69,9 +70,9 @@ class: its PRs merged, the culprits among them, and their wait on a person.
   no user, contributor, or other repository reads change
 - `refactor` - code changes that keep every behavior and output the same,
   such as a rename inside a module or a simplification
-- `trivial` - a dependency or pin bump, or another change as small, from
-  any author and touching no `## High` path, which lands at any tier once
-  Pullfrog approves its head
+- `trivial` - a dependency or pin bump at any tier, or another change as
+  small that is not high, from any author, which lands once Pullfrog
+  approves its head
 
 ## High
 
