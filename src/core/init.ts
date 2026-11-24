@@ -28,7 +28,7 @@ export const REFERENCE_MARKER = "Quests: ";
  * whose `quest setup` hook already printed the rules skips the command.
  */
 export const REFERENCE_LINE =
-	"Quests: before any work, run `quest context` and follow it, or read https://github.com/moq-dev/quest/blob/main/docs/context.md where `quest` is not installed, unless this session already holds its rules.";
+	"Quests: before any work, run `quest context` and follow it, or read https://github.com/kixel-ai/quest/blob/main/docs/context.md where `quest` is not installed, unless this session already holds its rules.";
 
 /**
  * The skill directories Claude Code and other agents (Codex) read, each with

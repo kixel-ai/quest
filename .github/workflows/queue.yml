@@ -2,7 +2,7 @@ name: Queue
 
 # GitHub's merge queue tests each picked PR on top of main, one at a time, on
 # the host's self-hosted runner, and merges exactly the tree it tested. When the
-# queue drops a PR, moq-dev/quest's queue watcher on the host runs the land
+# queue drops a PR, kixel-ai/quest's queue watcher on the host runs the land
 # fixer and re-enqueues it at the back of the queue.
 #
 # `main`'s ruleset requires this workflow's `Queue` context. On a pull request,
@@ -40,7 +40,7 @@ jobs:
   # queue-build.yml runs only after it lands.
   build:
     name: Queue build
-    uses: moq-dev/quest/.github/workflows/queue-build.yml@main
+    uses: kixel-ai/quest/.github/workflows/queue-build.yml@main
 
   # The required context. A reusable workflow's jobs report as
   # `Queue build / Build`, so this job reports the build's result under the
