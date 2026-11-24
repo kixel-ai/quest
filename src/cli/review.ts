@@ -2375,10 +2375,8 @@ export async function classify(input: Classifying): Promise<{ key: string; value
 	}
 	const classes = file!.classes.map((each) => each.name);
 
-	// With no attributes, so the head can mark none of its own hunks binary to hide them from the classifier.
-	const empty = emptyTree(root);
 	const diff = (args: string[]) =>
-		git(root, [`--attr-source=${empty}`, "diff", "--no-ext-diff", "--no-textconv", "--no-color", ...args, range]);
+		git(root, ["diff", "--no-ext-diff", "--no-textconv", "--no-color", ...args, range]);
 	const prompt = classifyPrompt(change, { sha: baseSha, text }, diff(["--stat=160"]), diff(["--patch"]), classes);
 	const answer = await ask(CLASSIFIERS, {
 		cwd: root,

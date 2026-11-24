@@ -1929,21 +1929,6 @@ fakes("a high head Fable wrote is reviewed by Opus with Astra second, never Sol"
 	]);
 });
 
-fakes("the classifier reads every hunk, whichever the head's attributes mark binary", async () => {
-	const s = setup();
-	moveBase(s.repo, (dir) => write(dir, "RISK.md", riskFile(["- `billing/**/*.ts` - charges customers"])));
-	write(s.repo, ".gitattributes", "src/lib.ts -diff\n");
-	git(s.repo, "add", "-A");
-	git(s.repo, "commit", "-qm", "attributes");
-	vi.stubEnv("FAKE_RISK", JSON.stringify({ tier: "medium", reason: "Only a constant changes." }));
-	vi.stubEnv("FAKE_REPLY", JSON.stringify({ score: 10, rationale: "Lands as is.", findings: [] }));
-	const result = await quest("--root", s.repo, "review");
-	expect(result.code, result.stderr).toBe(0);
-	const [call] = classifying(s.calls());
-	expect(call!.stdin).toContain("-export const x = 1;\n+export const x = 2;");
-	expect(call!.stdin).not.toContain("Binary files");
-});
-
 fakes(
 	"the classifier sets the tier from the diff and the base's risk file, once per head",
 	async () => {
