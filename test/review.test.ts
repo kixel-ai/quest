@@ -1685,13 +1685,15 @@ function onGitHub(
 	repo: string,
 	pulls: FakePull[],
 	fork = false,
-): { body: string }[] & { statuses: { sha: string; state: string; context: string; description: string }[] } {
+): { body: string }[] & {
+	statuses: { sha: string; state: string; context: string; description: string; target_url: string }[];
+} {
 	const local = git(repo, "remote", "get-url", "origin");
 	git(repo, "remote", "set-url", "origin", "https://github.com/acme/widget.git");
 	git(repo, "config", `url.${local}.insteadOf`, "https://github.com/acme/widget.git");
 	const owner = fork ? "upstream" : "acme";
 	const writes = Object.assign([] as { body: string }[], {
-		statuses: [] as { sha: string; state: string; context: string; description: string }[],
+		statuses: [] as { sha: string; state: string; context: string; description: string; target_url: string }[],
 	});
 	const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status });
 	const info = (login: string, parent: string | null) => ({
@@ -1774,7 +1776,13 @@ fakes("each round rewrites the Review section of the branch's open PR, keeping t
 		const base = git(s.repo, "rev-parse", "origin/main");
 		// The record's head carries a status saying it has not passed, which `quest status` reads before the body.
 		expect(writes.statuses).toEqual([
-			{ sha: head, state: "failure", context: "quest review", description: "Risk medium: findings open" },
+			{
+				sha: head,
+				state: "failure",
+				context: "quest review",
+				description: "Risk medium: findings open",
+				target_url: `https://github.com/acme/widget/compare/main...${head}`,
+			},
 		]);
 		expect(pull.body).toBe(
 			[
@@ -2523,9 +2531,7 @@ fakes(
 			expect(low.stdout).toContain("\nrisk low Only a constant changes.\n");
 			expect(low.stdout).toContain("\nclass constants\n");
 			expect(low.stdout).not.toContain("\nreviewer ");
-			expect(low.stdout).toContain(
-				"\nnext done: the head is low risk, so the online reviewer alone reviews it\n",
-			);
+			expect(low.stdout).toContain("\nnext done: the head is low risk, so no local reviewer ran\n");
 			// Only the classifier ran, told the classes it may name.
 			const reviewers = new Set(Object.values(REVIEWERS).flatMap((list) => list.map((each) => each.model)));
 			expect(
@@ -2537,9 +2543,7 @@ fakes(
 			const head = git(s.repo, "rev-parse", "HEAD");
 			// The head is named in full, so the record counts as its review.
 			expect(pull.body).toContain(`- Head: ${head}\n`);
-			expect(pull.body).toContain(
-				"- Class: `constants`\n- Local review: none, since a low-risk head needs only the online reviewer",
-			);
+			expect(pull.body).toContain("- Class: `constants`\n- Local review: none, since the head is low risk");
 			expect(recordedRisk(pull.body)).toMatchObject({ tier: "low", class: "constants", overridden: null });
 			// Its status attests the tier and class the record names, which `quest status` checks the body against.
 			expect(writes.statuses).toEqual([
@@ -2547,7 +2551,8 @@ fakes(
 					sha: head,
 					state: "success",
 					context: "quest review",
-					description: "Risk low, class constants: passed",
+					description: "Risk low, class constants: passed with no local reviewer",
+					target_url: `https://github.com/acme/widget/compare/main...${head}`,
 				},
 			]);
 
@@ -2983,25 +2988,37 @@ test("the record replaces only a top-level Review section, never an example of o
 		expect(() => withReview(open, "new")).toThrow("unclosed code fence or HTML comment");
 });
 
-fakes("a status GitHub refuses, as a contributor's token's, leaves the record and says so", async () => {
-	const s = setup();
-	onGitHub(s.repo, [{ number: 9, body: "" }]);
-	const fetch = globalThis.fetch;
-	vi.stubGlobal("fetch", async (input: URL, init?: RequestInit) =>
-		new URL(input).pathname.includes("/statuses/")
-			? new Response('{"message":"Not Found"}', { status: 404 })
-			: fetch(input, init),
-	);
-	try {
-		const result = await quest("--root", s.repo, "review");
-		expect(result.code, result.stderr).toBe(0);
-		expect(result.stdout).toContain(
-			"record https://github.com/acme/widget/pull/9; status skipped: GitHub refused the quest review status (HTTP 404)\n",
-		);
-	} finally {
-		vi.unstubAllGlobals();
-	}
-});
+fakes(
+	"a status GitHub refuses, as for an unpushed head or a contributor's token, keeps the record and fails",
+	async () => {
+		for (const [status, message, why] of [
+			[422, "No commit found for SHA: x", ", which it needs pushed first: No commit found for SHA: x"],
+			[404, "Not Found", " (HTTP 404: Not Found); the token needs write access to commit statuses"],
+		] as const) {
+			const s = setup();
+			const pull = { number: 9, body: "" };
+			onGitHub(s.repo, [pull]);
+			const head = git(s.repo, "rev-parse", "HEAD");
+			const fetch = globalThis.fetch;
+			vi.stubGlobal("fetch", async (input: URL, init?: RequestInit) =>
+				new URL(input).pathname.includes("/statuses/")
+					? new Response(JSON.stringify({ message }), { status })
+					: fetch(input, init),
+			);
+			try {
+				const result = await quest("--root", s.repo, "review");
+				expect(result.code, result.stderr).toBe(1);
+				const on = status === 422 ? ` on ${head}` : "";
+				expect(result.stdout).toContain(
+					`\nrecord https://github.com/acme/widget/pull/9; status skipped: GitHub refused the quest review status${on}${why}\n`,
+				);
+				expect(pull.body).toContain("## Review");
+			} finally {
+				vi.unstubAllGlobals();
+			}
+		}
+	},
+);
 
 fakes("a record GitHub refuses fails the command after printing the round", async () => {
 	const s = setup();
@@ -3151,9 +3168,10 @@ test("the next step stops for the design checkpoint when a reviewer's every thir
 	expect(nextStep([round(6, 2)])).toMatch(/^next checkpoint: .*best long-term approach from first principles/);
 	expect(nextStep([round(4, 1)])).toMatch(/^next respond: /);
 	expect(nextStep([round(3, 0)])).toMatch(/^next done: /);
-	expect(nextStep([round(3, 2, "low")])).toMatch(/^next finish: /);
-	expect(nextStep([round(4, 1, "low")])).toMatch(/^next finish: /);
-	// Across reviewers: any finding not low needs another round, and a clean third round is no checkpoint.
+	// Low findings need a round too, since only a passing round's status lets its record count.
+	expect(nextStep([round(3, 2, "low")])).toMatch(/^next checkpoint: /);
+	expect(nextStep([round(4, 1, "low")])).toMatch(/^next respond: /);
+	// Across reviewers: a clean third round is no checkpoint.
 	expect(nextStep([round(1, 1, "low"), round(1, 1)])).toMatch(/^next respond: /);
 	expect(nextStep([round(3, 0), round(1, 1)])).toMatch(/^next respond: /);
 	expect(nextStep([round(1, 1), round(3, 1)])).toMatch(

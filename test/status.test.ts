@@ -804,27 +804,30 @@ test("refuses a head moved between the paged state and ownership read", async ()
 
 describe("the review record", () => {
 	const C = "c".repeat(40);
+	const RISK = "\n- Risk: low, `docs only`\n- Classified: low by default";
+	// The maintainer's passing status on `sha`, attesting the record above.
+	const on = (sha: string) => ({ statuses: { [sha]: reviewStatus("SUCCESS", "Risk low: passed", sha) } });
 	const line = async (body: string, options: Parameters<typeof setup>[1] = {}) => {
 		const fixture = setup([pull({ body, checks: null, reviews: page([]), threads: page([]) })], options);
 		return statusLines(await pullRequestStatus(pr, fixture.deps)).find((l) => l.startsWith("review-record "));
 	};
 
 	test("is current when the section's last full SHA is the head, without comparing", async () => {
-		expect(await line(`## Review\n\n- Head: ${B}\n- Low findings fixed at ${A}`)).toBe(
-			`review-record current ${A}`,
-		);
+		expect(await line(`## Review\n\n- Head: ${A}${RISK}`)).toBe(`review-record current ${A}`);
 	});
 
 	test("carries across a head whose diff from the base matches the reviewed head's, and not otherwise", async () => {
-		const body = `## Review\n\n- Head: ${B}`;
-		expect(await line(body, { diffs: { [A]: "same", [B]: "same" } })).toBe(`review-record diff-identical ${B}`);
-		expect(await line(body, { diffs: { [A]: "new", [B]: "old" } })).toBe(`review-record stale ${B}`);
+		const body = `## Review\n\n- Head: ${B}${RISK}`;
+		expect(await line(body, { ...on(B), diffs: { [A]: "same", [B]: "same" } })).toBe(
+			`review-record diff-identical ${B}`,
+		);
+		expect(await line(body, { ...on(B), diffs: { [A]: "new", [B]: "old" } })).toBe(`review-record stale ${B}`);
 	});
 
 	test("is unknown, with a warning, when GitHub cannot compare a head", async () => {
 		for (const status of [406, 403]) {
 			const warnings: string[] = [];
-			expect(await line(`## Review\n\n- Head: ${B}`, { diffs: { [A]: status }, warnings })).toBe(
+			expect(await line(`## Review\n\n- Head: ${B}${RISK}`, { ...on(B), diffs: { [A]: status }, warnings })).toBe(
 				`review-record unknown ${B}`,
 			);
 			expect(warnings).toHaveLength(1);
@@ -838,10 +841,11 @@ describe("the review record", () => {
 
 describe("whose review record counts", () => {
 	const C = "c".repeat(40);
-	const record = (head: string, risk = "") =>
+	const RISK = "\n- Risk: low, `docs only`\n- Classified: low by default";
+	const record = (head: string, risk = RISK) =>
 		`Fixes it.\n\n## Review\n\n- Head: ${head}${risk}\n\n## Models\n\nSize: S`;
 	const permissions = { maintainer: "admin", writer: "write", alice: "read" };
-	const passed = reviewStatus("SUCCESS", "Risk low: passed");
+	const passed = (sha: string, login?: string) => reviewStatus("SUCCESS", "Risk low: passed", sha, login);
 	const read = async (body: string, options: Parameters<typeof setup>[1] = {}) => {
 		const warnings: string[] = [];
 		const fixture = setup([pull({ body, checks: null, reviews: page([]), threads: page([]) })], {
@@ -857,86 +861,114 @@ describe("whose review record counts", () => {
 
 	test("counts a record a writer's passing status attests on the head it names", async () => {
 		for (const login of ["maintainer", "writer"]) {
-			const status = reviewStatus("SUCCESS", "Risk low: passed", login);
-			const attested = await read(record(A), { statuses: { [A]: status } });
-			expect(attested).toMatchObject({ record: `review-record current ${A}`, warnings: [] });
+			const attested = await read(record(A), { statuses: { [A]: passed(A, login) } });
+			expect(attested).toMatchObject({
+				record: `review-record current ${A}`,
+				risk: "risk low current low docs only",
+				warnings: [],
+			});
 			expect(attested.fixture.statusQueries).toEqual([A]);
 			expect(attested.fixture.permissionRequests).toEqual([login]);
 		}
 	});
 
 	test("carries an attested record to a head with the same diff, reading the status of the head it names", async () => {
-		const carried = await read(record(B), { statuses: { [B]: passed }, diffs: { [A]: "same", [B]: "same" } });
+		const carried = await read(record(B), { statuses: { [B]: passed(B) }, diffs: { [A]: "same", [B]: "same" } });
 		expect(carried).toMatchObject({ record: `review-record diff-identical ${B}`, warnings: [] });
 		expect(carried.fixture.statusQueries).toEqual([B]);
 	});
 
-	test("counts no record without a passing status from a user who can write", async () => {
+	test("counts no record without a passing status from a user who can write, and hides its risk", async () => {
 		const cases: [Record<string, ReturnType<typeof reviewStatus> | null>, string][] = [
 			[{}, `${A} has no quest review status`],
 			[{ [A]: null }, `example/project has no commit ${A}`],
 			[
-				{ [A]: reviewStatus("FAILURE", "Risk low: findings open") },
+				{ [A]: reviewStatus("FAILURE", "Risk low: findings open", A) },
 				`the quest review status on ${A} is failure, not success`,
 			],
 			[
-				{ [A]: reviewStatus("SUCCESS", "Risk low: passed", "alice") },
+				{ [A]: passed(B) },
+				`the quest review status on ${A} attests another diff than into main: https://github.com/example/project/compare/main...${B}`,
+			],
+			[
+				{ [A]: { ...passed(A), targetUrl: `https://github.com/example/project/compare/release...${A}` } },
+				`the quest review status on ${A} attests another diff than into main: https://github.com/example/project/compare/release...${A}`,
+			],
+			[
+				{ [A]: passed(A, "alice") },
 				`alice, who set the quest review status on ${A}, has read access to example/project, not write`,
 			],
 			[
-				{ [A]: reviewStatus("SUCCESS", "Risk low: passed", "github-actions", "Bot") },
+				{ [A]: passed(A, "stranger") },
+				`stranger, who set the quest review status on ${A}, has no access to example/project, not write`,
+			],
+			[
+				{ [A]: reviewStatus("SUCCESS", "Risk low: passed", A, "github-actions", "Bot") },
 				`github-actions, who set the quest review status on ${A}, is a Bot, not a user`,
 			],
 			[
-				{ [A]: { ...passed, creator: null as unknown as typeof passed.creator } },
+				{ [A]: { ...passed(A), creator: null as unknown as ReturnType<typeof passed>["creator"] } },
 				`the account that set the quest review status on ${A} is gone`,
 			],
-			[{ [A]: reviewStatus("SUCCESS", "looks good") }, `the quest review status on ${A} names no risk`],
+			[
+				{ [A]: reviewStatus("SUCCESS", "looks good", A) },
+				`the quest review status on ${A} names no risk: looks good`,
+			],
 		];
 		for (const [statuses, why] of cases)
-			expect(await read(`${record(A)}`, { statuses })).toMatchObject({
+			expect(await read(record(A), { statuses })).toMatchObject({
 				record: "review-record -",
+				risk: "risk -",
 				warnings: untrusted(why),
 			});
-		const hidden = await read(record(A), { statuses: { [A]: passed }, permissions: { maintainer: 403 } });
+		const hidden = await read(record(A), { statuses: { [A]: passed(A) }, permissions: { maintainer: 403 } });
 		expect(hidden.warnings).toEqual(
-			untrusted(`cannot read the permission of maintainer, who set the quest review status on ${A} (HTTP 403)`),
+			untrusted(
+				`cannot read the permission of maintainer, who set the quest review status on ${A}: Must have push access`,
+			),
 		);
 	});
 
-	test("counts a record whose risk and class are the ones its status attests, and hides a forged one", async () => {
-		const risk =
-			"\n- Risk: low, `docs only`\n- Classified: low by Claude Code, m, low effort, session `s`\n- Class: `test`";
-		const attest = (description: string) => ({ statuses: { [A]: reviewStatus("SUCCESS", description) } });
-		expect(await read(record(A, risk), attest(attestation("low", "test", true)))).toMatchObject({
-			record: `review-record current ${A}`,
-			risk: "risk low current low docs only",
-			warnings: [],
-		});
-		for (const description of [
-			"Risk high, class test: passed",
-			"Risk low: passed",
-			"Risk low, class chore: passed",
-		])
-			expect(await read(record(A, risk), attest(description))).toMatchObject({
+	test("counts a record whose risk, class, and reviewer are the ones its status attests, and hides a forged one", async () => {
+		const risk = `${RISK.replace("by default", "by Claude Code, m, low effort, session `s`")}\n- Class: \`test\``;
+		const none = `${risk}\n- Local review: none, since the head is low risk`;
+		const attest = (description: string) => ({ statuses: { [A]: reviewStatus("SUCCESS", description, A) } });
+		for (const [body, outcome] of [
+			[risk, "passed"],
+			[none, "passed with no local reviewer"],
+		] as const)
+			expect(await read(record(A, body), attest(attestation("low", "test", outcome)))).toMatchObject({
+				record: `review-record current ${A}`,
+				risk: "risk low current low docs only",
+				warnings: [],
+			});
+		for (const [body, description] of [
+			[risk, "Risk high, class test: passed"],
+			[risk, "Risk low: passed"],
+			[risk, "Risk low, class chore: passed"],
+			// A reviewer's round claimed where none ran, or the reverse.
+			[risk, "Risk low, class test: passed with no local reviewer"],
+			[none, "Risk low, class test: passed"],
+		] as const)
+			expect(await read(record(A, body), attest(description))).toMatchObject({
 				record: "review-record -",
 				risk: "risk -",
-				warnings: untrusted(`its risk differs from the quest review status on ${A}: ${description}`),
+				warnings: untrusted(`it differs from the quest review status on ${A}: ${description}`),
 			});
+		// A record whose risk was deleted after the status attested one counts for nothing either.
+		expect((await read(record(A, ""), attest("Risk high: passed"))).warnings).toEqual(
+			untrusted(`it names no risk, which the quest review status on ${A} attests`),
+		);
 	});
 
 	test("reads the status of the last full SHA, so a land fixer's head or a hand-written line needs its own", async () => {
-		const open = `Fixes it.\n\n## Review\n\nmechanical fix by codex: merged (head ${A})\n- Head: ${B.slice(0, 12)}, named in full once no reviewer reports a finding`;
-		const fixed = await read(open, { statuses: { [B]: passed } });
-		expect(fixed).toMatchObject({
+		const open = `Fixes it.\n\n## Review\n\nmechanical fix by codex: merged (head ${A})\n- Head: ${B.slice(0, 12)}, named in full once no reviewer reports a finding${RISK}`;
+		expect(await read(open, { statuses: { [B]: passed(B) } })).toMatchObject({
 			record: "review-record -",
 			warnings: untrusted(`${A} has no quest review status`),
 		});
-		const forged = `${record(B)}\n\nLow findings fixed at ${C}.`.replace(
-			"\n\n## Models\n\nSize: S\n\nLow",
-			`\nLow findings fixed at ${C}.\n\n## Models\n\nSize: S\n\nLow`,
-		);
-		expect((await read(forged, { statuses: { [B]: passed } })).warnings).toEqual(
+		const added = record(B, `${RISK}\n- Low findings fixed at ${C}`);
+		expect((await read(added, { statuses: { [B]: passed(B) } })).warnings).toEqual(
 			untrusted(`${C} has no quest review status`),
 		);
 	});
@@ -975,11 +1007,13 @@ describe("the risk tier", () => {
 	});
 
 	test("carries to a later head as the review record does", async () => {
-		expect((await risk(record(B, `\n- Low findings fixed at ${A}`))).line).toMatch(/^risk high current /);
-		expect((await risk(record(B), { diffs: { [A]: "same", [B]: "same" } })).line).toMatch(
+		const statuses = { [B]: reviewStatus("SUCCESS", "Risk high: passed", B) };
+		expect((await risk(record(B), { statuses, diffs: { [A]: "same", [B]: "same" } })).line).toMatch(
 			/^risk high diff-identical /,
 		);
-		expect((await risk(record(B), { diffs: { [A]: "new", [B]: "old" } })).line).toMatch(/^risk high stale /);
+		expect((await risk(record(B), { statuses, diffs: { [A]: "new", [B]: "old" } })).line).toMatch(
+			/^risk high stale /,
+		);
 	});
 
 	test("is absent from a record without one, and marks a malformed one without failing the read", async () => {

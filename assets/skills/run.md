@@ -43,7 +43,7 @@ A PR you would skip or delete rather than fix, such as a superseded one, gets th
 Leave a PR whose required checks are still running for a later round; an automated reviewer is not waited on, since the queue waits for an approval the base requires.
 
 A PR whose author has write access carries a standing `/quest-merge` pick, unless the repository's `CONTRIBUTING.md` opts out, when `quest status` shows it low for the head, in a class the base `RISK.md` lists under `## Automatic`, adding or expanding no quests: run `/quest-merge` on it without asking, and name it as auto-picked in the summary.
-A trivial PR, such as a dependency bump, carries it too whatever its author and tier, under the same opt-out, once a maintainer's `quest review` record of a local reviewer's round passes on its head, as `/quest-merge` counts one; a low head's record with no reviewer is not enough.
+A trivial PR, such as a dependency bump, carries it too whatever its author and tier, under the same opt-out, once a maintainer's `quest review` record of a local reviewer's round passes on its head, as `/quest-merge` counts one; a low head's record with no local reviewer is not enough, so review one with `--harness`, `--model`, or `--effort`.
 Judge the diff against the class's rule before every `/quest-merge` run, and ask when unsure: the standing pick ends at the first head that does not qualify, or once a person takes the PR out of the queue.
 Ask about a high PR with both reviews' results.
 

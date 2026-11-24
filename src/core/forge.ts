@@ -64,8 +64,8 @@ export interface Thread {
 }
 
 /**
- * The head the PR body's `## Review` section names last, the latest reviewed one: a round's record, or a line after
- * it for low-severity fixes or a skip. `current` is the PR's head; `diff-identical` an earlier head whose diff from
+ * The head the PR body's `## Review` section names last, the latest reviewed one, which a `quest review` status
+ * attests. `current` is the PR's head; `diff-identical` an earlier head whose diff from
  * the base (`git diff <base>...<sha>`) matches the head's; `unknown` one the forge cannot compare, such as a diff too
  * large to render.
  */

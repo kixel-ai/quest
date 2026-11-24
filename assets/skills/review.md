@@ -21,12 +21,12 @@ Never alter the repository's harness to get a pass, such as by disabling a tool,
 Run no new round when a review already counts for the committed head, as `/quest-merge` defines below, and leaves no finding unrefuted: go on to pushing and marking it ready.
 `quest status <pr>` reads the pushed head, so trust its `review-record` line only while its `head` line is the committed head.
 
-Otherwise, review the committed branch with `quest review --base <remote>/<base>`, in the foreground; a round takes minutes.
+Otherwise, push the committed branch, since each round's status goes on the head GitHub has, then review it with `quest review --base <remote>/<base>`, in the foreground; a round takes minutes.
 It picks a reviewer other than the model that changed the branch last, at an effort the PR's size sets.
 It reads that model, and off a quest branch the size, from the PR body's `## Models` record: open the draft PR and write the record before the first round, as `Size: M` and `Implementer: Claude Code, claude-opus-5-5, high effort`.
 Pass `--exclude-model` or `--size` only for a PR whose body cannot hold the record.
 Where the repository's root instructions name other reviewers, pass them with `--harness`, `--model`, and `--effort`, which runs that reviewer alone.
-Each round rewrites the PR body's `## Review` section and sets the head's `quest review` commit status, so add context only after it; a record written by hand, as when it printed `record skipped` or `status skipped`, counts for no merge.
+Each round rewrites the PR body's `## Review` section and, on GitHub, sets the head's `quest review` commit status, so add context only after it; a record written by hand, as when it printed `record skipped` or `status skipped`, counts for no merge.
 
 `quest review` sets the head's risk tier before any reviewer runs: a low head gets no local reviewer, only a record saying so, and a high one gets a second reviewer from another vendor on the high list, which a round that raises the tier runs at once; a head classified high also takes its pick from that list.
 When the user overrides the tier, pass it with `--override <tier> --reason <their reason>`.
@@ -48,7 +48,7 @@ Once it exits 3, every eligible reviewer is out, an outage rather than a skip: s
 Its `## Waiting` item names each reviewer, its error, and the check, such as `Codex: out of quota until 2026-11-03 15:00 UTC; check that quest review runs`, with the reset time `quest review` prints; a logged-out or missing reviewer waits on `Maintainer (PC):`, with the login command `quest review` prints, since the login runs on the reviewer's host.
 Once the reset passes or the login is restored, the item has cleared: whoever finds it runs `/quest-review` on the PR.
 
-Push, resolve each `duplicate` line `quest status <pr>` then prints as the guide's Creation describes, then mark the PR ready for review: with `quest ready <pr> <token>`, which also drops its `## Waiting` section, or with `gh pr ready <pr>` for a draft you reviewed without a hold.
+Push any commit not yet pushed, resolve each `duplicate` line `quest status <pr>` then prints as the guide's Creation describes, then mark the PR ready for review: with `quest ready <pr> <token>`, which also drops its `## Waiting` section, or with `gh pr ready <pr>` for a draft you reviewed without a hold.
 
 Summarize the review, with its last round's score and rationale, and CI from `quest status <pr>`.
 Name any decisions the review raised without answering them, then ask the user for the pick with `/quest-merge`'s options.

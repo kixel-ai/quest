@@ -683,10 +683,10 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"landing-stopped, and checks, whose state and counts follow the checks that count, pending while an open PR's base requires a check or workflow nothing reports; review-record gives whether the PR body's ## Review record " +
 				"covers the head, as current, diff-identical (git diff <base>...<head> prints the same as for the head it names), " +
 				"stale, or unknown when GitHub cannot compare them, then the head it names last, counting the record only when the latest " +
-				"quest review commit status on that head is success, set by a user with write access to the repository, and attests the " +
-				"record's risk tier and class (else -, with a warning saying why); risk gives the record's risk " +
+				"quest review commit status on that head is success, set by a user with write access to the repository for the diff into the PR's base, " +
+				"and attests the record's risk tier, class, and whether a local reviewer ran (else -, with a warning saying why, and risk and class print - too); risk gives the record's risk " +
 				"tier, the same state for its head, the tier its classifier set before any reviewer raised it, and the " +
-				"reason last, - when the record names none, or - malformed - and why when its risk lines do not parse; class gives the RISK.md ## Automatic class the record's classifier named, or -; auto-merge gives its method, who enabled it and when, and the head it was " +
+				"reason last, - when the record names none or does not count, or - malformed - and why when its risk lines do not parse; class gives the RISK.md ## Automatic class the record's classifier named, or -; auto-merge gives its method, who enabled it and when, and the head it was " +
 				"enabled on, which differs from head once a push follows, as GitHub keeps auto-merge across a writer's " +
 				"push (- when it cannot be told: a quest land pin names it, and otherwise the head branch's push " +
 				"activity, which GitHub lists up to minutes late); landing-stopped is the latest exit from the merge queue, auto-merge, or " +
@@ -1777,7 +1777,6 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"part read from the prompt cache, and output), a score from 0 to 10 for how ready the head is to land with " +
 				"its one-sentence rationale, a raised line with the tier and reason when it raised the classifier's, the finding count, each finding by its number, then the last round's findings with " +
 				"their numbers and dispositions; then the `record` line below and a last `next` line naming the author's next step: " +
-				"`next finish` when every finding is low severity, to fix or refute them without another round, " +
 				"`next checkpoint` when a reviewer's every third round reports other findings, to compare the current approach " +
 				"with the best long-term approach worked out from first principles before fixing them, `next respond` to fix or refute the findings, or `next done`, which for a low head no reviewer ran says so. A reply without a valid score " +
 				"fails as any malformed reply does. --json prints " +
@@ -1787,14 +1786,14 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"head, named in full only once no reviewer reports a finding, the base, the head's risk tier and reason, " +
 				"an `- Overridden:` line, the classifier's tier and who set it, a `- Class:` line, a `- Local review: none` line for a low head no reviewer ran on, a `- Skipped:` line for each reviewer passed over, and each reviewer, its Reviewer line ending in `, shadow` for the shadow or `, second` for the second reviewer, its " +
 				"session and round, score, the tier it raised the risk to and why, its tally of findings across the branch's rounds, and each finding with its disposition. " +
-				"It then sets the `quest review` commit status on the head, on the same token: success once no finding is open, else failure, " +
-				"its description the head's risk tier and class, which `quest status` counts only from a user who can push; one GitHub refuses " +
-				"prints `; status skipped: <why>` after the record's URL. With no " +
+				"On GitHub it then sets the `quest review` commit status on the head, on the same token, so push the head first: success once no finding is open, else failure, " +
+				"its description the head's risk tier and class and whether a local reviewer ran, its target the diff from the PR's base, which `quest status` counts only from a user who can push; one GitHub refuses " +
+				"prints `; status skipped: <why>` after the record's URL and exits 1. With no " +
 				"such PR, several from other repositories that `HEAD` contains, or a remote off GitHub, it prints `record skipped: <why>` and changes nothing.\n\n" +
 				"Exits 0 once the round finishes, whatever it found, 2 for invalid arguments " +
 				"or a checkout that cannot be reviewed, 3 when no eligible reviewer could run, each not installed, logged " +
 				"out, its login rejected, at its usage limit, or unable to run on this host, and 1 for other failures, including a PR GitHub will not show or a record it " +
-				"refuses. A malformed `## Models` field the round reads, such as a Size line naming no size or an " +
+				"refuses or a status it refuses. A malformed `## Models` field the round reads, such as a Size line naming no size or an " +
 				"Implementer line naming no model it can read, is a usage error, unless --size or --exclude-model replaces it. A usage limit of the only " +
 				"eligible reviewer prints one line, " +
 				"`error: <harness> hit its usage limit; resets <time>`, where <time> is the reset as an ISO 8601 UTC " +
@@ -1911,7 +1910,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 								);
 							print(nextStep(rounds));
 						}
-						if (failure === undefined) return 0;
+						if (failure === undefined) return record !== undefined && "unattested" in record ? 1 : 0;
 						warn(
 							`the round finished, but recording it in the PR body failed: ${failure instanceof Error ? failure.message : String(failure)}`,
 						);

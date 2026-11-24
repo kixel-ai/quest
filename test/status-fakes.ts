@@ -3,7 +3,7 @@ import { expect } from "vitest";
 
 import { recordedRisk } from "../src/core";
 import { type GitHubReadDependencies } from "../src/github/client";
-import { attestation } from "../src/github/review-trust";
+import { NO_REVIEWER, attestation, reviewTarget } from "../src/github/review-trust";
 
 export const A = "a".repeat(40);
 export const B = "b".repeat(40);
@@ -131,7 +131,7 @@ export function setup(
 		open?: { pulls: Node[]; blobs?: Record<string, string>; files?: Record<number, Node[]> };
 		/**
 		 * The latest `quest review` status on each commit, or null for a commit GitHub does not have; by default, the
-		 * maintainer's passing status attesting the body's risk on every commit.
+		 * maintainer's passing status attesting the body's risk on the head alone.
 		 */
 		statuses?: Record<string, Node | null>;
 		/** Each login's permission on the repository, or the status GitHub refuses it with; by default `maintainer` is an admin. */
@@ -245,17 +245,26 @@ export function setup(
 			if (request.query.includes("query ReviewStatus(")) {
 				const sha = String(request.variables.sha);
 				statusQueries.push(sha);
-				// By default the maintainer's passing status attests whatever the body's record says.
-				const recorded = recordedRisk(String(last?.data.repository.pullRequest.body ?? ""));
+				// By default the maintainer's passing status on the head attests whatever the body's record says.
+				const pull = last?.data.repository.pullRequest;
+				const body = String(pull?.body ?? "");
+				const recorded = recordedRisk(body);
 				const status =
-					options.statuses === undefined
-						? reviewStatus(
-								"SUCCESS",
-								recorded === null || "malformed" in recorded
-									? "Risk low: passed"
-									: attestation(recorded.tier, recorded.class, true),
-							)
-						: options.statuses[sha];
+					options.statuses !== undefined
+						? options.statuses[sha]
+						: sha !== pull?.headRefOid
+							? undefined
+							: reviewStatus(
+									"SUCCESS",
+									recorded === null || "malformed" in recorded
+										? "Risk low: passed"
+										: attestation(
+												recorded.tier,
+												recorded.class,
+												NO_REVIEWER.test(body) ? "passed with no local reviewer" : "passed",
+											),
+									sha,
+								);
 				const object = status === null ? null : { status: status === undefined ? null : { context: status } };
 				return Response.json({ data: { repository: { object } } });
 			}
@@ -287,7 +296,11 @@ export function setup(
 	return { deps, queries, texts, holdQueries, eventRequests, activityRequests, statusQueries, permissionRequests };
 }
 
-/** A `quest review` status as GitHub's GraphQL `StatusContext` gives it, set by `login` of GraphQL type `kind`. */
-export function reviewStatus(state: string, description: string, login = "maintainer", kind = "User") {
-	return { state, description, creator: { __typename: kind, login } };
+/**
+ * A `quest review` status on `sha` as GitHub's GraphQL `StatusContext` gives it, its target the diff into `main`, set
+ * by `login` of GraphQL type `kind`.
+ */
+export function reviewStatus(state: string, description: string, sha: string, login = "maintainer", kind = "User") {
+	const targetUrl = reviewTarget({ owner: "example", repo: "project" }, "main", sha);
+	return { state, description, targetUrl, creator: { __typename: kind, login } };
 }

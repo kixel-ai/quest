@@ -5,7 +5,7 @@ import { recorded } from "./models-record";
 import { type ClaimDependencies, upstream } from "./claims";
 import { pullsFrom } from "../github/claims";
 import { object, repositoryPath } from "../github/client";
-import { REVIEW_CONTEXT, attestation } from "../github/review-trust";
+import { REVIEW_CONTEXT, attestation, reviewTarget } from "../github/review-trust";
 import { git } from "./git";
 import { contains } from "./land";
 import { requireRemote } from "./github";
@@ -109,7 +109,7 @@ export function reviewRecord({ rounds, tallies, risk, skipped, head, base }: Rev
 		...(risk.overridden ? [`- Overridden: from ${risk.overridden} by the maintainer`] : []),
 		`- Classified: ${risk.classified.tier} by ${classifiedBy(risk.classified)}`,
 		...(risk.classified.class === null ? [] : [`- Class: \`${risk.classified.class}\``]),
-		...(rounds.length === 0 ? [`- Local review: none, since a low-risk head needs only the online reviewer`] : []),
+		...(rounds.length === 0 ? [`- Local review: none, since the head is low risk`] : []),
 		// Outside the Reviewer blocks, which `parseReview` reads as reviewers that ran.
 		...skipped.map(
 			(skip) => `- Skipped: ${HARNESSES[skip.harness]}, ${skip.model}, ${skip.effort} effort: ${skip.reason}`,
@@ -368,15 +368,21 @@ async function openPull(
 		url: pull.url,
 		body,
 		edit: (body) => hosting.writes().edit({ ...repository, number: pull.number }, { title: null, body }),
-		// The status goes on the person's own token, which `quest status` counts only when it can push.
+		// The status goes on the person's own token, which `quest status` counts only when it can push. Another forge
+		// has no commit statuses here, and decides on its own which record counts.
 		attest: async (sha, state, description) => {
-			if (up.github === null) return `${remote} is not on GitHub`;
+			if (up.github === null) return null;
 			const response = await up.github.client.request(`${repositoryPath(repository)}/statuses/${sha}`, {
-				body: { state, context: REVIEW_CONTEXT, description },
+				body: { state, context: REVIEW_CONTEXT, description, target_url: reviewTarget(repository, base, sha) },
 				allow: [403, 404, 422],
+				// The latest status per context wins, so setting it again leaves the same state.
+				repeat: true,
 			});
-			if (response.status === 422) return `GitHub has no commit ${sha}; push it, then review it again`;
-			return response.ok ? null : `GitHub refused the ${REVIEW_CONTEXT} status (HTTP ${response.status})`;
+			if (response.ok) return null;
+			const message = String(object(await response.json()).message);
+			return response.status === 422
+				? `GitHub refused the ${REVIEW_CONTEXT} status on ${sha}, which it needs pushed first: ${message}`
+				: `GitHub refused the ${REVIEW_CONTEXT} status (HTTP ${response.status}: ${message}); the token needs write access to commit statuses`;
 		},
 	};
 }
@@ -403,10 +409,11 @@ export async function recordRounds(root: string, reviewed: Reviewed, deps: Claim
 	const next = withReview(pull.body, reviewRecord(reviewed));
 	if (next !== pull.body) await pull.edit(next);
 	const ok = passed(reviewed);
+	const outcome = !ok ? "findings open" : reviewed.rounds.length === 0 ? "passed with no local reviewer" : "passed";
 	const why = await pull.attest(
 		reviewed.head,
 		ok ? "success" : "failure",
-		attestation(reviewed.risk.tier, reviewed.risk.classified.class, ok),
+		attestation(reviewed.risk.tier, reviewed.risk.classified.class, outcome),
 	);
 	return why === null ? { url: pull.url } : { url: pull.url, unattested: why };
 }

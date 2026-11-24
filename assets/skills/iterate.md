@@ -27,6 +27,6 @@ Answer each `signal` line of `quest status <pr>` that your push leaves: reply in
 If `quest status <pr>` shows auto-merge enabled, disable it with `gh pr merge <pr> --disable-auto` before any push: GitHub keeps it across a writer's push and would land the new head unreviewed.
 
 Once nothing is unfinished and no decision beyond its follow-ups' needs the user, finish with `/quest-review`, passing your token, whether the PR is a draft or already ready for review: it reviews the branch, pushes, and marks it ready.
-If you stop before that on a PR that is ready for review, its new head still needs a review before the push: run `quest review --base <remote>/<base>`, with `--branch <head-branch>` whenever your checked-out branch is not the PR's head branch, and follow each round's `next` line; then push and update the PR's summary.
+If you stop before that on a PR that is ready for review, its new head still needs a review: push it, run `quest review --base <remote>/<base>`, with `--branch <head-branch>` whenever your checked-out branch is not the PR's head branch, follow each round's `next` line, pushing each fix before the next round, and update the PR's summary.
 Hand the PR back with `quest release <pr> <token>`, using the latest token printed, whenever you stop, including to ask.
 Never merge; that is `/quest-merge`, once the PR is picked.

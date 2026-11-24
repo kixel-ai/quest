@@ -579,8 +579,8 @@ comes last, and a missing value prints as `-`:
 | --- | --- |
 | `url`, `state`, `draft`, `head` | The PR URL; `open`, `closed`, or `merged`; `true` or `false`; the head SHA. |
 | `mergeable`, `merge-state`, `review-decision` | GitHub's values, lowercased. |
-| `review-record` | Whether the PR body's [`## Review` record](#review-locally) still covers the head, and the head it names last: `current` when it is the head, `diff-identical` when `git diff <base>...<head>` prints the same as for it, `stale` otherwise, or `unknown` when GitHub cannot compare them, such as a diff too large; `-` when the record names no full SHA, or, with a warning saying why, when no passing [`quest review` commit status](#review-locally) attests it: the latest one on the head it names must be `success`, set by a user with write access to the base repository, and its description must name the record's risk tier and class. So a record a contributor or a bot wrote, or edited to name another head or tier, counts for nothing. Reading the setter's permission takes a token that can push to the repository; any other sees every record as untrusted. |
-| `risk` | The record's [risk tier](#risk-tiers), `low`, `medium`, or `high`; the same state as `review-record` for the head it names; the tier its classifier set before any reviewer raised it; and the reason. `-` when the record names none, and `- malformed -` with why when its risk lines do not parse, which `quest merge` refuses. |
+| `review-record` | Whether the PR body's [`## Review` record](#review-locally) still covers the head, and the head it names last: `current` when it is the head, `diff-identical` when `git diff <base>...<head>` prints the same as for it, `stale` otherwise, or `unknown` when GitHub cannot compare them, such as a diff too large; `-` when the record names no full SHA, or, with a warning saying why, when no passing [`quest review` commit status](#review-locally) attests it: the latest one on the head it names must be `success`, set by a user with write access to the base repository, its target the diff into the PR's base, and its description must name the record's risk tier, class, and whether a local reviewer ran. So a record a contributor or a bot wrote, or edited to name another head, base, or tier, counts for nothing. Reading the setter's permission takes a token that can push to the repository; any other sees every record as untrusted. |
+| `risk` | The record's [risk tier](#risk-tiers), `low`, `medium`, or `high`; the same state as `review-record` for the head it names; the tier its classifier set before any reviewer raised it; and the reason. `-` when the record names none or does not count, and `- malformed -` with why when its risk lines do not parse, which `quest merge` refuses. |
 | `class` | The `## Automatic` class of the base's `RISK.md` the record's classifier found the change in, or `-`. |
 | `auto-merge` | Method, who enabled it, when, and the head it was enabled on. |
 | `merge-queue` | Queue state, position, and when it was enqueued. |
@@ -1187,8 +1187,8 @@ not pin yet, it opens or updates that target's one `quest-bump` PR as the App:
    bump PR's head becomes the new commit's first parent, beside the target's
    base, so the branch never rewinds; any other `quest-bump` branch, left by a
    merged or closed PR, is replaced. Auto-merge on the open PR is disarmed
-   before the push. The PR body links the comparison and records the review as
-   skipped, since a pin bump changes no repository code and the target's CI is
+   before the push. The PR body links the comparison and says it lands with
+   no review, since a pin bump changes no repository code and the target's CI is
    the gate. Its title and body name the release.
 5. Findings `quest check --fix` cannot resolve leave the PR a draft with a
    `## Waiting` item quoting them. Otherwise it lands like any PR there, through
@@ -1503,7 +1503,7 @@ whole branch at the PR's size.
 ## Review locally
 
 `quest review` has a model other than the latest writer review the checkout's
-committed branch before it is pushed for review, at an effort set by the PR's
+committed and pushed branch before it is marked ready for review, at an effort set by the PR's
 size. Each size ranks its reviewers, the same for every repository:
 
 | PR size | Reviewer | When the reviewer wrote it or is weaker than its writer | Then, while those are out |
@@ -1781,13 +1781,16 @@ text to `quest status` and the record alike; the rest of the body stays as writt
 gains it at the end, unless it ends inside an unclosed code fence or HTML
 comment, which fails the record. With no such PR, or a remote off GitHub, it changes nothing
 and prints `record skipped: <why>`. It edits as the user the GitHub token names
-(`GH_TOKEN`, `GITHUB_TOKEN`, or `gh auth token`), then sets the `quest review`
-commit status on the head on the same token: `success` once no finding is open,
-else `failure`, described by the head's risk tier and class, as `Risk low, class
-test: passed`. `quest status` counts a record only through that status, set by
-someone who can push, so a contributor's own record counts for nothing; a status
-GitHub refuses prints `; status skipped: <why>` after the record's URL. A record GitHub refuses fails the command after the
-round's report, with exit status 1. It exits 0 once the round
+(`GH_TOKEN`, `GITHUB_TOKEN`, or `gh auth token`), then on GitHub sets the
+`quest review` commit status on the head on the same token, so push the head
+first: `success` once no finding is open, else `failure`, described by the
+head's risk tier and class and whether a local reviewer ran, as `Risk low,
+class test: passed with no local reviewer`, its target the diff from the PR's
+base. `quest status` counts a record only through that status, set by someone
+who can push, so a contributor's own record counts for nothing, and a failing
+one blocks `quest merge --land` as any failed check does. A record or status
+GitHub refuses fails the command after the round's report, with exit status 1,
+a status printing `; status skipped: <why>` after the record's URL. It exits 0 once the round
 finishes, whatever it found, 2 for invalid arguments or a checkout that
 cannot be reviewed, 3 when no eligible reviewer could run, each not installed,
 logged out, its login rejected, at its usage limit, or unable to run on this host, and 1 for other
@@ -1813,7 +1816,7 @@ run catches what those miss.
 
 | Tier | Local review | Lands on |
 |---|---|---|
-| Low | None; the online reviewer only | Its own, once its class is in `RISK.md`'s `## Automatic` list; else the maintainer's pick |
+| Low | None, unless `--harness`, `--model`, or `--effort` names one | Its own, once its class is in `RISK.md`'s `## Automatic` list; else the maintainer's pick |
 | Medium | The size's pick | The maintainer's pick |
 | High | No shadow, but a second reviewer from another vendor on the high list; the pick comes from that list too when the classifier or an override set the tier | The maintainer's pick, with the full brief |
 
@@ -1886,8 +1889,8 @@ to its block. A `- Class:` line follows when the classifier named a class.
 
 A low head with no finding left to settle runs no local reviewer, unless
 `--harness`, `--model`, or `--effort` names one: the record names the head in
-full, adds `- Local review: none, since a low-risk head needs only the online
-reviewer`, and `next done` says so. A high head runs no shadow but gets a
+full, adds `- Local review: none, since the head is low risk`, and `next done`
+says so. A high head runs no shadow but gets a
 second reviewer: the first of the `high` list (Codex `gpt-6.2-sol` xhigh,
 Claude Code `claude-opus-5-5` xhigh, Claude Code `claude-fable-5-2` xhigh,
 Codex `gpt-6.2-astra` xhigh) from a vendor other than the pick's that can
@@ -1965,8 +1968,8 @@ it, so a review's sub-agents count as reviewing. Each PR shows its `## Models` s
 whether a reviewer raised it, and its implementers, and as `unread:` each Implementer line it cannot read; each reviewer the
 `quest review` record names, with its latest round and score and its tally of
 findings across every round, marked `shadow` or `second` for those seats, where a merged PR whose last round left only low
-findings open counts them settled, since `/quest-review` fixes or refutes those
-before merge without another round; the land fixer's fixes; the later merged PRs
+findings open counts them settled, as `/quest-review` once had those fixed or
+refuted before merge without another round; the land fixer's fixes; the later merged PRs
 whose `## Caused by` names it on a bullet that opens with its link, as
 `- [owner/repo#N](url) - why`, never a link elsewhere on a line; and each
 online reviewer's record, read from GitHub.

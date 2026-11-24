@@ -1865,7 +1865,7 @@ const SCALE =
 	"after the findings are fixed, 4 to 6 needs rework, and 0 to 3 is the wrong approach. A head with no findings can " +
 	"still score below 10, such as a working change that is harder to maintain than it needs to be.";
 
-/** What each severity means; the author runs no further round after one whose findings are all low. */
+/** What each severity means. */
 const SEVERITY =
 	"Rate each finding high when it breaks behavior, security, or data in a case users will hit, medium when it is " +
 	"wrong in a narrower case or misses a case the change should cover, and low when it would not block landing, " +
@@ -3287,16 +3287,12 @@ async function open(
 
 /**
  * The author's next step after a run's `rounds`, printed last so each step of the
- * procedure arrives when it applies: handling findings that are all low
- * severity without another round, the design checkpoint when a reviewer's
- * every third round reports others, else answering them, or nothing left to do.
+ * procedure arrives when it applies: the design checkpoint when a reviewer's
+ * every third round reports findings, else answering them, or nothing left to do.
  */
 export function nextStep(rounds: Round[]): string {
-	if (rounds.length === 0) return "next done: the head is low risk, so the online reviewer alone reviews it";
-	const findings = rounds.flatMap((round) => round.findings);
-	if (findings.length === 0) return "next done: no findings remain on this head";
-	if (findings.every((finding) => finding.severity === "low"))
-		return "next finish: fix or refute each finding, commit, rerun the checks, then add a line after the PR body's review record naming the new head's full SHA and each finding's disposition; run no further round";
+	if (rounds.length === 0) return "next done: the head is low risk, so no local reviewer ran";
+	if (rounds.every((round) => round.findings.length === 0)) return "next done: no findings remain on this head";
 	if (rounds.some((round) => round.findings.length > 0 && round.round % 3 === 0))
 		return "next checkpoint: before fixing these findings, step back: work out the best long-term approach from first principles, compare it with the current one, and let the user decide, as /quest-review describes";
 	return "next respond: fix each finding or refute it with evidence the reviewer cannot rebut, commit, rerun the checks, then run the next round with --responses, one response per finding by its number";

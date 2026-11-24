@@ -74,9 +74,7 @@ person.
   such as a rename inside a module, a simplification, or a comment-only
   change
 - `chore` - a dependency or pin bump at any tier, or another change as
-  small that is not high, from any author, which lands once a
-  maintainer's `quest review` record of a local reviewer's round passes
-  on its head; a low head's record with no reviewer is not enough
+  small that is not high, from any author
 
 ## High
 
