@@ -700,8 +700,12 @@ export async function publishHead(
 /** Passes in a row that fail to collect the same PR before it is set aside, so its job's other PRs go on. */
 export const COLLECTION_ATTEMPTS = 3;
 
-/** An exit status as a cause: a signal by name (143 is SIGTERM), or a crash with its code (101 is a Rust panic). */
+/**
+ * An exit status as a cause: a timeout (124, which `timeout(1)` and the fixer client use for a limit reached), a signal
+ * by name (143 is SIGTERM), or a crash with its code (101 is a Rust panic).
+ */
 function exited(code: string): string {
+	if (code === "124") return "timed out (exit 124)";
 	const signal = Object.entries(osConstants.signals).find(([, number]) => 128 + number === Number(code))?.[0];
 	return signal ? `stopped by ${signal} (exit ${code})` : `crashed (exit ${code})`;
 }
