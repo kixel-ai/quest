@@ -186,12 +186,11 @@ three hosts' saved review rounds:
     effort, and a token and cost table. Behind local review it still
     found something on 147 of 272 high-tier and 148 of 549 medium-tier
     merged PRs, 93% of its findings accepted, most likely for its model
-    differing from the mostly-Sol pick. Once kixel-ai/quest#819's second
-    seat runs on high heads (Sol and Fable xhigh on Opus's work, Opus and
-    Astra xhigh on Fable's, never weaker than the writer), compare what Pullfrog still
-    finds behind it per dollar, and recommend retiring it once
-    [review seats](/quest/m0/review-seats.md)' one, two, or three vendor
-    seats match it, with its tally.
+    differing from the mostly-Sol pick.
+    Superseded 2026-11-24 (maintainer): Pullfrog's required approval retired
+    when its quota ran out ([kixel-ai/dotfiles#297](https://github.com/kixel-ai/dotfiles/pull/297)),
+    and [kixel-ai/quest#858](https://github.com/kixel-ai/quest/pull/858)
+    seats one, two, or three local reviewers by tier, each on its own vendor.
   - Replay bench? ✅ Not yet (rejected: build it in kixel.quest now). It
     would rerun merged L and XL quests from their base with each writer,
     paired, deciding in days for about $6k a comparison what a live arm

@@ -17,10 +17,11 @@ import { afterEach, expect, test, vi } from "vitest";
 
 import type { ReviewHarness } from "../src/cli/agent";
 import { RUNGS, type ReviewModel, type Rung, drawRung, drawnFrom, rungOrder } from "../src/cli/models";
-import { SIZES, type Size, recordedRisk } from "../src/core";
+import { SIZES, type Size, TIERS, recordedRisk } from "../src/core";
 import {
 	type Draw,
 	type Finding,
+	SEATS,
 	type Round,
 	type Settled,
 	type Tally,
@@ -227,7 +228,7 @@ test("each seat takes a model of the round's rung the branch has not had, never 
 	expect(() => pick("M", { effort: "high" }, all)).toThrow("is avoided, as the latest writer's");
 });
 
-test("over many draws, rounds bring models a branch has not had, at the rung shares the draw promises", () => {
+test("over many draws, each tier's seats are as many distinct vendors, never the writer, from the nearest rung", () => {
 	// A fixed linear congruential source, so the sample is the same on every run.
 	let seed = 42;
 	const random = () => (seed = (seed * 1664525 + 1013904223) % 2 ** 32) / 2 ** 32;
@@ -245,11 +246,23 @@ test("over many draws, rounds bring models a branch has not had, at the rung sha
 				usable: (entry) => !wrote(entry),
 			};
 			if (size === "M") drawn[drawnFrom(size, draw.rung)]++;
-			const first = drawSeat(draw, [])!;
-			const second = drawSeat(draw, [first.reviewer.harness])!;
-			expect(first.reviewer.model).not.toBe(writer);
-			expect(second.reviewer.model).not.toBe(writer);
-			expect(second.reviewer.harness).not.toBe(first.reviewer.harness);
+			const tier = TIERS[(branch + run) % TIERS.length]!;
+			const seats: { reviewer: ReviewModel; rung: Rung }[] = [];
+			while (seats.length < SEATS[tier]) {
+				const taken = seats.map((seat) => seat.reviewer.harness);
+				const seat = drawSeat(draw, taken)!;
+				// Each seat comes from the first rung, the drawn one, then the size's and outward, that has a model of a
+				// vendor no seat has yet.
+				const nearest = rungOrder(size, draw.rung).find((rung) =>
+					RUNGS[rung].some((entry) => !wrote(entry) && !taken.includes(entry.harness)),
+				);
+				expect(seat.rung).toBe(nearest);
+				seats.push(seat);
+			}
+			// Low, medium, and high seat one, two, and three vendors, none on the writer's model.
+			expect(new Set(seats.map((seat) => seat.reviewer.harness)).size).toBe([1, 2, 3][TIERS.indexOf(tier)]);
+			expect(seats.filter((seat) => seat.reviewer.model === writer)).toEqual([]);
+			const [first] = seats as [(typeof seats)[number]];
 			// The first seat comes from the drawn rung, and repeats a model only once the rung has no new one left,
 			// then the one the branch had longest ago.
 			expect(first.rung).toBe(draw.rung);
@@ -258,8 +271,7 @@ test("over many draws, rounds bring models a branch has not had, at the rung sha
 				expect(open.every((entry) => had[entry.model] !== undefined)).toBe(true);
 				expect(had[first.reviewer.model]).toBe(Math.min(...open.map((entry) => had[entry.model]!)));
 			}
-			had[first.reviewer.model] = run;
-			had[second.reviewer.model] = run;
+			for (const seat of seats) had[seat.reviewer.model] = run;
 		}
 	}
 	const total = drawn.size + drawn.up + drawn.down;
@@ -268,7 +280,7 @@ test("over many draws, rounds bring models a branch has not had, at the rung sha
 	expect(drawn.down / total).toBeCloseTo(0.25, 1);
 });
 
-fakes("a quest branch is reviewed at its quest's size on the base, which its own change cannot lower", async () => {
+agyFakes("a quest branch is reviewed at its quest's size on the base, which its own change cannot lower", async () => {
 	const s = setup();
 	git(s.repo, "checkout", "-q", "main");
 	write(s.repo, "quest/m0/big.md", "# [L] Big\n\n## Goal\n\nBig.\n");
@@ -395,7 +407,7 @@ fakes.each([
 		const s = setup(host);
 		vi.stubEnv(variable, "/work");
 		vi.stubEnv(flag, value);
-		const result = await quest("--root", s.repo, "review");
+		const result = await quest("--root", s.repo, "review", "--harness", host === "CLAUDECODE" ? "codex" : "claude");
 		expect(result.code, result.stderr).toBe(3);
 		expect(result.stderr).toContain(message);
 	},
@@ -412,17 +424,12 @@ fakes.each([
 	async (host, variant, message) => {
 		const s = setup(host);
 		vi.stubEnv("FAKE_REJECTED", variant);
-		const result = await quest("--root", s.repo, "review");
+		const result = await quest("--root", s.repo, "review", "--harness", host === "CLAUDECODE" ? "codex" : "claude");
 		expect(result.stderr).toContain(message);
 		expect(result.code).toBe(3);
-		// A rejected login rules out every model of its CLI, so Claude's later reviewer never runs. The failing seat's
-		// status check passed, and the first turn to fail stopped the other seat before it
-		// resumed. That seat runs its own status check concurrently, so the abort may stop it before its CLI
-		// logs, or before it spawns at all.
+		// The named reviewer's status check passed, and its first turn failed, so it never resumed.
 		const calls = s.calls();
-		const checks = calls.filter((c) => effortOf(c) === null).length;
-		expect(checks).toBeGreaterThanOrEqual(1);
-		expect(checks).toBeLessThanOrEqual(2);
+		expect(calls.filter((c) => effortOf(c) === null)).toHaveLength(1);
 		const turns = calls.filter((c) => effortOf(c) !== null);
 		expect(turns.length).toBeGreaterThanOrEqual(1);
 		expect(turns.every((c) => !c.argv.includes("--resume") && !c.argv.includes("resume"))).toBe(true);
@@ -432,9 +439,10 @@ fakes.each([
 // Codex prints its reset in the local time zone, which this process shares.
 const codexReset = new Date(2026, 10, 5, 15, 15).toISOString().replace(".000Z", "Z");
 
-// One test per case: each runs two full reviews, and all four in one test outran its timeout on loaded runners.
-fakes.for([
-	// Sol's limit passes its seat to Gemini, then to the next rung's Astra, which hits Codex's limit too.
+// One test per case: each runs two full reviews, and all four in one test outran its timeout on loaded runners. The
+// second review seats Gemini beside the vendor at its limit, so it needs agy.
+agyFakes.for([
+	// Sol's limit passes its seat to the next rung's Astra, which hits Codex's limit too.
 	[
 		"CLAUDECODE",
 		"reset",
@@ -460,10 +468,12 @@ fakes.for([
 	"a usage limit with no reviewer left exits 3 with its reset, and records no round (%s, %s)",
 	async ([host, variant, message]) => {
 		const s = setup(host);
+		// Only the vendor the host leaves beside Gemini is at its limit, so the seat Gemini does not take finds none.
+		vi.stubEnv("FAKE_FAILS", host === "CLAUDECODE" ? "codex" : "claude");
 		vi.stubEnv("FAKE_LIMITED", variant);
 		const result = await quest("--root", s.repo, "review");
-		// Gemini's seat is out too, at its own limit or where quest refuses agy, as the message goes on to say.
-		expect(result.stderr).toContain(`error: ${message}, gemini-4-neon medium (agy `);
+		// Where quest refuses agy, its skip is named after them.
+		expect(result.stderr).toContain(`error: ${message}`);
 		expect(result.code).toBe(3);
 		expect(result.stdout).toBe("");
 		vi.stubEnv("FAKE_LIMITED", undefined);
@@ -476,6 +486,9 @@ fakes.for([
 // where a seat it would take reads as a skip instead.
 const OPUS_WROTE = ["--exclude-model", "claude-opus-5-5", "--exclude-model", "gemini-4-neon"];
 
+// Opus wrote it, and Gemini may sit: a high head's three vendors need agy.
+const OPUS = ["--exclude-model", "claude-opus-5-5"];
+
 fakes("a reviewer at its usage limit passes the round to the next eligible one, and the record names it", async () => {
 	const s = setup(null);
 	vi.stubEnv("FAKE_FAILS", "gpt-6.2-sol");
@@ -483,8 +496,10 @@ fakes("a reviewer at its usage limit passes the round to the next eligible one, 
 	const plain = await quest("--root", s.repo, "review", ...OPUS_WROTE);
 	expect(plain.code, plain.stderr).toBe(0);
 	expect(plain.stdout).toContain(`\nskipped codex gpt-6.2-sol high usage limit, resets ${codexReset}\n`);
-	// The standard rung has no other model left, so the seat passes to the next rung outward.
+	// The standard rung has no other model left, so the seat passes to the next rung outward, as does the medium head's
+	// second seat, on Claude Code.
 	expect(plain.stdout).toContain("\nreviewer codex gpt-6.2-astra medium\nrung deep up\nsession ");
+	expect(plain.stdout).toContain("\nreviewer claude claude-fable-5-2 medium\nrung deep up\nsession ");
 	// Only Astra ran turns after Sol's limit, and Opus, the writer, never ran.
 	const turns = s.calls().filter((c) => effortOf(c) !== null);
 	expect(turns.filter((c) => c.argv.join(" ").includes("claude-opus-5-5"))).toEqual([]);
@@ -493,20 +508,26 @@ fakes("a reviewer at its usage limit passes the round to the next eligible one, 
 	// The responses answer Astra's finding, which Sol, a model the branch has not had, settles once it is back.
 	vi.stubEnv("FAKE_LIMITED", undefined);
 	const responses = join(s.bin, "..", "responses.md");
-	writeFileSync(responses, "1. Fixed: the average divides by the count.\n");
+	writeFileSync(responses, "1. Fixed: the average divides by the count.\n2. Fixed: the same.\n");
 	write(s.repo, "src/lib.ts", "export const x = 3;\n");
 	git(s.repo, "commit", "-qam", "fix");
 	const back = await quest("--root", s.repo, "review", ...OPUS_WROTE, "--responses", responses, "--json");
 	expect(back.code, back.stderr).toBe(0);
 	const { rounds, skipped, tallies } = JSON.parse(back.stdout);
 	expect(skipped).toEqual([]);
+	// Fable is the only Claude Code model the writer leaves on the rungs it reaches, so it sits again.
 	expect(rounds.map((r: Round) => `${r.reviewer} ${r.model} ${r.effort} ${r.rung?.name}`)).toEqual([
 		"codex gpt-6.2-sol high standard",
+		"claude claude-fable-5-2 medium deep",
 	]);
-	expect(rounds.map((r: Round) => r.earlier?.findings.map((f) => f.disposition))).toEqual([["fixed"]]);
-	// The fix is Astra's, whose finding it was, and Sol's own round starts its own tally.
+	expect(rounds.map((r: Round) => r.earlier?.findings.map((f) => f.disposition))).toEqual([
+		["fixed", "fixed"],
+		["fixed", "fixed"],
+	]);
+	// Each fix is its raiser's, Astra's and Fable's, and Sol's own round starts its own tally.
 	expect(tallies.map((t: Tally) => [t.model, t.rounds, t.fixed, t.last])).toEqual([
 		["gpt-6.2-sol", 1, 0, 2],
+		["claude-fable-5-2", 2, 1, 2],
 		["gpt-6.2-astra", 1, 1, 1],
 	]);
 });
@@ -520,7 +541,10 @@ fakes("a model its login does not serve passes the round on, recorded as a skip"
 	const { rounds, skipped } = JSON.parse(result.stdout);
 	// Only Sol is out, so Codex's other model still takes the seat.
 	expect(skipped).toEqual([{ harness: "codex", model: "gpt-6.2-sol", effort: "high", reason: "model not served" }]);
-	expect(rounds.map((r: Round) => `${r.model} ${r.effort}`)).toEqual(["gpt-6.2-astra medium"]);
+	expect(rounds.map((r: Round) => `${r.model} ${r.effort}`)).toEqual([
+		"gpt-6.2-astra medium",
+		"claude-fable-5-2 medium",
+	]);
 	// So does one whose CLI says so only on stderr.
 	vi.stubEnv("FAKE_LIMITED", "unserved-stderr");
 	const quiet = JSON.parse((await quest("--root", s.repo, "review", ...OPUS_WROTE, "--new", "--json")).stdout);
@@ -536,7 +560,7 @@ fakes("a model at its usage limit passes the round to the next model of its rung
 	const s = setup(null);
 	vi.stubEnv("FAKE_FAILS", "claude-opus-5-5");
 	vi.stubEnv("FAKE_LIMITED", "reset");
-	const args = ["--exclude-model", "gpt-6.2-sol", "--size", "L", "--json"];
+	const args = ["--exclude-model", "gpt-6.2-sol", "--exclude-model", "gemini-4-neon", "--size", "L", "--json"];
 	const result = await quest("--root", s.repo, "review", ...args);
 	expect(result.code, result.stderr).toBe(0);
 	const { rounds, skipped } = JSON.parse(result.stdout);
@@ -548,25 +572,35 @@ fakes("a model at its usage limit passes the round to the next model of its rung
 			reason: "usage limit, resets 2030-03-17T17:46:40Z",
 		},
 	]);
+	// Claude Code's seat takes the rung's next model, and Codex's the one the exclusion leaves.
 	expect(rounds.map((r: Round) => `${r.model} ${r.effort} ${r.rung?.name} ${r.rung?.drawn}`)).toEqual([
 		"gpt-6.2-astra medium deep size",
+		"claude-fable-5-2 medium deep size",
 	]);
 });
 
 fakes("a reviewer CLI that is not installed passes the round to the next eligible one", async () => {
 	const s = setup(null);
-	// Only git and Codex are on PATH, so no claude install outside the fakes is found either.
-	const only = join(s.bin, "..", "codex-only");
+	// Only git, Codex, and Claude Code are on PATH, so no agy install outside the fakes is found either.
+	const only = join(s.bin, "..", "no-agy");
 	mkdirSync(only);
 	symlinkSync(execFileSync("which", ["git"], { encoding: "utf8" }).trim(), join(only, "git"));
 	symlinkSync(join(s.bin, "codex"), join(only, "codex"));
+	symlinkSync(join(s.bin, "claude"), join(only, "claude"));
 	vi.stubEnv("PATH", only);
 	const result = await quest("--root", s.repo, "review", "--exclude-model", "gpt-6.2-sol");
 	expect(result.code, result.stderr).toBe(0);
-	expect(result.stdout).toContain("\nskipped claude claude-opus-5-5 medium not installed\n");
-	// Gemini's CLI is missing too, so the seat passes to the next rung outward.
+	// Gemini's seat beside Opus passes to Codex, whose only standard model is excluded, so to the next rung outward.
 	expect(result.stdout).toContain("\nskipped agy gemini-4-neon medium not installed\n");
+	expect(result.stdout).toContain("\nreviewer claude claude-opus-5-5 medium\nrung standard size\n");
 	expect(result.stdout).toContain("\nreviewer codex gpt-6.2-astra medium\nrung deep up\n");
+
+	// With Codex missing too, no second vendor can run, so the medium head's run is an outage.
+	rmSync(join(only, "codex"));
+	const alone = await quest("--root", s.repo, "review", "--new", "--exclude-model", "gpt-6.2-sol");
+	expect(alone.code).toBe(3);
+	expect(alone.stderr).toContain("gemini-4-neon medium (agy is not installed");
+	expect(alone.stderr).toContain("(codex is not installed");
 });
 
 fakes.each([
@@ -580,16 +614,23 @@ fakes.each([
 	const result = await quest("--root", s.repo, "review", ...OPUS_WROTE, flag, value);
 	expect(result.stderr).toBe(`error: codex hit its usage limit; resets ${codexReset}\n`);
 	expect(result.code).toBe(3);
-	expect(s.calls().filter((c) => c.argv[0] !== "exec" && c.argv[0] !== "login")).toEqual([]);
+	// No other Codex model takes its seat. --harness runs alone; --model and --effort name only the first seat, so a
+	// drawn Claude Code seat may start beside it before the failure stops it.
+	const calls = s.calls();
+	const codex = calls.filter((c) => c.argv[0] === "exec" || c.argv[0] === "login");
+	expect(codex.filter((c) => effortOf(c) !== null && !c.argv.join(" ").includes("gpt-6.2-sol"))).toEqual([]);
+	if (flag === "--harness") expect(calls.filter((c) => !codex.includes(c))).toEqual([]);
 });
 
 fakes("a failed turn whose reply only quotes a usage limit is no limit, so no other reviewer runs", async () => {
 	const s = setup("CODEX_THREAD_ID");
 	vi.stubEnv("FAKE_QUOTED", "1");
-	const result = await quest("--root", s.repo, "review");
+	const result = await quest("--root", s.repo, "review", ...FABLE_WROTE);
 	expect(result.code).toBe(1);
 	expect(result.stderr).toContain("claude failed with exit status 1");
-	expect(s.calls().filter((c) => effortOf(c) !== null && !c.argv.includes("claude-opus-5-5"))).toEqual([]);
+	// No other Claude Code model takes Opus's seat; Sol's seat beside it may have started its turn.
+	const others = s.calls().filter((c) => effortOf(c) !== null && !c.argv.includes("claude-opus-5-5"));
+	expect(others.filter((c) => !c.argv.join(" ").includes("gpt-6.2-sol"))).toEqual([]);
 });
 
 fakes("Codex reaches a gateway at OPENAI_BASE_URL, whose persistent 429 is the pool's usage limit", async () => {
@@ -597,19 +638,17 @@ fakes("Codex reaches a gateway at OPENAI_BASE_URL, whose persistent 429 is the p
 	vi.stubEnv("FAKE_LOGGED_OUT", "1");
 	vi.stubEnv("CODEX_API_KEY", "proxy-key");
 	vi.stubEnv("FAKE_LIMITED", "retried");
+	const codex = ["--harness", "codex"];
 	// From the provider itself, giving up on a 429 may be a brief throttle, so it is no limit.
-	const direct = await quest("--root", s.repo, "review");
+	const direct = await quest("--root", s.repo, "review", ...codex);
 	expect(direct.code).toBe(1);
 	expect(direct.stderr).toContain("exceeded retry limit, last status: 429");
 	vi.stubEnv("OPENAI_BASE_URL", "http://127.0.0.1:4000/v1");
-	const pooled = await quest("--root", s.repo, "review");
-	// Gemini's seat is out too, logged out or where quest refuses agy.
-	expect(pooled.stderr).toContain(
-		"error: no eligible standard reviewer could run: gpt-6.2-sol high and gpt-6.2-astra medium (codex hit its usage limit; resets unknown), gemini-4-neon medium (agy ",
-	);
+	const pooled = await quest("--root", s.repo, "review", ...codex);
+	expect(pooled.stderr).toBe("error: codex hit its usage limit; resets unknown\n");
 	expect(pooled.code).toBe(3);
 	vi.stubEnv("FAKE_LIMITED", undefined);
-	expect((await quest("--root", s.repo, "review")).code).toBe(0);
+	expect((await quest("--root", s.repo, "review", ...codex)).code).toBe(0);
 	// Codex reads no OPENAI_BASE_URL itself, so the review sets its openai_base_url.
 	for (const call of s
 		.calls()
@@ -652,7 +691,7 @@ fakes.each([
 	const s = setup();
 	vi.stubEnv("OPENAI_BASE_URL", "http://127.0.0.1:4000/v1");
 	vi.stubEnv(name, value);
-	const result = await quest("--root", s.repo, "review");
+	const result = await quest("--root", s.repo, "review", "--harness", "codex");
 	expect(result.code, result.stderr).toBe(0);
 	const calls = s.calls();
 	expect(calls.length).toBeGreaterThan(1);
@@ -667,7 +706,7 @@ fakes("a gateway that rejects Codex's key names the key and the gateway", async 
 	vi.stubEnv("OPENAI_BASE_URL", "http://127.0.0.1:4000/v1");
 	vi.stubEnv("CODEX_API_KEY", "gateway-key");
 	vi.stubEnv("FAKE_REJECTED", "turn");
-	const result = await quest("--root", s.repo, "review");
+	const result = await quest("--root", s.repo, "review", "--harness", "codex");
 	expect(result.code).toBe(3);
 	expect(result.stderr).toContain(
 		"codex rejected CODEX_API_KEY through OPENAI_BASE_URL; replace it, or run `codex login`",
@@ -679,7 +718,7 @@ fakes("a reviewer with no stored login reviews with the credential its CLI reads
 	vi.stubEnv("FAKE_LOGGED_OUT", "1");
 	vi.stubEnv("CODEX_API_KEY", "codex-key");
 	vi.stubEnv("CLAUDE_CODE_OAUTH_TOKEN", "session-token");
-	const codex = await quest("--root", s.repo, "review");
+	const codex = await quest("--root", s.repo, "review", "--harness", "codex");
 	expect(codex.stderr).toBe("");
 	expect(codex.code).toBe(0);
 	for (const call of s.calls().filter((c) => effortOf(c) !== null)) {
@@ -694,7 +733,7 @@ fakes("a reviewer with no stored login reviews with the credential its CLI reads
 	vi.stubEnv("ANTHROPIC_API_KEY", "anthropic-key");
 	vi.stubEnv("CODEX_API_KEY", "codex-key");
 	vi.stubEnv("CLAUDE_CODE_ENTRYPOINT", "sdk-ts");
-	const claude = await quest("--root", t.repo, "review");
+	const claude = await quest("--root", t.repo, "review", "--harness", "claude");
 	expect(claude.stderr).toBe("");
 	expect(claude.code).toBe(0);
 	for (const call of t.calls().filter((c) => effortOf(c) !== null)) {
@@ -710,7 +749,10 @@ fakes("an abort stops the reviewer's turn and records no round", async () => {
 	const pid = join(s.bin, "..", "codex.pid");
 	vi.stubEnv("FAKE_HANG", pid);
 	const controller = new AbortController();
-	const round = review({ root: s.repo, signal: controller.signal }, { env: process.env });
+	const round = review(
+		{ root: s.repo, signal: controller.signal, exclude: ["claude-opus-5-5", "gemini-4-neon"] },
+		{ env: process.env },
+	);
 	while (!existsSync(pid)) await new Promise((resolve) => setTimeout(resolve, 20));
 	controller.abort();
 	await expect(round).rejects.toThrow(/abort/i);
@@ -722,7 +764,7 @@ fakes("an abort stops the reviewer's turn and records no round", async () => {
 fakes("a stored login wins over an environment credential, so a shell's key never changes the billing", async () => {
 	const s = setup("CODEX_THREAD_ID");
 	vi.stubEnv("ANTHROPIC_API_KEY", "anthropic-key");
-	expect((await quest("--root", s.repo, "review")).code).toBe(0);
+	expect((await quest("--root", s.repo, "review", "--harness", "claude")).code).toBe(0);
 	for (const call of s.calls()) expect(call.env.ANTHROPIC_API_KEY).toBeUndefined();
 });
 
@@ -731,7 +773,7 @@ fakes("an environment credential the API rejects is named in the error", async (
 	vi.stubEnv("FAKE_LOGGED_OUT", "1");
 	vi.stubEnv("CODEX_API_KEY", "codex-key");
 	vi.stubEnv("FAKE_REJECTED", "turn");
-	const result = await quest("--root", s.repo, "review");
+	const result = await quest("--root", s.repo, "review", "--harness", "codex");
 	expect(result.code).toBe(3);
 	expect(result.stderr).toContain("codex rejected CODEX_API_KEY; replace it, or run `codex login`");
 });
@@ -740,7 +782,7 @@ fakes("a stored login the API rejects names the credential quest review strips b
 	const s = setup("CODEX_THREAD_ID");
 	vi.stubEnv("ANTHROPIC_API_KEY", "anthropic-key");
 	vi.stubEnv("FAKE_REJECTED", "status");
-	const result = await quest("--root", s.repo, "review");
+	const result = await quest("--root", s.repo, "review", "--harness", "claude");
 	expect(result.code).toBe(3);
 	expect(result.stderr).toContain(
 		`${CLAUDE_LOGGED_OUT}; quest review strips ANTHROPIC_API_KEY while a stored login exists`,
@@ -829,7 +871,7 @@ fakes("an Authorization header in ANTHROPIC_CUSTOM_HEADERS is the gateway's cred
 	const s = setup("CODEX_THREAD_ID");
 	vi.stubEnv("ANTHROPIC_BASE_URL", "https://gateway.example");
 	vi.stubEnv("ANTHROPIC_CUSTOM_HEADERS", "X-Gateway-Tenant: review\r\n  authorization :  Bearer gateway");
-	const result = await quest("--root", s.repo, "review");
+	const result = await quest("--root", s.repo, "review", "--harness", "claude");
 	expect(result.code, result.stderr).toBe(0);
 	expect(s.calls().length).toBeGreaterThan(1);
 	for (const call of s.calls()) {
@@ -842,7 +884,7 @@ fakes("a cloud provider ignores ANTHROPIC_BASE_URL, so it needs no gateway crede
 	const s = setup("CODEX_THREAD_ID");
 	vi.stubEnv("ANTHROPIC_BASE_URL", "https://gateway.example");
 	vi.stubEnv("CLAUDE_CODE_USE_BEDROCK", "1");
-	const result = await quest("--root", s.repo, "review");
+	const result = await quest("--root", s.repo, "review", "--harness", "claude");
 	expect(result.code, result.stderr).toBe(0);
 	for (const call of s.calls()) expect(call.env.CLAUDE_CODE_USE_BEDROCK).toBe("1");
 });
@@ -854,7 +896,7 @@ fakes("a host-managed provider is dropped, and the review runs on the stored log
 	vi.stubEnv("ANTHROPIC_CUSTOM_HEADERS", "X-Host: t3");
 	vi.stubEnv("ANTHROPIC_AUTH_TOKEN", "host-token");
 	vi.stubEnv("CLAUDE_CODE_USE_BEDROCK", "1");
-	const result = await quest("--root", s.repo, "review");
+	const result = await quest("--root", s.repo, "review", "--harness", "claude");
 	expect(result.code, result.stderr).toBe(0);
 	expect(s.calls().length).toBeGreaterThan(1);
 	for (const call of s.calls()) {
@@ -891,7 +933,7 @@ fakes("a gateway credential the API rejects is named with the gateway", async ()
 	vi.stubEnv("ANTHROPIC_AUTH_TOKEN", "gateway-token");
 	vi.stubEnv("ANTHROPIC_BASE_URL", "https://gateway.example");
 	vi.stubEnv("FAKE_REJECTED", "status");
-	const result = await quest("--root", s.repo, "review");
+	const result = await quest("--root", s.repo, "review", "--harness", "claude");
 	expect(result.code).toBe(3);
 	expect(result.stderr).toContain(
 		"claude rejected ANTHROPIC_AUTH_TOKEN through ANTHROPIC_BASE_URL; replace it, or run `claude auth login`",
@@ -903,7 +945,7 @@ fakes.each(["0", "false", ""])("a provider switch set to %j routes nothing", asy
 	vi.stubEnv("ANTHROPIC_API_KEY", "anthropic-key");
 	vi.stubEnv("CLAUDE_CODE_USE_BEDROCK", value);
 	vi.stubEnv("CLAUDE_CODE_USE_VERTEX", value);
-	const result = await quest("--root", s.repo, "review");
+	const result = await quest("--root", s.repo, "review", "--harness", "claude");
 	expect(result.code, result.stderr).toBe(0);
 	expect(s.calls().length).toBeGreaterThan(1);
 	for (const call of s.calls()) {
@@ -928,7 +970,7 @@ fakes.each([
 	vi.stubEnv(`CLAUDE_CODE_SKIP_${provider}_AUTH`, "1");
 	vi.stubEnv(endpoint, "https://provider.example");
 	vi.stubEnv("ANTHROPIC_MODEL", "parent-model");
-	const result = await quest("--root", s.repo, "review");
+	const result = await quest("--root", s.repo, "review", "--harness", "claude");
 	expect(result.code, result.stderr).toBe(0);
 	expect(s.calls().length).toBeGreaterThan(1);
 	for (const call of s.calls()) {
@@ -944,7 +986,7 @@ const PROVIDER_KEYS = ["ANTHROPIC_AWS_API_KEY", "ANTHROPIC_FOUNDRY_API_KEY", "AN
 fakes("Claude gets no provider key over a stored login with no gateway or provider set", async () => {
 	const s = setup("CODEX_THREAD_ID");
 	for (const key of PROVIDER_KEYS) vi.stubEnv(key, "provider-key");
-	expect((await quest("--root", s.repo, "review")).code).toBe(0);
+	expect((await quest("--root", s.repo, "review", "--harness", "claude")).code).toBe(0);
 	expect(s.calls().length).toBeGreaterThan(1);
 	for (const call of s.calls()) for (const key of PROVIDER_KEYS) expect(call.env[key], key).toBeUndefined();
 });
@@ -965,7 +1007,7 @@ fakes("Claude gets a provider's keys while the provider is set", async () => {
 	const s = setup("CODEX_THREAD_ID");
 	for (const key of PROVIDER_KEYS) vi.stubEnv(key, "provider-key");
 	vi.stubEnv("CLAUDE_CODE_USE_FOUNDRY", "1");
-	const result = await quest("--root", s.repo, "review");
+	const result = await quest("--root", s.repo, "review", "--harness", "claude");
 	expect(result.code, result.stderr).toBe(0);
 	for (const call of s.calls()) for (const key of PROVIDER_KEYS) expect(call.env[key], key).toBe("provider-key");
 });
@@ -974,7 +1016,7 @@ fakes("Codex keeps CODEX_CA_CERTIFICATE always, and CODEX_ACCESS_TOKEN without a
 	const s = setup();
 	vi.stubEnv("CODEX_CA_CERTIFICATE", "/etc/gateway-ca.pem");
 	vi.stubEnv("CODEX_ACCESS_TOKEN", "agent-identity");
-	expect((await quest("--root", s.repo, "review")).code).toBe(0);
+	expect((await quest("--root", s.repo, "review", "--harness", "codex")).code).toBe(0);
 	for (const call of s.calls()) {
 		expect(call.env.CODEX_CA_CERTIFICATE).toBe("/etc/gateway-ca.pem");
 		expect(call.env.CODEX_ACCESS_TOKEN).toBeUndefined();
@@ -985,7 +1027,7 @@ fakes("Codex keeps CODEX_CA_CERTIFICATE always, and CODEX_ACCESS_TOKEN without a
 	vi.stubEnv("CODEX_CA_CERTIFICATE", "/etc/gateway-ca.pem");
 	vi.stubEnv("CODEX_ACCESS_TOKEN", "agent-identity");
 	vi.stubEnv("ANTHROPIC_BASE_URL", "https://gateway.example");
-	const result = await quest("--root", t.repo, "review");
+	const result = await quest("--root", t.repo, "review", "--harness", "codex");
 	expect(result.code, result.stderr).toBe(0);
 	expect(t.calls().length).toBeGreaterThan(1);
 	for (const call of t.calls().filter((c) => effortOf(c) !== null)) {
@@ -1007,7 +1049,7 @@ fakes("the reviewer CLI is found on PATH, never in the checkout it reviews", asy
 		git(s.repo, "add", ".");
 		git(s.repo, "commit", "-qm", "plant");
 		vi.stubEnv("PATH", `.::relative:${s.bin}:${process.env.PATH}:`);
-		const result = await quest("--root", s.repo, "review");
+		const result = await quest("--root", s.repo, "review", ...OPUS_WROTE);
 		expect(result.stderr).toBe("");
 		expect(result.code).toBe(0);
 		expect(existsSync(planted)).toBe(false);
@@ -1038,14 +1080,24 @@ const SMALL = ["--size", "S"];
 
 fakes("a detached checkout continues the rounds of the branch --branch names", async () => {
 	const s = setup();
-	expect((await quest("--root", s.repo, "review", ...SMALL)).stdout).toContain("round 1\n");
+	expect((await quest("--root", s.repo, "review", ...SMALL, ...OPUS_WROTE)).stdout).toContain("round 1\n");
 	// Another worktree holds the branch, so its fix is reviewed from a detached checkout of its head.
 	git(s.repo, "checkout", "-q", "--detach");
 	write(s.repo, "src/lib.ts", "export const x = 4;\n");
 	git(s.repo, "commit", "-qam", "fix");
 	write(s.repo, ".tmp/responses.md", "Fixed at src/lib.ts:1.\n");
 	const responses = join(s.repo, ".tmp", "responses.md");
-	const round = await quest("--root", s.repo, "review", ...SMALL, "--branch", "feature", "--responses", responses);
+	const round = await quest(
+		"--root",
+		s.repo,
+		"review",
+		...SMALL,
+		...OPUS_WROTE,
+		"--branch",
+		"feature",
+		"--responses",
+		responses,
+	);
 	expect(round.stderr).toBe("");
 	expect(round.stdout).toContain("round 2\n");
 	// Each round reviews the whole change in a session of its own.
@@ -1054,32 +1106,42 @@ fakes("a detached checkout continues the rounds of the branch --branch names", a
 
 fakes("a differently named branch continues the rounds --branch names, and without it has its own", async () => {
 	const s = setup();
-	expect((await quest("--root", s.repo, "review", ...SMALL)).stdout).toContain("round 1\n");
+	expect((await quest("--root", s.repo, "review", ...SMALL, ...OPUS_WROTE)).stdout).toContain("round 1\n");
 	git(s.repo, "checkout", "-qb", "merge-fix");
 	write(s.repo, ".tmp/responses.md", "Fixed at src/lib.ts:1.\n");
 	const responses = join(s.repo, ".tmp", "responses.md");
-	const named = await quest("--root", s.repo, "review", ...SMALL, "--branch", "feature", "--responses", responses);
+	const named = await quest(
+		"--root",
+		s.repo,
+		"review",
+		...SMALL,
+		...OPUS_WROTE,
+		"--branch",
+		"feature",
+		"--responses",
+		responses,
+	);
 	expect(named.stdout).toContain("round 2\n");
-	const own = await quest("--root", s.repo, "review", ...SMALL, "--responses", responses);
+	const own = await quest("--root", s.repo, "review", ...SMALL, ...OPUS_WROTE, "--responses", responses);
 	expect(own.code).toBe(2);
 	expect(own.stderr).toContain("this branch has none to settle");
 });
 
 fakes("a branch tracking the PR's branch continues its rounds, and one tracking the base has its own", async () => {
 	const s = setup();
-	expect((await quest("--root", s.repo, "review", ...SMALL)).stdout).toContain("round 1\n");
+	expect((await quest("--root", s.repo, "review", ...SMALL, ...OPUS_WROTE)).stdout).toContain("round 1\n");
 	write(s.repo, ".tmp/responses.md", "Fixed at src/lib.ts:1.\n");
 	const responses = join(s.repo, ".tmp", "responses.md");
 	git(s.repo, "checkout", "-qb", "temp");
 	git(s.repo, "config", "branch.temp.remote", "origin");
 	git(s.repo, "config", "branch.temp.merge", "refs/heads/feature");
-	const tracking = await quest("--root", s.repo, "review", ...SMALL, "--responses", responses);
+	const tracking = await quest("--root", s.repo, "review", ...SMALL, ...OPUS_WROTE, "--responses", responses);
 	expect(tracking.stderr).toBe("");
 	expect(tracking.stdout).toContain("round 2\n");
 	git(s.repo, "checkout", "-qb", "other");
 	git(s.repo, "config", "branch.other.remote", "origin");
 	git(s.repo, "config", "branch.other.merge", "refs/heads/main");
-	const base = await quest("--root", s.repo, "review", ...SMALL, "--responses", responses);
+	const base = await quest("--root", s.repo, "review", ...SMALL, ...OPUS_WROTE, "--responses", responses);
 	expect(base.code).toBe(2);
 	expect(base.stderr).toContain("this branch has none to settle");
 });
@@ -1102,7 +1164,8 @@ fakes.each(["CLAUDECODE", "CODEX_THREAD_ID"] as const)(
 		// The base gains a docs change the branch lacks, which a diff against its tip shows as reverted.
 		const tip = moveBase(s.repo, (dir) => write(dir, "docs/guide.md", "new\n"));
 		const head = git(s.repo, "rev-parse", "HEAD");
-		const result = await quest("--root", s.repo, "review");
+		const other = host === "CLAUDECODE" ? "codex" : "claude";
+		const result = await quest("--root", s.repo, "review", "--harness", other);
 		expect(result.stderr).toBe("");
 		expect(result.stdout).toContain(`base ${tip} origin/main\n`);
 
@@ -1124,11 +1187,12 @@ fakes.each(["CLAUDECODE", "CODEX_THREAD_ID"] as const)(
 
 fakes("codex reviews read-only with the base's instructions, then reports in the schema", async () => {
 	const s = setup();
-	const result = await quest("--root", s.repo, "review");
+	const result = await quest("--root", s.repo, "review", ...OPUS_WROTE);
 	expect(result.stderr).toBe("");
 	expect(result.code).toBe(0);
 	const head = git(s.repo, "rev-parse", "HEAD");
 	const base = git(s.repo, "rev-parse", "origin/main");
+	const session = /\nreviewer claude [^]*?\nsession (\S+)\n/.exec(result.stdout)?.[1];
 	expect(result.stdout).toBe(
 		[
 			"size M default",
@@ -1148,6 +1212,19 @@ fakes("codex reviews read-only with the base's instructions, then reports in the
 			"findings 1",
 			"",
 			"1. high src/lib.ts:2 Off by one",
+			"  average([3]) is 0.",
+			"",
+			// A medium head seats a second vendor: the writer's is the rung's only Claude Code model, so the next rung's.
+			"reviewer claude claude-fable-5-2 medium",
+			"rung deep up",
+			`session ${session}`,
+			"round 1",
+			"usage review input 101 cached 0 output 51",
+			"usage findings input 100 cached 80 output 7",
+			"score 8 Lands once the off-by-one is fixed.",
+			"findings 1",
+			"",
+			"2. high src/lib.ts:2 Off by one",
 			"  average([3]) is 0.",
 			// The fixture's origin is a local path, which can have no PR.
 			"record skipped: origin is not on GitHub or Kixel Quest",
@@ -1200,7 +1277,7 @@ fakes("codex reviews read-only with the base's instructions, then reports in the
 	expect(replySchema.properties.earlier).toBeUndefined();
 });
 
-fakes("--base reviews against another branch, fetched first, with that branch's instructions", async () => {
+agyFakes("--base reviews against another branch, fetched first, with that branch's instructions", async () => {
 	const s = setup();
 	git(s.repo, "checkout", "-qb", "release", "main");
 	write(s.repo, "AGENTS.md", "RELEASE-ROOT rule\n");
@@ -1596,7 +1673,8 @@ agyFakes("agy's status check failing other than on its login is agy out, never l
 	expect(skipped.map((skip: Round & { reason: string }) => [skip.model, skip.reason])).toEqual([
 		["gemini-4-neon", "status check failed"],
 	]);
-	expect(rounds).toHaveLength(1);
+	// The medium head's two seats go to the next rung's other vendors.
+	expect(rounds.map((round: Round) => round.model)).toEqual(["gpt-6.2-astra", "claude-fable-5-2"]);
 });
 
 agyFakes(
@@ -1616,6 +1694,7 @@ const FABLE_WROTE = ["--exclude-model", "claude-fable-5-2", "--exclude-model", "
 
 fakes("a later round seats a model the branch has not had, which settles the findings and reviews it all", async () => {
 	const s = setup(null);
+	lowRisk(s.repo);
 	const first = await quest("--root", s.repo, "review", ...FABLE_WROTE, "--json");
 	expect(JSON.parse(first.stdout).rounds.map((r: Round) => r.model)).toEqual(["gpt-6.2-sol"]);
 	const missing = await quest("--root", s.repo, "review", ...FABLE_WROTE);
@@ -1657,9 +1736,9 @@ fakes("a later round seats a model the branch has not had, which settles the fin
 	expect(prompt).toContain("by another reviewer in another session");
 	expect(prompt).toContain("Then review the whole change anew");
 	expect(prompt).toContain("BASE-REVIEW rule");
-	expect(prompt).toContain(`\`git diff ${git(s.repo, "rev-parse", "origin/main")}..${head}\``);
+	expect(prompt).toContain(`\`git diff ${git(s.repo, "merge-base", "HEAD", "origin/main")}..${head}\``);
 	// The new head is classified again before the round, which gives it to the reviewer.
-	expect(report!.stdin).toContain("the change was classified medium risk");
+	expect(report!.stdin).toContain("the change was classified low risk");
 	expect(report!.stdin).toContain(
 		"<earlier-findings>\n1. high src/lib.ts:2 Off by one\n   average([3]) is 0.\n</earlier-findings>",
 	);
@@ -1678,6 +1757,7 @@ fakes("a later round seats a model the branch has not had, which settles the fin
 
 fakes("--new drops the last round's findings, and a first round takes no responses", async () => {
 	const s = setup();
+	lowRisk(s.repo);
 	expect((await quest("--root", s.repo, "review", ...SMALL)).code).toBe(0);
 	write(s.repo, ".tmp/responses.md", "Fixed at src/lib.ts:1.\n");
 	const responses = join(s.repo, ".tmp", "responses.md");
@@ -1720,15 +1800,16 @@ fakes.each([
 		git(s.repo, "push", "-q", "origin", "next");
 		git(s.repo, "checkout", "-q", "feature");
 		git(s.repo, "merge", "-q", "--no-edit", "next");
-		const first = await quest("--root", s.repo, "review", ...SMALL, "--base", "origin/next");
+		const first = await quest("--root", s.repo, "review", ...SMALL, ...OPUS_WROTE, "--base", "origin/next");
 		expect(first.code, first.stderr).toBe(0);
 		const flags = change(s.repo);
 		const base = flags.includes("--base") ? [] : ["--base", "origin/next"];
-		const round = await quest("--root", s.repo, "review", ...SMALL, ...base, ...flags);
+		const round = await quest("--root", s.repo, "review", ...SMALL, ...OPUS_WROTE, ...base, ...flags);
 		expect(round.code, round.stderr).toBe(0);
 		expect(round.stdout).toContain("round 2\n");
 		expect(round.stdout).not.toContain("unchanged");
-		expect(at(s.calls(), "medium").at(-2)!.argv[1]).toBe("review");
+		const codex = at(s.calls(), "medium").filter((call) => call.argv[0] === "exec");
+		expect(codex.at(-2)!.argv[1]).toBe("review");
 	},
 );
 
@@ -1797,6 +1878,7 @@ function onGitHub(repo: string, pulls: FakePull[], fork = false): { body: string
 
 fakes("each round rewrites the Review section of the branch's open PR, keeping the author's prose", async () => {
 	const s = setup();
+	lowRisk(s.repo);
 	const pull = {
 		number: 7,
 		body: [
@@ -1820,6 +1902,7 @@ fakes("each round rewrites the Review section of the branch's open PR, keeping t
 		expect(first.stdout).toContain("record https://github.com/acme/widget/pull/7\n");
 		const head = git(s.repo, "rev-parse", "HEAD");
 		const base = git(s.repo, "rev-parse", "origin/main");
+		const classifier = classifying(s.calls())[0]!.argv.find((arg) => /^[0-9a-f-]{36}$/.test(arg));
 		expect(pull.body).toBe(
 			[
 				// The author's lines keep their line endings.
@@ -1830,10 +1913,10 @@ fakes("each round rewrites the Review section of the branch's open PR, keeping t
 				// The land gate counts a full SHA, which a head with an open finding does not earn.
 				`- Head: ${head.slice(0, 12)}, named in full once no reviewer reports a finding`,
 				`- Base: origin/main at ${base.slice(0, 12)}`,
-				"- Risk: medium, `the base has no RISK.md to name what is always high or customer-facing, so every change is medium`",
-				"- Classified: medium by default",
+				"- Risk: low, `Only a constant changes.`",
+				`- Classified: low by Claude Code, claude-haiku-5-5, low effort, session \`${classifier}\``,
 				"",
-				// The body's `## Models` record sizes the PR S, whose run drew its own rung.
+				// A low head seats one reviewer. The body's `## Models` record sizes the PR S, whose run drew its own rung.
 				"- Reviewer: Codex, gpt-6.2-sol, medium effort, light rung (size)",
 				"- Session: `thread-1`, round 1",
 				"- Score: 8/10, `Lands once the off-by-one is fixed.`",
@@ -1903,24 +1986,30 @@ const riskFile = (high: string[]) =>
 /** The turns that ran the classifier, Haiku, rather than a reviewer. */
 const classifying = (calls: Call[]) => calls.filter((call) => call.argv.includes("claude-haiku-5-5"));
 
-fakes(
+agyFakes(
 	"a change to a path held high is high without a model, even a file moved out of it",
 	async () => {
 		const s = setup();
 		moveBase(s.repo, (dir) => write(dir, "RISK.md", riskFile(["- `src/` - customers' averages run on it"])));
-		// A high head seats two reviewers of different vendors from the run's rung, never the writer's model. The
-		// standard rung's only Claude model wrote it, so the second seat passes to the next rung outward.
-		const listed = await quest("--root", s.repo, "review", ...OPUS_WROTE);
+		// A high head seats three reviewers, one per vendor, from the run's rung, never the writer's model. The
+		// standard rung's only Claude model wrote it, so Claude Code's seat passes to the next rung outward.
+		const listed = await quest("--root", s.repo, "review", ...OPUS);
 		expect(listed.code, listed.stderr).toBe(0);
 		const reason = "it changes src/lib.ts, which is always high: customers' averages run on it";
 		expect(listed.stdout).toContain(
 			`\nrisk high ${reason}\nclassified high paths ${reason}\n\nreviewer codex gpt-6.2-sol high\nrung standard size\n`,
 		);
+		expect(reviewersOf(listed.stdout)).toEqual([
+			"reviewer codex gpt-6.2-sol high",
+			"reviewer agy gemini-4-neon medium",
+			"reviewer claude claude-fable-5-2 medium",
+		]);
 		expect(listed.stdout).toContain("\nreviewer claude claude-fable-5-2 medium\nrung deep up\n");
-		// An L PR's rung seats both, Codex's with the model the branch has not had.
-		const large = await quest("--root", s.repo, "review", "--new", "--size", "L", ...OPUS_WROTE);
+		// An L PR's rung seats all three, Codex's with the model the branch has not had.
+		const large = await quest("--root", s.repo, "review", "--new", "--size", "L", ...OPUS);
 		expect(large.code, large.stderr).toBe(0);
 		expect(large.stdout).toContain("\nreviewer codex gpt-6.2-astra medium\nrung deep size\n");
+		expect(large.stdout).toContain("\nreviewer agy gemini-4-neon high\nrung deep size\n");
 		expect(large.stdout).toContain("\nreviewer claude claude-fable-5-2 medium\nrung deep size\n");
 		expect(classifying(s.calls())).toEqual([]);
 
@@ -1934,7 +2023,7 @@ fakes(
 		git(t.repo, "merge", "-q", "--no-edit", "origin/main");
 		git(t.repo, "mv", ".github/workflows/ci.yml", "ci.yml");
 		git(t.repo, "commit", "-qm", "retire the workflow");
-		const moved = await quest("--root", t.repo, "review", ...OPUS_WROTE);
+		const moved = await quest("--root", t.repo, "review", ...OPUS);
 		expect(moved.code, moved.stderr).toBe(0);
 		expect(moved.stdout).toContain(`base ${base} origin/main\n`);
 		expect(moved.stdout).toContain(
@@ -1946,7 +2035,7 @@ fakes(
 
 const reviewersOf = (out: string) => out.split("\n").filter((line) => line.startsWith("reviewer "));
 
-fakes("a high head's seat that cannot run passes on, and each model is skipped once", async () => {
+agyFakes("a high head's seat that cannot run passes on, and each model is skipped once", async () => {
 	const s = setup();
 	moveBase(s.repo, (dir) => write(dir, "RISK.md", riskFile(["- `src/` - customers' averages run on it"])));
 	const skips = (out: string) =>
@@ -1955,22 +2044,23 @@ fakes("a high head's seat that cannot run passes on, and each model is skipped o
 			.filter((line) => line.startsWith("skipped "))
 			.sort();
 	try {
-		// Opus wrote it and Sol is at its limit: its seat passes to the next rung's Astra, beside Fable.
+		// Opus wrote it and Sol is at its limit: its seat passes to the next rung's Astra, beside Gemini and Fable.
 		vi.stubEnv("FAKE_FAILS", "gpt-6.2-sol");
 		vi.stubEnv("FAKE_LIMITED", "reset");
-		const passed = await quest("--root", s.repo, "review", ...OPUS_WROTE);
+		const passed = await quest("--root", s.repo, "review", ...OPUS);
 		expect(passed.code, passed.stderr).toBe(0);
 		expect(reviewersOf(passed.stdout)).toEqual([
+			"reviewer agy gemini-4-neon medium",
 			"reviewer codex gpt-6.2-astra medium",
 			"reviewer claude claude-fable-5-2 medium",
 		]);
-		// Sonnet wrote it, and Sol and Opus, the standard rung's seats, are both at their limits. Sol's first turn
-		// hangs, so Opus fails first, and once Sol fails too neither is run again: each is named once, and the next
-		// rung seats Astra and Fable.
+		// Sonnet wrote it, and Sol and Opus, two of the standard rung's seats, are both at their limits. Sol's first
+		// turn hangs, so Opus fails first, and once Sol fails too neither is run again: each is named once, and the
+		// next rung seats Astra and Fable beside Gemini.
 		vi.stubEnv("FAKE_FAILS", "gpt-6.2-sol,claude-opus-5-5");
 		vi.stubEnv("FAKE_HANG", join(s.bin, "..", "sol.pid"));
 		const before = s.calls().length;
-		const sonnet = ["--exclude-model", "claude-sonnet-5-5", "--exclude-model", "gemini-4-neon"];
+		const sonnet = ["--exclude-model", "claude-sonnet-5-5"];
 		const both = await quest("--root", s.repo, "review", "--new", ...sonnet);
 		expect(both.code, both.stderr).toBe(0);
 		expect(skips(both.stdout)).toEqual([
@@ -1978,6 +2068,7 @@ fakes("a high head's seat that cannot run passes on, and each model is skipped o
 			`skipped codex gpt-6.2-sol high usage limit, resets ${codexReset}`,
 		]);
 		expect(reviewersOf(both.stdout)).toEqual([
+			"reviewer agy gemini-4-neon medium",
 			"reviewer codex gpt-6.2-astra medium",
 			"reviewer claude claude-fable-5-2 medium",
 		]);
@@ -1992,18 +2083,40 @@ fakes("a high head's seat that cannot run passes on, and each model is skipped o
 	}
 });
 
-fakes("a high head's seats may be weaker than its writer, as Sol and Opus reviewing Fable's work", async () => {
+agyFakes(
+	"a high head's seats may be weaker than its writer, as Sol, Opus, and Neon reviewing Fable's work",
+	async () => {
+		const s = setup();
+		moveBase(s.repo, (dir) => write(dir, "RISK.md", riskFile(["- `src/` - customers' averages run on it"])));
+		const fable = await quest("--root", s.repo, "review", "--exclude-model", "claude-fable-5-2");
+		expect(fable.code, fable.stderr).toBe(0);
+		expect(reviewersOf(fable.stdout)).toEqual([
+			"reviewer codex gpt-6.2-sol high",
+			"reviewer claude claude-opus-5-5 medium",
+			"reviewer agy gemini-4-neon medium",
+		]);
+	},
+);
+
+fakes("a high head where agy cannot run finds no third vendor, an outage", async () => {
 	const s = setup();
 	moveBase(s.repo, (dir) => write(dir, "RISK.md", riskFile(["- `src/` - customers' averages run on it"])));
-	const fable = await quest("--root", s.repo, "review", ...FABLE_WROTE);
-	expect(fable.code, fable.stderr).toBe(0);
-	expect(reviewersOf(fable.stdout)).toEqual([
-		"reviewer codex gpt-6.2-sol high",
-		"reviewer claude claude-opus-5-5 medium",
-	]);
+	// Only git, Codex, and Claude Code are on PATH, so Gemini's seat finds no CLI, as on a host without agy.
+	const only = join(s.bin, "..", "no-agy");
+	mkdirSync(only);
+	symlinkSync(execFileSync("which", ["git"], { encoding: "utf8" }).trim(), join(only, "git"));
+	symlinkSync(join(s.bin, "codex"), join(only, "codex"));
+	symlinkSync(join(s.bin, "claude"), join(only, "claude"));
+	vi.stubEnv("PATH", only);
+	const result = await quest("--root", s.repo, "review", ...OPUS);
+	// Gemini is the only model that could take the third seat, so the run fails as its CLI did.
+	expect(result.stderr).toBe("error: agy is not installed: no agy on PATH\n");
+	expect(result.code).toBe(3);
+	// No round ran, so none was saved.
+	expect(existsSync(sessionFile(join(s.repo, ".git"), "feature"))).toBe(false);
 });
 
-fakes(
+agyFakes(
 	"the classifier sets the tier from the diff and the base's risk file, once per head",
 	async () => {
 		const s = setup();
@@ -2064,6 +2177,8 @@ fakes("without a logged-in Claude Code, Codex classifies", async () => {
 	symlinkSync(execFileSync("which", ["git"], { encoding: "utf8" }).trim(), join(only, "git"));
 	symlinkSync(join(s.bin, "codex"), join(only, "codex"));
 	vi.stubEnv("PATH", only);
+	// A low head, whose one seat Codex can take alone.
+	vi.stubEnv("FAKE_RISK", JSON.stringify({ tier: "low", reason: "Only a constant changes." }));
 	const result = await quest("--root", s.repo, "review");
 	expect(result.code, result.stderr).toBe(0);
 	expect(result.stdout).toContain("classifier codex gpt-6.2-sol low thread-classify\n");
@@ -2191,7 +2306,7 @@ fakes("a question no model answers usably throws with what each reply took", asy
 	]);
 });
 
-fakes("a reviewer raises the tier, and the record keeps the classifier's beside it", async () => {
+agyFakes("a reviewer raises the tier, and the record keeps the classifier's beside it", async () => {
 	const s = setup();
 	moveBase(s.repo, (dir) => write(dir, "RISK.md", riskFile([])));
 	const pull = {
@@ -2199,18 +2314,19 @@ fakes("a reviewer raises the tier, and the record keeps the classifier's beside 
 		body: "Fixes averaging.\n\n## Models\n\n- Size: S\n- Implementer: Claude Code, claude-opus-5-5, high effort\n",
 	};
 	onGitHub(s.repo, [pull]);
+	vi.stubEnv("FAKE_RISK", JSON.stringify({ tier: "low", reason: "Only a constant changes." }));
 	vi.stubEnv("FAKE_RAISE", "high");
 	try {
-		const result = await quest("--root", s.repo, "review", ...OPUS_WROTE);
+		const result = await quest("--root", s.repo, "review", ...OPUS);
 		expect(result.code, result.stderr).toBe(0);
 		expect(result.stdout).toContain("\nrisk high It rewrites the wire format peers read.\n");
-		expect(result.stdout).toContain("\nclassified medium model It changes what the library returns.\n");
+		expect(result.stdout).toContain("\nclassified low model Only a constant changes.\n");
 		expect(result.stdout).toContain("\nscore 8 Lands once the off-by-one is fixed.\nraised high It rewrites");
 		const session = classifying(s.calls())[0]!.argv.find((arg) => /^[0-9a-f-]{36}$/.test(arg));
 		expect(pull.body).toContain(
 			[
 				"- Risk: high, `It rewrites the wire format peers read.`",
-				`- Classified: medium by Claude Code, claude-haiku-5-5, low effort, session \`${session}\``,
+				`- Classified: low by Claude Code, claude-haiku-5-5, low effort, session \`${session}\``,
 				"",
 				"- Reviewer: Codex, gpt-6.2-sol, medium effort, light rung (size)",
 				"- Session: `thread-1`, round 1",
@@ -2218,14 +2334,20 @@ fakes("a reviewer raises the tier, and the record keeps the classifier's beside 
 				"- Raised the risk to high: `It rewrites the wire format peers read.`",
 			].join("\n"),
 		);
-		// The raise to high gets the second seat the medium tier skipped, in the same run: the light rung's only
-		// other model wrote the PR, so it comes from the nearest rung with another vendor's.
+		// The raise to high gets the two seats the low tier left out, in the same run: the light rung's only other
+		// model wrote the PR, so they come from the nearest rungs with another vendor's.
+		expect(reviewersOf(result.stdout)).toEqual([
+			"reviewer codex gpt-6.2-sol medium",
+			"reviewer agy gemini-4-neon medium",
+			"reviewer claude claude-fable-5-2 medium",
+		]);
+		expect(result.stdout).toContain("\nreviewer agy gemini-4-neon medium\nrung standard up\n");
 		expect(result.stdout).toContain("\nreviewer claude claude-fable-5-2 medium\nrung deep up\n");
 		expect(pull.body).toContain("- Reviewer: Claude Code, claude-fable-5-2, medium effort, deep rung (up)\n");
 		expect(recordedRisk(pull.body)).toEqual({
 			tier: "high",
 			reason: "It rewrites the wire format peers read.",
-			classified: "medium",
+			classified: "low",
 			by: "model",
 			session,
 			head: git(s.repo, "rev-parse", "HEAD").slice(0, 12),
@@ -2235,26 +2357,28 @@ fakes("a reviewer raises the tier, and the record keeps the classifier's beside 
 
 		// A raise holds for every later round on its head, whatever they judge it.
 		vi.stubEnv("FAKE_RAISE", undefined);
-		write(s.repo, ".tmp/responses.md", "1. Fixed.\n2. Fixed.\n");
+		write(s.repo, ".tmp/responses.md", "1. Fixed.\n2. Fixed.\n3. Fixed.\n");
 		const responses = ["--responses", join(s.repo, ".tmp", "responses.md")];
-		const held = await quest("--root", s.repo, "review", ...OPUS_WROTE, ...responses);
+		const held = await quest("--root", s.repo, "review", ...OPUS, ...responses);
 		expect(held.code, held.stderr).toBe(0);
 		expect(held.stdout).toContain("\nrisk high It rewrites the wire format peers read.\n");
-		expect(reviewersOf(held.stdout)).toHaveLength(2);
-		// On a new head the tier is the classifier's again, and a reviewer never lowers it.
+		expect(reviewersOf(held.stdout)).toHaveLength(3);
+		// On a new head the tier is the classifier's again, here medium, and a reviewer never lowers it.
+		vi.stubEnv("FAKE_RISK", undefined);
 		vi.stubEnv("FAKE_RAISE", "low");
 		write(s.repo, "src/lib.ts", "export const x = 3;\n");
 		git(s.repo, "commit", "-qam", "another constant");
-		const lower = await quest("--root", s.repo, "review", ...OPUS_WROTE, ...responses);
+		const lower = await quest("--root", s.repo, "review", ...OPUS, ...responses);
 		expect(lower.code, lower.stderr).toBe(0);
 		expect(lower.stdout).toContain("\nrisk medium It changes what the library returns.\n");
+		expect(reviewersOf(lower.stdout)).toHaveLength(2);
 		expect(lower.stdout).not.toContain("\nraised ");
 	} finally {
 		vi.unstubAllGlobals();
 	}
 });
 
-fakes("a raise to high seats the second reviewer at once, and a run that fails there saves nothing", async () => {
+agyFakes("a raise to high seats the third reviewer at once, and a run that fails there saves nothing", async () => {
 	const s = setup();
 	moveBase(s.repo, (dir) => write(dir, "RISK.md", riskFile([])));
 	const pull = {
@@ -2263,13 +2387,13 @@ fakes("a raise to high seats the second reviewer at once, and a run that fails t
 	};
 	onGitHub(s.repo, [pull]);
 	vi.stubEnv("FAKE_RAISE", "high");
-	write(s.repo, ".tmp/responses.md", "1. Fixed.\n2. Fixed.\n");
+	write(s.repo, ".tmp/responses.md", "1. Fixed.\n2. Fixed.\n3. Fixed.\n");
 	const responses = ["--responses", join(s.repo, ".tmp", "responses.md")];
 	try {
-		// The second seat the raise calls for cannot run, and no other vendor's model is left, so the run fails on it.
+		// The third seat the raise calls for cannot run, and no other vendor's model is left, so the run fails on it.
 		vi.stubEnv("FAKE_LIMITED", "reset");
 		vi.stubEnv("FAKE_FAILS", "claude-fable-5-2");
-		const out = await quest("--root", s.repo, "review", ...OPUS_WROTE);
+		const out = await quest("--root", s.repo, "review", ...OPUS);
 		expect(out.code).toBe(3);
 		expect(out.stderr).toBe("error: claude hit its usage limit; resets 2030-03-17T17:46:40Z\n");
 		// The run is whole or nothing: no round of it is printed or saved, so the next is the branch's first again.
@@ -2277,10 +2401,11 @@ fakes("a raise to high seats the second reviewer at once, and a run that fails t
 
 		vi.stubEnv("FAKE_LIMITED", undefined);
 		vi.stubEnv("FAKE_FAILS", undefined);
-		const both = await quest("--root", s.repo, "review", ...OPUS_WROTE);
+		const both = await quest("--root", s.repo, "review", ...OPUS);
 		expect(both.code, both.stderr).toBe(0);
 		expect(reviewersOf(both.stdout)).toEqual([
 			"reviewer codex gpt-6.2-sol medium",
+			"reviewer agy gemini-4-neon medium",
 			"reviewer claude claude-fable-5-2 medium",
 		]);
 		expect(pull.body).toContain(
@@ -2290,25 +2415,27 @@ fakes("a raise to high seats the second reviewer at once, and a run that fails t
 			"- Rounds: 1, runs 1 to 1; first round 1 (high 1); findings 1 (high 1): fixed 0, refuted 0, open 1\n",
 		);
 
-		// On a new head the tier starts at medium with one seat; when its round raises the tier again, the second
+		// On a new head the tier starts at medium with two seats; when their rounds raise the tier again, the third
 		// seat runs at once, each reviewer once.
 		write(s.repo, "src/lib.ts", "export const x = 3;\n");
 		git(s.repo, "commit", "-qam", "another constant");
-		const again = await quest("--root", s.repo, "review", ...OPUS_WROTE, ...responses);
+		const again = await quest("--root", s.repo, "review", ...OPUS, ...responses);
 		expect(again.code, again.stderr).toBe(0);
 		expect(again.stdout).toContain("\nrisk high It rewrites the wire format peers read.\n");
 		expect(reviewersOf(again.stdout)).toEqual([
 			"reviewer codex gpt-6.2-sol medium",
+			"reviewer agy gemini-4-neon medium",
 			"reviewer claude claude-fable-5-2 medium",
 		]);
 
-		// --effort names only the first seat, so its raise still seats the second.
+		// --effort names only the first seat, so its raise still seats the rest.
 		write(s.repo, "src/lib.ts", "export const x = 4;\n");
 		git(s.repo, "commit", "-qam", "a third constant");
-		const named = await quest("--root", s.repo, "review", ...OPUS_WROTE, "--effort", "high", ...responses);
+		const named = await quest("--root", s.repo, "review", ...OPUS, "--effort", "high", ...responses);
 		expect(named.code, named.stderr).toBe(0);
 		expect(reviewersOf(named.stdout)).toEqual([
 			"reviewer codex gpt-6.2-sol high",
+			"reviewer agy gemini-4-neon medium",
 			"reviewer claude claude-fable-5-2 medium",
 		]);
 	} finally {
@@ -2316,17 +2443,17 @@ fakes("a raise to high seats the second reviewer at once, and a run that fails t
 	}
 });
 
-fakes("a raise to high with no other vendor's model left is a usage error", async () => {
+agyFakes("a raise to high with no other vendor's model left is a usage error", async () => {
 	const s = setup();
 	moveBase(s.repo, (dir) => write(dir, "RISK.md", riskFile([])));
 	vi.stubEnv("FAKE_RAISE", "high");
 	try {
-		// Every model but Codex's is avoided, so Sol has no second reviewer.
-		const others = ["claude-opus-5-5", "claude-fable-5-2", "gemini-4-neon"].flatMap((m) => ["--exclude-model", m]);
+		// Every Claude Code model is avoided, so Sol and Gemini have no third reviewer.
+		const others = ["claude-opus-5-5", "claude-fable-5-2"].flatMap((m) => ["--exclude-model", m]);
 		const out = await quest("--root", s.repo, "review", "--size", "S", ...others);
 		expect(out.code).toBe(2);
 		expect(out.stderr).toContain(
-			"a high-risk head needs reviewers from 2 vendors, and every model of a vendor other than codex's is avoided",
+			"this head's tier needs reviewers from 3 vendors, and every model of a vendor other than codex and agy's is avoided",
 		);
 		expect(out.stdout).toBe("");
 	} finally {
@@ -2334,14 +2461,14 @@ fakes("a raise to high with no other vendor's model left is a usage error", asyn
 	}
 });
 
-fakes("a raise by an earlier run's reviewer holds while the head is the one it reviewed", async () => {
+agyFakes("a raise by an earlier run's reviewer holds while the head is the one it reviewed", async () => {
 	const s = setup();
 	const pull = {
 		number: 7,
 		body: "Fixes averaging.\n\n## Models\n\n- Size: L\n- Implementer: Claude Code, claude-opus-5-5, high effort\n",
 	};
 	onGitHub(s.repo, [pull]);
-	// Only Sol, at xhigh effort for an L PR, raises the tier; the second seat it calls for does not.
+	// Only Sol, at xhigh effort for an L PR, raises the tier; the seats beside it and the third it calls for do not.
 	vi.stubEnv("FAKE_RAISE", "high@xhigh");
 	const raised = "\nrisk high It rewrites the wire format peers read.\n";
 	const block = [
@@ -2350,25 +2477,27 @@ fakes("a raise by an earlier run's reviewer holds while the head is the one it r
 		"- Raised the risk to high: `It rewrites the wire format peers read.`",
 		"- Rounds: 1, runs 1 to 1;",
 	].join("\n");
-	write(s.repo, ".tmp/responses.md", "1. Refuted.\n2. Refuted.\n");
+	write(s.repo, ".tmp/responses.md", "1. Refuted.\n2. Refuted.\n3. Refuted.\n");
 	const responses = ["--responses", join(s.repo, ".tmp", "responses.md")];
 	try {
-		const first = await quest("--root", s.repo, "review", ...OPUS_WROTE);
+		const first = await quest("--root", s.repo, "review", ...OPUS);
 		expect(first.code, first.stderr).toBe(0);
 		expect(first.stdout).toContain(raised);
 		expect(reviewersOf(first.stdout)).toEqual([
 			"reviewer codex gpt-6.2-sol xhigh",
+			"reviewer agy gemini-4-neon high",
 			"reviewer claude claude-fable-5-2 medium",
 		]);
 
 		// The next run on that head seats Astra, which the branch has not had, in Sol's place: Sol's raise still
-		// covers the head, so the run seats two and the record keeps the raise beside Sol's tally.
+		// covers the head, so the run seats three and the record keeps the raise beside Sol's tally.
 		vi.stubEnv("FAKE_RAISE", undefined);
 		vi.stubEnv("FAKE_REPLY", JSON.stringify({ score: 10, rationale: "Lands as is.", findings: [] }));
-		const again = await quest("--root", s.repo, "review", ...OPUS_WROTE, ...responses);
+		const again = await quest("--root", s.repo, "review", ...OPUS, ...responses);
 		expect(again.code, again.stderr).toBe(0);
 		expect(reviewersOf(again.stdout)).toEqual([
 			"reviewer codex gpt-6.2-astra medium",
+			"reviewer agy gemini-4-neon high",
 			"reviewer claude claude-fable-5-2 medium",
 		]);
 		expect(again.stdout).toContain(raised);
@@ -2378,7 +2507,7 @@ fakes("a raise by an earlier run's reviewer holds while the head is the one it r
 		// A new head is its own reviewers' to judge.
 		write(s.repo, "src/lib.ts", "export const x = 3;\n");
 		git(s.repo, "commit", "-qam", "another constant");
-		const moved = await quest("--root", s.repo, "review", ...OPUS_WROTE);
+		const moved = await quest("--root", s.repo, "review", ...OPUS);
 		expect(moved.code, moved.stderr).toBe(0);
 		expect(moved.stdout).toContain("\nrisk medium the base has no RISK.md");
 		expect(pull.body).not.toContain("- Raised the risk");
@@ -2387,8 +2516,8 @@ fakes("a raise by an earlier run's reviewer holds while the head is the one it r
 	}
 });
 
-fakes(
-	"a low head gets no local review, and the maintainer's override sets the tier until the change grows",
+agyFakes(
+	"a low head gets one local reviewer, and the maintainer's override sets the tier until the change grows",
 	async () => {
 		const s = setup();
 		moveBase(s.repo, (dir) =>
@@ -2409,15 +2538,10 @@ fakes(
 			expect(low.code, low.stderr).toBe(0);
 			expect(low.stdout).toContain("\nrisk low Only a constant changes.\n");
 			expect(low.stdout).toContain("\nclass constants\n");
-			expect(low.stdout).not.toContain("\nreviewer ");
-			expect(low.stdout).toContain(
-				"\nnext done: the head is low risk, so the online reviewer alone reviews it\n",
-			);
-			// Only the classifier ran, told the classes it may name.
-			const reviewers = new Set(Object.values(RUNGS).flatMap((rung) => rung.map((each) => each.model)));
-			expect(
-				s.calls().filter((call) => [...reviewers].some((model) => call.argv.join(" ").includes(model))),
-			).toEqual([]);
+			// One seat, drawn from the size's rung, never on the writer's model.
+			expect(reviewersOf(low.stdout)).toEqual(["reviewer codex gpt-6.2-sol medium"]);
+			expect(low.stdout).toContain("\nnext done: no findings remain on this head\n");
+			// The classifier was told the classes it may name.
 			const [call] = classifying(s.calls());
 			const schema = JSON.parse(call!.argv[call!.argv.indexOf("--json-schema") + 1]!);
 			expect(schema.properties.class.enum).toEqual(["constants", null]);
@@ -2425,17 +2549,20 @@ fakes(
 			// The head is named in full, so the record counts as its review.
 			expect(pull.body).toContain(`- Head: ${head}\n`);
 			expect(pull.body).toContain(
-				"- Class: `constants`\n- Local review: none, since a low-risk head needs only the online reviewer",
+				"- Class: `constants`\n\n- Reviewer: Codex, gpt-6.2-sol, medium effort, light rung (size)\n",
 			);
 			expect(recordedRisk(pull.body)).toMatchObject({ tier: "low", class: "constants", overridden: null });
 
-			// The maintainer holds it high: two reviewers of different vendors review it.
+			// The maintainer holds it high: three reviewers of different vendors review it.
 			const high = ["--override", "high", "--reason", "It ships tonight."];
-			const held = await quest("--root", s.repo, "review", ...OPUS_WROTE, ...high);
+			const held = await quest("--root", s.repo, "review", ...OPUS, ...high);
 			expect(held.code, held.stderr).toBe(0);
 			expect(held.stdout).toContain("\nrisk high It ships tonight.\noverridden low by the maintainer\n");
-			expect(held.stdout).toContain("\nreviewer codex gpt-6.2-sol medium\n");
-			expect(held.stdout).toContain("\nreviewer claude claude-fable-5-2 medium\n");
+			expect(reviewersOf(held.stdout)).toEqual([
+				"reviewer codex gpt-6.2-sol medium",
+				"reviewer agy gemini-4-neon medium",
+				"reviewer claude claude-fable-5-2 medium",
+			]);
 			expect(recordedRisk(pull.body)).toMatchObject({
 				tier: "high",
 				overridden: "low",
@@ -2444,22 +2571,23 @@ fakes(
 			// The override outlasts a new head whose change is no riskier.
 			write(s.repo, "src/lib.ts", "export const x = 3;\n");
 			git(s.repo, "commit", "-qam", "another constant");
-			const kept = await quest("--root", s.repo, "review", ...OPUS_WROTE);
+			const kept = await quest("--root", s.repo, "review", ...OPUS);
 			expect(kept.stdout).toContain("\nrisk high It ships tonight.\n");
-			// --effort names only the first seat, so a high head still gets its second.
+			// --effort names only the first seat, so a high head still gets the other two.
 			write(s.repo, "src/lib.ts", "export const x = 7;\n");
 			git(s.repo, "commit", "-qam", "a constant at a named effort");
-			const effort = await quest("--root", s.repo, "review", ...OPUS_WROTE, "--effort", "high");
+			const effort = await quest("--root", s.repo, "review", ...OPUS, "--effort", "high");
 			expect(effort.code, effort.stderr).toBe(0);
 			expect(reviewersOf(effort.stdout)).toEqual([
 				"reviewer codex gpt-6.2-sol high",
+				"reviewer agy gemini-4-neon medium",
 				"reviewer claude claude-fable-5-2 medium",
 			]);
 			// A riskier change than the one overridden ends it.
 			vi.stubEnv("FAKE_RISK", JSON.stringify({ tier: "medium", reason: "It changes the output.", class: null }));
 			write(s.repo, "src/lib.ts", "export const x = 4;\n");
 			git(s.repo, "commit", "-qam", "a riskier constant");
-			const grown = await quest("--root", s.repo, "review", ...OPUS_WROTE);
+			const grown = await quest("--root", s.repo, "review", ...OPUS);
 			expect(grown.code, grown.stderr).toBe(0);
 			expect(grown.stdout).toContain("\nrisk medium It changes the output.\n");
 			expect(grown.stdout).not.toContain("\noverridden ");
@@ -2469,7 +2597,7 @@ fakes(
 				"--root",
 				s.repo,
 				"review",
-				...OPUS_WROTE,
+				...OPUS,
 				"--override",
 				"medium",
 				"--reason",
@@ -2484,14 +2612,14 @@ fakes(
 				"--override and --reason go together",
 			);
 
-			// A second seat that cannot run, with no other vendor's model left, is the one the failure names, never
-			// the seat it ran beside. On a new head Codex runs until the failure stops it.
+			// A seat that cannot run, with no other model of its vendor left, is the one the failure names, never
+			// the seats it ran beside. On a new head Codex runs until the failure stops it.
 			write(s.repo, "src/lib.ts", "export const x = 5;\n");
 			git(s.repo, "commit", "-qam", "a constant for the outage");
 			vi.stubEnv("FAKE_HANG", join(s.bin, "..", "codex.pid"));
 			vi.stubEnv("FAKE_LIMITED", "reset");
 			vi.stubEnv("FAKE_FAILS", "claude-fable-5-2");
-			const out = await quest("--root", s.repo, "review", ...OPUS_WROTE, ...high);
+			const out = await quest("--root", s.repo, "review", ...OPUS, ...high);
 			expect(out.code).toBe(3);
 			expect(out.stderr).toBe("error: claude hit its usage limit; resets 2030-03-17T17:46:40Z\n");
 		} finally {
@@ -2500,12 +2628,12 @@ fakes(
 	},
 );
 
-fakes("a raise to the override's own tier agrees with it, so the override holds", async () => {
+agyFakes("a raise to the override's own tier agrees with it, so the override holds", async () => {
 	const s = setup();
 	vi.stubEnv("FAKE_REPLY", JSON.stringify({ score: 10, rationale: "Lands as is.", findings: [] }));
 	try {
 		// Classified medium, held high by the maintainer, and judged high by its reviewers too.
-		const opus = OPUS_WROTE;
+		const opus = OPUS;
 		vi.stubEnv("FAKE_RAISE", "high");
 		const held = await quest(
 			"--root",
@@ -2518,7 +2646,7 @@ fakes("a raise to the override's own tier agrees with it, so the override holds"
 			"It ships tonight.",
 		);
 		expect(held.code, held.stderr).toBe(0);
-		expect(reviewersOf(held.stdout)).toHaveLength(2);
+		expect(reviewersOf(held.stdout)).toHaveLength(3);
 		vi.stubEnv("FAKE_RAISE", undefined);
 		// The next head is classified medium and raised by no one, and the override still holds it high.
 		write(s.repo, "src/lib.ts", "export const x = 9;\n");
@@ -2526,7 +2654,7 @@ fakes("a raise to the override's own tier agrees with it, so the override holds"
 		const next = await quest("--root", s.repo, "review", ...opus);
 		expect(next.code, next.stderr).toBe(0);
 		expect(next.stdout).toContain("\noverridden medium by the maintainer\n");
-		expect(reviewersOf(next.stdout)).toHaveLength(2);
+		expect(reviewersOf(next.stdout)).toHaveLength(3);
 	} finally {
 		vi.unstubAllGlobals();
 	}
@@ -2544,7 +2672,7 @@ fakes("a malformed risk file on the base fails before any model runs", async () 
 	expect(s.calls()).toEqual([]);
 });
 
-fakes("a branch with no open PR, or a body without a Review section, is reported as such", async () => {
+agyFakes("a branch with no open PR, or a body without a Review section, is reported as such", async () => {
 	const s = setup();
 	const pulls: { number: number; body: string | null }[] = [];
 	onGitHub(s.repo, pulls);
@@ -2568,7 +2696,7 @@ fakes("a branch with no open PR, or a body without a Review section, is reported
 	}
 });
 
-fakes("a maintainer's checkout records on a contributor's fork PR and reads its size", async () => {
+agyFakes("a maintainer's checkout records on a contributor's fork PR and reads its size", async () => {
 	const s = setup();
 	const pushed = git(s.repo, "rev-parse", "HEAD~1");
 	const pull = { number: 12, body: "Body.\n\n## Models\n\n- Size: S\n", head: "contributor/widget", sha: pushed };
@@ -2619,7 +2747,7 @@ fakes("a maintainer's checkout records on a contributor's fork PR and reads its 
 	}
 });
 
-fakes("a review from a subdirectory of a fork records on the upstream PR", async () => {
+agyFakes("a review from a subdirectory of a fork records on the upstream PR", async () => {
 	const s = setup();
 	const pull = { number: 11, body: "Body." };
 	onGitHub(s.repo, [pull], true);
@@ -2634,7 +2762,9 @@ fakes("a review from a subdirectory of a fork records on the upstream PR", async
 });
 
 fakes("a round on the head the last round passed runs no reviewer and repeats that round", async () => {
+	// Each head is low, so one reviewer's round is the whole run.
 	const s = setup();
+	lowRisk(s.repo);
 	vi.stubEnv("FAKE_REPLY", JSON.stringify({ score: 10, rationale: "Lands as is.", findings: [] }));
 	const first = await quest("--root", s.repo, "review", "--json", ...SMALL);
 	expect(first.code, first.stderr).toBe(0);
@@ -2668,10 +2798,12 @@ fakes("a round on the head the last round passed runs no reviewer and repeats th
 	// Its reviewer since avoided, a passed head needs another: Sol's round no longer counts for it. So does a size
 	// on another rung.
 	const u = setup();
+	lowRisk(u.repo);
 	expect((await quest("--root", u.repo, "review", ...SMALL)).code).toBe(0);
 	const large = JSON.parse((await quest("--root", u.repo, "review", "--json", "--size", "L", ...OPUS_WROTE)).stdout);
 	expect(large.rounds.map((r: Round) => [r.round, r.unchanged])).toEqual([[2, false]]);
 	const v = setup();
+	lowRisk(v.repo);
 	expect((await quest("--root", v.repo, "review", ...SMALL)).code).toBe(0);
 	const avoided = JSON.parse(
 		(await quest("--root", v.repo, "review", "--json", "--size", "S", "--exclude-model", "gpt-6.2-sol")).stdout,
@@ -2681,6 +2813,7 @@ fakes("a round on the head the last round passed runs no reviewer and repeats th
 	// A round with findings to settle runs on the same head, since a refutation needs no new commit.
 	vi.stubEnv("FAKE_REPLY", undefined);
 	const t = setup();
+	lowRisk(t.repo);
 	expect((await quest("--root", t.repo, "review", ...SMALL)).code).toBe(0);
 	write(t.repo, ".tmp/responses.md", "1. Refuted: src/lib.ts:1 sets it.\n");
 	const responses = join(t.repo, ".tmp", "responses.md");
@@ -2691,26 +2824,29 @@ fakes("a round on the head the last round passed runs no reviewer and repeats th
 	expect(at(t.calls(), "medium").at(-2)!.stdin).toContain("Refuted: src/lib.ts:1 sets it.");
 });
 
-fakes("a head that turns high after its round passed gets a run of two vendors", async () => {
+agyFakes("a head that turns high after its round passed gets a run of three vendors", async () => {
 	const s = setup(null);
+	lowRisk(s.repo);
+	const fable = ["--exclude-model", "claude-fable-5-2"];
 	vi.stubEnv("FAKE_REPLY", JSON.stringify({ score: 10, rationale: "Lands as is.", findings: [] }));
-	const first = JSON.parse((await quest("--root", s.repo, "review", "--json", ...FABLE_WROTE)).stdout);
+	const first = JSON.parse((await quest("--root", s.repo, "review", "--json", ...fable)).stdout);
 	expect(first.rounds.map((r: Round) => r.model)).toEqual(["gpt-6.2-sol"]);
-	// The maintainer holds the head high: one vendor's round no longer stands for it, so a new run seats two.
+	// The maintainer holds the head high: one vendor's round no longer stands for it, so a new run seats three.
 	const high = ["--override", "high", "--reason", "It ships tonight."];
-	const held = JSON.parse((await quest("--root", s.repo, "review", "--json", ...FABLE_WROTE, ...high)).stdout);
+	const held = JSON.parse((await quest("--root", s.repo, "review", "--json", ...fable, ...high)).stdout);
 	expect(held.rounds.map((r: Round) => [r.round, r.unchanged])).toEqual([
 		[2, false],
 		[2, false],
+		[2, false],
 	]);
-	expect(new Set(held.rounds.map((r: Round) => r.reviewer)).size).toBe(2);
+	expect(new Set(held.rounds.map((r: Round) => r.reviewer)).size).toBe(3);
 	const calls = s.calls().length;
-	const again = JSON.parse((await quest("--root", s.repo, "review", "--json", ...FABLE_WROTE)).stdout);
-	expect(again.rounds.map((r: Round) => r.unchanged)).toEqual([true, true]);
+	const again = JSON.parse((await quest("--root", s.repo, "review", "--json", ...fable)).stdout);
+	expect(again.rounds.map((r: Round) => r.unchanged)).toEqual([true, true, true]);
 	expect(s.calls()).toHaveLength(calls);
 });
 
-fakes("the PR's Models record sizes the review and names its latest writer", async () => {
+agyFakes("the PR's Models record sizes the review and names its latest writer", async () => {
 	const s = setup();
 	const body = (...lines: string[]) => ["Body.", "", "## Models", "", ...lines].join("\n");
 	const pull: FakePull = { number: 9, body: body("- Size: L", "- Implementer: Codex, gpt-6.2-sol, high effort") };
@@ -2894,7 +3030,7 @@ test("the record replaces only a top-level Review section, never an example of o
 		expect(() => withReview(open, "new")).toThrow("unclosed code fence or HTML comment");
 });
 
-fakes("a record GitHub refuses fails the command after printing the round", async () => {
+agyFakes("a record GitHub refuses fails the command after printing the round", async () => {
 	const s = setup();
 	onGitHub(s.repo, [{ number: 9, body: "" }]);
 	const fetch = globalThis.fetch;
@@ -2914,6 +3050,12 @@ fakes("a record GitHub refuses fails the command after printing the round", asyn
 });
 
 /** Push a commit that `change` makes to origin's main, returning its SHA. */
+/** Move the base to a risk file the fake classifier reads as low, so each run seats one reviewer. */
+function lowRisk(repo: string): void {
+	moveBase(repo, (dir) => write(dir, "RISK.md", riskFile([])));
+	vi.stubEnv("FAKE_RISK", JSON.stringify({ tier: "low", reason: "Only a constant changes." }));
+}
+
 function moveBase(repo: string, change: (dir: string) => void): string {
 	const base = join(repo, "..", "base");
 	git(repo, "worktree", "add", "-q", base, "origin/main");
@@ -2924,7 +3066,7 @@ function moveBase(repo: string, change: (dir: string) => void): string {
 	return git(base, "rev-parse", "HEAD");
 }
 
-fakes("a reply that does not match the schema fails rather than reads as clean", async () => {
+agyFakes("a reply that does not match the schema fails rather than reads as clean", async () => {
 	const s = setup();
 	vi.stubEnv("FAKE_REPLY", "Looks good to me.");
 	const prose = await quest("--root", s.repo, "review");
@@ -3105,7 +3247,7 @@ test("saved rounds are read only in the current format, or refused naming --new"
 		expect(() => parseState(older)).toThrow(/--new/);
 });
 
-fakes("rounds saved by an older quest are refused before the reviewer runs", async () => {
+agyFakes("rounds saved by an older quest are refused before the reviewer runs", async () => {
 	const s = setup();
 	expect((await quest("--root", s.repo, "review")).code).toBe(0);
 	const path = sessionFile(join(s.repo, ".git"), "feature");
@@ -3126,6 +3268,7 @@ fakes("rounds saved by an older quest are refused before the reviewer runs", asy
 
 fakes("--harness reviews alone, and its findings are the next run's to settle", async () => {
 	const s = setup();
+	lowRisk(s.repo);
 	vi.stubEnv("FAKE_REPLY", JSON.stringify({ score: 10, rationale: "Lands as is.", findings: [] }));
 	expect((await quest("--root", s.repo, "review", ...SMALL)).code).toBe(0);
 	write(s.repo, "src/lib.ts", "export const x = 4;\n");
@@ -3158,15 +3301,16 @@ fakes("--harness reviews alone, and its findings are the next run's to settle", 
 
 fakes("a finding a later run keeps open carries over once, still its raiser's", async () => {
 	const s = setup(null);
+	lowRisk(s.repo);
 	const first = JSON.parse((await quest("--root", s.repo, "review", "--json", ...FABLE_WROTE)).stdout);
 	expect(first.rounds.map((r: Round) => [r.model, r.findings.length])).toEqual([["gpt-6.2-sol", 1]]);
 	write(s.repo, ".tmp/responses.md", "1. Refuted.\n");
 	const responses = ["--responses", join(s.repo, ".tmp", "responses.md")];
 	// Two seats both keep it open: the first carries it, as Sol's, beside what each found itself.
 	vi.stubEnv("FAKE_DISPOSITION", "open");
-	const high = ["--override", "high", "--reason", "It ships tonight."];
+	const medium = ["--override", "medium", "--reason", "It ships tonight."];
 	const kept = JSON.parse(
-		(await quest("--root", s.repo, "review", "--json", ...FABLE_WROTE, ...high, ...responses)).stdout,
+		(await quest("--root", s.repo, "review", "--json", ...FABLE_WROTE, ...medium, ...responses)).stdout,
 	);
 	const found = kept.rounds.map((r: Round) => r.findings.map((f) => f.raised?.model ?? null));
 	expect(found).toEqual([[null, "gpt-6.2-sol"], [null]]);

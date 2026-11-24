@@ -365,6 +365,9 @@ function shuffled<T>(list: readonly T[], random: () => number): T[] {
 	return drawn;
 }
 
+/** How many seats a head's tier gets, each on a vendor of its own, so the riskier the change, the more vendors read it. */
+export const SEATS: Record<Tier, number> = { low: 1, medium: 2, high: 3 };
+
 /** What a round's seats draw from. */
 export interface Draw {
 	size: Size;
@@ -541,7 +544,7 @@ export interface Tally extends Reviewing {
 
 /** What a run of `quest review` gives: each reviewer's round, every tally on the branch, the run's first, and the head's risk. */
 export interface Reviewed {
-	/** Each reviewer's round; none when the head's tier is low, which needs no local review. */
+	/** Each reviewer's round. */
 	rounds: Round[];
 	tallies: Tally[];
 	risk: Risk;
@@ -2536,8 +2539,8 @@ export function overridden(risk: Risk, override: Override | undefined): Risk {
  * limit, or not served, passes its seat to the next the draw gives, unless a flag named it; once a seat finds none
  * on any rung, the run fails as an outage.
  *
- * The head's tier scales the review: a low head with nothing left to settle gets no local review, and a high one
- * gets two seats on different vendors, the second of which a round that raises the tier to high runs at once.
+ * The head's tier sets the seats, each on a vendor of its own: one on a low head, two on medium, and three on high,
+ * the extra of which a round that raises the tier runs at once.
  */
 export async function review(options: ReviewOptions, deps: ReviewDependencies): Promise<Reviewed> {
 	// Native Windows installs the reviewer CLIs as batch shims, which `run` cannot start without a shell.
@@ -2590,6 +2593,7 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 	const out = new Set<string>();
 	const skipped: Skip[] = [];
 	const messages: string[] = [];
+	const ready = new Set<ReviewHarness>();
 	const draw: Draw = {
 		...drawing(sized.size, deps.random ?? Math.random),
 		had: (model) => {
@@ -2609,15 +2613,17 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 				const blocking = skipped.map((skip) => !vendors.includes(skip.harness));
 				const passed = skipped.filter((_, i) => blocking[i]);
 				// A CLI this host lacks could never take a further seat, so alone it leaves that seat to the avoided models,
-				// which the writer's record frees; with no seat filled, the missing CLI is what to restore.
+				// which the writer's record frees, once another seat's CLI showed it can run; with none, the missing CLI is
+				// what to restore.
 				const lacking = passed.every(
 					(skip) => skip.reason === "not installed" || skip.reason === "not supported",
 				);
+				const filled = vendors.some((vendor) => ready.has(vendor));
 				const unavoided = {
 					...draw,
 					usable: (entry: ReviewModel) => !down.has(entry.harness) && !out.has(canonicalModel(entry.model)),
 				};
-				if (passed.length > 0 && !(vendors.length > 0 && lacking && drawSeat(unavoided, vendors) !== undefined))
+				if (passed.length > 0 && !(filled && lacking && drawSeat(unavoided, vendors) !== undefined))
 					throw new ReviewOutageError(
 						SIZE_RUNGS[sized.size],
 						passed,
@@ -2628,7 +2634,7 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 				throw new ReviewInputError(
 					vendors.length === 0
 						? `every reviewer is avoided, as the latest writer's; pass --harness and --model, or, ${guessed}`
-						: `a high-risk head needs reviewers from ${vendors.length + 1} vendors, and every model of a vendor other than ${names(vendors)}'s is avoided, as the latest writer's; ${guessed}`,
+						: `this head's tier needs reviewers from ${vendors.length + 1} vendors, and every model of a vendor other than ${names(vendors)}'s is avoided, as the latest writer's; ${guessed}`,
 				);
 			}
 			seats.push(seat);
@@ -2694,15 +2700,10 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 				riskier(risk.overridden ?? risk.tier, override.from) && (risk.overridden ?? risk.tier) !== override.tier
 			) && { override }),
 	});
-	const low = overridden(before, override);
-	if (!named && earlier.length === 0 && low.tier === "low") {
-		save(statePath, state(prior, runs, tallies, low));
-		return { rounds: [], tallies, risk: low, skipped: [], since, branch, head, base, sized };
-	}
+	const current = overridden(before, override);
 
-	// A high head seats two vendors, and any other one; the reviewer --harness names runs alone.
-	const seats = (risk: Risk) =>
-		options.harness !== undefined ? 1 : overridden(risk, override).tier === "high" ? 2 : 1;
+	// One seat per tier, each on its own vendor; the reviewer --harness names runs alone.
+	const seats = (risk: Risk) => (options.harness !== undefined ? 1 : SEATS[overridden(risk, override).tier]);
 	const one = (round: Round): ReviewModel => ({ harness: round.reviewer, model: round.model, effort: round.effort });
 	// The head the last run passed with no finding, under the same base, size's rung, instructions, and rules: its
 	// rounds stand whole, repeated as unchanged, while they are the review this run would be: the flag's reviewer among
@@ -2720,7 +2721,7 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 		(lead === undefined || latest.some((round) => round.reviewer === lead.harness && sameReviewer(round, lead))) &&
 		new Set(latest.map((round) => round.reviewer)).size >= seats(before);
 	if (stands) {
-		save(statePath, state(prior, runs, tallies, low));
+		save(statePath, state(prior, runs, tallies, current));
 		const rounds = latest.map((round): Round => ({
 			...round,
 			base,
@@ -2729,7 +2730,7 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 			usage: [],
 			unchanged: true,
 		}));
-		return { rounds, tallies, risk: low, skipped: [], since, branch, head, base, sized };
+		return { rounds, tallies, risk: current, skipped: [], since, branch, head, base, sized };
 	}
 	const shared: Shared = {
 		root,
@@ -2745,12 +2746,13 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 		number: runs + 1,
 		dir,
 		env: deps.env,
+		ready,
 	};
 	let done: Round[] = [];
 	// The last run's findings this run already carried over, by number.
 	const open = new Set<number>();
 	const judged = () => settle(classified.value, [...onHead, ...done]);
-	// A round that raises the tier to high gets the seat the lower tier skipped in a further pass, at once. The run
+	// A round that raises the tier gets the seats the lower tier left out in a further pass, at once. The run
 	// is saved whole or not at all, so one that fails leaves the last run's findings and responses as they were.
 	for (;;) {
 		const taken = [...new Set(done.map((round) => round.reviewer))];
@@ -2829,8 +2831,22 @@ async function runSeats(shared: Shared, seats: Seat[], stop: AbortSignal | undef
 		if (controller.signal.aborted) throw controller.signal.reason;
 		return results.map((result) => (result as PromiseFulfilledResult<T>).value);
 	};
-	// Every CLI is checked before any turn runs, so a seat that cannot run passes on before another spends a turn.
-	const clis = await all((seat) => prepare(seat.reviewer.harness, shared.root, shared.env, signal));
+	// Every CLI is checked before any turn runs, so a seat that cannot run passes on before another spends a turn. Each
+	// check settles, so the CLIs that can run are known whichever failed first, and the first seat's failure is the one.
+	const checked = await Promise.allSettled(
+		seats.map(async ({ reviewer }) => {
+			const cli = await prepare(reviewer.harness, shared.root, shared.env, signal);
+			shared.ready.add(reviewer.harness);
+			return cli;
+		}),
+	);
+	const failed = checked.findIndex((result) => result.status === "rejected");
+	if (failed >= 0) {
+		const error = (checked[failed] as PromiseRejectedResult).reason;
+		if (error instanceof ReviewerUnavailableError) error.seat = seats[failed]!.reviewer;
+		throw error;
+	}
+	const clis = checked.map((result) => (result as PromiseFulfilledResult<Cli>).value);
 	return all((seat, index) => reviewWith(shared, seat, clis[index]!));
 }
 
@@ -2942,6 +2958,8 @@ interface Shared {
 	/** The directory holding the branch's rounds and the reply schemas. */
 	dir: string;
 	env: NodeJS.ProcessEnv;
+	/** The CLIs whose status check passed this run, which a seat another CLI cannot take shows can review. */
+	ready: Set<ReviewHarness>;
 }
 
 /** A seat of a run: its reviewer, and the rung that gave it, or none for the one a flag named. */
@@ -3036,7 +3054,6 @@ async function open(
  * nothing left to do.
  */
 export function nextStep(rounds: Round[], since = 0): string {
-	if (rounds.length === 0) return "next done: the head is low risk, so the online reviewer alone reviews it";
 	const findings = rounds.flatMap((round) => round.findings);
 	if (findings.length === 0) return "next done: no findings remain on this head";
 	if (findings.every((finding) => finding.severity === "low"))

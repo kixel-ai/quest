@@ -1658,7 +1658,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"it is any model of the harness running this command, usually the session that just pushed, detected from the " +
 				"variables Claude Code, Codex, and Antigravity each set, so Codex reviews from Claude Code and Claude Code from Codex; with --harness it is " +
 				"none. " +
-				"--harness, --model, or --effort names one reviewer, which runs alone, outside the draw, as a run of its own; a high head still seats a drawn second vendor beside it unless --harness names it: the first entry the flags fit from the size's rung outward, in the order the rungs list, so the same flags name the same reviewer on every run. --harness alone is that CLI's first entry whose model is not avoided, --model its own entry in any spelling such as openai/gpt-6.2-astra, passed to the CLI as given, and --effort alone the first entry whose model is not avoided; --model and --effort then override the entry's. A --model no rung lists needs --harness, at whose first entry's effort it runs unless --effort names one. A repository whose AGENTS.md names other reviewers passes them. The seats run at once, each CLI's login checked before any turn starts, and the first to fail stops the others and fails the " +
+				"--harness, --model, or --effort names one reviewer, which runs alone, outside the draw, as a run of its own; --model or --effort names only the first seat, and the rest are drawn on other vendors, while the reviewer --harness names runs alone: the first entry the flags fit from the size's rung outward, in the order the rungs list, so the same flags name the same reviewer on every run. --harness alone is that CLI's first entry whose model is not avoided, --model its own entry in any spelling such as openai/gpt-6.2-astra, passed to the CLI as given, and --effort alone the first entry whose model is not avoided; --model and --effort then override the entry's. A --model no rung lists needs --harness, at whose first entry's effort it runs unless --effort names one. A repository whose AGENTS.md names other reviewers passes them. The seats run at once, each CLI's login checked before any turn starts, and the first to fail stops the others and fails the " +
 				"run, saving no round. The " +
 				"size is --size, else the size of the quest a quest/ branch names, read from the base's tip so a " +
 				`change cannot lower its own review, else the PR record's Size line, else ${DEFAULT_SIZE}. ` +
@@ -1732,9 +1732,9 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"RISK.md reuses the tier unless --new. Each reviewer's reply judges the tier too, told the classified one, " +
 				"and can only raise it: the head's tier is the riskiest, with the reason of the first to judge it so. " +
 				"The classifier also names the class of RISK.md's ## Automatic list every changed file falls in, or none. " +
-				"The tier scales the review: a low head with no finding to settle runs no reviewer unless --harness, " +
-				"--model, or --effort names one, and a high head seats two reviewers of different vendors, each drawn from the run's rung as above. " +
-				"A round that raises the tier to high seats the second reviewer at once, in the same run; a run is saved whole or not at all, so one that fails there, as when no other vendor's reviewer can run, leaves the branch as it was. " +
+				"The tier sets the seats, each on a vendor of its own and drawn from the run's rung as above: one on a low head, two on medium, and three on high. " +
+				"A seat the drawn rung has no vendor left for fills from the size's rung, then each rung outward, and the run is an outage only when a seat finds no vendor on any rung. " +
+				"A round that raises the tier seats the extra reviewers at once, in the same run; a run is saved whole or not at all, so one that fails there, as when no other vendor's reviewer can run, leaves the branch as it was. " +
 				"--override and --reason record the maintainer's tier for the branch, which holds until the reviewed " +
 				"tier grows riskier than the one overridden, other than to the override's own tier.\n\n" +
 				"Prints the size and where it came from, base, and head, its risk tier and reason, the classifier's tier, " +
@@ -1748,13 +1748,13 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"their numbers and dispositions; then the `record` line below and a last `next` line naming the author's next step: " +
 				"`next finish` when every finding is low severity, to fix or refute them without another round, " +
 				"`next checkpoint` when every third run of the branch since the last --new reports other findings, to compare the current approach " +
-				"with the best long-term approach worked out from first principles before fixing them, `next respond` to fix or refute the findings, or `next done`, which for a low head no reviewer ran says so. A reply without a valid score " +
+				"with the best long-term approach worked out from first principles before fixing them, `next respond` to fix or refute the findings, or `next done`. A reply without a valid score " +
 				"fails as any malformed reply does. --json prints " +
 				"one object: `rounds`, one per reviewer, `tallies`, every reviewer's findings across the branch's rounds, `risk`, the head's tier with its classification, `skipped`, each reviewer passed over with its reason, `record`, and `next`.\n\n" +
 				"After each round, it rewrites the `## Review` section of the branch's open PR into the base, the one from the repository the base's remote pushes to, else the only one from another repository whose pushed head `HEAD` contains, as the " +
 				"user the GitHub token names, keeping the rest of the body, and prints `record <url>`: the reviewed " +
 				"head, named in full only once no reviewer reports a finding, the base, the head's risk tier and reason, " +
-				"an `- Overridden:` line, the classifier's tier and who set it, a `- Class:` line, a `- Local review: none` line for a low head no reviewer ran on, a `- Skipped:` line for each reviewer passed over, and each reviewer, its Reviewer line ending in its rung and which way it was drawn, as `, deep rung (up)`, its every session, its latest " +
+				"an `- Overridden:` line, the classifier's tier and who set it, a `- Class:` line, a `- Skipped:` line for each reviewer passed over, and each reviewer, its Reviewer line ending in its rung and which way it was drawn, as `, deep rung (up)`, its every session, its latest " +
 				"session and round, score, the tier it raised the risk to and why, its tally of findings across the branch's rounds, and each finding with its disposition. With no " +
 				"such PR, several from other repositories that `HEAD` contains, or a remote off GitHub, it prints `record skipped: <why>` and changes nothing.\n\n" +
 				"Exits 0 once the round finishes, whatever it found, 2 for invalid arguments " +

@@ -114,7 +114,6 @@ export function reviewRecord({ rounds, tallies, risk, skipped, head, base }: Rev
 		...(risk.overridden ? [`- Overridden: from ${risk.overridden} by the maintainer`] : []),
 		`- Classified: ${risk.classified.tier} by ${classifiedBy(risk.classified)}`,
 		...(risk.classified.class === null ? [] : [`- Class: \`${risk.classified.class}\``]),
-		...(rounds.length === 0 ? [`- Local review: none, since a low-risk head needs only the online reviewer`] : []),
 		// Outside the Reviewer blocks, which `parseReview` reads as reviewers that ran.
 		...skipped.map(
 			(skip) => `- Skipped: ${HARNESSES[skip.harness]}, ${skip.model}, ${skip.effort} effort: ${skip.reason}`,

@@ -1524,7 +1524,7 @@ A reviewer that cannot run passes its seat on the same way. That is a failure
 the CLI or provider reports before any finding is saved, never text in the
 diff or a reply: a CLI that is not installed, logged out, or has its login
 rejected, or sent to a gateway with no credential, passes over every model of
-that CLI, so a user without `agy` reviews on the other two, and a model at its
+that CLI, so a user without `agy` reviews low and medium heads on the other two, and a model at its
 usage limit, or one its login or gateway does not serve, as Codex's `model is
 not supported when using Codex with a ChatGPT account`, passes over only
 itself. The run prints a `skipped` line for each reviewer it passed over, and
@@ -1550,7 +1550,7 @@ running the command, usually the session that
 just pushed, detected from the variables Claude Code, Codex, and Antigravity
 each set, is taken to be the latest writer, so Codex reviews from Claude Code
 and Claude Code from Codex. `--harness`, `--model`, or `--effort` names one reviewer, which runs alone, outside the draw, as a run of its
-own; a high head still seats a drawn second vendor beside it unless `--harness` names it: the first entry the flags fit from the size's rung outward, in the order the rungs
+own; `--model` or `--effort` names only the first seat, and the rest are drawn on other vendors, while the reviewer `--harness` names runs alone: the first entry the flags fit from the size's rung outward, in the order the rungs
 list, so the same flags name the same reviewer on every run. `--harness` alone is that CLI's first entry whose
 model is not avoided, `--model` its own entry in any spelling such as `openai/gpt-6.2-astra`, passed to the CLI
 as given, and `--effort` alone the first entry whose model is not avoided; `--model` and `--effort` then
@@ -1786,9 +1786,9 @@ run catches what those miss.
 
 | Tier | Local review | Lands on |
 |---|---|---|
-| Low | None; the online reviewer only | Its own, once its class is in `RISK.md`'s `## Automatic` list; else the maintainer's pick |
-| Medium | One reviewer, drawn around the size's rung | The maintainer's pick |
-| High | Two reviewers of different vendors, each drawn from the run's rung | The maintainer's pick, with the full brief |
+| Low | One reviewer, drawn from the run's rung | Its own, once its class is in `RISK.md`'s `## Automatic` list; else the maintainer's pick |
+| Medium | Two reviewers of different vendors, each drawn from the run's rung | The maintainer's pick |
+| High | Three reviewers, one each from Codex, Claude Code, and Gemini through `agy`, each drawn from the run's rung | The maintainer's pick, with the full brief |
 
 `/quest-run` carries the picks.
 
@@ -1847,15 +1847,20 @@ the reason of the first to judge it so. The record names it after the base:
 tier, and a reviewer that raised it adds `- Raised the risk to high: <reason>`
 to its block. A `- Class:` line follows when the classifier named a class.
 
-A low head with no finding left to settle runs no local reviewer, unless
-`--harness`, `--model`, or `--effort` names one: the record names the head in
-full, adds `- Local review: none, since a low-risk head needs only the online
-reviewer`, and `next done` says so. A high head seats two reviewers
-of different vendors, each drawn from the run's rung as any seat is. `--model` and `--effort` name only the first seat, so the second still runs; the reviewer `--harness` names runs alone. A round that raises the tier to high seats the
-second reviewer at once, in the same run; a run is saved whole or not at all, so one that fails there, as when
-none can run, leaves the branch as it was. When every model of the other vendor is avoided, as
-with no `## Models` record, which avoids every model of the harness running the
-command, the run fails as a usage error; when they cannot run, as an outage.
+The tier sets the seats: one reviewer on a low head, two on medium, and three
+on high, each on a vendor of its own and drawn from the run's rung as any seat
+is. A seat the drawn rung has no vendor left for fills from the size's rung,
+then each rung outward. `--model` and `--effort` name only the first seat, so
+the rest are still drawn; the reviewer `--harness` names runs alone. A round
+that raises the tier seats the extra reviewers at once, in the same run; a run
+is saved whole or not at all, so one that fails there, as when none can run,
+leaves the branch as it was. When every model of a vendor a seat needs is
+avoided, as with no `## Models` record, which avoids every model of the harness
+running the command, the run fails as a usage error; when a seat finds no
+other vendor that can run on any rung, as an outage. So a host where `agy`
+cannot run, such as macOS's case-insensitive default volume, finds only two
+vendors for a high head, and its run is an outage: review high heads where
+`agy` runs.
 
 `--override <tier> --reason <text>` records the maintainer's tier for the
 branch in place of the reviewed one, as `- Risk: <tier>, <reason>` and
@@ -1864,7 +1869,7 @@ the reviewed tier grows riskier than the one overridden, other than to the
 override's own tier, which agrees with it, and `quest usage`
 counts overrides as a reading of the tier's accuracy. So a raise to medium on
 a head overridden from low to high ends the override, and the next run on that
-head needs one reviewer again, not two.
+head seats two reviewers, not three.
 
 ## Audit cost and accuracy
 

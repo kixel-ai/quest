@@ -15,6 +15,7 @@ it.
 ## Plan
 
 Decided 2026-11-23 (maintainer, [on kixel-ai/quest#838's review checkpoint](https://github.com/kixel-ai/quest/pull/838#issuecomment-7123306069)): ✅ keep this quest, widened to an OS read sandbox on both platforms: Seatbelt on macOS, bubblewrap or Landlock on Linux (rejected: drop it, leaving agy Linux-only). #838 itself landed without a sandbox, accepting the documented mid-turn gap, since agy then reviewed only when `--harness agy` named it. It has since joined the standard and deep rungs ([kixel-ai/quest#858](https://github.com/kixel-ai/quest/pull/858), as the maintainer placed Neon), so the gap applies to any review whose draw seats it, at any size, until this quest lands. The gap also applies whenever the risk classifier falls through to agy, after Claude and Codex cannot run.
+Until it lands, quest refuses agy on macOS's case-insensitive volume, so a high head there, which needs three vendors since #858, is an outage.
 
 What #838 found:
 

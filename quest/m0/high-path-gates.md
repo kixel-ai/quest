@@ -14,6 +14,7 @@ The gaps predate it, since `assets/CONTEXT.md` was already high:
 - `assets/skills/merge.md` exempts a land fixer's recorded mechanical fix from a new review, and the fixer's protected paths (`src/cli/land-fixer.ts`) cover only the build and CI files, so a conflict it resolves in an instruction file lands unread.
 
 Decided 2026-11-23 (maintainer, the pick round of [kixel-ai/quest#852](https://github.com/kixel-ai/quest/pull/852)): ✅ keep this quest, and "remove the too trivial to review line": delete the recorded trivial skip from `CONTRIBUTING.md` and `/quest-review`, so the tier alone decides when no local review runs, as `low` already does, keeping three tiers (rejected: a `none` tier below `low` with no online review either; leaving the skip).
+Since [kixel-ai/quest#858](https://github.com/kixel-ai/quest/pull/858), every tier gets a local review, so without the skip every head is reviewed.
 
 Recommended for the other two: the standing trivial pick excludes a high head other than a dependency or pin bump, as the tier `quest review` records for it; and the land fixer refuses to resolve a conflict in a `## High` path, leaving it to the PR's next `/quest-iterate`.
 

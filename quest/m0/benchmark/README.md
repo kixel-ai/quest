@@ -73,7 +73,8 @@ maintainer's typed messages since 2026-10-01):
     CI unless it actually catches issues. Running the full suite is dumb
     because the next commit (or nightly) can catch the issue anyway. We
     should use RISK to get additional/stronger reviews instead."): a high
-    PR gets two reviewers from different vendors
+    PR gets two reviewers from different vendors (three since
+    [kixel-ai/quest#858](https://github.com/kixel-ai/quest/pull/858))
   - Rejected: review, approval, and CI; approval only
 - Must a PR state how to undo it? ✅ No (maintainer, 2026-11-22: "I
   definitely don't want Undo to be a gate"). Rejected: an `## Undo`
