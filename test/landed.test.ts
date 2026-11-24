@@ -219,7 +219,11 @@ describe("quest merge's landing check", () => {
 		tree.append("quest/m0/epic/one.md", "\n## Related\n\n- [Gone](/quest/m0/gone.md) - missing\n");
 		commit(tree, "dangling link on main");
 		git(tree, "switch", "--quiet", "fix/stacked");
+		tree.write("src.ts", "work\n");
+		commit(tree, "work");
 		git(tree, "cherry-pick", "main");
+		// The head carries main's change on its own commit, so the merge base is main's parent.
+		expect(git(tree, "merge-base", "main", "fix/stacked")).toBe(git(tree, "rev-parse", "main~"));
 		expect(await inspect(tree, "fix/stacked")).toEqual([]);
 	});
 
@@ -236,7 +240,7 @@ describe("quest merge's landing check", () => {
 
 	test("reports one more of a finding the merge base had", async () => {
 		const tree = brokenAtFork("fix/again");
-		tree.append("quest/m0/epic/one.md", "- [Gone again](/quest/m0/gone.md) - missing\n");
+		tree.append("quest/m0/epic/one.md", "- [Gone](/quest/m0/gone.md) - missing\n");
 		commit(tree, "the same dangling link");
 		fixMain(tree, "fix/again");
 		expect((await inspect(tree, "fix/again")).map((finding) => finding.path)).toEqual(["quest/m0/epic/one.md"]);

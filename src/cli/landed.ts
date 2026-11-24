@@ -102,8 +102,9 @@ export function landingCheck(root: string): LandingCheck {
 				[`GIT_CONFIG_KEY_${count + 1}`]: "http.https://github.com/.extraheader",
 				[`GIT_CONFIG_VALUE_${count + 1}`]: `Authorization: basic ${basic}`,
 			});
+			// `-z` keeps Git from quoting a path it would escape, such as a non-ASCII one.
 			const quests = (ref: string) =>
-				run(["ls-tree", "-r", "--name-only", ref, "quest"]).split("\n").some(isQuest);
+				run(["ls-tree", "-r", "-z", "--name-only", ref, "quest"]).split("\0").some(isQuest);
 			const [based, headed] = [quests(base), quests(tip)];
 			if (!based && !headed) return [];
 			let fork: string;
@@ -131,7 +132,7 @@ export function landingCheck(root: string): LandingCheck {
 			// carries a base commit it did not merge, such as a squash-landed branch it was stacked on. One
 			// more of the same in the head is.
 			const known = new Map<string, number>();
-			for (const ref of [fork, base]) {
+			for (const ref of tree.length ? new Set([fork, base]) : []) {
 				const counts = new Map<string, number>();
 				for (const { key } of readable(dir, ref)) counts.set(key, (counts.get(key) ?? 0) + 1);
 				for (const [key, count] of counts) known.set(key, Math.max(known.get(key) ?? 0, count));
