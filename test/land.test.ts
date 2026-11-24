@@ -1906,6 +1906,39 @@ ${requeueScript}
 		git(root, "commit", "-qm", "revert");
 		expect(() => validateFix(root, entry, git(root, "rev-parse", "HEAD"), forge.main())).not.toThrow();
 	});
+	test("protects the paths the base's RISK.md holds high", async () => {
+		const forge = new Forge();
+		forge.advance({ "RISK.md": "# Risk\n\n## High\n\n- `assets/` - every agent loads it\n", "assets/a.md": "old" });
+		forge.pull("one", { "one.txt": "yes" });
+		const deps = await forge.deps();
+		const plan = await resolveQueue(REPOSITORY, SQUASH, deps);
+		forge.advance({ "assets/a.md": "base" });
+		const root = forge.clone();
+		const entry = plan.queue[0];
+		git(root, "checkout", "--quiet", "--detach", entry.head);
+		git(root, "merge", "--no-edit", forge.main());
+		expect(() => validateFix(root, entry, git(root, "rev-parse", "HEAD"), forge.main())).not.toThrow();
+		writeFileSync(join(root, "assets/a.md"), "fixer");
+		git(root, "commit", "-qam", "edit a high path");
+		expect(() => validateFix(root, entry, git(root, "rev-parse", "HEAD"), forge.main())).toThrow("protected set");
+	});
+	test("refuses any resolution of a protected conflict, the pin's side included", async () => {
+		const forge = new Forge();
+		forge.advance({ "flake.nix": "old" });
+		forge.pull("one", { "flake.nix": "PR" });
+		const deps = await forge.deps();
+		const plan = await resolveQueue(REPOSITORY, SQUASH, deps);
+		forge.advance({ "flake.nix": "base" });
+		const root = forge.clone();
+		const entry = plan.queue[0];
+		git(root, "checkout", "--quiet", "--detach", entry.head);
+		expect(() => git(root, "merge", "--no-edit", forge.main())).toThrow();
+		git(root, "checkout", "--ours", "--", "flake.nix");
+		git(root, "commit", "-qam", "keep the PR's flake.nix");
+		expect(() => validateFix(root, entry, git(root, "rev-parse", "HEAD"), forge.main())).toThrow(
+			"resolves a conflict in a protected path",
+		);
+	});
 });
 
 /** Private Git transport: require an exact ephemeral header before forwarding to the local forge. */

@@ -31,7 +31,8 @@ Allowed fixes: preserve both sides' intent in conflicts, format/lint, regenerate
 generated files, rebuild lockfiles as [Lockfiles](#lockfiles) says, or follow a
 base rename. Merge base where practical.
 flake.nix, flake.lock, shell.nix, default.nix, nix/, .envrc, .github/, .gitmodules,
-and gitlinks (submodule entries) anywhere are protected. Merging the base may carry
+gitlinks (submodule entries) anywhere, RISK.md, and each path the base's RISK.md
+lists under `## High` are protected. Merging the base may carry
 the base's own changes to those paths: that is no edit of yours when they come out
 exactly as a plain `git merge` of the base leaves them, with no conflict there for you
 to edit. Prefer a fix that leaves them alone. When the mechanical fix itself must

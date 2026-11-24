@@ -14,7 +14,7 @@ import {
 } from "node:fs";
 import { constants as osConstants } from "node:os";
 import { join } from "node:path";
-import { reviewSection } from "../core";
+import { ALWAYS_HIGH, type HighPath, RISK_FILE, matches, parseRiskFile, reviewSection } from "../core";
 import { GitHub, type GitHubDependencies, type ObjectValue, object, string } from "../github/client";
 import { baseRemote, commandEnvironment, contains, git, tryGit, type Entry, type Plan } from "./land";
 import { COMMENT_LIMIT, resolution, type Resolution } from "./land-apply";
@@ -488,7 +488,19 @@ export function outputSection(output: string, room: number): string {
 	return section.length <= room ? section : "";
 }
 
-/** New commits descend from the pin. Protected content/modes at the head must match the pin or its merge with `base`, the base the fixer was given. */
+/** The paths `base`'s risk file holds high, with those every repository does: a fixer's edit to one never lands unread. */
+function highPaths(root: string, base: string): readonly HighPath[] {
+	if (tryGit(root, ["cat-file", "-e", `${base}:${RISK_FILE}`]).status !== 0) return ALWAYS_HIGH;
+	const file = parseRiskFile(git(root, ["show", `${base}:${RISK_FILE}`]));
+	if (file.problems.length > 0)
+		throw new Error(`the base's ${RISK_FILE} cannot be read: ${file.problems.join("; ")}`);
+	return [...ALWAYS_HIGH, ...file.high];
+}
+
+/**
+ * New commits descend from the pin. Protected content/modes at the head must match the pin or its merge with `base`,
+ * the base the fixer was given, and a head that merges `base` resolves no conflict in a protected path.
+ */
 export function validateFix(root: string, entry: Pick<Entry, "head">, head: string, base: string): void {
 	if (!contains(root, entry.head, head) || head === entry.head)
 		throw new Error("fixed head must descend from the pinned PR head");
@@ -498,10 +510,11 @@ export function validateFix(root: string, entry: Pick<Entry, "head">, head: stri
 		if (!contains(root, entry.head, commit)) throw new Error("new fixer commit is not on top of pinned head");
 	}
 
+	const high = highPaths(root, base);
 	const protectedPath = (path: string) =>
 		["flake.nix", "flake.lock", "shell.nix", "default.nix", ".gitmodules", ".envrc", "nix", ".github"].some(
 			(prefix) => path === prefix || path.startsWith(`${prefix}/`),
-		);
+		) || high.some(({ pattern }) => matches(pattern, path));
 	const merged = tryGit(root, ["merge-tree", "--write-tree", "--name-only", "--no-messages", "-z", entry.head, base]);
 	if (merged.status !== 0 && merged.status !== 1) throw new Error("cannot compute protected merge result");
 	const [tree, ...conflicts] = merged.stdout.split("\0");
@@ -519,6 +532,9 @@ export function validateFix(root: string, entry: Pick<Entry, "head">, head: stri
 	};
 	const sets = maps.map((list) => list.filter(protectedEntry).sort().join("\0"));
 	const protectedConflict = conflicts.some((path) => protectedPath(path) || gitlinks.has(path));
+	// Every resolution picks between the sides: even keeping the pin's copy reverts the base's change.
+	if (protectedConflict && contains(root, base, head))
+		throw new ProtectedEdit("off-limits fixer edit: it resolves a conflict in a protected path");
 	if (sets[0] !== sets[1] && (protectedConflict || sets[0] !== sets[2]))
 		throw new ProtectedEdit("off-limits fixer edit: protected set must equal pinned head or base merge result");
 }

@@ -20,7 +20,6 @@ Never alter the repository's harness to get a pass, such as by disabling a tool,
 
 Run no new round when a review already counts for the committed head, as `/quest-merge` defines below, and leaves no finding unrefuted: go on to pushing and marking it ready.
 `quest status <pr>` reads the pushed head, so trust its `review-record` line only while its `head` line is the committed head.
-If you judge the change too trivial to review, skip the review instead and record the skip and its reason in `## Review`.
 
 Otherwise, review the committed branch with `quest review --base <remote>/<base>`, in the foreground; a round takes minutes.
 It picks a reviewer other than the model that changed the branch last, at an effort the PR's size sets.

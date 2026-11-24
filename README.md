@@ -1020,9 +1020,11 @@ restart only where the host leaves its process group alive (under systemd,
 and the restart. After the wrapper exits, the
 daemon validates every result, ancestry, and protected path before lease-pushing
 as the bot. The protected set as a whole must match the pinned head or its merge with the
-current base, including content and mode. It covers `flake.nix`, `flake.lock`,
-`shell.nix`, `default.nix`, `nix/`, `.envrc`, `.github/`, `.gitmodules`, and gitlinks
-anywhere. Collection copies at most 100 MiB of Git metadata the fixer added into a
+current base, including content and mode, and a head that merges the base resolves no
+conflict in it, not even by keeping the PR's side. It covers `flake.nix`, `flake.lock`,
+`shell.nix`, `default.nix`, `nix/`, `.envrc`, `.github/`, `.gitmodules`, gitlinks
+anywhere, and every path `quest review` holds high from the base's `RISK.md`, so
+a high path lands only after a local review. Collection copies at most 100 MiB of Git metadata the fixer added into a
 clean object repository. It skips the packs fetched at launch, whose objects the clean
 repository borrows from the daemon's own. It ignores fixer configuration and never
 follows the fixer's Git alternates. Pack indexes are rebuilt with
@@ -1034,7 +1036,7 @@ status or signal, with the tail of the job's retained log. A validated fix whose
 GitHub refuses, such as a merged base's `.github/workflows` changes that the App lacks
 the `workflows` permission to push, is handed back with its resolution. So is a fix
 that edits protected paths beyond what the base merge carries, such as a conflict in
-`flake.nix` the fixer resolved: those never land automatically. The resolution is the
+`flake.nix` or a high path the fixer resolved: those never land automatically. The resolution is the
 PR head, the base, the resolved tree, and the fixer's edits as a patch against the
 merge's conflicted result, or against the head itself for a fix that merges no base,
 sized to GitHub's 65,536-character comment limit. A maintainer
