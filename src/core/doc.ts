@@ -339,7 +339,8 @@ export function markdown(text: string): Root {
 /** One-line `text` as an inline code span that renders it whole, whatever backticks it holds. */
 export function codeSpan(text: string): string {
 	const fence = "`".repeat(Math.max(0, ...(text.match(/`+/g) ?? []).map((run) => run.length)) + 1);
-	const pad = /^`|`$/.test(text) ? " " : "";
+	// Markdown strips one space from each edge of a span that has one at both and is not all spaces.
+	const pad = /^`|`$/.test(text) || (/^ [^]* $/.test(text) && /[^ ]/.test(text)) ? " " : "";
 	return `${fence}${pad}${text}${pad}${fence}`;
 }
 

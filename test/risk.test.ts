@@ -1,6 +1,16 @@
 import { expect, test } from "vitest";
 
-import { ALWAYS_HIGH, classesFor, matches, parseRiskFile, patternError, recordedRisk, riskier } from "../src/core";
+import {
+	ALWAYS_HIGH,
+	classesFor,
+	codeSpan,
+	matches,
+	parseRiskFile,
+	patternError,
+	recordedRisk,
+	riskier,
+} from "../src/core";
+import { markdown } from "../src/core/doc";
 
 test("a pattern is a path from the root whose * stays in a segment and whose ** spans segments", () => {
 	const cases: [string, string, boolean][] = [
@@ -274,6 +284,15 @@ test("a change may fall only in the classes whose scope holds every path it chan
 	expect(classesFor([scratch], ["notes/a.txt"])).toEqual([scratch]);
 	// A change that touches no path falls in no class, not even an unscoped one.
 	expect(classesFor(classes, [])).toEqual([]);
+});
+
+test("a code span renders its text whole, whatever backticks or edge spaces it holds", () => {
+	for (const text of ["a", "a`b", "``", "`a", "a`", " a", "a ", " a ", "  a  ", " `a` ", " ", "  "]) {
+		const paragraph = markdown(codeSpan(text)).children[0];
+		expect(paragraph?.type === "paragraph" && paragraph.children).toEqual([
+			expect.objectContaining({ type: "inlineCode", value: text }),
+		]);
+	}
 });
 
 test("the review record's class and override read back", () => {
