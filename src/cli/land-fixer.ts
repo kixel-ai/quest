@@ -537,7 +537,8 @@ function highPaths(root: string, base: string): HighPath[] {
 /**
  * New commits descend from the pin. A head that takes no history of `base`, the base the fixer was given, keeps the
  * pin's protected content and modes; one that does merges all of `base`, resolves no conflict in a protected path or
- * one naming no path, and keeps the plain merge's. With `high`, for a head its PR's review record rates high, every path is protected.
+ * one naming no conflicted file, and keeps the plain merge's. Every path is protected on a high head: one its PR's
+ * review record rates high (`high`), or whose own change touches a path the base's risk file holds high.
  */
 export function validateFix(root: string, entry: Pick<Entry, "head">, head: string, base: string, high = false): void {
 	if (!contains(root, entry.head, head) || head === entry.head)
@@ -548,44 +549,88 @@ export function validateFix(root: string, entry: Pick<Entry, "head">, head: stri
 		if (!contains(root, entry.head, commit)) throw new Error("new fixer commit is not on top of pinned head");
 	}
 
-	const held = high ? [] : highPaths(root, base);
+	const held = highPaths(root, base);
+	const paths = (args: string[]) =>
+		git(root, [...args, "-z"])
+			.split("\0")
+			.filter(Boolean);
+	// Both sides of a rename, as `quest review` classifies a head.
+	const since = git(root, ["merge-base", entry.head, base]);
+	const hit = paths(["diff", "--name-only", "--no-renames", since, entry.head]).find((path) =>
+		held.some(({ pattern }) => matches(pattern, path)),
+	);
+	const every = high
+		? "its review record rates the pull request high"
+		: hit === undefined
+			? undefined
+			: `the pull request changes ${hit}, which is high`;
 	const protectedPath = (path: string) =>
-		high ||
+		every !== undefined ||
 		["flake.nix", "flake.lock", "shell.nix", "default.nix", ".gitmodules", ".envrc", "nix", ".github"].some(
 			(prefix) => path === prefix || path.startsWith(`${prefix}/`),
 		) ||
 		held.some(({ pattern }) => matches(pattern, path));
-	const merged = tryGit(root, ["merge-tree", "--write-tree", "--name-only", "--no-messages", "-z", entry.head, base]);
+	const refuse = (what: string, path: string) =>
+		new ProtectedEdit(
+			`off-limits fixer edit: ${what}, at ${path}${every === undefined ? "" : `; every path is protected, since ${every}`}`,
+		);
+	const merged = tryGit(root, ["merge-tree", "--write-tree", "--name-only", "-z", entry.head, base]);
 	if (merged.status !== 0 && merged.status !== 1) throw new Error("cannot compute protected merge result");
-	const [tree, ...conflicts] = merged.stdout.split("\0").filter(Boolean);
-	if (!/^[a-f0-9]{40}$/.test(tree)) throw new Error("invalid protected merge tree");
-	const entries = (ref: string) => git(root, ["ls-tree", "-rz", ref]).split("\0").filter(Boolean);
-	const maps = [head, entry.head, tree].map(entries);
+	const { tree, conflicts, unlisted } = mergeResult(merged.stdout);
 	const gitlinks = new Set(
-		maps.flatMap((list) =>
-			list.filter((line) => line.startsWith("160000 ")).map((line) => line.slice(line.indexOf("\t") + 1)),
+		[head, entry.head, tree].flatMap((ref) =>
+			paths(["ls-tree", "-r", ref])
+				.filter((line) => line.startsWith("160000 "))
+				.map((line) => line.slice(line.indexOf("\t") + 1)),
 		),
 	);
-	const protectedEntry = (line: string) => {
-		const path = line.slice(line.indexOf("\t") + 1);
-		return protectedPath(path) || gitlinks.has(path);
-	};
-	const sets = maps.map((list) => list.filter(protectedEntry).sort().join("\0"));
+	// Only the paths whose entries differ need the protection test, not every path of three trees.
+	const edited = (from: string) =>
+		paths(["diff-tree", "-r", "--name-only", "--no-renames", from, head]).find(
+			(path) => protectedPath(path) || gitlinks.has(path),
+		);
 	const count = (...not: string[]) => git(root, ["rev-list", "--count", head, ...not.map((ref) => `^${ref}`)]);
 	if (count(entry.head) === count(entry.head, base)) {
-		if (sets[0] !== sets[1])
-			throw new ProtectedEdit("off-limits fixer edit: protected set must equal the pinned head's");
+		const path = edited(entry.head);
+		if (path !== undefined) throw refuse("protected set must equal the pinned head's", path);
 		return;
 	}
 	// With the base's history in the head, the pin's copy of a path the base changed reverts that change.
 	if (!contains(root, base, head)) throw new Error("a fix that merges base history must merge all of the base");
-	// Some conflicts, such as a directory rename split, name no path, so one may fall in a protected path.
-	if (merged.status === 1 && conflicts.length === 0)
-		throw new ProtectedEdit("off-limits fixer edit: it resolves a conflict that names no path");
-	if (conflicts.some((path) => protectedPath(path) || gitlinks.has(path)))
-		throw new ProtectedEdit("off-limits fixer edit: it resolves a conflict in a protected path");
-	if (sets[0] !== sets[2])
-		throw new ProtectedEdit("off-limits fixer edit: protected set must equal the base merge result's");
+	// Some conflicts, such as a directory rename split, name no conflicted file, so one may fall in a protected path.
+	if (unlisted !== undefined || (merged.status === 1 && conflicts.length === 0))
+		throw refuse("it resolves a conflict that names no conflicted file", unlisted ?? "an unnamed path");
+	const conflict = conflicts.find((path) => protectedPath(path) || gitlinks.has(path));
+	if (conflict !== undefined) throw refuse("it resolves a conflict in a protected path", conflict);
+	const path = edited(tree);
+	if (path !== undefined) throw refuse("protected set must equal the base merge result's", path);
+}
+
+/**
+ * `git merge-tree --write-tree --name-only -z`'s output: the merged tree, the conflicted files, and the first path a
+ * conflict message names when none of its paths is a conflicted file.
+ */
+function mergeResult(output: string): { tree: string; conflicts: string[]; unlisted?: string } {
+	const fields = output.split("\0");
+	const tree = fields[0];
+	if (!/^[a-f0-9]{40}$/.test(tree)) throw new Error("invalid protected merge tree");
+	// The conflicted files end at an empty field, which opens the messages.
+	let at = fields.indexOf("", 1);
+	if (at < 0) throw new Error("invalid protected merge output");
+	const conflicts = fields.slice(1, at);
+	const listed = new Set(conflicts);
+	let unlisted: string | undefined;
+	// Each message is its path count, those paths, its type, and its text.
+	for (at++; at < fields.length && fields[at] !== "";) {
+		const count = Number(fields[at]);
+		if (!Number.isSafeInteger(count) || count < 0 || at + count + 2 >= fields.length)
+			throw new Error("invalid protected merge message");
+		const named = fields.slice(at + 1, at + 1 + count);
+		if (fields[at + 1 + count].startsWith("CONFLICT") && !named.some((path) => listed.has(path)))
+			unlisted ??= named[0] ?? "an unnamed path";
+		at += count + 3;
+	}
+	return { tree, conflicts, unlisted };
 }
 
 /** Anything the fixer writes may echo a token it read; GitHub tokens never reach a post. */

@@ -1030,11 +1030,14 @@ daemon validates every result, ancestry, and protected path before lease-pushing
 as the bot. A head that takes none of the base's history keeps the protected set as
 the pinned head has it, content and mode; one that does merges the whole base the
 fixer was given, resolves no conflict in the protected set, not even by keeping the
-PR's side, and keeps that set as a plain merge of the base leaves it. It covers
+PR's side, nor one Git's merge names no conflicted file for, such as a directory
+rename split, and keeps that set as a plain merge of the base leaves it. It covers
 `flake.nix`, `flake.lock`, `shell.nix`, `default.nix`, `nix/`, `.envrc`, `.github/`,
 `.gitmodules`, gitlinks anywhere, and every path `quest review` holds high from the
-base's `RISK.md`; on a PR whose `## Review` record rates it high, it covers every path.
-So a high change lands only after a local review. Collection copies at most 100 MiB of Git metadata the fixer added into a
+base's `RISK.md`; on a high PR, one whose `## Review` record rates it high or whose
+own change touches such a path, it covers every path. So a high change lands only
+after a local review. The watcher's own merge with the quest merge driver, below, is
+no fixer edit: it runs no model and resolves only `quest/` files. Collection copies at most 100 MiB of Git metadata the fixer added into a
 clean object repository. It skips the packs fetched at launch, whose objects the clean
 repository borrows from the daemon's own. It ignores fixer configuration and never
 follows the fixer's Git alternates. Pack indexes are rebuilt with
@@ -1052,7 +1055,8 @@ merge's conflicted result, or against the head itself for a fix that merges no b
 sized to GitHub's 65,536-character comment limit. A maintainer
 runs `quest land apply <pr>`, which refuses a moved head, rebuilds and checks that
 tree, and prints an unpushed commit and its push command to run after reviewing it;
-it records no mechanical fix, so the pushed head needs a local `quest review` round.
+it records no mechanical fix, so the pushed head needs a review that counts for it,
+as `/quest-merge` defines one.
 A resolution too large for the comment hands back plainly.
 
 Every base the watcher merges into a PR head, for a conflict's clean merge or an
@@ -1776,8 +1780,8 @@ for the reviewer that raised it when a new size pick's reviewer fixes or
 refutes it, but one that reviewer keeps open becomes its own, since its round
 reports it again. `--new` drops the findings it leaves unsettled from the
 tallies. A reviewer the run left out keeps a block with only its session and
-tally. `quest status` takes the last full SHA the section names as the
-reviewed head, so the head appears in full only once no reviewer reports a
+tally. `quest status` takes the last full SHA a section holding that record
+names as the reviewed head, so the head appears in full only once no reviewer reports a
 finding, and model text
 appears as inline code, which mentions or links nothing and never holds a full
 SHA. The section runs to the next level-1 or

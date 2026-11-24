@@ -1984,22 +1984,49 @@ ${requeueScript}
 			"resolves a conflict in a protected path",
 		);
 	});
-	test("refuses resolving a conflict that lists no path", async () => {
+	test("refuses resolving a conflict that names no conflicted file, beside one that does or not", async () => {
+		for (const text of [false, true]) {
+			const forge = new Forge();
+			forge.advance({ "dir/a": "a\n", "dir/b": "b\n", "f.txt": "1\n" });
+			forge.pull("one", {
+				"dir/a": null,
+				"dir/b": null,
+				"x/a": "a\n",
+				"y/b": "b\n",
+				...(text && { "f.txt": "PR\n" }),
+			});
+			const deps = await forge.deps();
+			const plan = await resolveQueue(REPOSITORY, SQUASH, deps);
+			forge.advance({ "dir/c": "c\n", ...(text && { "f.txt": "base\n" }) });
+			const root = forge.clone();
+			const entry = plan.queue[0];
+			git(root, "checkout", "--quiet", "--detach", entry.head);
+			// The PR splits `dir` between two directories, so where the base's new file goes is a conflict on no file.
+			expect(() => git(root, "merge", "--no-edit", forge.main())).toThrow();
+			expect(git(root, "diff", "--name-only", "--diff-filter=U")).toBe(text ? "f.txt" : "");
+			writeFileSync(join(root, "f.txt"), "both\n");
+			git(root, "commit", "-qam", "resolve");
+			expect(() => validateFix(root, entry, git(root, "rev-parse", "HEAD"), forge.main())).toThrow(
+				"resolves a conflict that names no conflicted file, at dir",
+			);
+		}
+	});
+	test("protects every path of a pull request that changes a high path", async () => {
 		const forge = new Forge();
-		forge.advance({ "dir/a": "a\n", "dir/b": "b\n" });
-		forge.pull("one", { "dir/a": null, "dir/b": null, "x/a": "a\n", "y/b": "b\n" });
+		forge.advance({ "RISK.md": "# Risk\n\n## High\n\n- `assets/` - every agent loads it\n", "assets/a.md": "old" });
+		forge.pull("one", { "assets/a.md": "PR", "one.txt": "yes" });
 		const deps = await forge.deps();
 		const plan = await resolveQueue(REPOSITORY, SQUASH, deps);
-		forge.advance({ "dir/c": "c\n" });
+		forge.advance({ "two.txt": "base" });
 		const root = forge.clone();
 		const entry = plan.queue[0];
 		git(root, "checkout", "--quiet", "--detach", entry.head);
-		// The PR splits `dir` between two directories, so where the base's new file goes is a conflict on no path.
-		expect(() => git(root, "merge", "--no-edit", forge.main())).toThrow();
-		expect(git(root, "diff", "--name-only", "--diff-filter=U")).toBe("");
-		git(root, "commit", "-qm", "take git's merge");
+		git(root, "merge", "--quiet", "--no-edit", forge.main());
+		expect(() => validateFix(root, entry, git(root, "rev-parse", "HEAD"), forge.main())).not.toThrow();
+		writeFileSync(join(root, "one.txt"), "fixer");
+		git(root, "commit", "-qam", "fix the PR's own file");
 		expect(() => validateFix(root, entry, git(root, "rev-parse", "HEAD"), forge.main())).toThrow(
-			"resolves a conflict that names no path",
+			"protected set must equal the base merge result's, at one.txt; every path is protected, since the pull request changes assets/a.md, which is high",
 		);
 	});
 	test("refuses a base merge that keeps the pin's copy of a protected path the base changed", async () => {

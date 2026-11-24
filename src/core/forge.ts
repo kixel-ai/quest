@@ -135,7 +135,7 @@ export interface Status {
 	reviews: Review[];
 	/** The design checkpoints online reviewers put on the head. */
 	checkpoints: { reviewer: string; round: number; url: string }[];
-	/** Null when the `## Review` section names no full SHA. */
+	/** Null when the `## Review` section holds no record `quest review` wrote, or it names no full SHA. */
 	reviewRecord: ReviewRecord | null;
 	/**
 	 * The head's risk tier as the `## Review` record names it, and the classifier's own tier, lower when a reviewer

@@ -137,7 +137,7 @@ export function resolutionSection(number: number, resolution: Resolution, room: 
 	const text =
 		`\n\n${why}, so its validated resolution travels in this comment: PR head \`${head}\`, ` +
 		`${merge}, resolved tree \`${tree}\`. A maintainer session rebuilds the commit with ` +
-		`\`quest land apply ${number}\`, ${review}, pushes it to the PR branch, and picks the PR again once a local \`quest review\` round covers the new head, since this commit is no recorded mechanical fix.` +
+		`\`quest land apply ${number}\`, ${review}, pushes it to the PR branch, and picks the PR again once a review counts for the new head, as \`/quest-merge\` defines one, since this commit is no recorded mechanical fix.` +
 		`\n\n<!-- quest land apply v1 head=${head} base=${base} tree=${tree} patch=${patch} -->`;
 	if (text.length <= room) return text;
 	return `\n\nThe fixer's resolution is too large for a comment (${patch.length} characters encoded), so redo the merge by hand.`;
