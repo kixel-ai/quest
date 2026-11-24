@@ -13,6 +13,7 @@ import { version } from "./version";
 import { type StopInput, broken, questRoot, runningTasks, usesQuest } from "./rules";
 import { stubFindings } from "./setup";
 import { CONTEXT } from "./skills";
+import { claimSessionPacks, contextPacks, packsForToolCall, resetSessionPacks } from "./context";
 import { HOOK_EVENTS } from "./worktree-hook";
 import { queue } from "./send";
 import { type Sample, logCall, sessionSample, startLine } from "./calls";
@@ -293,6 +294,8 @@ interface HookInput {
 	tool_use_id?: string;
 	/** Claude Code: the sub-agent whose call it is. */
 	agent_id?: string;
+	/** SessionStart source: startup, resume, clear, or compact. */
+	source?: string;
 	/** What the tool returned; Claude Code's Bash names the background task it moved the command to. */
 	tool_response?: unknown;
 }
@@ -329,6 +332,12 @@ export function hook(input: unknown, deps: HookDependencies = { env: process.env
 		case "SubagentStart": {
 			const root = questRoot(value.cwd);
 			if (root === null) return "";
+			if (typeof value.session_id === "string" && (event === "SubagentStart" || value.source !== "resume"))
+				resetSessionPacks(
+					value.session_id,
+					typeof value.agent_id === "string" ? value.agent_id : null,
+					deps.env,
+				);
 			const stubs = stubFindings(root).length;
 			const context =
 				stubs === 0
@@ -357,7 +366,19 @@ export function hook(input: unknown, deps: HookDependencies = { env: process.env
 						),
 						deps.env,
 					);
-				return "";
+				const fresh = claimSessionPacks(
+					value.session_id,
+					typeof value.agent_id === "string" ? value.agent_id : null,
+					packsForToolCall(value.tool_name, value.tool_input),
+					deps.env,
+				);
+				if (fresh.length === 0) return "";
+				return JSON.stringify({
+					hookSpecificOutput: {
+						hookEventName: event,
+						additionalContext: contextPacks(fresh),
+					},
+				});
 			}
 			const reason = rules.join("\n");
 			return JSON.stringify({

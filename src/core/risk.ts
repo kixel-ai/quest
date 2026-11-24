@@ -1,7 +1,7 @@
 // A pull request's risk tier: what could break, for whom, and how hard it is to undo, set from its diff and never
 // from who wrote it. The repository's RISK.md lists the paths whose change is always high and says what else is
 // customer-facing there; `quest review` sets the tier and records it in the PR body's `## Review` section.
-import type { List, ListItem, Paragraph, PhrasingContent, RootContent, Text } from "mdast";
+import type { List, ListItem, Paragraph, PhrasingContent, RootContent } from "mdast";
 
 import { codeSpan, markdown } from "./doc";
 import { reviewSection } from "./review";
@@ -197,39 +197,44 @@ function automaticClass(text: string, item: ListItem): Class | string {
 	const name = code.value;
 	if (!CLASS_NAME.test(name)) return `\`${name}\` is no class name: use lowercase words joined by hyphens`;
 	const opening = inline[0];
-	const scoped = opening?.type === "text" && /^\s*\(/.test(opening.value) ? scopeOf(name, inline) : null;
-	if (typeof scoped === "string") return scoped;
-	const rule = dashed(text.slice(scoped?.end ?? code.position!.end.offset!, first!.position!.end.offset!));
+	let scope: string[] | null = null;
+	let end = code.position!.end.offset!;
+	if (opening?.type === "text" && /^\s*\(/.test(opening.value)) {
+		if (/^\s*\(\s*\)/.test(opening.value))
+			return `\`${name}\`'s scope is empty: list its patterns, or drop the parentheses`;
+		const list = spanList(inline);
+		if (list === null) return `\`${name}\`'s scope is not backticked path patterns joined by \`, \``;
+		for (const pattern of list.spans) {
+			const problem = patternError(pattern);
+			if (problem !== null) return `${codeSpan(pattern)} in \`${name}\`'s scope is no pattern: ${problem}`;
+		}
+		[scope, end] = [list.spans, list.end];
+	}
+	const rule = dashed(text.slice(end, first!.position!.end.offset!));
 	if (rule === null)
-		return scoped
+		return scope
 			? `\`${name}\`'s scope must be followed by \` - \` and the rule, with nothing between`
 			: `\`${name}\` must be followed by its optional scope in parentheses, \` - \`, and the rule over the diff`;
 	// A scope after the dash would read as prose the classifier judges, not a scope the code checks.
 	const [lead] = markdown(rule).children;
-	const nodes = lead?.type === "paragraph" ? (lead as Paragraph).children : [];
-	if (nodes[0]?.type === "text" && typeof scopeOf(name, nodes) !== "string")
+	if (lead?.type === "paragraph" && spanList((lead as Paragraph).children) !== null)
 		return `\`${name}\`'s scope goes before \` - \`, not at the start of its rule`;
-	return { name, scope: scoped?.patterns ?? null, rule };
+	return { name, scope, rule };
 }
 
 /**
- * The patterns of class `name`'s scope, read from `nodes`, the item's text after its name, opening with `(`, and the
- * source offset just past its `)`; or why it is no scope. Each pattern is a code span, so it may use any backtick run.
+ * The code spans of the parenthesized list joined by `, ` that `nodes` open with, and the source offset just past its
+ * `)`, or null when they open with no such list. A span may use any backtick run, so it may hold a backtick.
  */
-function scopeOf(name: string, nodes: PhrasingContent[]): { patterns: string[]; end: number } | string {
-	const opening = (nodes[0] as Text).value;
-	if (/^\s*\(\s*\)/.test(opening)) return `\`${name}\`'s scope is empty: list its patterns, or drop the parentheses`;
-	const malformed = `\`${name}\`'s scope is not backticked path patterns joined by \`, \``;
-	if (!/^\s*\($/.test(opening)) return malformed;
-	const patterns: string[] = [];
+function spanList(nodes: PhrasingContent[]): { spans: string[]; end: number } | null {
+	if (nodes[0]?.type !== "text" || !/^\s*\($/.test(nodes[0].value)) return null;
+	const spans: string[] = [];
 	for (let index = 1; ; index += 2) {
 		const [code, next] = [nodes[index], nodes[index + 1]];
-		if (code?.type !== "inlineCode" || next?.type !== "text") return malformed;
-		const problem = patternError(code.value);
-		if (problem !== null) return `${codeSpan(code.value)} in \`${name}\`'s scope is no pattern: ${problem}`;
-		patterns.push(code.value);
-		if (next.value.startsWith(")")) return { patterns, end: next.position!.start.offset! + 1 };
-		if (!/^,\s+$/.test(next.value)) return malformed;
+		if (code?.type !== "inlineCode" || next?.type !== "text") return null;
+		spans.push(code.value);
+		if (next.value.startsWith(")")) return { spans, end: next.position!.start.offset! + 1 };
+		if (!/^,\s+$/.test(next.value)) return null;
 	}
 }
 

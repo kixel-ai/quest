@@ -226,6 +226,7 @@ test("a risk file's ## Automatic list names each class, its scope, and its rule"
 			"- `dashless`: a colon",
 			"- `late` - (`quest/**`) a scope after the dash",
 			"- `later` - (``docs/**``): a scope after the dash, then punctuation",
+			"- `invalid` - (`/docs/**`) a misplaced scope whose pattern is no pattern",
 		].join("\n"),
 	);
 	expect(broken.classes).toEqual([
@@ -243,6 +244,7 @@ test("a risk file's ## Automatic list names each class, its scope, and its rule"
 		"RISK.md:12: `dashless` must be followed by its optional scope in parentheses, ` - `, and the rule over the diff",
 		"RISK.md:13: `late`'s scope goes before ` - `, not at the start of its rule",
 		"RISK.md:14: `later`'s scope goes before ` - `, not at the start of its rule",
+		"RISK.md:15: `invalid`'s scope goes before ` - `, not at the start of its rule",
 		"RISK.md lists the class `docs` twice",
 	]);
 });

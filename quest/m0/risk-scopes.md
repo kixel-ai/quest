@@ -30,9 +30,12 @@ Recommended lines, for the implementer to check against the tree and
 A scope pattern names whole paths, so a directory needs a trailing `/` or
 `/**`.
 
-Leave out a `chore` class for dependency and pin bumps. `RISK.md` rates
-them medium, a class needs low to land, and `/quest-run`'s trivial-PR rule
-already lands them once Pullfrog approves.
+Leave `chore` unscoped. `AGENTS.md`'s standing trivial pick goes through
+it, at any tier. Its rule also takes "another change as small", and
+covers bumps of the github-actions group, which change
+`.github/workflows/`. A scope such as (`package.json`, `bun.lock`,
+`flake.lock`) would end both, and that is the maintainer's call, not this
+quest's.
 
 Validate by replaying recent merged PRs' changed files, both sides of
 each rename, through `classesFor` against the new file. The PRs classed
