@@ -62,8 +62,19 @@ const KNOWN = new Map(
 		.map(({ model }) => [key(model), model]),
 );
 
-/** A model's listed ID when it names a listed model, as `openai/gpt-6.2-astra` does, else the name as written. */
-export const canonicalModel = (name: string): string => KNOWN.get(key(name)) ?? name;
+/**
+ * The ID a model name compares by: a listed model's ID, as for `openai/gpt-6.2-astra`, a GPT ID or display name with
+ * its provider dropped, as `gpt-6.1-sol` for `openai/gpt-6.1-sol` or `GPT-6.1 Sol`, else the name as written.
+ */
+export function canonicalModel(name: string): string {
+	const listed = KNOWN.get(key(name));
+	if (listed) return listed;
+	const gpt = /^(?:[\w.-]+\/)?gpt[-\s]+(\d+(?:\.\d+)*)[-\s]+([a-z]+)$/i.exec(name);
+	return gpt ? `gpt-${gpt[1]}-${gpt[2]!.toLowerCase()}` : name;
+}
+
+/** Whether two model names mean the same model, however each is spelled. */
+export const sameModel = (a: string, b: string): boolean => canonicalModel(a) === canonicalModel(b);
 
 /**
  * The model ID `name` means: a listed model by its ID or display name, a Claude harness's `<Family> <version>` as

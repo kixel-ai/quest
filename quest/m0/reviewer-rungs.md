@@ -56,7 +56,13 @@ Recommendations, the implementer's to revisit:
 - Once every model on the drawn rung has reviewed the PR, take the one
   whose last round is oldest, still never the writer's. A model that cannot
   run passes the round to the next untried model on the same rung, then
-  as today.
+  as today. That includes a login or gateway that does not serve the
+  model, such as Codex's `The '<model>' model is not supported when using
+  Codex with a ChatGPT account`, recorded as a skip as a usage limit is.
+- Key tallies by model and effort, not by seat, so a round on a model
+  the PR has not had starts its own tally. Today's tally keeps one per
+  harness and role and takes its latest round's model, which would credit
+  one model's findings to the next.
 - Record the rung and which way it was drawn on each round's Reviewer line,
   so the readout can compare the size's rung with its neighbors.
 - A fresh round reviews the whole branch, since it has no session to diff

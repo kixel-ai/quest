@@ -15,7 +15,7 @@ import { git } from "./git";
 import { type ClaimDependencies, upstream } from "./claims";
 import { readRemote, remoteRepository, requireRemote } from "./github";
 import type { Model } from "./models";
-import { recorded } from "./models-record";
+import { recorded, sameModel } from "./models-record";
 import {
 	type Assessment,
 	type Finding,
@@ -386,7 +386,11 @@ export interface EvalReport {
 export function evalSeats(entry: EvalCase, options: Pick<EvalOptions, "harness" | "model" | "effort">) {
 	if (options.harness !== undefined)
 		return [{ reviewer: pickReviewer(entry.size, options, () => false), shadow: undefined }];
-	const pick = pickReviewer(entry.size, {}, (model: Model) => model.model === entry.writer);
+	const pick = pickReviewer(
+		entry.size,
+		{},
+		(model: Model) => entry.writer !== null && sameModel(model.model, entry.writer),
+	);
 	const shadow = shadowOf(entry.size, pick);
 	return [{ reviewer: pick, shadow: undefined }, ...(shadow ? [{ reviewer: shadow, shadow: true as const }] : [])];
 }

@@ -28,7 +28,7 @@ import {
 	verdict,
 } from "../src/cli/review";
 import { withReview } from "../src/cli/review-record";
-import { implementer, recorded } from "../src/cli/models-record";
+import { implementer, recorded, sameModel } from "../src/cli/models-record";
 import { tempDir } from "./fixture";
 import {
 	CLAUDE_LOGGED_OUT,
@@ -2147,6 +2147,10 @@ test("an Implementer line reads as agents write it", () => {
 	expect(read("Codex, GPT 6.1  Sol, high effort")?.model).toBe("gpt-6.1-sol");
 	expect(read("Codex, GPT-6.1-SOL, high effort")?.model).toBe("gpt-6.1-sol");
 	expect(read("Codex, openai/gpt-6.1-sol, high effort")?.model).toBe("openai/gpt-6.1-sol");
+	// Comparisons fold the spellings of one model, retired GPT versions included.
+	expect(sameModel("openai/gpt-6.1-sol", "GPT-6.1 Sol")).toBe(true);
+	expect(sameModel("openai/gpt-6.2-astra", "gpt-6.2-astra")).toBe(true);
+	expect(sameModel("gpt-6.1-sol", "gpt-6.2-sol")).toBe(false);
 	expect(read("Codex, openrouter/gpt-5-mini, high effort")?.model).toBe("openrouter/gpt-5-mini");
 	expect(read("GPT 6.2 Astra")?.model).toBe("gpt-6.2-astra");
 	expect(read("Claude Code, Opus 5.5, low effort (iterate, flow fix)")).toEqual(opus("low"));

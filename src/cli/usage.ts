@@ -976,13 +976,14 @@ function accuracyRows(pulls: PullRow[]): AccuracyRow[] {
 			each.state === "merged" ? share(writing, distinct) : new Map<number, Tokens & { split: number }>();
 		for (const [i, implementer] of distinct.entries()) {
 			const size = implementer.size;
-			const id = JSON.stringify([size, implementer.harness, implementer.model, implementer.effort]);
+			const model = canonicalModel(implementer.model);
+			const id = JSON.stringify([size, implementer.harness, model, implementer.effort]);
 			let row = rows.get(id);
 			if (!row) {
 				row = {
 					size,
 					harness: implementer.harness,
-					model: implementer.model,
+					model,
 					effort: implementer.effort,
 					...noOutcomes(),
 					spent: noSpend(),
@@ -1007,20 +1008,14 @@ function reviewerRows(pulls: PullRow[]): ReviewerRow[] {
 	const rows = new Map<string, ReviewerRow>();
 	const latest = tallied(pulls, () => true);
 	const row = (each: PullRow, review: ReviewSummary) => {
-		const id = JSON.stringify([
-			each.size,
-			review.harness,
-			review.model,
-			review.effort,
-			review.shadow,
-			review.second,
-		]);
+		const model = canonicalModel(review.model);
+		const id = JSON.stringify([each.size, review.harness, model, review.effort, review.shadow, review.second]);
 		let found = rows.get(id);
 		if (!found) {
 			found = {
 				size: each.size,
 				harness: review.harness,
-				model: review.model,
+				model,
 				effort: review.effort,
 				shadow: review.shadow,
 				second: review.second,

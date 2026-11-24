@@ -34,7 +34,7 @@ import { discoveryEnv, git } from "./git";
 import { LIMIT, codexReset } from "./limit";
 import { CLASSIFIERS, DEFAULT_SIZE, type Model, REVIEWERS } from "./models";
 import { programEnvironment, requireProgram } from "./program";
-import { canonicalModel, type recorded } from "./models-record";
+import { type recorded, sameModel } from "./models-record";
 import { save } from "./worktree";
 
 /** A mistake in the arguments, checkout, or environment, reported as a usage error. */
@@ -315,11 +315,10 @@ export interface Choice {
  * pushed, unless `--harness` names the reviewer, which then avoids nothing.
  */
 export function authored(choice: Choice, env: NodeJS.ProcessEnv, latest?: string): (entry: Model) => boolean {
-	// A provider-qualified spelling of a listed model, from `--model` or a record, is that model.
-	const same = (a: string, b: string) => canonicalModel(a) === canonicalModel(b);
+	// Another spelling of a model, such as a provider-qualified ID from `--model` or a record, is that model.
 	const exclude = choice.exclude ?? [];
-	if (exclude.length > 0) return (entry) => exclude.some((model) => same(model, entry.model));
-	if (latest !== undefined && latest !== "unknown") return (entry) => same(entry.model, latest);
+	if (exclude.length > 0) return (entry) => exclude.some((model) => sameModel(model, entry.model));
+	if (latest !== undefined && latest !== "unknown") return (entry) => sameModel(entry.model, latest);
 	if (choice.harness !== undefined) return () => false;
 	const running = runningHarness(env);
 	return (entry) => entry.harness === running;
@@ -2142,7 +2141,7 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 	// It comes from the size's whole list, since --model or --effort narrows only the pick.
 	const pool = auto ? REVIEWERS[sized.size].filter((each) => !avoided(each)) : candidates;
 	const secondTo = (routed: Model): Model => {
-		const others = pool.filter((each) => each.model !== routed.model);
+		const others = pool.filter((each) => !sameModel(each.model, routed.model));
 		if (others.length === 0)
 			throw new ReviewInputError(
 				`a high-risk head needs a second reviewer on a model other than ${routed.model}, and every other model of the size's list is avoided; name the latest writer in the PR's ## Models record or with --exclude-model`,
@@ -2163,8 +2162,8 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 			const own = pool.find(
 				(each) =>
 					each.harness === seconded!.reviewer &&
-					each.model === seconded!.last.model &&
-					each.model !== routed.model &&
+					sameModel(each.model, seconded!.last.model) &&
+					!sameModel(each.model, routed.model) &&
 					!secondOut.has(each.model) &&
 					!down.has(each.harness),
 			);

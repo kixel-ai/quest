@@ -56,9 +56,9 @@ Guidance:
   cannot run passes to another vendor on the round's rung. Recommended:
   when the drawn rung has too few vendors that can run, such as when
   Gemini is out or the rung's only Claude model wrote the head, fill the
-  missing seats from the size's rung, then the rungs next to it. The
-  round is an outage once a seat its tier needs finds no distinct vendor
-  on any rung, which includes every vendor being out.
+  missing seats from the size's rung, then each rung outward from it in
+  turn. The round is an outage once a seat its tier needs finds no
+  distinct vendor on any rung, which includes every vendor being out.
 - Dropping Pullfrog's ruleset is a change to kixel-ai/dotfiles'
   `bin/repo-settings`, not this repository; list it in the PR's
   follow-ups when the readout recommends it.
