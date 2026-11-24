@@ -14,6 +14,7 @@ import {
 	readCodexMessages,
 	readT3Messages,
 	repositories,
+	topLevelCwd,
 } from "../src/cli/messages";
 import { run, tempDir } from "./fixture";
 
@@ -61,11 +62,11 @@ function t3State(path: string, root: string, rows: { id: string; at: string; pay
 	const db = new DatabaseSync(path);
 	db.exec(`
 		CREATE TABLE orchestration_v2_projection_messages (message_id TEXT, thread_id TEXT, run_id TEXT, role TEXT, created_at TEXT, payload_json TEXT);
-		CREATE TABLE orchestration_v2_projection_runs (run_id TEXT, thread_id TEXT, provider_thread_id TEXT);
+		CREATE TABLE orchestration_v2_projection_runs (run_id TEXT, thread_id TEXT, provider_thread_id TEXT, completed_at TEXT);
 		CREATE TABLE orchestration_v2_projection_provider_threads (provider_thread_id TEXT, payload_json TEXT);
 		CREATE TABLE orchestration_v2_projection_threads (thread_id TEXT, project_id TEXT);
 		CREATE TABLE projection_projects (project_id TEXT, workspace_root TEXT);
-		INSERT INTO orchestration_v2_projection_runs VALUES ('run', 'thread', 'pt');
+		INSERT INTO orchestration_v2_projection_runs VALUES ('run', 'thread', 'pt', NULL);
 		INSERT INTO orchestration_v2_projection_threads VALUES ('thread', 'project');
 	`);
 	db.prepare("INSERT INTO orchestration_v2_projection_provider_threads VALUES ('pt', ?)").run(
@@ -753,6 +754,8 @@ describe("messages", () => {
 		mkdirSync(other);
 		execFileSync("git", ["init", "-q", other]);
 		execFileSync("git", ["-C", other, "remote", "add", "origin", "https://github.com/acme/other.git"]);
+		const scratch = join(home, "scratch");
+		mkdirSync(scratch);
 		mkdirSync(join(home, ".claude", "projects", "p"), { recursive: true });
 		writeFileSync(
 			join(home, ".claude", "projects", "p", `${SESSION}.jsonl`),
@@ -763,6 +766,8 @@ describe("messages", () => {
 				{ ...skillTurn("2026-11-06T09:00:00Z", "/skills/quest-plan"), cwd: other },
 				// T3 Code removed the worktree this answer came from.
 				claudeAnswer("2026-11-06T09:01:00Z", { "Which color?": "Blue" }, { cwd: join(home, "t3-gone") }),
+				// A directory that still exists keeps its own name, even unnamed.
+				claudeAnswer("2026-11-06T09:02:00Z", { "Which color?": "Red (Recommended)" }, { cwd: scratch }),
 			),
 		);
 		mkdirSync(join(home, ".codex", "sessions"), { recursive: true });
@@ -782,13 +787,45 @@ describe("messages", () => {
 		db.prepare(
 			"INSERT INTO orchestration_v2_projection_messages VALUES ('async-answer:x', 'orphan', NULL, 'user', ?, ?)",
 		).run("2026-11-06T10:00:00.000Z", JSON.stringify({ createdBy: "user", creationSource: "server", text: "Yes" }));
+		// A project no one wrote in during the window is no gap in the evidence.
+		db.exec("INSERT INTO projection_projects VALUES ('idle', '/idle')");
 		db.close();
-		const mine = messages({ since: "2026-11-01", repository: "acme/proj" }, { env: {}, home });
+		const notes: string[] = [];
+		const read = () =>
+			messages(
+				{ since: "2026-11-01", repository: "acme/proj" },
+				{ env: {}, home, warn: (line) => notes.push(line) },
+			);
+		const mine = read();
 		expect(mine.map((m) => [m.kind, m.harness, m.repository, m.kind === "answer" ? m.skill : m.text])).toEqual([
 			["answer", "claude", "acme/proj", null],
 			["message", "codex", "acme/proj", "and test"],
 		]);
-		expect(messages({ since: "2026-11-01", repository: null }, { env: {}, home })).toHaveLength(2);
+		expect(notes).toEqual([
+			"left out the sessions in 1 directory no GitHub or Kixel Quest origin names; --all prints them",
+		]);
+		expect(messages({ since: "2026-11-01", repository: null }, { env: {}, home })).toHaveLength(3);
+		// A provider row SQLite cannot read, with no message of its own, maps no session and fails no read.
+		const broken = new DatabaseSync(state);
+		broken.exec(`
+			INSERT INTO projection_projects VALUES ('theirs', '${other}');
+			INSERT INTO orchestration_v2_projection_threads VALUES ('their-thread', 'theirs');
+			INSERT INTO orchestration_v2_projection_runs VALUES ('their-run', 'their-thread', 'their-pt', NULL);
+			INSERT INTO orchestration_v2_projection_provider_threads VALUES ('their-pt', '{');
+		`);
+		broken.close();
+		expect(read()).toEqual(mine);
+		expect(messages({ since: "2026-11-01", repository: null }, { env: {}, home })).toHaveLength(3);
+	});
+
+	test("finds a record's own directory without decoding it", () => {
+		const record = (fields: string) =>
+			`{"message":{"content":[{"cwd":"/nested"}]},"text":"\\"cwd\\":\\"/str\\"",${fields}}`;
+		expect(topLevelCwd(record(`"cwd":"/work/a\\"b"`))).toBe('/work/a"b');
+		expect(topLevelCwd(record(`"type":"cwd","n":1`))).toBeUndefined();
+		// An escape JSON rejects leaves the line to the reader, which counts it malformed.
+		expect(topLevelCwd(record(`"cwd":"/bad\\q"`))).toBeUndefined();
+		expect(topLevelCwd('{"text":"unterminated')).toBeUndefined();
 	});
 
 	test("names each forge's repository from the configured origin, comparing owner/name without case", () => {

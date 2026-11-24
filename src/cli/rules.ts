@@ -267,7 +267,7 @@ function check(cwd: string, env: NodeJS.ProcessEnv): Check {
 }
 
 /** The checkout holding `cwd`, found without running git, or `cwd` outside any. */
-function checkoutRoot(cwd: string): string {
+export function checkoutRoot(cwd: string): string {
 	for (let dir = cwd; ; dir = dirname(dir)) {
 		if (existsSync(join(dir, ".git"))) return dir;
 		if (dirname(dir) === dir) return cwd;

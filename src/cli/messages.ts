@@ -7,7 +7,7 @@ import { isAbsolute, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { hostedRepository, originHost } from "./forge";
 import { type RemoteHost, githubRepository } from "./github";
-import { RECOMMENDED } from "./rules";
+import { RECOMMENDED, checkoutRoot } from "./rules";
 import { kixelUrl } from "./tokens";
 
 /**
@@ -197,8 +197,9 @@ export function repositories(
 	projects: ReadonlyMap<string, string> = new Map(),
 ): Repositories {
 	const names = new Map<string, string>();
+	const removed = new Set<string>();
 	const unnamed = new Set<string>();
-	// By checkout, so its removed worktrees share one lookup.
+	// By checkout, so its subdirectories and removed worktrees share one lookup.
 	const hosts = new Map<string, RemoteHost | null>();
 	const kixel = kixelUrl(env);
 	const named = (host: RemoteHost | null) =>
@@ -210,7 +211,9 @@ export function repositories(
 	const name = (dir: string): string => {
 		let found = names.get(dir);
 		if (found === undefined) {
-			const checkout = existsSync(dir) ? dir : WORKTREE.exec(dir)?.[1];
+			const exists = existsSync(dir);
+			if (!exists) removed.add(dir);
+			const checkout = exists ? checkoutRoot(dir) : WORKTREE.exec(dir)?.[1];
 			let host: RemoteHost | null = null;
 			if (checkout !== undefined && existsSync(checkout)) {
 				host = hosts.get(checkout) ?? null;
@@ -228,9 +231,10 @@ export function repositories(
 	return {
 		name(dir, session) {
 			const found = name(dir);
-			// T3 Code removes its worktrees, which sit outside the checkout, but keeps their project.
+			// T3 Code removes its worktrees, which sit outside the checkout, but keeps their project. A directory that
+			// still exists is what it is, even unnamed.
 			const project = session === undefined ? undefined : projects.get(session);
-			return isAbsolute(found) && project !== undefined ? name(project) : found;
+			return isAbsolute(found) && project !== undefined && removed.has(dir) ? name(project) : found;
 		},
 		origin(url) {
 			const repository = hostedRepository(kixel, url);
@@ -279,8 +283,41 @@ function answer(
 /** How Claude Code opens the turn loading a skill, whether typed as a slash command or called as a tool. */
 const CLAUDE_SKILL = /^\s*Base directory for this skill: (?:.*\/)?([^/\n]+?)\/?[ \t]*$/m;
 
-/** A Claude Code record's directory, as the JSON string literal's body. */
-const CLAUDE_CWD = /"cwd":"((?:[^"\\]|\\.)*)"/g;
+/** A `cwd` member and its string value, matched where a top-level key starts. */
+const CWD = /"cwd":"((?:[^"\\]|\\.)*)"/y;
+
+/**
+ * The `cwd` among a JSON object line's own members, found by skipping strings and nested values rather than decoding
+ * them, so another repository's record is never parsed; undefined when it has none or the line is malformed there.
+ */
+export function topLevelCwd(line: string): string | undefined {
+	let depth = 0;
+	for (let i = 0; i < line.length; i++) {
+		const c = line.charCodeAt(i);
+		if (c === 34) {
+			if (depth === 1) {
+				CWD.lastIndex = i;
+				const value = CWD.exec(line)?.[1];
+				if (value !== undefined)
+					try {
+						return JSON.parse(`"${value}"`) as string;
+					} catch {
+						return undefined;
+					}
+			}
+			// Skip to the quote closing the string: one after an even run of backslashes.
+			for (;;) {
+				i = line.indexOf('"', i + 1);
+				if (i < 0) return undefined;
+				let escapes = 0;
+				while (line.charCodeAt(i - 1 - escapes) === 92) escapes++;
+				if (escapes % 2 === 0) break;
+			}
+		} else if (c === 123 || c === 91) depth++;
+		else if (c === 125 || c === 93) depth--;
+	}
+	return undefined;
+}
 
 /** The skill a Claude Code record loads, if any; built-in commands such as `/compact` load none. */
 export function claudeSkill(record: Record<string, unknown>): string | null {
@@ -307,14 +344,11 @@ export function readClaudeMessages(
 	const entries: Entry[] = [];
 	let skill: string | null = null;
 	eachLine(path, (line, complete) => {
-		// Another repository's lines are left unparsed. Content can nest a `cwd` too, so a line is left only when no
-		// `cwd` it holds is kept; the parsed record's own is checked below.
-		const names = [...line.matchAll(CLAUDE_CWD)].map((match) =>
-			repositories.name(JSON.parse(`"${match[1]}"`) as string, session),
-		);
-		if (names.length && !names.some((name) => repositories.keep(name))) {
-			if (line.includes('"human"') || line.includes('"answers"'))
-				for (const name of names) repositories.leave(name);
+		// Another repository's lines are left unparsed.
+		const cwd = topLevelCwd(line);
+		const named = cwd === undefined ? null : repositories.name(cwd, session);
+		if (named !== null && !repositories.keep(named)) {
+			if (line.includes('"human"') || line.includes('"answers"')) repositories.leave(named);
 			return;
 		}
 		// Only these lines can hold a typed turn, a skill, or an answer; the rest are parsed only to count malformed ones.
@@ -632,19 +666,7 @@ const T3_DRIVERS: Record<string, string> = { claudeAgent: "claude", codex: "code
 export function readT3Messages(path: string, since: number, repositories: Repositories): Message[] {
 	const db = new DatabaseSync(path, { readOnly: true });
 	try {
-		// Only the kept projects' messages are fetched; every one, those of no project included, when all are kept.
-		const projects = repositories.all
-			? []
-			: (db.prepare("SELECT project_id AS id, workspace_root AS root FROM projection_projects").all() as {
-					id: string;
-					root: string;
-				}[]);
-		const kept = projects.filter((project) => {
-			const name = repositories.name(project.root);
-			if (repositories.keep(name)) return true;
-			repositories.leave(name);
-			return false;
-		});
+		const kept = t3Kept(db, since, repositories);
 		const rows = db
 			.prepare(
 				`SELECT m.message_id AS id, m.created_at AS at, m.payload_json AS payload,
@@ -654,15 +676,11 @@ export function readT3Messages(path: string, since: number, repositories: Reposi
 				LEFT JOIN orchestration_v2_projection_provider_threads pt ON pt.provider_thread_id = r.provider_thread_id
 				LEFT JOIN orchestration_v2_projection_threads t ON t.thread_id = m.thread_id
 				LEFT JOIN projection_projects p ON p.project_id = t.project_id
-				WHERE m.role = 'user' AND m.created_at >= ?
-					AND (? OR t.project_id IN (SELECT value FROM json_each(?)))
+				WHERE m.role = 'user' AND m.created_at >= ?1
+					AND (?2 IS NULL OR t.project_id IN (SELECT value FROM json_each(?2)))
 				ORDER BY m.created_at`,
 			)
-			.all(
-				new Date(since).toISOString(),
-				repositories.all ? 1 : 0,
-				JSON.stringify(kept.map((project) => project.id)),
-			) as {
+			.all(new Date(since).toISOString(), kept) as {
 			id: string;
 			at: string;
 			payload: string;
@@ -703,20 +721,51 @@ export function readT3Messages(path: string, since: number, repositories: Reposi
 	}
 }
 
-/** The root of the project each session T3 Code drives belongs to, by the harness's own session ID. */
-export function readT3Projects(path: string): Map<string, string> {
+/**
+ * The IDs of the T3 Code projects the query reads, as a JSON array for `json_each`, or null when it reads every one.
+ * Tells `leave` of each other project a person wrote in since `since`.
+ */
+function t3Kept(db: DatabaseSync, since: number, repositories: Repositories): string | null {
+	if (repositories.all) return null;
+	const projects = db
+		.prepare(
+			`SELECT p.project_id AS id, p.workspace_root AS root, EXISTS (
+				SELECT 1 FROM orchestration_v2_projection_threads t
+				JOIN orchestration_v2_projection_messages m ON m.thread_id = t.thread_id
+				WHERE t.project_id = p.project_id AND m.role = 'user' AND m.created_at >= ?
+			) AS active
+			FROM projection_projects p`,
+		)
+		.all(new Date(since).toISOString()) as { id: string; root: string; active: number }[];
+	const kept: string[] = [];
+	for (const project of projects) {
+		const name = repositories.name(project.root);
+		if (repositories.keep(name)) kept.push(project.id);
+		else if (project.active) repositories.leave(name);
+	}
+	return JSON.stringify(kept);
+}
+
+/**
+ * The root of the project each session T3 Code drove since `since` belongs to, by the harness's own session ID: what
+ * names the session, so every project's is read. A provider row SQLite cannot read maps nothing; `readT3Messages`
+ * fails on one whose messages it reads.
+ */
+export function readT3Projects(path: string, since: number): Map<string, string> {
 	const db = new DatabaseSync(path, { readOnly: true });
 	try {
 		const rows = db
 			.prepare(
-				`SELECT DISTINCT json_extract(pt.payload_json, '$.nativeThreadRef.nativeId') AS session,
+				`SELECT DISTINCT CASE WHEN json_valid(pt.payload_json)
+						THEN json_extract(pt.payload_json, '$.nativeThreadRef.nativeId') END AS session,
 					p.workspace_root AS root
 				FROM orchestration_v2_projection_runs r
 				JOIN orchestration_v2_projection_provider_threads pt ON pt.provider_thread_id = r.provider_thread_id
 				JOIN orchestration_v2_projection_threads t ON t.thread_id = r.thread_id
-				JOIN projection_projects p ON p.project_id = t.project_id`,
+				JOIN projection_projects p ON p.project_id = t.project_id
+				WHERE r.completed_at IS NULL OR r.completed_at >= ?`,
 			)
-			.all() as { session: unknown; root: string }[];
+			.all(new Date(since).toISOString()) as { session: unknown; root: string }[];
 		return new Map(
 			rows.flatMap((row) => (typeof row.session === "string" ? [[row.session, row.root] as const] : [])),
 		);
@@ -735,7 +784,7 @@ export function messages(query: MessagesQuery, deps: MessagesDependencies): Entr
 	const state = join(t3, "userdata", "statev2.sqlite");
 	if (existsSync(t3) && !existsSync(state))
 		throw new Error(`T3 Code is installed at ${t3} but keeps no state at ${state}, where quest reads its messages`);
-	const scope = repositories(deps.env, query.repository, existsSync(t3) ? readT3Projects(state) : undefined);
+	const scope = repositories(deps.env, query.repository, existsSync(t3) ? readT3Projects(state, from) : undefined);
 	const found: Entry[] = [];
 	for (const [session, path] of claudeLogs(deps)) {
 		if (statSync(path).mtimeMs < from) continue;
