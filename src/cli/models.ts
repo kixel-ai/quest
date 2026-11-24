@@ -1,7 +1,7 @@
 // The harnesses, models, and efforts `quest` runs for each size, the same for
 // every repository; a repository's AGENTS.md may override them in prose, which
 // the session following it passes as flags. The model check
-// (quest/m1/model-check.md) audits these lists each milestone.
+// (quest/m1/model-check.md) audits these lists and rungs each milestone.
 import { createHash } from "node:crypto";
 import { type Doc, SIZES, type Size, onMaintainer, size, waits } from "../core";
 import type { HarnessName, ReviewHarness } from "./agent";
@@ -46,48 +46,62 @@ export const WRITERS: Record<Size, readonly Model[]> = {
 	XL: [fable("high"), opus("xhigh")],
 };
 
-/** The lists a reviewer comes from: each PR size's, and the one every high-risk head reviews from. */
-export type Listing = Size | "high";
+const neon = (effort: string): ReviewModel => ({ harness: "agy", model: "gemini-4-neon", effort });
+
+/** The reviewer rungs' names, from the cheapest to the strongest. */
+export const RUNG_NAMES = ["light", "standard", "deep", "frontier"] as const;
+export type Rung = (typeof RUNG_NAMES)[number];
 
 /**
- * The writers each model is weaker than, so it never reviews their work: Sonnet is weaker than every other model,
- * and never reviews its own work, so it reviews nothing, and Sol is weaker than the frontier models.
+ * Each rung's reviewers: configurations of about equal cost and quality across vendors, each model at one effort, so a
+ * round on any of them is the same depth of review from another vendor. They are seated from public benchmarks and
+ * list prices, then retuned only from `quest usage`'s per-model tallies on real PRs. Gemini Neon sits on the
+ * standard and deep rungs alone: low is too weak to review, and xhigh costs 72% more than high for one index point.
+ * Fable sits on the two strongest, since its limit also writes XL quests. Sonnet reviews nothing.
  */
-const WEAKER_THAN: ReadonlyMap<string, readonly string[]> = new Map([
-	["gpt-6.2-sol", ["claude-fable-5-2", "gpt-6.2-astra"]],
-	// Retired, yet a gateway may still serve it to `--model`.
-	["gpt-6.1-sol", ["claude-fable-5-2", "gpt-6.2-astra"]],
-]);
-
-/** Whether model `reviewer` is too weak to review what model `writer` wrote. */
-export const weaker = (reviewer: string, writer: string): boolean =>
-	reviewer !== writer && (reviewer === "claude-sonnet-5-5" || (WEAKER_THAN.get(reviewer)?.includes(writer) ?? false));
-
-/**
- * Whether an entry may not review what model `writer` wrote: it runs the writer's model or a {@link weaker} one.
- * `writer` is a listed model's ID, so callers pass a record's or flag's spelling through `canonicalModel` first.
- */
-export const unfit =
-	(writer: string) =>
-	(entry: ReviewModel): boolean =>
-		entry.model === writer || weaker(entry.model, writer);
-
-/**
- * Each list's reviewers, ranked: the first that is neither the latest writer's model nor {@link weaker} than it
- * reviews the PR, so below XL Opus reviews what Fable wrote, and one that cannot run passes the review to the next. Now that
- * Sonnet reviews nothing, another Codex model and then Fable close each size's list, so Opus's work still has a reviewer
- * while Sol, or all of Codex, is out. A high head reviews from `high`, whatever its size: the pick, then a second
- * reviewer from the other vendor, so Sol and Fable review Opus's work, Opus and Astra Fable's. XL starts on Astra,
- * the vendor's frontier model, at high rather than xhigh.
- */
-export const REVIEWERS: Record<Listing, readonly ReviewModel[]> = {
-	XS: [sol("medium"), opus("low"), astra("medium"), fable("medium")],
-	S: [sol("medium"), opus("low"), astra("medium"), fable("medium")],
-	M: [sol("high"), opus("medium"), astra("high"), fable("high")],
-	L: [sol("xhigh"), opus("high"), astra("xhigh"), fable("xhigh")],
-	XL: [astra("high"), opus("xhigh"), sol("xhigh"), fable("xhigh")],
-	high: [sol("xhigh"), opus("xhigh"), fable("xhigh"), astra("xhigh")],
+export const RUNGS: Record<Rung, readonly ReviewModel[]> = {
+	light: [sol("medium"), opus("low")],
+	standard: [sol("high"), opus("medium"), neon("medium")],
+	deep: [sol("xhigh"), opus("high"), astra("medium"), neon("high"), fable("medium")],
+	frontier: [astra("high"), opus("xhigh"), fable("high")],
 };
+
+/** The rung each PR size's rounds draw around. */
+export const SIZE_RUNGS: Record<Size, Rung> = { XS: "light", S: "light", M: "standard", L: "deep", XL: "frontier" };
+
+/** Which way a round's rung lies from its size's: the size's own, or one stronger or cheaper. */
+export const DRAWN = ["size", "up", "down"] as const;
+export type Drawn = (typeof DRAWN)[number];
+
+/**
+ * The rung a round of a PR of `size` draws, given `roll` in [0, 1): the size's half the time, the next stronger a
+ * quarter, and the next cheaper a quarter, so each rung is measured against its neighbors on the same sizes. The
+ * top and bottom rungs have no step past them, so that quarter goes to the size's.
+ */
+export function drawRung(size: Size, roll: number): Rung {
+	const at = RUNG_NAMES.indexOf(SIZE_RUNGS[size]);
+	const step = roll < 0.5 ? 0 : roll < 0.75 ? 1 : -1;
+	return RUNG_NAMES[at + step] ?? RUNG_NAMES[at]!;
+}
+
+/** Which way `rung` lies from the rung of `size`. */
+export function drawnFrom(size: Size, rung: Rung): Drawn {
+	const step = RUNG_NAMES.indexOf(rung) - RUNG_NAMES.indexOf(SIZE_RUNGS[size]);
+	return step === 0 ? "size" : step > 0 ? "up" : "down";
+}
+
+/**
+ * The rungs a seat looks through for a PR of `size` whose round drew `drawn`, in order: the drawn rung, the size's,
+ * then each rung outward from the size's, the stronger first. A seat leaves a rung only when none of its models
+ * can take it.
+ */
+export function rungOrder(size: Size, drawn: Rung): Rung[] {
+	const at = RUNG_NAMES.indexOf(SIZE_RUNGS[size]);
+	const outward = RUNG_NAMES.map((_, distance) => distance).flatMap((distance) =>
+		distance === 0 ? [at] : [at + distance, at - distance],
+	);
+	return [...new Set([drawn, ...outward.flatMap((index) => RUNG_NAMES[index] ?? [])])];
+}
 
 /** One side of the writer A/B: A runs the size's own first writer, B the alternative. */
 export type Arm = "A" | "B";

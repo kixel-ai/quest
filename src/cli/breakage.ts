@@ -85,7 +85,7 @@ export function culpritOf(pull: Pull): Culprit {
 	};
 }
 
-/** Each seat once, in first-named order, as several Implementer lines, a shadow, or another spelling may repeat one. */
+/** Each seat once, in first-named order, as several Implementer lines or another spelling may repeat one. */
 function distinct(seats: Seat[]): Seat[] {
 	const seen = new Map<string, Seat>();
 	for (const seat of seats) {

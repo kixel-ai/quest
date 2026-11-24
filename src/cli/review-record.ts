@@ -1,6 +1,7 @@
 // `quest review` rewrites the `## Review` section of its branch's open PR after each round, so the head
 // it reviewed counts without an agent copying the round into the body by hand.
 import { DEFAULT, PATHS, reviewSection } from "../core";
+import { DRAWN, RUNG_NAMES } from "./models";
 import { recorded } from "./models-record";
 import { type ClaimDependencies, upstream } from "./claims";
 import { pullsFrom } from "../github/claims";
@@ -17,7 +18,7 @@ import {
 	type Tally,
 	located,
 	parseBase,
-	sameSeat,
+	sameReviewer,
 } from "./review";
 
 /** The name a PR body's review record gives each reviewer's CLI. */
@@ -44,16 +45,16 @@ function code(text: string): string {
 const capitalized = (word: string) => word[0]!.toUpperCase() + word.slice(1);
 
 /**
- * A block's Reviewer line, ending in `, shadow` for the shadow, the size's pick one effort away, or `, second` for the
- * second reviewer a high-risk head gets.
+ * A block's Reviewer line, ending in the rung its latest round's seat took the model from and which way that lies
+ * from the size's, as `, deep rung (up)`; a reviewer a flag named has none.
  */
-const reviewerLine = (seat: Pick<Tally, "reviewer" | "model" | "effort" | "shadow" | "second">) =>
-	`- Reviewer: ${HARNESSES[seat.reviewer]}, ${seat.model}, ${seat.effort} effort${seat.shadow ? ", shadow" : seat.second ? ", second" : ""}`;
+const reviewerLine = (seat: Pick<Tally, "reviewer" | "model" | "effort" | "rung">) =>
+	`- Reviewer: ${HARNESSES[seat.reviewer]}, ${seat.model}, ${seat.effort} effort${seat.rung ? `, ${seat.rung.name} rung (${seat.rung.drawn})` : ""}`;
 
 /** A tally's counts, as the record's `Rounds:` line and `quest usage` write them. */
 export interface Counts {
 	rounds: number;
-	/** The first round's findings, null when the tally began before rounds kept them. */
+	/** The first round's findings, null where a sum of tallies leaves them out. */
 	first: Tally["findings"] | null;
 	findings: Tally["findings"];
 	fixed: number;
@@ -78,9 +79,12 @@ export function findingsText(counts: Omit<Counts, "rounds">): string {
 }
 
 /** A tally's counts, where a finding neither fixed nor refuted is open. */
-const counted = ({ first, ...tally }: Tally): Counts => ({
-	...tally,
-	first: first ?? null,
+const counted = (tally: Tally): Counts => ({
+	rounds: tally.rounds,
+	first: tally.first,
+	findings: tally.findings,
+	fixed: tally.fixed,
+	refuted: tally.refuted,
 	settled: 0,
 	open: SEVERITIES.reduce((sum, severity) => sum + tally.findings[severity], 0) - tally.fixed - tally.refuted,
 });
@@ -95,10 +99,9 @@ function classifiedBy({ by }: Risk["classified"]): string {
 /**
  * The `## Review` section's text for a run's `rounds` of the same head, without its heading: the head's risk and each
  * reviewer the run skipped since it could not run, then every tally on the branch, each round's reviewer's beside its
- * round, and a reviewer the run left out on its own.
+ * round, and a reviewer of an earlier run on its own.
  */
 export function reviewRecord({ rounds, tallies, risk, skipped, head, base }: Reviewed): string {
-	// A reviewer the run left out may still hold open findings, which keep the head from passing too.
 	const clean =
 		rounds.every((round) => round.findings.length === 0) && tallies.every((tally) => counted(tally).open === 0);
 	const lines = [
@@ -122,12 +125,15 @@ export function reviewRecord({ rounds, tallies, risk, skipped, head, base }: Rev
 			"",
 			reviewerLine(round),
 			`- Session: ${code(round.session)}, round ${round.round}`,
+		);
+		const tally = tallies.find((each) => sameReviewer(each, round));
+		if (tally === undefined) throw new Error(`no tally for ${round.reviewer}'s round`);
+		lines.push(
+			...earlierSessions(tally, round.session),
 			`- Score: ${round.score}/10, ${code(round.rationale)}`,
 			...(round.raised ? [`- Raised the risk to ${round.raised.tier}: ${code(round.raised.reason)}`] : []),
+			`- Rounds: ${tally.rounds}; ${findingsText(counted(tally))}`,
 		);
-		const tally = tallies.find((each) => sameSeat(each, round));
-		if (tally === undefined) throw new Error(`no tally for ${round.reviewer}'s round`);
-		lines.push(`- Rounds: ${tally.rounds}; ${findingsText(counted(tally))}`);
 		if (round.findings.length === 0) lines.push("- Findings: none");
 		else lines.push("- Findings, open until the next round settles them:");
 		for (const finding of round.findings)
@@ -139,14 +145,13 @@ export function reviewRecord({ rounds, tallies, risk, skipped, head, base }: Rev
 				`  - ${capitalized(finding.disposition)}: ${finding.severity}, ${code(located(finding))}: ${code(finding.title)}; ${code(finding.reason)}`,
 			);
 	}
-	for (const tally of tallies.filter((each) => !rounds.some((round) => sameSeat(round, each))))
+	for (const tally of tallies.filter((each) => !rounds.some((round) => sameReviewer(round, each))))
 		lines.push(
 			"",
 			reviewerLine(tally),
-			// Its session, still named so `quest usage` counts it as reviewing.
-			...(tally.session === undefined ? [] : [`- Session: ${code(tally.session)}`]),
+			...earlierSessions(tally),
 			// Its last round reviewed this head, so its raise still holds.
-			...(risk.raisedBy && sameSeat(risk.raisedBy, tally)
+			...(risk.raisedBy && sameReviewer(risk.raisedBy, tally)
 				? [`- Raised the risk to ${risk.tier}: ${code(risk.reason)}`]
 				: []),
 			`- Rounds: ${tally.rounds}; ${findingsText(counted(tally))}`,
@@ -154,18 +159,28 @@ export function reviewRecord({ rounds, tallies, risk, skipped, head, base }: Rev
 	return lines.join("\n");
 }
 
+/**
+ * A reviewer's sessions on the branch but `latest`, newest first: every round ran its own, each still named so
+ * `quest usage` counts what it spent as reviewing.
+ */
+const earlierSessions = (tally: Tally, latest?: string) =>
+	tally.sessions
+		.filter((session) => session !== latest)
+		.reverse()
+		.map((session) => `- Session: ${code(session)}`);
+
 /** What a PR body's `## Review` record says of one reviewer, as `reviewRecord` writes it. */
 export interface ReviewSummary {
 	/** The reviewer's harness as the record names it, such as `Codex`. */
 	harness: string;
 	model: string;
 	effort: string;
-	/** Whether it is the shadow: the size's pick one effort away, beside it on the same heads. */
-	shadow: boolean;
-	/** Whether it is the second reviewer a high-risk head gets, from a vendor other than the pick's. */
-	second: boolean;
-	/** Its latest session, null when the record names none; its round, null when the latest run left it out. */
+	/** The rung its latest round drew it from and which way that lies from the size's, null for one a flag named. */
+	rung: NonNullable<Tally["rung"]> | null;
+	/** Its latest session, null when the record names none, and every session of its rounds, newest first. */
 	session: string | null;
+	sessions: string[];
+	/** The branch's run of its round, null when the latest run left it out. */
 	round: number | null;
 	/** Null when the latest run left it out, or on a record written before rounds were scored. */
 	score: number | null;
@@ -222,7 +237,12 @@ export function parseReview(body: string): ReviewSummary[] {
 			if (!found) throw new Error(`the ## Review record has no line matching ${pattern.source}`);
 			return found;
 		};
-		const reviewer = match(/^- Reviewer: (.+?), (\S+), (\S+) effort(?:(, shadow)|(, second))?\r?$/m);
+		const reviewer = match(
+			new RegExp(
+				`^- Reviewer: (.+?), (\\S+), (\\S+) effort(?:, (${RUNG_NAMES.join("|")}) rung \\((${DRAWN.join("|")})\\))?\\r?$`,
+				"m",
+			),
+		);
 		const tally = parseCounts(text);
 		// A reviewer the latest run left out has its tally, and its session with no round once tallies name it.
 		const session =
@@ -241,9 +261,12 @@ export function parseReview(body: string): ReviewSummary[] {
 			harness: reviewer[1]!,
 			model: reviewer[2]!,
 			effort: reviewer[3]!,
-			shadow: reviewer[4] !== undefined,
-			second: reviewer[5] !== undefined,
+			rung:
+				reviewer[4] === undefined
+					? null
+					: { name: reviewer[4] as (typeof RUNG_NAMES)[number], drawn: reviewer[5] as (typeof DRAWN)[number] },
 			session: session && session[2]!,
+			sessions: [...text.matchAll(/^- Session: (`+) ?(.*?) ?\1(?:, round \d+)?\r?$/gm)].map((found) => found[2]!),
 			round: session?.[3] === undefined ? null : Number(session[3]),
 			score: score ? Number(score[1]) : null,
 			tally,

@@ -77,7 +77,9 @@ import {
 	DEFAULT_SIZE,
 	SPLITTERS,
 	SPLIT_CHECKERS,
-	REVIEWERS,
+	RUNGS,
+	RUNG_NAMES,
+	SIZE_RUNGS,
 	WRITERS,
 	questWriters,
 	writerAt,
@@ -1429,16 +1431,16 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"costliest copy, and the report says how many copies it folded from which hosts; a session with a request " +
 				"token-max could not price or a line it could not read is listed, its cost a lower bound. A host that fails fails the report. " +
 				"Each PR also shows its ## Models size, its risk tier from the ## Review record and whether a reviewer raised it, its implementers, and as unread each Implementer line and ## Review record it cannot read, " +
-				"each reviewer the ## Review record names, with its latest round and score and its tally of findings across every round and in its first, marked when it is the shadow or second, " +
+				"each reviewer the ## Review record names, with its latest round and score and its tally of findings across every round and in its first, with the rung it was drawn from, " +
 				"where a merged PR whose last round left only low findings open counts them settled, since the author fixes or refutes those before merge, " +
 				"the later merged PRs whose ## Caused by bullets open with its link, and each online reviewer's record from GitHub: whether it " +
 				"reviewed the last head, and its findings accepted, declined, unclassified, or unanswered. An online reviewer " +
 				"is a bot whose review has a body or opens a thread, or a review whose body opens with Automated review by <name>; a finding is a " +
 				"review thread it opens or a [P<n>] line in its review body, and its first answer's first word takes or " +
 				"declines it. Rollups follow: spend by size, role, harness, model, and " +
-				"effort, accuracy by size and implementer, summing each branch's tallies but the shadow's once, where an Implementer line's own size, as (iterate, XS), wins " +
-				"over the PR's, with its writing cost over the merged PRs it was found on, the writer A/B by size and arm, counting a sized PR whose every Implementer line names the same arm, as (arm B), under its first line's writer with the spend of every session on it, local reviewers by size, harness, model, effort, and shadow or second, with their " +
-				"tallies and reviewing cost per PR, each risk tier's PRs, merged PRs, tiers a reviewer raised, tiers the maintainer overrode, PRs a later one fixed, and time waited on a person, the same for each RISK.md ## Automatic class the classifiers named, with how many were low, each online reviewer's coverage and findings over the merged PRs, and each breakage a merged PR in the window names under ## Caused by: its culprit's tier, size, writers, and local reviewers, read from GitHub when older than the window, who found it and the incident it closes when the line ends with (found by check|reviewer|queue|canary|person|customer; incident <id>), either part alone allowed, and how long after the culprit merged the fix opened. Without token-max on PATH, it says how to install it and reports the PRs' records alone. " +
+				"effort, accuracy by size and implementer, summing each branch's tallies once, where an Implementer line's own size, as (iterate, XS), wins " +
+				"over the PR's, with its writing cost over the merged PRs it was found on, the writer A/B by size and arm, counting a sized PR whose every Implementer line names the same arm, as (arm B), under its first line's writer with the spend of every session on it, local reviewers by size, harness, model, effort, and the rung each was drawn from and which way, or named for one a flag named, with their " +
+				"tallies, the later PRs that fixed what they reviewed, and reviewing cost per PR, each risk tier's PRs, merged PRs, tiers a reviewer raised, tiers the maintainer overrode, PRs a later one fixed, and time waited on a person, the same for each RISK.md ## Automatic class the classifiers named, with how many were low, each online reviewer's coverage and findings over the merged PRs, and each breakage a merged PR in the window names under ## Caused by: its culprit's tier, size, writers, and local reviewers, read from GitHub when older than the window, who found it and the incident it closes when the line ends with (found by check|reviewer|queue|canary|person|customer; incident <id>), either part alone allowed, and how long after the culprit merged the fix opened. Without token-max on PATH, it says how to install it and reports the PRs' records alone. " +
 				"--json prints the same report as one object.\n\n" +
 				"Uses GH_TOKEN, GITHUB_TOKEN, or gh auth token. Exits 0 when done, 2 for invalid arguments, and 1 for " +
 				"other failures.",
@@ -1620,9 +1622,10 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 			else for (const line of messageLines(found)) print(line);
 		});
 
-	const reviewers = [...SIZES, "high" as const]
-		.map((list) => `${list} ${REVIEWERS[list].map((e) => `${e.harness} ${e.model} ${e.effort}`).join(", then ")}`)
-		.join("; ");
+	const rungs = RUNG_NAMES.map(
+		(rung) => `${rung} ${RUNGS[rung].map((e) => `${e.harness} ${e.model} ${e.effort}`).join(", ")}`,
+	).join("; ");
+	const sizeRungs = SIZES.map((size) => `${size} ${SIZE_RUNGS[size]}`).join(", ");
 	const classifiers = CLASSIFIERS.map((e) => `${e.harness} ${e.model} ${e.effort}`).join(", then ");
 	/** quest review's exit code for `error`: 2 for a usage error, 3 when no reviewer could run, else 1. */
 	const reviewFailure = (error: unknown, json = false): number => {
@@ -1645,31 +1648,27 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		.command("review")
 		.summary("Have a model other than the latest writer review the committed branch, read-only")
 		.description(
-			"Review the checkout's committed branch against its base with a reviewer its size picks, never the " +
-				`model that changed it last. Each size, and the high list a high head uses, ranks its reviewers (harness, model, effort): ${reviewers}. The ` +
-				"first whose model is not avoided reviews. One that cannot run, as its CLI or provider reports before any " +
-				"finding is saved, passes the round to the next whose model is not avoided: a CLI that is not installed, " +
-				"logged out, or has its login rejected, or sent to a gateway with no credential, passes over every model of that CLI, and a model at its usage limit " +
+			"Review the checkout's committed branch against its base, each run with reviewers the branch has not had, never the " +
+				`model that changed it last. Reviewers sit on rungs (harness, model, effort), each a set of about equal cost and quality across vendors, from the cheapest: ${rungs}. ` +
+				`Each size draws around its own rung: ${sizeRungs}. Every run draws its rung anew: the size's half the time, the next stronger a quarter, and the next ` +
+				"cheaper a quarter, which at the top or bottom rung, with no step past it, goes to the size's. Each seat of the run takes a model of that rung the " +
+				"branch has not had, in an order drawn anew each run, while one is left, then the one whose last round is the oldest. A rung none of whose models can " +
+				"take the seat, each avoided, unable to run, or on a vendor another seat of the run has, passes it to the size's rung, then each rung outward from " +
+				"it, the stronger first. One that cannot run, as its CLI or provider reports before any " +
+				"finding is saved, passes its seat on the same way: a CLI that is not installed, " +
+				"logged out, or has its login rejected, or sent to a gateway with no credential, passes over every model of that CLI, and a model at its usage limit, " +
+				"or one its login or gateway does not serve, as Codex's `model is not supported when using Codex with a ChatGPT account`, " +
 				"only itself; the run's report and record name each it passed over and why. A reviewer --harness, --model, " +
-				"or --effort names never passes the round on. Beside the reviewer, on the same head in its own session, runs the shadow, " +
-				"which follows the round to the reviewer it passes to: " +
-				"the pick's model one effort (low, medium, high, xhigh) above it for an S or M PR, below it for an L or XL " +
-				"PR, and none for an XS PR or a Fable pick, skipped when no such effort is on that ladder, so each effort step can be " +
-				"compared with its neighbor. The shadow runs on a " +
-				"branch's first run of the pick, then only while it has findings to settle or once the pick changed so it is " +
-				"no longer that step away; its findings are numbered and settled like any reviewer's, its session carries " +
-				"over to the new shadow, and a pick with no shadow seats the old one as it ran while it still has " +
-				"findings, unless its model is avoided or cannot run, when it seats one at the pick's own effort. " +
-				"--exclude-model names each model to avoid, with every model weaker than it; without it, the " +
-				"latest writer is avoided, with every model weaker than it (Sonnet than any other, Sol than Fable and Astra), " +
-				"so a reviewer is never weaker than the writer: the model the last Implementer line names in the `## Models` record of the body of the branch's open PR. " +
+				"or --effort names never passes its seat on. " +
+				"--exclude-model names each model to avoid; without it, the " +
+				"latest writer's is avoided, and no other, so a draw may seat a model weaker than the writer: the model the last Implementer line names in the `## Models` record of the body of the branch's open PR. " +
 				"When it names none or an `unknown` model, " +
 				"it is any model of the harness running this command, usually the session that just pushed, detected from the " +
-				"variables Claude Code, Codex, and Antigravity each set, so Codex reviews from Claude Code and Claude Code from Codex, and with no model known no weaker one is avoided; with --harness it is " +
+				"variables Claude Code, Codex, and Antigravity each set, so Codex reviews from Claude Code and Claude Code from Codex; with --harness it is " +
 				"none. " +
-				"--harness names the only reviewer instead of the pick and the shadow, at the model and effort of its first entry whose model is not avoided, and --model and " +
-				"--effort override that reviewer's, or without --harness, the size pick's; a --model the list names, in any spelling such as openai/gpt-6.2-astra, runs on its own entry's harness and effort, passed to the CLI as given, and one it does not at --harness's first entry; a repository whose AGENTS.md names other reviewers " +
-				"passes them. A --harness run keeps the other reviewers' sessions for the next run of the pick, and refuses while one has findings to settle, as a run of the pick does while a reviewer only --harness runs has some. When the latest writer changes the size's pick to one with no session on the branch, its first session settles the open findings of the reviewer it replaces. The reviewers run at once, and the first to fail stops the others and fails the " +
+				"--harness names the only reviewer instead of the draw, taking that CLI's own draw, and --model and " +
+				"--effort override that reviewer's, or without --harness, the first seat's; a --model a rung lists, in any spelling such as openai/gpt-6.2-astra, runs on its entry's harness and effort, passed to the CLI as given, and one no rung lists needs --harness, whose first entry gives its effort; a repository whose AGENTS.md names other reviewers " +
+				"passes them. The seats run at once, each CLI's login checked before any turn starts, and the first to fail stops the others and fails the " +
 				"run, saving no round. The " +
 				"size is --size, else the size of the quest a quest/ branch names, read from the base's tip so a " +
 				`change cannot lower its own review, else the PR record's Size line, else ${DEFAULT_SIZE}. ` +
@@ -1689,24 +1688,20 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"credential in the environment, since the host set them, and reviews on the stored login. A logged-out error names the profile it checked, " +
 				"CLAUDE_CONFIG_DIR or CODEX_HOME, or the default when unset, and any gateway or provider.\n\n" +
 				"Every turn reviews only the branch's own change, from the merge base of HEAD with the base's tip, so " +
-				"a branch behind its base draws no findings on the base's newer code. The first round runs the " +
+				"a branch behind its base draws no findings on the base's newer code. Each round runs the " +
 				"reviewer's own review (`codex exec review` with custom instructions, or Claude Code's " +
 				"`/code-review <effort> <merge-base>...HEAD` with text after it, or for agy, which has none, a turn " +
 				"asking what the change breaks), given the range, the base's REVIEW.md, if " +
 				"any, and any responses up front, then resumes that session for one turn that reports the review in one " +
-				"JSON schema without reading anything again. --responses gives the author's fixes and refutations of " +
-				"the last round's findings, required while that round reported any; the reply settles each of those " +
-				"findings, by its number in the prompt, as fixed, refuted, or still open. Findings are numbered across " +
-				"the reviewers in the order the round printed them, and each reviewer settles only its own, given " +
-				"--responses only when it has some. A later round resumes the " +
-				"session and checks only what changed since the last round's head and those findings when nothing " +
-				"but the head changed: the same model, effort, and base, a merge base the last round's covers, as " +
-				"when the base moved on, the same applicable AGENTS.md, CLAUDE.md, and REVIEW.md, and the last round's head " +
-				"still in the clone, which an amend and a prune can remove. Otherwise it " +
-				"starts a new session that reviews the whole change and still weighs --responses. A round that would " +
-				"resume on the head the last round reviewed, when that round found nothing, runs no reviewer and " +
-				"repeats that round, marked unchanged, so on the same head only a reviewer with findings to settle runs. " +
-				"--new starts new sessions, continuing each reviewer's tally of its findings on the branch, less those it drops unsettled, unless the saved state is one this quest cannot read. Each reviewer's session is kept per branch in the clone's common Git directory, so any worktree of the clone resumes it. " +
+				"JSON schema without reading anything again. No round resumes another's session: each starts its own and reviews the " +
+				"whole change. --responses gives the author's fixes and refutations of " +
+				"the last run's findings, required while that run reported any; every seat of the next run is given those findings and " +
+				"responses, and its reply settles each, by its number in the prompt, as fixed, refuted, or still open, before it reviews the change anew. " +
+				"Findings are numbered across the run's reviewers in the order it printed them. A run on the head the last run passed with no " +
+				"finding, under the same base and applicable AGENTS.md, CLAUDE.md, and REVIEW.md, runs no reviewer and " +
+				"repeats its rounds, marked unchanged, but for a seat the tier now calls for that they lack, or a reviewer a flag names that is not among them, which joins that run. " +
+				"--new drops the last run's findings unsettled, and its classification, continuing each reviewer's tally of its findings on the branch, less those it drops, unless the saved state is one this quest cannot read. The branch's rounds are kept in the clone's common Git directory, so any worktree of the clone continues them. " +
+				"A checked-out branch with an upstream other than the base continues its upstream branch's rounds, so a " +
 				"A checked-out branch with an upstream other than the base continues its upstream branch's session, so a " +
 				"temporary branch tracking the PR's head shares the head's rounds. " +
 				"--branch names the branch instead of the checked-out one, as a detached HEAD requires, such as a " +
@@ -1749,34 +1744,30 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"and can only raise it: the head's tier is the riskiest, with the reason of the first to judge it so. " +
 				"The classifier also names the class of RISK.md's ## Automatic list every changed file falls in, or none. " +
 				"The tier scales the review: a low head with no finding to settle runs no reviewer unless --harness, " +
-				"--model, or --effort names one, and a high head runs no shadow but gets a second reviewer: the first of the " +
-				"high list from a vendor other than the pick's that can run, in its own session, which reviews " +
-				"every head while the tier is high and settles its findings after. A head the classifier or the " +
-				"maintainer's override holds high also takes its pick from that list, whatever the PR's size; a " +
-				"reviewer's raise changes only the second reviewer, so the pick stays the same on the head, unless that raise ends the override. --model and " +
-				"--effort change only the pick, so the second reviewer still runs; the one reviewer --harness names runs " +
-				"alone, at its entry in the pick's list, with none. A round that raises the tier to high saves its rounds and " +
-				"runs the second reviewer at once, printing those rounds before the error when that review fails, as when no second reviewer can run. " +
+				"--model, or --effort names one, and a high head seats two reviewers of different vendors, each drawn from the run's rung as above. " +
+				"--model and --effort name only the first seat, so the second still runs; the one reviewer --harness names runs " +
+				"alone. A round that raises the tier to high saves its rounds and " +
+				"seats the second reviewer at once, printing those rounds before the error when that review fails, as when no other vendor's reviewer can run. " +
 				"--override and --reason record the maintainer's tier for the branch, which holds until the reviewed " +
 				"tier grows riskier than the one overridden, other than to the override's own tier.\n\n" +
 				"Prints the size and where it came from, base, and head, its risk tier and reason, the classifier's tier, " +
 				"an overridden line with the tier the maintainer overrode, " +
 				"how it was set (model, paths, or default), and reason, a class line naming the class, and for a model a classifier line (harness, model, " +
 				"effort, session) and its usage line, a skipped line (harness, model, effort, reason) for each reviewer passed over, then for each reviewer its harness, model, and " +
-				"effort, followed by shadow for the shadow or second for the second reviewer, session, round, an " +
+				"effort, a rung line with its rung and which way that lies from the size's (size, up, or down) unless a flag named it, session, the branch's run as round, an " +
 				"unchanged line for a repeated round, a usage line per turn (input tokens, the " +
 				"part read from the prompt cache, and output), a score from 0 to 10 for how ready the head is to land with " +
 				"its one-sentence rationale, a raised line with the tier and reason when it raised the classifier's, the finding count, each finding by its number, then the last round's findings with " +
 				"their numbers and dispositions; then the `record` line below and a last `next` line naming the author's next step: " +
 				"`next finish` when every finding is low severity, to fix or refute them without another round, " +
-				"`next checkpoint` when a reviewer's every third round reports other findings, to compare the current approach " +
+				"`next checkpoint` when the branch's every third run reports other findings, to compare the current approach " +
 				"with the best long-term approach worked out from first principles before fixing them, `next respond` to fix or refute the findings, or `next done`, which for a low head no reviewer ran says so. A reply without a valid score " +
 				"fails as any malformed reply does. --json prints " +
 				"one object: `rounds`, one per reviewer, `tallies`, every reviewer's findings across the branch's rounds, `risk`, the head's tier with its classification, `skipped`, each reviewer passed over with its reason, `record`, and `next`.\n\n" +
 				"After each round, it rewrites the `## Review` section of the branch's open PR into the base, the one from the repository the base's remote pushes to, else the only one from another repository whose pushed head `HEAD` contains, as the " +
 				"user the GitHub token names, keeping the rest of the body, and prints `record <url>`: the reviewed " +
 				"head, named in full only once no reviewer reports a finding, the base, the head's risk tier and reason, " +
-				"an `- Overridden:` line, the classifier's tier and who set it, a `- Class:` line, a `- Local review: none` line for a low head no reviewer ran on, a `- Skipped:` line for each reviewer passed over, and each reviewer, its Reviewer line ending in `, shadow` for the shadow or `, second` for the second reviewer, its " +
+				"an `- Overridden:` line, the classifier's tier and who set it, a `- Class:` line, a `- Local review: none` line for a low head no reviewer ran on, a `- Skipped:` line for each reviewer passed over, and each reviewer, its Reviewer line ending in its rung and which way it was drawn, as `, deep rung (up)`, its every session, its latest " +
 				"session and round, score, the tier it raised the risk to and why, its tally of findings across the branch's rounds, and each finding with its disposition. With no " +
 				"such PR, several from other repositories that `HEAD` contains, or a remote off GitHub, it prints `record skipped: <why>` and changes nothing.\n\n" +
 				"Exits 0 once the round finishes, whatever it found, 2 for invalid arguments " +
@@ -1787,24 +1778,24 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"eligible reviewer prints one line, " +
 				"`error: <harness> hit its usage limit; resets <time>`, where <time> is the reset as an ISO 8601 UTC " +
 				"timestamp, or `unknown` when the CLI named none; with several, it prints `error: no eligible <list> " +
-				"reviewer could run: <model> <effort> (<error>), ...`, where <list> is the PR's size or high for a high head's list, each error as the only reviewer's would read.",
+				"reviewer could run: <model> <effort> (<error>), ...`, where <list> is the size's rung, each error as the only reviewer's would read.",
 		)
 		.option("--base <remote/branch>", "Base branch to review against (default: origin's default branch)")
 		.addOption(
 			new Option(
 				"--harness <name>",
-				"The only reviewer to run, instead of the pick and the shadow or second reviewer",
+				"The only reviewer to run, instead of the run's draw",
 			).choices(REVIEW_HARNESSES),
 		)
-		.option("--model <model>", "Model the pick, or --harness's reviewer, runs instead")
+		.option("--model <model>", "Model the first seat, or --harness's reviewer, runs instead of its draw")
 		.option(
 			"--effort <level>",
-			"Reasoning effort the pick, or --harness's reviewer, runs at instead, never max",
+			"Reasoning effort the first seat, or --harness's reviewer, runs at instead, never max",
 			effortLevel,
 		)
 		.option(
 			"--exclude-model <model>",
-			"A model never picked to review it, instead of the PR's latest writer; repeat for each",
+			"A model never seated to review it, instead of the PR's latest writer; repeat for each",
 			(value: string, previous: string[] = []) => [...previous, value],
 		)
 		.addOption(
@@ -1814,10 +1805,10 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 			).choices(SIZES),
 		)
 		.option("--responses <file>", "The author's responses to the last round's findings; - reads stdin")
-		.option("--new", "Start a new review session instead of resuming the branch's")
+		.option("--new", "Drop the last run's findings unsettled, and its classification")
 		.option(
 			"--branch <name>",
-			"Branch whose review session to continue, instead of the checked-out one or its upstream",
+			"Branch whose review rounds to continue, instead of the checked-out one or its upstream",
 		)
 		.addOption(
 			new Option(

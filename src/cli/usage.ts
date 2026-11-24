@@ -160,10 +160,10 @@ export interface AccuracyRow {
 	handedBack: number;
 	/** PRs whose record tallies their reviews; a record written before tallies counts for none of what follows. */
 	reviewed: number;
-	/** The reviewers' latest rounds on the reviewed PRs that have a score, and the scores' sum, leaving out the shadow's. */
+	/** The reviewers' latest rounds on the reviewed PRs that have a score, and the scores' sum. */
 	scored: number;
 	score: number;
-	/** Every reviewer's findings but the shadow's across every round on the reviewed PRs, and as `rounds`, each PR's most rounds. */
+	/** Every reviewer's findings across every round on the reviewed PRs, and as `rounds`, each PR's runs. */
 	tally: Omit<Counts, "first">;
 	firstRounds: FirstRounds;
 	/** Its writing sessions' spend on its merged PRs, so `spent.cost / spent.pulls` is its cost per merged PR. */
@@ -174,17 +174,21 @@ export interface AccuracyRow {
 	fixes: number;
 }
 
-/** One local reviewer seat over the PRs reported, by the PR's size, since review efforts follow it. */
+/**
+ * One reviewer model and effort over the PRs reported, by the PR's size and the rung its latest round there drew it
+ * from, so a size's rung reads against the neighbors its rounds also draw.
+ */
 export interface ReviewerRow {
 	size: Size | null;
 	harness: string;
 	model: string;
 	effort: string;
-	shadow: boolean;
-	/** The second reviewer a high-risk head gets, whose findings show what the second review catches. */
-	second: boolean;
+	/** The rung and which way it lies from the size's, null for a reviewer a flag named. */
+	rung: ReviewSummary["rung"];
 	/** PRs whose record tallies this reviewer, each branch counted once, and its findings across every round. */
 	reviewed: number;
+	/** Later PRs naming those PRs under `## Caused by`: what its reviews let through. */
+	fixes: number;
 	tally: Omit<Counts, "first">;
 	firstRounds: FirstRounds;
 	/** Its reviewing sessions' spend, so `spent.cost / spent.pulls` is its cost per PR reviewed. */
@@ -818,8 +822,12 @@ const noFirst = (): FirstRounds => ({ pulls: 0, findings: { high: 0, medium: 0, 
 const noSpend = (): Spend => ({ pulls: 0, split: 0, ...zero() });
 
 /** Add one PR's `tallies` of a cell to its counts, its rounds as their most, and to its first rounds when all have one. */
-function count(to: { tally: Omit<Counts, "first">; firstRounds: FirstRounds }, tallies: Counts[]) {
-	to.tally.rounds += Math.max(...tallies.map((tally) => tally.rounds));
+function count(
+	to: { tally: Omit<Counts, "first">; firstRounds: FirstRounds },
+	tallies: Counts[],
+	rounds = Math.max(...tallies.map((tally) => tally.rounds)),
+) {
+	to.tally.rounds += rounds;
 	for (const tally of tallies) {
 		for (const severity of SEVERITIES) to.tally.findings[severity] += tally.findings[severity];
 		to.tally.fixed += tally.fixed;
@@ -927,8 +935,7 @@ function outcome(row: ReturnType<typeof noOutcomes>, each: PullRow, latest: Set<
 	if (each.handedBack) row.handedBack++;
 	row.fixes += each.fixedBy.length;
 	row.landFixes += each.landFixes.filter((by) => by !== MERGER).length;
-	// The shadow's findings measure an effort step, not the writer, so they stay out of the writer's row.
-	const counted = latest.has(each) ? each.review.filter((review) => review.tally !== null && !review.shadow) : [];
+	const counted = latest.has(each) ? each.review.filter((review) => review.tally !== null) : [];
 	if (counted.length === 0) return;
 	row.reviewed++;
 	for (const { score } of counted)
@@ -936,9 +943,11 @@ function outcome(row: ReturnType<typeof noOutcomes>, each: PullRow, latest: Set<
 			row.scored++;
 			row.score += score;
 		}
+	// Each run seats other models, so the PR's runs are the latest's number, not any one reviewer's rounds.
 	count(
 		row,
 		counted.map((review) => review.tally!),
+		Math.max(...counted.map((review) => Math.max(review.round ?? 0, review.tally!.rounds))),
 	);
 }
 
@@ -950,7 +959,7 @@ function outcome(row: ReturnType<typeof noOutcomes>, each: PullRow, latest: Set<
 function tallied(pulls: PullRow[], counts: (pull: PullRow) => boolean): Set<PullRow> {
 	const branch = (each: PullRow) => JSON.stringify([each.repository ?? each.number, each.branch]);
 	const rounds = (each: PullRow) =>
-		each.review.reduce((sum, review) => sum + (review.shadow ? 0 : (review.tally?.rounds ?? 0)), 0);
+		each.review.reduce((sum, review) => sum + (review.tally?.rounds ?? 0), 0);
 	const latest = new Map<string, PullRow>();
 	for (const each of pulls) {
 		if (!counts(each) || each.review.every((review) => review.tally === null)) continue;
@@ -1013,12 +1022,15 @@ function accuracyRows(pulls: PullRow[]): AccuracyRow[] {
 	);
 }
 
+/** A reviewer's rung as a report line names it, such as `deep rung (up)`, or `named` for one a flag named. */
+const runged = (rung: ReviewSummary["rung"]) => (rung === null ? "named" : `${rung.name} rung (${rung.drawn})`);
+
 function reviewerRows(pulls: PullRow[]): ReviewerRow[] {
 	const rows = new Map<string, ReviewerRow>();
 	const latest = tallied(pulls, () => true);
 	const row = (each: PullRow, review: ReviewSummary) => {
 		const model = canonicalModel(review.model);
-		const id = JSON.stringify([each.size, review.harness, model, review.effort, review.shadow, review.second]);
+		const id = JSON.stringify([each.size, review.harness, model, review.effort, review.rung]);
 		let found = rows.get(id);
 		if (!found) {
 			found = {
@@ -1026,9 +1038,9 @@ function reviewerRows(pulls: PullRow[]): ReviewerRow[] {
 				harness: review.harness,
 				model,
 				effort: review.effort,
-				shadow: review.shadow,
-				second: review.second,
+				rung: review.rung,
 				reviewed: 0,
+				fixes: 0,
 				tally: noCounts(),
 				firstRounds: noFirst(),
 				// token-max reads no Antigravity session, so what an Antigravity reviewer spent is never all counted.
@@ -1039,13 +1051,10 @@ function reviewerRows(pulls: PullRow[]): ReviewerRow[] {
 		return found;
 	};
 	for (const each of pulls) {
-		// A session its record names, or that one's sub-agent, is that reviewer's, so a routed and a shadow reviewer
-		// at one effort are told apart.
+		// A session its record names, or that one's sub-agent, is that reviewer's.
 		const named = (session: SessionRow) => {
-			const at = each.review.findIndex(
-				(review) =>
-					review.session !== null &&
-					(review.session === session.session || review.session === session.parent),
+			const at = each.review.findIndex((review) =>
+				review.sessions.some((id) => id === session.session || id === session.parent),
 			);
 			return at < 0 ? undefined : at;
 		};
@@ -1062,13 +1071,14 @@ function reviewerRows(pulls: PullRow[]): ReviewerRow[] {
 		for (const review of each.review.filter((review) => review.tally !== null)) {
 			const to = row(each, review);
 			to.reviewed++;
+			to.fixes += each.fixedBy.length;
 			count(to, [review.tally!]);
 		}
 	}
 	return [...rows.values()].sort((a, b) =>
 		order(
-			[a.size, a.harness, a.model, a.effort, String(a.shadow), String(a.second)],
-			[b.size, b.harness, b.model, b.effort, String(b.shadow), String(b.second)],
+			[a.size, a.harness, a.model, a.effort, runged(a.rung)],
+			[b.size, b.harness, b.model, b.effort, runged(b.rung)],
 		),
 	);
 }
@@ -1495,7 +1505,7 @@ export function usageLines(report: Usage): string[] {
 		if (row.unreadReview) lines.push(`  unread review: ${row.unreadReview}`);
 		for (const r of row.review)
 			lines.push(
-				`  review: ${r.harness}, ${r.model}, ${r.effort} effort${r.shadow ? ", shadow" : r.second ? ", second" : ""}; ${r.round === null ? "not in the latest run" : `round ${r.round}, score ${r.score ?? "-"}/10`}; ${r.tally === null ? "no tally" : `rounds ${r.tally.rounds}, ${findingsText(r.tally)}`}`,
+				`  review: ${r.harness}, ${r.model}, ${r.effort} effort, ${runged(r.rung)}; ${r.round === null ? "not in the latest run" : `round ${r.round}, score ${r.score ?? "-"}/10`}; ${r.tally === null ? "no tally" : `rounds ${r.tally.rounds}, ${findingsText(r.tally)}`}`,
 			);
 		for (const o of row.online)
 			lines.push(`  online review: ${o.reviewer}, ${o.finalHead ? "" : "not "}at the final head; ${answers(o)}`);
@@ -1555,15 +1565,16 @@ export function usageLines(report: Usage): string[] {
 	if (report.reviewers.length)
 		lines.push(
 			"",
-			"Local reviewers by PR size:",
+			"Local reviewers by PR size, model, effort, and rung:",
 			...table(
 				report.reviewers.map((r) => [
 					" ",
 					r.size ?? "-",
 					r.harness,
 					r.model,
-					`${r.effort}${r.shadow ? ", shadow" : r.second ? ", second" : ""}`,
-					`${r.reviewed} reviewed: rounds ${mean(r.tally.rounds, r.reviewed)}, ${findingsText({ ...r.tally, first: null })}, ${firsts(r.firstRounds)}; ${per(r.spent, "PR reviewed")}`,
+					r.effort,
+					runged(r.rung),
+					`${r.reviewed} reviewed: rounds ${mean(r.tally.rounds, r.reviewed)}, ${findingsText({ ...r.tally, first: null })}, ${firsts(r.firstRounds)}; ${r.fixes} later fixes; ${per(r.spent, "PR reviewed")}`,
 				]),
 			),
 		);
