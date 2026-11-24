@@ -5,11 +5,15 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync
 import { basename, extname, join } from "node:path";
 
 import pr from "../../assets/context/pr.md";
+import review from "../../assets/REVIEW.md";
 import rust from "../../assets/context/rust.md";
 import ts from "../../assets/context/ts.md";
 import uniffi from "../../assets/context/uniffi.md";
 import { parse } from "./shell";
 import { logDirectory } from "./waits";
+
+/** Shared base review rules loaded by `quest review` before a repository's own `REVIEW.md`. */
+export const REVIEW: string = review;
 
 /** One on-demand context pack: its name, summary, and Markdown rules. */
 export interface ContextPack {
@@ -21,6 +25,7 @@ export interface ContextPack {
 /** Every context pack Quest ships, sorted by name. */
 export const CONTEXT_PACKS: readonly ContextPack[] = [
 	{ name: "pr", description: "Pull request hygiene, review records, and culprit attribution", body: pr },
+	{ name: "review", description: "Shared adversarial code review rules", body: review },
 	{ name: "rust", description: "Rust crate conventions, async polls, semver, and testing", body: rust },
 	{ name: "ts", description: "TypeScript/Bun boundaries, teardown, packaging, and browser verification", body: ts },
 	{ name: "uniffi", description: "UniFFI exports, cross-language wrappers, and Python bindings", body: uniffi },

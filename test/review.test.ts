@@ -20,6 +20,7 @@ import {
 	pickReviewer,
 	rankedReviewers,
 	review,
+	reviewPrompt,
 	runningHarness,
 	parseState,
 	shadowOf,
@@ -1092,6 +1093,19 @@ test("review refuses max effort", async () => {
 	expect(result.stderr).toContain("max is never run");
 });
 
+test("reviewPrompt always includes shared review rules and layers repo REVIEW.md after them", () => {
+	const change = { base: "origin/main", mergeBase: "aaa", head: "bbb" };
+	const withoutRepo = reviewPrompt(change, null);
+	expect(withoutRepo).toContain("<shared-review-rules>");
+	expect(withoutRepo).toContain("# Shared review rules");
+	expect(withoutRepo).not.toContain("<review-rules>");
+
+	const withRepo = reviewPrompt(change, { sha: "ccc", text: "Repo-only invariant." });
+	expect(withRepo).toContain("<shared-review-rules>");
+	expect(withRepo).toContain("<review-rules>\nRepo-only invariant.\n</review-rules>");
+	expect(withRepo.indexOf("<shared-review-rules>")).toBeLessThan(withRepo.indexOf("<review-rules>"));
+});
+
 fakes("claude reviews read-only with the base's instructions, then reports in the schema", async () => {
 	const s = setup("CODEX_THREAD_ID");
 	// The rules travel inside the command's one double-quoted argument.
@@ -1117,6 +1131,7 @@ fakes("claude reviews read-only with the base's instructions, then reports in th
 	const mergeBase = git(s.repo, "merge-base", "origin/main", "HEAD");
 	expect(first.stdin.startsWith(`/code-review low ${mergeBase}...HEAD "`)).toBe(true);
 	expect(first.stdin.endsWith('"')).toBe(true);
+	expect(first.stdin).toContain("<shared-review-rules>");
 	expect(first.stdin).toContain('Flag \\"magic\\" numbers \\\\ constants.');
 	expect(first.argv).not.toContain("--json-schema");
 	expect(second.argv).toContain("--json-schema");

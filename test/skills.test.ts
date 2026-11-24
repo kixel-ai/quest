@@ -104,7 +104,8 @@ test("the rules every task loads fit in one hook's context", () => {
 		expect(pack.body.trim()).not.toBe("");
 		expect(pack.body.length).toBeLessThanOrEqual(CONTEXT_LIMIT);
 	}
-	expect(contextPacks(["TS", "rust"])).toContain("# Rust");
-	expect(contextPacks(["TS", "rust"])).toContain("# TypeScript");
+	expect(contextPacks(["TS", "rust", "review"])).toContain("# Rust");
+	expect(contextPacks(["TS", "rust", "review"])).toContain("# TypeScript");
+	expect(contextPacks(["TS", "rust", "review"])).toContain("# Shared review rules");
 	expect(() => contextPack("nope")).toThrow("no context pack named nope");
 });

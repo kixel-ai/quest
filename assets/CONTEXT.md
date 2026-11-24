@@ -1,7 +1,7 @@
 # Context
 
 Engineering rules for every task. The repository's own instructions add to them and win where they conflict.
-Topic packs (`pr`, `rust`, `ts`, `uniffi`) load lazily via hooks, or run `quest context <pack...>`.
+Topic packs (`pr`, `review`, `rust`, `ts`, `uniffi`) load lazily via hooks, or run `quest context <pack...>`.
 
 ## Self-improvement
 
