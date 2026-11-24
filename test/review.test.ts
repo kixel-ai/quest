@@ -1480,6 +1480,22 @@ agyFakes("agy is refused where a directory leading to its workspace matches name
 	expect(s.calls().filter((call) => call.argv[0] !== "models")).toEqual([]);
 });
 
+agyFakes("agy is refused with a Git older than 2.41, which has no --attr-source", async () => {
+	const s = setup("CLAUDECODE");
+	const real = execFileSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).trim();
+	write(
+		s.bin,
+		"git",
+		`#!/bin/sh\nif [ "$1" = version ]; then echo "git version 2.40.1"; exit 0; fi\nexec "${real}" "$@"\n`,
+	);
+	chmodSync(join(s.bin, "git"), 0o755);
+	const result = await quest("--root", s.repo, "review", ...AGY);
+	expect(result.code, result.stderr).toBe(3);
+	expect(result.stderr).toContain("agy needs Git 2.41 or later");
+	expect(result.stderr).toContain("git version 2.40.1 is installed");
+	expect(s.calls().filter((call) => call.argv[0] !== "models")).toEqual([]);
+});
+
 agyFakes("agy's status check failing other than on its login fails as it is, rather than as logged out", async () => {
 	const s = setup("CLAUDECODE");
 	vi.stubEnv("FAKE_OFFLINE", "1");
@@ -2816,6 +2832,11 @@ test("an Implementer line reads as agents write it", () => {
 	expect(sameModel("openai/gpt-6.2-astra", "gpt-6.2-astra")).toBe(true);
 	expect(sameModel("gpt-6.1-sol", "gpt-6.2-sol")).toBe(false);
 	expect(sameModel("internal/gpt-5-mini", "openai/gpt-5-mini")).toBe(false);
+	// So do those of a model no table lists, which runs only when named, so a writer's spelling still avoids it.
+	expect(sameModel("google/gemini-4-neon", "Gemini 4 Neon")).toBe(true);
+	expect(
+		authored({ exclude: ["google/gemini-4-neon"] }, {})({ harness: "agy", model: "gemini-4-neon", effort: "high" }),
+	).toBe(true);
 	expect(read("GPT 6.2 Astra")?.model).toBe("gpt-6.2-astra");
 	expect(read("Claude Code, Opus 5.5, low effort (iterate, flow fix)")).toEqual(opus("low"));
 	expect(read("Claude Code, Opus 5.5, high effort (iterate, XS, arm B)")).toEqual({

@@ -1093,6 +1093,19 @@ function caseSensitive(dir: string, names: string[]): void {
 	}
 }
 
+/** Refuse a Git older than 2.41, whose missing `--attr-source` keeps the head's attributes out of agy's export and diffs. */
+function attrSource(): void {
+	const printed = spawnSync("git", ["version"], { encoding: "utf8" }).stdout?.trim() ?? "";
+	const [major, minor] = (/(\d+)\.(\d+)/.exec(printed) ?? []).slice(1).map(Number);
+	// A Git that prints no version fails on the first command that needs it.
+	if (major === undefined || minor === undefined || major > 2 || (major === 2 && minor >= 41)) return;
+	throw new ReviewerUnavailableError(
+		"agy",
+		"not supported",
+		`agy needs Git 2.41 or later, whose --attr-source keeps the head's .gitattributes out of what agy reads; ${printed} is installed`,
+	);
+}
+
 /** The names in `dir`, which must be listed, since a path in it that no rule names could be read. */
 function entries(dir: string): string[] {
 	try {
@@ -1326,7 +1339,10 @@ const agy: Reviewer = {
 	status: ["agy", "models"],
 	isolated: true,
 	remoteStatus: true,
-	supported: (dir) => void beside(dir),
+	supported: (dir) => {
+		attrSource();
+		beside(dir);
+	},
 	login: "agy",
 	credentials: [],
 	routeCredentials: [],

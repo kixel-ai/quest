@@ -1731,7 +1731,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"its target, beside the directory agy runs in, files.txt listing them, and the diff of each range it reviews, " +
 				"both ignoring the head's .gitattributes. agy compares its read rules case-sensitively, so quest refuses to " +
 				"run it where a directory leading to its agent directory matches names case-insensitively, as on macOS's " +
-				"default volume. The user's skills' text still reaches it, and their MCP servers start, with no tool it can call. A " +
+				"default volume, and on a Git older than 2.41, which has no --attr-source. The user's skills' text still reaches it, and their MCP servers start, with no tool it can call. A " +
 				"RESOURCE_EXHAUSTED quota error is its usage limit.\n\n" +
 				"Before the reviewers run, the head gets a risk tier, low, medium, or high, from its change alone, never " +
 				"from who wrote it. A changed path, either side of a rename, that a pattern holds makes it high: RISK.md, " +

@@ -1717,7 +1717,8 @@ not covered. The rules' own file is denied too. `agy` compares its rules with a
 path's case as written, so on a volume that matches names case-insensitively,
 such as macOS's default, `/USERS/...` passes a rule naming `/Users`: quest
 refuses to run `agy` where any directory leading to its agent directory is on
-one, which passes a classifier turn to the next and exits 3 for `--harness agy`.
+one, or with a Git older than 2.41, which has no `--attr-source`; either passes a
+classifier turn to the next and exits 3 for `--harness agy`.
 An `agy models` that fails other than on the login fails as it is. Your skills' text
 still reaches it, and your MCP servers start, with no tool it can call. A
 `RESOURCE_EXHAUSTED` quota error counts as its usage limit, resetting at the

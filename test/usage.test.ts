@@ -533,6 +533,13 @@ describe("share", () => {
 				),
 			),
 		).toEqual([[1, 3, 0]]);
+		// Spend no seat names never goes to an Antigravity seat, whose sessions token-max never reads.
+		const gemini = { harness: "Antigravity", model: "gemini-4-neon", effort: "high" };
+		const unnamed = [spend("gpt-6.2-sol", "high", 5)];
+		expect(
+			costs(share(unnamed, [gemini, { harness: "Claude Code", model: "claude-opus-5-5", effort: "high" }])),
+		).toEqual([[1, 5, 0]]);
+		expect(costs(share(unnamed, [gemini]))).toEqual([]);
 	});
 });
 
