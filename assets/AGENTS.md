@@ -259,7 +259,7 @@ Follow this when writing instructions for other agents: `AGENTS.md`, `CONTRIBUTI
 Models are trained on outputs, not prompts, so instructions they write drift into slop: understate, and expect to cut half of a draft.
 
 - Keep always-loaded files light. Put area-specific context in nested `AGENTS.md` files, path-scoped rules, or skills, and say each rule once: models resolve contradictions arbitrarily, which costs more than a missing detail.
-- Make sure each harness loads the file: Claude Code skips `AGENTS.md` when a `CLAUDE.md` sits at or above the working directory, so that `CLAUDE.md` imports it with an `@` path relative to itself, such as `@AGENTS.md` beside it, rather than asking in prose.
+- Make sure each harness loads the file: Claude Code skips `AGENTS.md` when a `CLAUDE.md` sits at or above the working directory, so have that `CLAUDE.md` import it with an `@` path relative to itself, such as `@AGENTS.md` beside it, rather than ask in prose.
 - Steer away from mistakes agents actually make. Don't document the repository; its code and docs already do.
 - State the goal, its reason, constraints, and observable outcome. Don't over-prescribe steps or code, since the facts evolve; recommendations are welcome.
 - Separate settled decisions from recommendations and open questions.

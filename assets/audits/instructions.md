@@ -9,15 +9,13 @@ Gather first, over the window since the date the last run's baseline records, or
 
 - Harnesses and models: the ones the repository's agents ran, writers and reviewers alike, from its PRs' `## Models` lines and `## Review` records.
 - Guidance: every page `quest guide prompting` links, checked to resolve, then read, along with the current pages for each harness and model found above that it lacks.
-- Evidence: review findings and `## Caused by` escapes from `quest usage --since`, or from the PRs' own `## Review` and `## Caused by` sections where it cannot read the repository's forge; corrections people typed, from `quest messages --since` run in a checkout of the repository on each host that runs its agents, which reads that repository's sessions only; and the transcripts of sessions whose working directory was one of its checkouts. Read no other repository's messages or transcripts, and quote none in the PR or the stub: give counts and paraphrase.
+- Evidence: review findings and `## Caused by` escapes from `quest usage --since`, or from the PRs' own `## Review` and `## Caused by` sections where it cannot read the repository's forge, with each finding's text from its PR's `## Review` section or review thread, since the counts alone name no rule; corrections people typed, from `quest messages --since` run in a checkout of the repository on each host that runs its agents, which reads that repository's sessions only; and the transcripts of sessions whose working directory was one of its checkouts. Read no other repository's messages or transcripts, and quote none in the PR or the stub: give counts and paraphrase.
 
 Look for:
 
 - Load budgets: each harness's loaded set, joined as it joins them from the root to the deepest working directory agents use, measured against the limits its pages give, such as Codex's `project_doc_max_bytes` and skill-list budget, Claude Code's per-file size target and skill-description cap, and Antigravity's per-rule-file and always-on caps. Text past a limit is cut silently.
 - Files a harness never loads, as `quest guide prompting` describes.
-- Contradictions between files, which models resolve arbitrarily, and a rule said in more than one place.
-- Rules the code, a hook, or a check already enforces, and caution written for older models.
-- Capitals, emphasis, and an absolute "never" or "always" where the rule has exceptions.
+- Anything the files do against `quest guide prompting`'s rules, such as contradictions and repeats.
 - Commands, flags, paths, and links in instruction files that no longer work.
 - Rules the evidence shows agents ignore, misread, or never need, and mistakes recurring under a rule meant to stop them.
 - Guidance the pages give that the files miss or contradict.
@@ -28,4 +26,5 @@ Where several harnesses' loaded sets or a large body of evidence are in scope, s
 Cut, consolidate, and rewrite in the run's PR, as `quest guide prompting` describes.
 Add a rule only where cutting or merging others cannot fix a finding; that replaces the running steps' `AGENTS.md` proposal for this audit.
 List each edit under the PR's `## Waiting` as its own `Maintainer:` item, to keep or revert with a recommendation, so the maintainer drops one without rejecting the rest; the PR lands only on those answers, and the reverts they ask for make a new head that gets a new review.
-Record as the next stub's baseline the date and commit this run read through, the hosts whose messages it read, each harness's loaded size as measured, the date each guidance page was read, and each rule kept against the evidence with why, so the next run reads what changed since.
+Landing on those answers is the user's agreement `quest context` asks for before a rule changes, so the run makes these edits without asking first.
+Record as the next stub's baseline the date and commit this run read through, the hosts whose messages it read with how many unnamed directories `quest messages` left out on each, each harness's loaded size as measured, the date each guidance page was read, and each rule kept against the evidence with why, so the next run reads what changed since.

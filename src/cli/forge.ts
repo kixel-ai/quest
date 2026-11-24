@@ -33,7 +33,8 @@ import {
 } from "../core";
 import { type GitHubDependencies, reading } from "../github/client";
 import { GitHubForge } from "../github/forge";
-import { pullRequest, readRemote, remoteHost } from "./github";
+import { GitError } from "./git";
+import { pullRequest, type RemoteHost, readRemote, remoteHost } from "./github";
 import { kixelUrl, tokenFor, tokensPath } from "./tokens";
 
 /** The variable that, set to `github`, reads GitHub even where Kixel Quest serves the repository. */
@@ -113,13 +114,8 @@ export interface Located {
 export function locate(value: string, root: string, env: NodeJS.ProcessEnv): Located {
 	const base = kixelUrl(env);
 	if (/^[1-9]\d*$/.test(value)) {
-		let origin = null;
-		try {
-			origin = readRemote(root, "origin");
-		} catch {
-			// Not a checkout: pullRequest says so.
-		}
-		const host = origin === null ? null : remoteHost(origin, (url) => hostedRepository(base, url));
+		// Outside a checkout, pullRequest says so.
+		const host = originHost(root, env);
 		if (host?.forge === "kixel") return { pull: { ...host.repository, number: Number(value) }, hosted: true };
 	} else if (value.startsWith(`${base}/`)) {
 		const match = /^([\w.-]+)\/([\w.-]+)\/pull\/([1-9]\d*)\/?(?:[?#].*)?$/.exec(value.slice(base.length + 1));
@@ -127,6 +123,17 @@ export function locate(value: string, root: string, env: NodeJS.ProcessEnv): Loc
 		return { pull: { owner: match[1]!, repo: match[2]!, number: Number(match[3]) }, hosted: true };
 	}
 	return { pull: pullRequest(value, root), hosted: false };
+}
+
+/** The forge and repository the origin at `root` names, or null when it names neither or git cannot read `root`. */
+export function originHost(root: string, env: NodeJS.ProcessEnv): RemoteHost | null {
+	try {
+		const origin = readRemote(root, "origin");
+		return origin === null ? null : remoteHost(origin, (url) => hostedRepository(kixelUrl(env), url));
+	} catch (error) {
+		if (error instanceof GitError) return null;
+		throw error;
+	}
 }
 
 /** The repository `value` on Kixel Quest at `base` names, as `<base>/<owner>/<repo>[.git]`, or null. */

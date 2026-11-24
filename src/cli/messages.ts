@@ -5,9 +5,8 @@
 import { closeSync, existsSync, openSync, readdirSync, readSync, statSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { hostedRepository } from "./forge";
-import { GitError } from "./git";
-import { type RemoteHost, githubRepository, readRemote, remoteHost } from "./github";
+import { hostedRepository, originHost } from "./forge";
+import { type RemoteHost, githubRepository } from "./github";
 import { RECOMMENDED } from "./rules";
 import { kixelUrl } from "./tokens";
 
@@ -85,7 +84,7 @@ export interface Message {
 	time: string;
 	/** `claude`, `codex`, or the agent T3 Code names; null when T3 Code recorded no agent for the turn. */
 	harness: string | null;
-	/** `owner/repo` of the checkout's GitHub `origin`, else the directory the session ran in. */
+	/** The repository as `MessagesQuery.repository` names it. */
 	repository: string;
 	/** The harness's own session ID, or null when T3 Code recorded none. */
 	session: string | null;
@@ -118,14 +117,14 @@ export type Entry = Message | Answer;
 /** Which messages `messages` returns: those since a local `YYYY-MM-DD`, from one repository or, when null, every one. */
 export interface MessagesQuery {
 	since: string;
-	/** A repository as the output names it, `owner/name` on GitHub or Kixel Quest, else its directory; null for all. */
+	/** A repository as the output names it, `owner/name` on GitHub, `<host>/owner/name` on Kixel Quest, else its directory; null for all. */
 	repository: string | null;
 }
 
 /** How the readers name the repository a session ran in, and whether the query reads it. */
 export interface Repositories {
-	/** The repository the directory `dir` belongs to, as the output names it. */
-	name(dir: string): string;
+	/** The repository the directory `dir`, where `session` ran, belongs to, as the output names it. */
+	name(dir: string, session?: string): string;
 	/** The repository a recorded origin URL names on either forge, as `name` would, or null for neither. */
 	origin(url: string): string | null;
 	/**
@@ -133,12 +132,18 @@ export interface Repositories {
 	 * record of one it does not.
 	 */
 	keep(name: string | null): boolean;
+	/** Notes that `keep` left out a session or record that may hold a person's words, ran where `name` is. */
+	leave(name: string): void;
+	/** How many directories no origin names `leave` was told of, which may hold the wanted repository's sessions. */
+	unnamed(): number;
+	/** Whether the query reads every repository's sessions. */
+	all: boolean;
 }
 
 export interface MessagesDependencies {
 	env: NodeJS.ProcessEnv;
 	home: string;
-	/** Told, on stderr, of each Claude Code session whose malformed lines were skipped. */
+	/** Told, on stderr, of each Claude Code session whose malformed lines were skipped, and of the unnamed directories left out. */
 	warn?: (line: string) => void;
 }
 
@@ -183,10 +188,18 @@ const folded = (name: string) => (isAbsolute(name) ? name : name.toLowerCase());
 /**
  * Names each directory's repository by its checkout's configured `origin`, before `insteadOf` rewrites, as
  * `owner/name` on GitHub or `<host>/owner/name` on Kixel Quest, so the same name on both forges differs, else the
- * directory itself; and keeps only `wanted`'s sessions, or every one when it is null.
+ * directory itself, or for a session T3 Code drives, its project's; and keeps only `wanted`'s sessions, or every one
+ * when it is null. `projects` maps each T3 Code session to its project's root.
  */
-export function repositories(env: NodeJS.ProcessEnv, wanted: string | null): Repositories {
-	const cache = new Map<string, string>();
+export function repositories(
+	env: NodeJS.ProcessEnv,
+	wanted: string | null,
+	projects: ReadonlyMap<string, string> = new Map(),
+): Repositories {
+	const names = new Map<string, string>();
+	const unnamed = new Set<string>();
+	// By checkout, so its removed worktrees share one lookup.
+	const hosts = new Map<string, RemoteHost | null>();
 	const kixel = kixelUrl(env);
 	const named = (host: RemoteHost | null) =>
 		host === null
@@ -194,33 +207,43 @@ export function repositories(env: NodeJS.ProcessEnv, wanted: string | null): Rep
 			: host.forge === "kixel"
 				? `${new URL(kixel).host}/${host.repository.owner}/${host.repository.repo}`
 				: `${host.repository.owner}/${host.repository.repo}`;
-	const hosted = (url: string) => hostedRepository(kixel, url);
-	return {
-		name(dir) {
-			let name = cache.get(dir);
-			if (name === undefined) {
-				const checkout = existsSync(dir) ? dir : WORKTREE.exec(dir)?.[1];
-				let host: RemoteHost | null = null;
-				if (checkout !== undefined && existsSync(checkout))
-					try {
-						const remote = readRemote(checkout, "origin");
-						host = remote === null ? null : remoteHost(remote, hosted);
-					} catch (error) {
-						// A directory git cannot read, such as a worktree whose repository moved, is named by itself.
-						if (!(error instanceof GitError)) throw error;
-					}
-				name = named(host) ?? dir;
-				cache.set(dir, name);
+	const name = (dir: string): string => {
+		let found = names.get(dir);
+		if (found === undefined) {
+			const checkout = existsSync(dir) ? dir : WORKTREE.exec(dir)?.[1];
+			let host: RemoteHost | null = null;
+			if (checkout !== undefined && existsSync(checkout)) {
+				host = hosts.get(checkout) ?? null;
+				if (!hosts.has(checkout)) {
+					// A directory git cannot read, such as a worktree whose repository moved, is named by itself.
+					host = originHost(checkout, env);
+					hosts.set(checkout, host);
+				}
 			}
-			return name;
+			found = named(host) ?? dir;
+			names.set(dir, found);
+		}
+		return found;
+	};
+	return {
+		name(dir, session) {
+			const found = name(dir);
+			// T3 Code removes its worktrees, which sit outside the checkout, but keeps their project.
+			const project = session === undefined ? undefined : projects.get(session);
+			return isAbsolute(found) && project !== undefined ? name(project) : found;
 		},
 		origin(url) {
-			const repository = hosted(url);
+			const repository = hostedRepository(kixel, url);
 			if (repository !== null) return named({ forge: "kixel", repository });
 			const github = githubRepository(url);
 			return github === null ? null : named({ forge: "github", url, repository: github });
 		},
 		keep: (name) => wanted === null || (name !== null && folded(name) === folded(wanted)),
+		leave(name) {
+			if (isAbsolute(name)) unnamed.add(name);
+		},
+		unnamed: () => unnamed.size,
+		all: wanted === null,
 	};
 }
 
@@ -256,6 +279,9 @@ function answer(
 /** How Claude Code opens the turn loading a skill, whether typed as a slash command or called as a tool. */
 const CLAUDE_SKILL = /^\s*Base directory for this skill: (?:.*\/)?([^/\n]+?)\/?[ \t]*$/m;
 
+/** A Claude Code record's directory, as the JSON string literal's body. */
+const CLAUDE_CWD = /"cwd":"((?:[^"\\]|\\.)*)"/g;
+
 /** The skill a Claude Code record loads, if any; built-in commands such as `/compact` load none. */
 export function claudeSkill(record: Record<string, unknown>): string | null {
 	const content = (record.message as { content?: unknown } | undefined)?.content;
@@ -281,6 +307,16 @@ export function readClaudeMessages(
 	const entries: Entry[] = [];
 	let skill: string | null = null;
 	eachLine(path, (line, complete) => {
+		// Another repository's lines are left unparsed. Content can nest a `cwd` too, so a line is left only when no
+		// `cwd` it holds is kept; the parsed record's own is checked below.
+		const names = [...line.matchAll(CLAUDE_CWD)].map((match) =>
+			repositories.name(JSON.parse(`"${match[1]}"`) as string, session),
+		);
+		if (names.length && !names.some((name) => repositories.keep(name))) {
+			if (line.includes('"human"') || line.includes('"answers"'))
+				for (const name of names) repositories.leave(name);
+			return;
+		}
 		// Only these lines can hold a typed turn, a skill, or an answer; the rest are parsed only to count malformed ones.
 		if (
 			!line.includes('"human"') &&
@@ -292,17 +328,18 @@ export function readClaudeMessages(
 		}
 		const record = parseLine(path, line, complete, skip);
 		if (!record || record.isSidechain === true) return;
+		const repository = typeof record.cwd === "string" ? repositories.name(record.cwd, session) : null;
+		if (repository !== null && !repositories.keep(repository)) return;
 		const result = record.toolUseResult as Record<string, unknown> | undefined;
 		const human = (record.origin as { kind?: unknown } | undefined)?.kind === "human";
 		skill = claudeSkill(record) ?? skill;
 		const asked = record.type === "user" && Array.isArray(result?.questions) && result.answers !== undefined;
 		if (!asked && (record.type !== "user" || !human)) return;
-		const repository = typeof record.cwd === "string" ? repositories.name(record.cwd) : null;
 		if (!repositories.keep(repository)) return;
-		if (repository === null) throw new Error(`${path} has a user record without a directory`);
 		const at = typeof record.timestamp === "string" ? Date.parse(record.timestamp) : NaN;
 		if (Number.isNaN(at)) throw new Error(`${path} has a user record without a timestamp`);
 		if (at < since) return;
+		if (repository === null) throw new Error(`${path} has a user record without a directory`);
 		const base = {
 			time: new Date(at).toISOString(),
 			harness: "claude",
@@ -403,10 +440,16 @@ export function readCodexMessages(path: string, since: number, repositories: Rep
 			typed = payload.originator !== T3_CODEX;
 			unmarked = writesNoProvenance(payload.cli_version);
 			session = payload.id;
+			// The directory's origin names it as other harnesses' sessions there are named; the URL Codex recorded, which
+			// can be rewritten or outdated, names only a directory that no longer has one.
+			const dir = typeof payload.cwd === "string" ? repositories.name(payload.cwd, payload.id) : null;
 			const url = (payload.git as Record<string, unknown> | undefined)?.repository_url;
-			const named = typeof url === "string" ? repositories.origin(url) : null;
-			const repository = named ?? (typeof payload.cwd === "string" ? repositories.name(payload.cwd) : null);
-			if (!repositories.keep(repository)) return false;
+			const recorded = typeof url === "string" ? repositories.origin(url) : null;
+			const repository = dir !== null && !isAbsolute(dir) ? dir : (recorded ?? dir);
+			if (!repositories.keep(repository)) {
+				if (repository !== null) repositories.leave(repository);
+				return false;
+			}
 			if (repository === null) throw new Error(`${path} names no directory`);
 			where = repository;
 			return true;
@@ -589,6 +632,19 @@ const T3_DRIVERS: Record<string, string> = { claudeAgent: "claude", codex: "code
 export function readT3Messages(path: string, since: number, repositories: Repositories): Message[] {
 	const db = new DatabaseSync(path, { readOnly: true });
 	try {
+		// Only the kept projects' messages are fetched; every one, those of no project included, when all are kept.
+		const projects = repositories.all
+			? []
+			: (db.prepare("SELECT project_id AS id, workspace_root AS root FROM projection_projects").all() as {
+					id: string;
+					root: string;
+				}[]);
+		const kept = projects.filter((project) => {
+			const name = repositories.name(project.root);
+			if (repositories.keep(name)) return true;
+			repositories.leave(name);
+			return false;
+		});
 		const rows = db
 			.prepare(
 				`SELECT m.message_id AS id, m.created_at AS at, m.payload_json AS payload,
@@ -599,9 +655,14 @@ export function readT3Messages(path: string, since: number, repositories: Reposi
 				LEFT JOIN orchestration_v2_projection_threads t ON t.thread_id = m.thread_id
 				LEFT JOIN projection_projects p ON p.project_id = t.project_id
 				WHERE m.role = 'user' AND m.created_at >= ?
+					AND (? OR t.project_id IN (SELECT value FROM json_each(?)))
 				ORDER BY m.created_at`,
 			)
-			.all(new Date(since).toISOString()) as {
+			.all(
+				new Date(since).toISOString(),
+				repositories.all ? 1 : 0,
+				JSON.stringify(kept.map((project) => project.id)),
+			) as {
 			id: string;
 			at: string;
 			payload: string;
@@ -609,11 +670,8 @@ export function readT3Messages(path: string, since: number, repositories: Reposi
 			root: string | null;
 		}[];
 		return rows.flatMap((row) => {
-			const repository = row.root === null ? null : repositories.name(row.root);
-			if (!repositories.keep(repository)) return [];
 			const payload = JSON.parse(row.payload) as Record<string, unknown>;
 			if (payload.createdBy === "agent") return [];
-			if (repository === null) throw new Error(`T3 Code message ${row.id} belongs to no project`);
 			if (payload.createdBy !== "user")
 				throw new Error(`T3 Code message ${row.id} names an unknown sender: ${String(payload.createdBy)}`);
 			if (payload.creationSource === "server" || payload.scheduledTaskId !== undefined) return [];
@@ -627,6 +685,8 @@ export function readT3Messages(path: string, since: number, repositories: Reposi
 			const driver = typeof native?.driver === "string" ? native.driver : null;
 			const text = payload.text.trim();
 			if (text === "") return [];
+			if (row.root === null) throw new Error(`T3 Code message ${row.id} belongs to no project`);
+			const repository = repositories.name(row.root);
 			return [
 				{
 					kind: "message" as const,
@@ -643,13 +703,39 @@ export function readT3Messages(path: string, since: number, repositories: Reposi
 	}
 }
 
+/** The root of the project each session T3 Code drives belongs to, by the harness's own session ID. */
+export function readT3Projects(path: string): Map<string, string> {
+	const db = new DatabaseSync(path, { readOnly: true });
+	try {
+		const rows = db
+			.prepare(
+				`SELECT DISTINCT json_extract(pt.payload_json, '$.nativeThreadRef.nativeId') AS session,
+					p.workspace_root AS root
+				FROM orchestration_v2_projection_runs r
+				JOIN orchestration_v2_projection_provider_threads pt ON pt.provider_thread_id = r.provider_thread_id
+				JOIN orchestration_v2_projection_threads t ON t.thread_id = r.thread_id
+				JOIN projection_projects p ON p.project_id = t.project_id`,
+			)
+			.all() as { session: unknown; root: string }[];
+		return new Map(
+			rows.flatMap((row) => (typeof row.session === "string" ? [[row.session, row.root] as const] : [])),
+		);
+	} finally {
+		db.close();
+	}
+}
+
 /**
  * Every message a person typed to an agent on this host since `since`, a `YYYY-MM-DD` local date, and every answer
  * they gave an agent's question, oldest first.
  */
 export function messages(query: MessagesQuery, deps: MessagesDependencies): Entry[] {
 	const from = new Date(`${query.since}T00:00:00`).getTime();
-	const scope = repositories(deps.env, query.repository);
+	const t3 = deps.env.T3CODE_HOME || join(deps.home, ".t3");
+	const state = join(t3, "userdata", "statev2.sqlite");
+	if (existsSync(t3) && !existsSync(state))
+		throw new Error(`T3 Code is installed at ${t3} but keeps no state at ${state}, where quest reads its messages`);
+	const scope = repositories(deps.env, query.repository, existsSync(t3) ? readT3Projects(state) : undefined);
 	const found: Entry[] = [];
 	for (const [session, path] of claudeLogs(deps)) {
 		if (statSync(path).mtimeMs < from) continue;
@@ -680,15 +766,13 @@ export function messages(query: MessagesQuery, deps: MessagesDependencies): Entr
 		threads.add(thread);
 		found.push(...readCodexMessages(path, from, scope));
 	}
-	const t3 = deps.env.T3CODE_HOME || join(deps.home, ".t3");
-	if (existsSync(t3)) {
-		const state = join(t3, "userdata", "statev2.sqlite");
-		if (!existsSync(state))
-			throw new Error(
-				`T3 Code is installed at ${t3} but keeps no state at ${state}, where quest reads its messages`,
-			);
-		found.push(...readT3Messages(state, from, scope));
-	}
+	if (existsSync(t3)) found.push(...readT3Messages(state, from, scope));
+	// Such a directory can hold this repository's sessions, so the count is reported, never the names.
+	const unnamed = scope.unnamed();
+	if (unnamed)
+		deps.warn?.(
+			`left out the sessions in ${unnamed} director${unnamed === 1 ? "y" : "ies"} no GitHub or Kixel Quest origin names; --all prints them`,
+		);
 	return found.sort((a, b) => a.time.localeCompare(b.time));
 }
 

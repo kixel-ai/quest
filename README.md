@@ -2254,7 +2254,10 @@ session's next stop labels the steps still unlabeled.
 since `--since` (a local `YYYY-MM-DD`, by default 7 days ago), oldest first,
 for a periodic audit of what agents keep getting wrong. It prints only the
 repository of the checkout it runs in, and reads another repository's sessions
-no further than what names them; `--all` prints every repository's:
+no further than what names them; `--all` prints every repository's. Outside a
+checkout whose origin is on GitHub or Kixel Quest it exits 2 and asks for
+`--all`, and it notes on stderr how many directories no origin names it left
+out, since they may hold this repository's sessions:
 
 ```console
 $ quest messages --since 2026-11-10
@@ -2266,8 +2269,8 @@ Each message shows its time, harness, repository (the checkout's `origin` on
 GitHub as `owner/name`, or on Kixel Quest as `<host>/owner/name`, compared
 without case, else its
 directory; a removed worktree under a checkout's `.worktrees/` or
-`.claude/worktrees/` takes that checkout's, while one elsewhere, such as T3 Code's,
-keeps its directory), and session, then its text. It also prints each
+`.claude/worktrees/` takes that checkout's, one T3 Code removed takes its
+project's, and any other keeps its directory), and session, then its text. It also prints each
 answer a person gave an agent's blocking question, such as Claude Code's
 `AskUserQuestion` or Codex's `request_user_input`, marked `answer` with the
 skill the session last ran, then the question, the options the agent marked
@@ -2284,8 +2287,9 @@ and nowhere else. Other Claude Code sessions count the turns Claude Code marks
 as a human's, with its reminders dropped and a slash command spelled as typed;
 other Codex sessions count the content Codex marks as the user's (before 0.162,
 which marks none, the parts but its environment, shell commands, and AGENTS.md instructions),
-outside headless (`codex exec`) and sub-agent sessions. A log or record in a shape it
-does not know fails the command rather than being skipped. Output goes to
+outside headless (`codex exec`) and sub-agent sessions. A log or record it
+reads in a shape it does not know fails the command rather than being skipped;
+another repository's is never read that far. Output goes to
 stdout only; nothing is stored or posted.
 
 ## Headless agents

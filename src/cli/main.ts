@@ -1601,18 +1601,18 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"content Codex marks as the user's (before 0.162, which marks none, the parts but its environment, shell commands, and " +
 				"AGENTS.md instructions), outside headless and sub-agent sessions. The repository is the " +
 				"checkout's configured origin, as owner/name on GitHub or <host>/owner/name on Kixel Quest, else the directory; a removed worktree under a checkout's .worktrees/ " +
-				"or .claude/worktrees/ is named by that checkout, and one elsewhere, such as T3 Code's, by its directory. It prints only the repository of the checkout it runs in, " +
+				"or .claude/worktrees/ is named by that checkout, one T3 Code removed by its project, and any other by its directory. It prints only the repository of the checkout it runs in, " +
 				"comparing names without case, and reads no further than the name of any other's sessions, unless --all " +
-				"prints every repository's. Output goes to stdout only, except a note on stderr " +
+				"prints every repository's. Output goes to stdout only, except notes on stderr " +
 				"naming each Claude Code session whose malformed lines, such as a partial record a crashed write left, " +
-				"were skipped and how many; nothing is stored or posted. Each answer a person gave an agent's blocking question (Claude Code's AskUserQuestion, " +
+				"were skipped and how many, and counting the directories no origin names that a scoped read left out; nothing is stored or posted. Each answer a person gave an agent's blocking question (Claude Code's AskUserQuestion, " +
 				"Codex's request_user_input) prints too, from the harness's own log in every session, T3 Code's " +
 				"included, with the skill the session last ran, the question, the options the agent marked " +
 				"(Recommended), and the ones picked or the words typed instead. --json prints a JSON array of " +
 				'{kind: "message", time, harness, repository, session, text} and {kind: "answer", time, harness, ' +
 				"repository, session, skill, header, question, options, recommended, picked}.\n\n" +
-				"Exits 0 when done, 2 for invalid arguments, and 1 for other failures, such as a log or T3 Code " +
-				"record in a shape quest does not know.",
+				"Exits 0 when done, 2 for invalid arguments or, without --all, a checkout whose origin is on neither forge, " +
+				"and 1 for other failures, such as a log or T3 Code record it reads in a shape quest does not know.",
 		)
 		.option("--since <date>", "First local date to print, as YYYY-MM-DD (default: 7 days ago)", date)
 		.option("--all", "Print every repository's, not only this checkout's")

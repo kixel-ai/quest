@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
 import { describe, expect, test, vi } from "vitest";
@@ -61,11 +61,11 @@ function t3State(path: string, root: string, rows: { id: string; at: string; pay
 	const db = new DatabaseSync(path);
 	db.exec(`
 		CREATE TABLE orchestration_v2_projection_messages (message_id TEXT, thread_id TEXT, run_id TEXT, role TEXT, created_at TEXT, payload_json TEXT);
-		CREATE TABLE orchestration_v2_projection_runs (run_id TEXT, provider_thread_id TEXT);
+		CREATE TABLE orchestration_v2_projection_runs (run_id TEXT, thread_id TEXT, provider_thread_id TEXT);
 		CREATE TABLE orchestration_v2_projection_provider_threads (provider_thread_id TEXT, payload_json TEXT);
 		CREATE TABLE orchestration_v2_projection_threads (thread_id TEXT, project_id TEXT);
 		CREATE TABLE projection_projects (project_id TEXT, workspace_root TEXT);
-		INSERT INTO orchestration_v2_projection_runs VALUES ('run', 'pt');
+		INSERT INTO orchestration_v2_projection_runs VALUES ('run', 'thread', 'pt');
 		INSERT INTO orchestration_v2_projection_threads VALUES ('thread', 'project');
 	`);
 	db.prepare("INSERT INTO orchestration_v2_projection_provider_threads VALUES ('pt', ?)").run(
@@ -730,7 +730,10 @@ describe("messages", () => {
 			{ since: "2026-11-01", repository: "acme/proj" },
 			{ env: {}, home, warn: (line) => notes.push(line) },
 		);
-		expect(notes).toEqual([]);
+		// Only a count of the directories no origin names, which may hold the repository's sessions.
+		expect(notes).toEqual([
+			"left out the sessions in 2 directories no GitHub or Kixel Quest origin names; --all prints them",
+		]);
 		expect(mine.map((m) => m.kind === "message" && [m.repository, m.text])).toEqual([
 			["acme/proj", "from a worktree"],
 			["acme/proj", "from a quest worktree"],
@@ -738,6 +741,54 @@ describe("messages", () => {
 		expect(() => messages({ since: "2026-11-01", repository: null }, { env: {}, home })).toThrow(
 			/without a directory/,
 		);
+	});
+
+	test("names a T3 Code session by its project, a Codex one by its directory's origin, and skips what the base skipped", () => {
+		const home = tempDir();
+		const checkout = join(home, "proj");
+		mkdirSync(checkout);
+		execFileSync("git", ["init", "-q", checkout]);
+		execFileSync("git", ["-C", checkout, "remote", "add", "origin", "https://github.com/acme/proj.git"]);
+		const other = join(home, "other");
+		mkdirSync(other);
+		execFileSync("git", ["init", "-q", other]);
+		execFileSync("git", ["-C", other, "remote", "add", "origin", "https://github.com/acme/other.git"]);
+		mkdirSync(join(home, ".claude", "projects", "p"), { recursive: true });
+		writeFileSync(
+			join(home, ".claude", "projects", "p", `${SESSION}.jsonl`),
+			lines(
+				// An older record in a shape quest rejects stays outside the window, even reading every repository.
+				turn("2026-10-01T09:00:00Z", "old", { cwd: undefined }),
+				// Another repository's skill never names this repository's answer.
+				{ ...skillTurn("2026-11-06T09:00:00Z", "/skills/quest-plan"), cwd: other },
+				// T3 Code removed the worktree this answer came from.
+				claudeAnswer("2026-11-06T09:01:00Z", { "Which color?": "Blue" }, { cwd: join(home, "t3-gone") }),
+			),
+		);
+		mkdirSync(join(home, ".codex", "sessions"), { recursive: true });
+		writeFileSync(
+			join(home, ".codex", "sessions", `rollout-2026-11-06T10-00-00-${THREAD}.jsonl`),
+			lines(
+				// Codex recorded the URL a rewrite gave, not the origin the checkout names.
+				codexMeta({ cwd: checkout, git: { repository_url: "https://kixel.quest/acme/proj" } }),
+				codexTurn("2026-11-06T11:00:00Z", [["and test", "user"]]),
+			),
+		);
+		const state = join(home, ".t3", "userdata", "statev2.sqlite");
+		mkdirSync(dirname(state), { recursive: true });
+		t3State(state, checkout, []);
+		// A structured question's answer in a thread whose project is gone.
+		const db = new DatabaseSync(state);
+		db.prepare(
+			"INSERT INTO orchestration_v2_projection_messages VALUES ('async-answer:x', 'orphan', NULL, 'user', ?, ?)",
+		).run("2026-11-06T10:00:00.000Z", JSON.stringify({ createdBy: "user", creationSource: "server", text: "Yes" }));
+		db.close();
+		const mine = messages({ since: "2026-11-01", repository: "acme/proj" }, { env: {}, home });
+		expect(mine.map((m) => [m.kind, m.harness, m.repository, m.kind === "answer" ? m.skill : m.text])).toEqual([
+			["answer", "claude", "acme/proj", null],
+			["message", "codex", "acme/proj", "and test"],
+		]);
+		expect(messages({ since: "2026-11-01", repository: null }, { env: {}, home })).toHaveLength(2);
 	});
 
 	test("names each forge's repository from the configured origin, comparing owner/name without case", () => {
