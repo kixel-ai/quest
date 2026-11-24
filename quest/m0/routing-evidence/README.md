@@ -207,7 +207,11 @@ three hosts' saved review rounds:
     the maintainer has implemented and reviewed XL quests by hand with
     Fable, and those sessions' `Implementer:` lines may say Opus or
     `unknown`, so read each XL PR's sessions for its model before crediting
-    either.
+    either. The baseline's rounds were reviewed by Sol xhigh, and since
+    [kixel-ai/quest#831](https://github.com/kixel-ai/quest/pull/831) Astra
+    high reviews XL, with Astra medium its shadow, so credit Fable with no
+    change in rounds or first-round findings that the reviewer change
+    could explain.
   - Pace: report each Fable arm's fall-throughs, quests that started on
     Fable but fell to Opus at its usage limit. When they exceed a fifth of
     the L arm's quests, recommend running a quarter of L on Fable instead.

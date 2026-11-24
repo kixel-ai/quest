@@ -70,11 +70,32 @@ and [for eval](https://github.com/kixel-ai/quest/pull/831#issuecomment-711801176
 
 Recommendations, the implementer's to revisit:
 
+- Place Gemini 4 Neon, never Carbon (maintainer,
+  [on kixel-ai/quest#838](https://github.com/kixel-ai/quest/pull/838#issuecomment-7119762070)),
+  at Neon medium on the M rung, beside Sol high and Opus medium, and Neon
+  high on the L rung, beside Sol xhigh, Opus high, and Astra medium. Neon
+  low and xhigh stay out. From the Artificial Analysis Intelligence Index
+  v5.0.1, cost per task at API list price, 2026-11-18 to 11-23:
+
+  | Model, effort | Index | Cost per task | Rung |
+  |---|---|---|---|
+  | Neon low | 44 | ~$0.75 | left out: too weak for review |
+  | Neon medium | 55 | ~$1.8 (est.) | M, beside Sol high and Opus medium |
+  | Neon high | 60 | $3.74 | L, beside Sol xhigh, Opus high, Astra medium |
+  | Neon xhigh | 61 | $6.44 | left out: +1 point for +72% cost, and Astra xhigh scores 62 at $2.52 |
+  | Astra xhigh | 62 | $2.52 | reference |
+  | Sol max | 57 | $1.01 | reference |
+  | Opus 5.5 max | 59 | $10.04 | reference |
+  | Fable 5.2 high | 62 | $9.08 | reference |
+
+  On the maintainer's flat Ultra plan Neon costs plan quota rather than
+  dollars; retune from `quest usage` once real PRs report.
 - Draw with an injected random source, so tests fix the draw rather than
   sampling it. The top and bottom rungs have no step past them: give that
   quarter to the size's rung.
-- Once every model on the drawn rung has reviewed the PR, take the one
-  whose last round is oldest, still never the writer's, rather than borrow
+- Once every model a seat may take from the drawn rung, never the
+  writer's nor one on a vendor another seat that round has, has reviewed
+  the PR, the seat takes the one of those whose last round is oldest, rather than borrow
   another rung's, which mostly holds the same models at another cost. A model that cannot
   run passes the round to the next untried model on the same rung, then
   as today. That includes a login or gateway that does not serve the

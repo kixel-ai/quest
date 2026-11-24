@@ -774,14 +774,15 @@ function spendRows(pulls: PullRow[]): SpendRow[] {
 	for (const each of pulls)
 		for (const session of each.sessions)
 			for (const spent of session.models) {
-				const id = JSON.stringify([each.size, session.role, session.harness, spent.model, spent.effort]);
+				const model = spent.model === null ? null : canonicalModel(spent.model);
+				const id = JSON.stringify([each.size, session.role, session.harness, model, spent.effort]);
 				let row = rows.get(id);
 				if (!row) {
 					row = {
 						size: each.size,
 						role: session.role,
 						harness: session.harness,
-						model: spent.model,
+						model,
 						effort: spent.effort,
 						sessions: 0,
 						...zero(),

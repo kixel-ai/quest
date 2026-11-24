@@ -84,14 +84,11 @@ test("each size's reviewer is the first whose model is not the latest writer's",
 	expect(pickReviewer("M", { harness: "claude" }, opus).model).toBe("claude-fable-5-2");
 	expect(at("S", authored({ exclude: ["claude-opus-5-5"] }, { CLAUDECODE: "1" }))).toBe("codex gpt-6.2-sol medium");
 	expect(at("S", authored({ exclude: ["gpt-6.2-sol"] }, { CLAUDECODE: "1" }))).toBe("claude claude-opus-5-5 low");
-	// A provider-qualified spelling of a listed model is that model, whether a record or --model names it.
+	// A provider-qualified spelling of a listed model is that model, whether a record or --exclude-model names it.
 	expect(at("S", authored({}, {}, "openai/gpt-6.2-sol"))).toBe("claude claude-opus-5-5 low");
 	expect(at("S", authored({ exclude: ["openai/gpt-6.2-sol"] }, {}))).toBe("claude claude-opus-5-5 low");
-	const byAstra = authored({ harness: "codex" }, {}, "gpt-6.2-astra");
-	expect(() => pickReviewer("XL", { harness: "codex", model: "openai/gpt-6.2-astra" }, byAstra)).toThrow(
-		"is avoided",
-	);
-	// A qualified spelling of Fable still avoids Sol, which is weaker.
+	// A qualified spelling of Fable still avoids Sol, which is weaker, and so does retired Sol 6.1.
+	expect(weaker("gpt-6.1-sol", "claude-fable-5-2")).toBe(true);
 	expect(at("M", authored({ exclude: ["anthropic/claude-fable-5-2"] }, {}))).toBe("claude claude-opus-5-5 medium");
 	// No harness need be detected once the implementers are named.
 	expect(at("M", authored({ exclude: ["other-model"] }, {}))).toBe("codex gpt-6.2-sol high");
@@ -230,6 +227,22 @@ fakes("--exclude-model picks the reviewer from the PR's implementers instead of 
 		"M",
 		"default",
 	]);
+
+	// Qualified flags run and compare as the listed model: Astra on its own M entry's effort, with Opus avoided.
+	const qualified = await quest(
+		"--root",
+		s.repo,
+		"review",
+		"--exclude-model",
+		"anthropic/claude-opus-5-5",
+		"--model",
+		"openai/gpt-6.2-astra",
+		"--json",
+		"--new",
+	);
+	expect(qualified.stderr).toBe("");
+	const [astra] = JSON.parse(qualified.stdout).rounds;
+	expect([astra.reviewer, astra.model, astra.effort]).toEqual(["codex", "gpt-6.2-astra", "high"]);
 
 	const all = ["gpt-6.2-sol", "claude-opus-5-5", "gpt-6.2-astra", "claude-fable-5-2"].flatMap((m) => [
 		"--exclude-model",

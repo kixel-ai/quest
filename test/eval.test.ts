@@ -102,10 +102,10 @@ test("the pick avoids the case's writer, and --harness runs alone at its list's 
 		"claude-opus-5-5 low",
 		"claude-opus-5-5 medium shadow",
 	]);
-	// A provider-qualified writer is avoided as a review avoids it.
-	expect(names(evalSeats({ ...entry, writer: "openai/gpt-6.2-sol" }, {}))).toEqual([
-		"claude-opus-5-5 low",
-		"claude-opus-5-5 medium shadow",
+	// XL starts on Astra high for Fable's work, its shadow one effort down.
+	expect(names(evalSeats({ ...entry, size: "XL", writer: "claude-fable-5-2" }, {}))).toEqual([
+		"gpt-6.2-astra high",
+		"gpt-6.2-astra medium shadow",
 	]);
 	// A provider-qualified writer is avoided as a review avoids it.
 	expect(names(evalSeats({ ...entry, writer: "openai/gpt-6.2-sol" }, {}))).toEqual([

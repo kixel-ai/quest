@@ -318,14 +318,10 @@ export interface Choice {
  * reviewer, which then avoids nothing.
  */
 export function authored(choice: Choice, env: NodeJS.ProcessEnv, latest?: string): (entry: Model) => boolean {
-	// Another spelling of a model, such as a provider-qualified ID from `--model` or a record, is that model.
-	const as = (entry: Model): Model => ({ ...entry, model: canonicalModel(entry.model) });
+	// A record may spell a model another way, such as `openai/gpt-6.2-sol`; `quest review` passes flags canonical.
 	const exclude = (choice.exclude ?? []).map((model) => unfit(canonicalModel(model)));
-	if (exclude.length > 0) return (entry) => exclude.some((each) => each(as(entry)));
-	if (latest !== undefined && latest !== "unknown") {
-		const avoid = unfit(canonicalModel(latest));
-		return (entry) => avoid(as(entry));
-	}
+	if (exclude.length > 0) return (entry) => exclude.some((each) => each(entry));
+	if (latest !== undefined && latest !== "unknown") return unfit(canonicalModel(latest));
 	if (choice.harness !== undefined) return () => false;
 	const running = runningHarness(env);
 	return (entry) => entry.harness === running;

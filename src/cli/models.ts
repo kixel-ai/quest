@@ -52,6 +52,8 @@ export type Listing = Size | "high";
  */
 const WEAKER_THAN: ReadonlyMap<string, readonly string[]> = new Map([
 	["gpt-6.2-sol", ["claude-fable-5-2", "gpt-6.2-astra"]],
+	// Retired, yet a gateway may still serve it to `--model`.
+	["gpt-6.1-sol", ["claude-fable-5-2", "gpt-6.2-astra"]],
 ]);
 
 /** Whether model `reviewer` is too weak to review what model `writer` wrote. */
@@ -69,7 +71,7 @@ export const unfit =
 
 /**
  * Each list's reviewers, ranked: the first that is neither the latest writer's model nor {@link weaker} than it
- * reviews the PR, so Opus reviews what Fable wrote, and one that cannot run passes the review to the next. Now that
+ * reviews the PR, so below XL Opus reviews what Fable wrote, and one that cannot run passes the review to the next. Now that
  * Sonnet reviews nothing, another Codex model and then Fable close each size's list, so Opus's work still has a reviewer
  * while Sol, or all of Codex, is out. A high head reviews from `high`, whatever its size: the pick, then a second
  * reviewer from the other vendor, so Sol and Fable review Opus's work, Opus and Astra Fable's. XL starts on Astra,

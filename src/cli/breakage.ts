@@ -10,7 +10,7 @@ import {
 	type Size,
 	SIZES,
 } from "../core";
-import { recorded } from "./models-record";
+import { canonicalModel, recorded } from "./models-record";
 import { parseReview } from "./review-record";
 import type { Pull } from "./usage";
 
@@ -85,10 +85,12 @@ export function culpritOf(pull: Pull): Culprit {
 	};
 }
 
-/** Each seat once, in first-named order, as several Implementer lines or a shadow may repeat one. */
+/** Each seat once, in first-named order, as several Implementer lines, a shadow, or another spelling may repeat one. */
 function distinct(seats: Seat[]): Seat[] {
 	const seen = new Map<string, Seat>();
-	for (const { harness, model, effort } of seats) {
+	for (const seat of seats) {
+		const { harness, effort } = seat;
+		const model = canonicalModel(seat.model);
 		const id = JSON.stringify([harness, model, effort]);
 		if (!seen.has(id)) seen.set(id, { harness, model, effort });
 	}

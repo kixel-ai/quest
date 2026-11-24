@@ -1504,13 +1504,17 @@ whole branch at the PR's size.
 committed branch before it is pushed for review, at an effort set by the PR's
 size. Each size ranks its reviewers, the same for every repository:
 
-| PR size | Reviewer | When Sol, Fable, or Astra changed it last | Then, while those are out |
+| PR size | Reviewer | When the reviewer wrote it or is weaker than its writer | Then, while those are out |
 |---|---|---|---|
 | XS | Codex `gpt-6.2-sol` medium | Claude Code `claude-opus-5-5` low | Codex `gpt-6.2-astra` medium, then Claude Code `claude-fable-5-2` medium |
 | S | Codex `gpt-6.2-sol` medium | Claude Code `claude-opus-5-5` low | Codex `gpt-6.2-astra` medium, then Claude Code `claude-fable-5-2` medium |
 | M, or none | Codex `gpt-6.2-sol` high | Claude Code `claude-opus-5-5` medium | Codex `gpt-6.2-astra` high, then Claude Code `claude-fable-5-2` high |
 | L | Codex `gpt-6.2-sol` xhigh | Claude Code `claude-opus-5-5` high | Codex `gpt-6.2-astra` xhigh, then Claude Code `claude-fable-5-2` xhigh |
 | XL | Codex `gpt-6.2-astra` high | Claude Code `claude-opus-5-5` xhigh | Codex `gpt-6.2-sol` xhigh, then Claude Code `claude-fable-5-2` xhigh |
+
+Sol is weaker than Fable and Astra, so Opus reviews what either wrote below XL.
+XL starts on Astra, which may review Fable's and Sol's work, so Opus takes only
+Astra's, and Sol and then Fable follow only behind an Opus-written head.
 
 Beside it, the shadow, the pick's model one effort away on the ladder (low,
 medium, high, xhigh), reviews the same head in its own session, so the routing
