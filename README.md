@@ -1844,7 +1844,8 @@ Antigravity `gemini-3.8-flash` at low, each when those before it are missing,
 logged out, have their login rejected, or hit their usage limit. When none can
 run, the review fails on the limit that resets first if every one whose CLI is
 installed hit its own, and otherwise as a usage error naming why each failed. A diff past 200,000 characters gives it only the
-stat, and it reads the parts it needs. The tier is kept with the reviewers'
+stat, and it reads the parts it needs. The diff ignores the head's
+`.gitattributes`, so a head cannot mark its own hunks binary to hide them. The tier is kept with the reviewers'
 sessions, so a later round on the same head and base `RISK.md` reuses it, and
 `--new` classifies again. Each reviewer judges the tier too, told the
 classified one, and can only raise it: the head's tier is the riskiest, with

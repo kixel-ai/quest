@@ -1740,7 +1740,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"backticked path from the repository's root, where `*` and `?` stay within one segment and a whole `**` " +
 				"segment spans any number, then ` - ` and why its change is high; a RISK.md that cannot be read is a usage " +
 				"error. A base with no RISK.md makes every other change medium. Otherwise a classifier, " +
-				`${classifiers}, reads the diff and the base's RISK.md, which says what is customer-facing, ` +
+				`${classifiers}, reads the diff, which ignores the head's attributes files, and the base's RISK.md, which says what is customer-facing, ` +
 				"in one read-only turn and replies with a tier and its reason. One that is logged out, whose login the " +
 				"API rejects, or at its usage limit passes the turn to the next; when none is left, the run fails on the " +
 				"limit that resets first if every one whose CLI is installed hit its own, else as a usage error naming why each failed. A later round on the same head and base " +
