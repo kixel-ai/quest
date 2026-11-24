@@ -6,7 +6,8 @@ import { closeSync, existsSync, openSync, readdirSync, readSync, statSync } from
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { hostedRepository } from "./forge";
-import { type RemoteHost, githubRepository, readRemote, remoteHost } from "./github";
+import { GitError } from "./git";
+import { type Remote, type RemoteHost, githubRepository, readRemote, remoteHost } from "./github";
 import { RECOMMENDED } from "./rules";
 import { kixelUrl } from "./tokens";
 
@@ -127,8 +128,11 @@ export interface Repositories {
 	name(dir: string): string;
 	/** The repository a recorded origin URL names on either forge, as `name` would, or null for neither. */
 	origin(url: string): string | null;
-	/** Whether the query reads this repository's sessions; the readers parse no further record of one it does not. */
-	keep(name: string): boolean;
+	/**
+	 * Whether the query reads this repository's sessions, null for a record naming none; the readers parse no further
+	 * record of one it does not.
+	 */
+	keep(name: string | null): boolean;
 }
 
 export interface MessagesDependencies {
@@ -174,7 +178,7 @@ export function claudeText(content: unknown): string | null {
 const WORKTREE = /^(.+?)[/\\](?:\.claude[/\\]worktrees|\.worktrees)[/\\][^/\\]+(?:[/\\].*)?$/;
 
 /** A repository's name as `keep` compares it: both forges ignore case in `owner/name`, a directory keeps it. */
-const folded = (name: string) => (/^(?:[\w.-]+\/)?[\w.-]+\/[\w.-]+$/.test(name) ? name.toLowerCase() : name);
+const folded = (name: string) => (/^(?:[\w.-]+(?::\d+)?\/)?[\w.-]+\/[\w.-]+$/.test(name) ? name.toLowerCase() : name);
 
 /**
  * Names each directory's repository by its checkout's configured `origin`, before `insteadOf` rewrites, as
@@ -196,7 +200,14 @@ export function repositories(env: NodeJS.ProcessEnv, wanted: string | null): Rep
 			let name = cache.get(dir);
 			if (name === undefined) {
 				const checkout = existsSync(dir) ? dir : WORKTREE.exec(dir)?.[1];
-				const remote = checkout !== undefined && existsSync(checkout) ? readRemote(checkout, "origin") : null;
+				let remote: Remote | null = null;
+				if (checkout !== undefined && existsSync(checkout))
+					try {
+						remote = readRemote(checkout, "origin");
+					} catch (error) {
+						// A directory git cannot read, such as a worktree whose repository moved, is named by itself.
+						if (!(error instanceof GitError)) throw error;
+					}
 				name = named(remote === null ? null : remoteHost(remote, hosted)) ?? dir;
 				cache.set(dir, name);
 			}
@@ -208,7 +219,7 @@ export function repositories(env: NodeJS.ProcessEnv, wanted: string | null): Rep
 			const github = githubRepository(url);
 			return github === null ? null : named({ forge: "github", url, repository: github });
 		},
-		keep: (name) => wanted === null || folded(name) === folded(wanted),
+		keep: (name) => wanted === null || (name !== null && folded(name) === folded(wanted)),
 	};
 }
 
@@ -285,9 +296,9 @@ export function readClaudeMessages(
 		skill = claudeSkill(record) ?? skill;
 		const asked = record.type === "user" && Array.isArray(result?.questions) && result.answers !== undefined;
 		if (!asked && (record.type !== "user" || !human)) return;
-		if (typeof record.cwd !== "string") throw new Error(`${path} has a user record without a directory`);
-		const repository = repositories.name(record.cwd);
+		const repository = typeof record.cwd === "string" ? repositories.name(record.cwd) : null;
 		if (!repositories.keep(repository)) return;
+		if (repository === null) throw new Error(`${path} has a user record without a directory`);
 		const at = typeof record.timestamp === "string" ? Date.parse(record.timestamp) : NaN;
 		if (Number.isNaN(at)) throw new Error(`${path} has a user record without a timestamp`);
 		if (at < since) return;
@@ -393,10 +404,11 @@ export function readCodexMessages(path: string, since: number, repositories: Rep
 			session = payload.id;
 			const url = (payload.git as Record<string, unknown> | undefined)?.repository_url;
 			const named = typeof url === "string" ? repositories.origin(url) : null;
-			if (named !== null) where = named;
-			else if (typeof payload.cwd === "string") where = repositories.name(payload.cwd);
-			else throw new Error(`${path} names no directory`);
-			return repositories.keep(where);
+			const repository = named ?? (typeof payload.cwd === "string" ? repositories.name(payload.cwd) : null);
+			if (!repositories.keep(repository)) return false;
+			if (repository === null) throw new Error(`${path} names no directory`);
+			where = repository;
+			return true;
 		}
 		const output = /"call_id"\s*:\s*"([^"]+)"/.exec(line)?.[1];
 		const user = /"role"\s*:\s*"user"/.test(line);
@@ -596,11 +608,11 @@ export function readT3Messages(path: string, since: number, repositories: Reposi
 			root: string | null;
 		}[];
 		return rows.flatMap((row) => {
+			const repository = row.root === null ? null : repositories.name(row.root);
+			if (!repositories.keep(repository)) return [];
 			const payload = JSON.parse(row.payload) as Record<string, unknown>;
 			if (payload.createdBy === "agent") return [];
-			if (row.root === null) throw new Error(`T3 Code message ${row.id} belongs to no project`);
-			const repository = repositories.name(row.root);
-			if (!repositories.keep(repository)) return [];
+			if (repository === null) throw new Error(`T3 Code message ${row.id} belongs to no project`);
 			if (payload.createdBy !== "user")
 				throw new Error(`T3 Code message ${row.id} names an unknown sender: ${String(payload.createdBy)}`);
 			if (payload.creationSource === "server" || payload.scheduledTaskId !== undefined) return [];

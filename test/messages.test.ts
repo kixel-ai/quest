@@ -602,6 +602,13 @@ describe("readT3Messages", () => {
 		]);
 	});
 
+	test("reads no further into another project's rows than their project", () => {
+		const path = join(tempDir(), "statev2.sqlite");
+		t3State(path, "/elsewhere", [{ id: "a", at: "2026-11-06T10:00:00.000Z", payload: { createdBy: "robot" } }]);
+		expect(readT3Messages(path, SINCE, { ...repositories({}, "acme/proj"), name: (dir) => dir })).toEqual([]);
+		expect(() => readT3Messages(path, SINCE, plain)).toThrow(/unknown sender: robot/);
+	});
+
 	test("fails on a sender or client it does not know", () => {
 		const path = join(tempDir(), "statev2.sqlite");
 		t3State(path, "/work/proj", [
@@ -713,7 +720,7 @@ describe("messages", () => {
 		);
 		writeFileSync(
 			join(home, ".claude", "projects", "p", "other.jsonl"),
-			`{"partial\n${JSON.stringify(turn("2026-11-06T09:03:00Z", "theirs", { cwd: "/other" }))}\n`,
+			`{"partial\n${lines(turn("2026-11-06T09:03:00Z", "theirs", { cwd: "/other" }), turn("2026-11-06T09:04:00Z", "nowhere", { cwd: undefined }))}`,
 		);
 		const notes: string[] = [];
 		const mine = messages(
@@ -725,7 +732,9 @@ describe("messages", () => {
 			["acme/proj", "from a worktree"],
 			["acme/proj", "from a quest worktree"],
 		]);
-		expect(() => messages({ since: "2026-11-01", repository: null }, { env: {}, home })).toThrow(/plugins.mystery/);
+		expect(() => messages({ since: "2026-11-01", repository: null }, { env: {}, home })).toThrow(
+			/without a directory/,
+		);
 	});
 
 	test("names each forge's repository from the configured origin, comparing owner/name without case", () => {
@@ -747,6 +756,14 @@ describe("messages", () => {
 		expect(scope.name(join(home, "mirrored"))).toBe("acme/proj");
 		expect(scope.origin("https://kixel.quest/acme/proj")).toBe("kixel.quest/acme/proj");
 		expect(scope.origin("/srv/mirror/proj")).toBeNull();
+		const broken = join(home, "broken");
+		mkdirSync(broken);
+		writeFileSync(join(broken, ".git"), "gitdir: /nonexistent\n");
+		expect(scope.name(broken)).toBe(broken);
+		expect(scope.keep(null)).toBe(false);
+		expect(repositories({}, null).keep(null)).toBe(true);
+		const local = repositories({ QUEST_KIXEL_URL: "http://localhost:8787" }, "localhost:8787/Acme/Proj");
+		expect(local.keep("localhost:8787/acme/proj")).toBe(true);
 		expect(["Acme/Proj", "kixel.quest/acme/proj", "/work/acme/proj"].map((name) => scope.keep(name))).toEqual([
 			true,
 			false,
