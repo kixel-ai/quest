@@ -56,7 +56,6 @@ test("a pattern is a path from the root whose * stays in a segment and whose ** 
 		["{a,b}", "do not support"],
 		["src/[ab]", "do not support"],
 		["has space", "do not support"],
-		["a`b", "do not support"],
 	] as const)
 		expect(patternError(pattern), pattern).toContain(why);
 });
@@ -193,6 +192,7 @@ test("a risk file's ## Automatic list names each class, its scope, and its rule"
 		"  such as plans (under `quest/`)",
 		"- `refactor`",
 		"  (`src/**`) - code that behaves the same",
+		"- `ticked` (``a`b``, `c/`) - (`f()` still returns the same) prose",
 	].join("\n");
 	expect(parseRiskFile(text)).toEqual({
 		high: [],
@@ -204,6 +204,8 @@ test("a risk file's ## Automatic list names each class, its scope, and its rule"
 				rule: "documentation no user reads, such as plans (under `quest/`)",
 			},
 			{ name: "refactor", scope: ["src/**"], rule: "code that behaves the same" },
+			// Any backtick run delimits a pattern, and a rule may open with parenthesized prose.
+			{ name: "ticked", scope: ["a`b", "c/"], rule: "(`f()` still returns the same) prose" },
 		],
 		problems: [],
 	});
@@ -223,7 +225,6 @@ test("a risk file's ## Automatic list names each class, its scope, and its rule"
 			"- `between` (`docs/**`) and more - text after the scope",
 			"- `dashless`: a colon",
 			"- `late` - (`quest/**`) a scope after the dash",
-			"- `ticked` (``a`b``) - a pattern holding a backtick",
 		].join("\n"),
 	);
 	expect(broken.classes).toEqual([
@@ -234,13 +235,12 @@ test("a risk file's ## Automatic list names each class, its scope, and its rule"
 		"RISK.md:3: `Tests` is no class name: use lowercase words joined by hyphens",
 		"RISK.md:4: an `## Automatic` item is a backticked class name, optionally a scope of backticked path patterns in parentheses, ` - `, and the rule over the diff",
 		"RISK.md:7: `empty`'s scope is empty: list its patterns, or drop the parentheses",
-		"RISK.md:8: `bare`'s scope is not backticked path patterns joined by `, `: (docs/**)",
-		"RISK.md:9: `spaced`'s scope is not backticked path patterns joined by `, `: (`a/**` `b/**`)",
+		"RISK.md:8: `bare`'s scope is not backticked path patterns joined by `, `",
+		"RISK.md:9: `spaced`'s scope is not backticked path patterns joined by `, `",
 		"RISK.md:10: `/src` in `rooted`'s scope is no pattern: it starts with /, but a pattern is a path from the repository root",
 		"RISK.md:11: `between`'s scope must be followed by ` - ` and the rule, with nothing between",
 		"RISK.md:12: `dashless` must be followed by its optional scope in parentheses, ` - `, and the rule over the diff",
 		"RISK.md:13: `late`'s scope goes before ` - `, not at the start of its rule",
-		"RISK.md:14: `ticked` must be followed by its optional scope in parentheses, ` - `, and the rule over the diff",
 		"RISK.md lists the class `docs` twice",
 	]);
 });

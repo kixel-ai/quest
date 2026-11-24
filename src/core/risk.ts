@@ -1,7 +1,7 @@
 // A pull request's risk tier: what could break, for whom, and how hard it is to undo, set from its diff and never
 // from who wrote it. The repository's RISK.md lists the paths whose change is always high and says what else is
 // customer-facing there; `quest review` sets the tier and records it in the PR body's `## Review` section.
-import type { List, ListItem, Paragraph, RootContent } from "mdast";
+import type { List, ListItem, Paragraph, PhrasingContent, RootContent, Text } from "mdast";
 
 import { markdown } from "./doc";
 import { reviewSection } from "./review";
@@ -39,9 +39,8 @@ export const ALWAYS_HIGH: readonly HighPath[] = [
 export function patternError(pattern: string): string | null {
 	if (pattern.trim() === "") return "it is empty";
 	if (pattern.startsWith("/")) return "it starts with /, but a pattern is a path from the repository root";
-	// A backtick would end the code span that holds the pattern in RISK.md.
-	if (/[[\]{}\\!`\s]/.test(pattern))
-		return "it holds whitespace or one of [ ] { } \\ ! `, which patterns do not support";
+	if (/[[\]{}\\!\s]/.test(pattern))
+		return "it holds whitespace or one of [ ] { } \\ !, which patterns do not support";
 	const segments = (pattern.endsWith("/") ? pattern.slice(0, -1) : pattern).split("/");
 	if (segments.some((segment) => segment === "" || segment === "." || segment === ".."))
 		return "it has an empty, `.`, or `..` segment";
@@ -85,7 +84,7 @@ function patternSource(pattern: string): string {
 export interface Class {
 	name: string;
 	/**
-	 * Patterns one of which names every changed path, checked before a model judges the rule; null for any path. A
+	 * Patterns every changed path must match one of, checked before a model judges the rule; null for any path. A
 	 * pattern names a whole path, and everything under a directory only when it ends in `/` or `/**`.
 	 */
 	scope: string[] | null;
@@ -188,39 +187,48 @@ const CLASS_NAME = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
 /** One `## Automatic` item, or why it is not one. */
 function automaticClass(text: string, item: ListItem): Class | string {
-	const parsed = codeItem(text, item);
-	if (parsed === null)
+	const [first, ...rest] = item.children;
+	const [code, ...inline] = first?.type === "paragraph" ? (first as Paragraph).children : [];
+	if (rest.length > 0 || code?.type !== "inlineCode")
 		return (
 			"an `## Automatic` item is a backticked class name, optionally a scope of backticked path patterns in " +
 			"parentheses, ` - `, and the rule over the diff"
 		);
-	const name = parsed.code;
+	const name = code.value;
 	if (!CLASS_NAME.test(name)) return `\`${name}\` is no class name: use lowercase words joined by hyphens`;
-	// Parentheses around anything but backticked spans, so a pattern may hold one.
-	const scoped = /^\s*\(((?:[^`)]|`[^`]*`)*)\)/.exec(parsed.after);
-	const scope = scoped ? scopeOf(name, scoped[1]!) : null;
-	if (typeof scope === "string") return scope;
-	const rule = dashed(scoped ? parsed.after.slice(scoped[0].length) : parsed.after);
+	const opening = inline[0];
+	const scoped = opening?.type === "text" && /^\s*\(/.test(opening.value) ? scopeOf(name, inline) : null;
+	if (typeof scoped === "string") return scoped;
+	const rule = dashed(text.slice(scoped?.end ?? code.position!.end.offset!, first!.position!.end.offset!));
 	if (rule === null)
 		return scoped
 			? `\`${name}\`'s scope must be followed by \` - \` and the rule, with nothing between`
 			: `\`${name}\` must be followed by its optional scope in parentheses, \` - \`, and the rule over the diff`;
 	// A scope after the dash would read as prose the classifier judges, not a scope the code checks.
-	if (rule.startsWith("(`")) return `\`${name}\`'s scope goes before \` - \`, not at the start of its rule`;
-	return { name, scope, rule };
+	if (/^\(`[^`]+`(?:, `[^`]+`)*\)(?:\s|$)/.test(rule))
+		return `\`${name}\`'s scope goes before \` - \`, not at the start of its rule`;
+	return { name, scope: scoped?.patterns ?? null, rule };
 }
 
-/** The patterns in class `name`'s parenthesized scope `inside`, or why it holds none. */
-function scopeOf(name: string, inside: string): string[] | string {
-	if (inside.trim() === "") return `\`${name}\`'s scope is empty: list its patterns, or drop the parentheses`;
-	if (!/^`[^`]+`(?:,\s+`[^`]+`)*$/.test(inside))
-		return `\`${name}\`'s scope is not backticked path patterns joined by \`, \`: (${inside.replace(/\s+/g, " ")})`;
-	const patterns = [...inside.matchAll(/`([^`]+)`/g)].map((match) => match[1]!);
-	for (const pattern of patterns) {
-		const problem = patternError(pattern);
-		if (problem !== null) return `\`${pattern}\` in \`${name}\`'s scope is no pattern: ${problem}`;
+/**
+ * The patterns of class `name`'s scope, read from `nodes`, the item's text after its name, opening with `(`, and the
+ * source offset just past its `)`; or why it is no scope. Each pattern is a code span, so it may use any backtick run.
+ */
+function scopeOf(name: string, nodes: PhrasingContent[]): { patterns: string[]; end: number } | string {
+	const opening = (nodes[0] as Text).value;
+	if (/^\s*\(\s*\)/.test(opening)) return `\`${name}\`'s scope is empty: list its patterns, or drop the parentheses`;
+	const malformed = `\`${name}\`'s scope is not backticked path patterns joined by \`, \``;
+	if (!/^\s*\($/.test(opening)) return malformed;
+	const patterns: string[] = [];
+	for (let index = 1; ; index += 2) {
+		const [code, next] = [nodes[index], nodes[index + 1]];
+		if (code?.type !== "inlineCode" || next?.type !== "text") return malformed;
+		const problem = patternError(code.value);
+		if (problem !== null) return `\`${code.value}\` in \`${name}\`'s scope is no pattern: ${problem}`;
+		patterns.push(code.value);
+		if (next.value.startsWith(")")) return { patterns, end: next.position!.start.offset! + 1 };
+		if (!/^,\s+$/.test(next.value)) return malformed;
 	}
-	return patterns;
 }
 
 /** The risk the PR body's `## Review` record names for its head. */

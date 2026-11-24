@@ -12,7 +12,10 @@ The parser landed without scopes in this repository's own `RISK.md`. The
 merge queue checks the merged tree with a `quest` built from the base
 (`.github/workflows/queue-build.yml`), and a base from before the parser
 reports every scoped class as malformed. Once `main` carries the parser,
-the scopes can land.
+the scopes can land. `quest review` still reads the base's `RISK.md` with
+the branch's own parser, so after they land, a branch that has not merged
+`main` since the parser did fails with "the base's RISK.md cannot be
+read". The PR's body says to merge `main` to fix that.
 
 Recommended lines, for the implementer to check against the tree and
 `quest usage`'s per-class numbers:
