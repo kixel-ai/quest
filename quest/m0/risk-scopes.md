@@ -30,12 +30,14 @@ Recommended lines, for the implementer to check against the tree and
 A scope pattern names whole paths, so a directory needs a trailing `/` or
 `/**`.
 
-Leave `chore` unscoped. `AGENTS.md`'s standing trivial pick goes through
-it, at any tier. Its rule also takes "another change as small", and
-covers bumps of the github-actions group, which change
-`.github/workflows/`. A scope such as (`package.json`, `bun.lock`,
-`flake.lock`) would end both, and that is the maintainer's call, not this
-quest's.
+Decided (coordinator, maintainer away, in
+[kixel-ai/quest#859](https://github.com/kixel-ai/quest/pull/859)):
+✅ leave `chore` unscoped (rejected: scope it to lockfiles).
+`AGENTS.md`'s standing trivial pick goes through it, at any tier. Its rule
+also takes "another change as small", and covers bumps of the
+github-actions group, which change `.github/workflows/`. A scope such as
+(`package.json`, `bun.lock`, `flake.lock`) would end both, and the
+classifier already judges the diff against the rule.
 
 Validate by replaying recent merged PRs' changed files, both sides of
 each rename, through `classesFor` against the new file. The PRs classed
