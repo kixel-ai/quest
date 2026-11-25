@@ -1564,8 +1564,14 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 			execFileSync(command, args, { stdio: ["ignore", "inherit", "inherit"] });
 		},
 		tryRun: (command: string, args: string[]) => {
-			spawnSync(command, args, { stdio: "ignore" });
+			// A nonzero exit is the answer; a spawn error or signal exit is not, so it must not read as "failed".
+			const { status, error, signal } = spawnSync(command, args, { stdio: "ignore" });
+			if (error) throw error;
+			if (status === null) throw new Error(`${command} ${args.join(" ")} ended by signal ${signal}`);
+			return status === 0;
 		},
+		now: () => performance.now(),
+		sleep: (ms: number) => void Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms),
 	});
 	recordsCommand
 		.command("install")
