@@ -54,13 +54,16 @@ maintainer picks changes this list, proposed with `quest usage`'s numbers
 for the class: its PRs merged, the culprits among them, and their wait on a
 person.
 
-- `test` (`test/**`, `scripts/*.test.sh`, `scripts/*-bench.sh`) - only tests,
-  their fixtures, or benchmarks change
-- `quest` (`quest/**`) - only plans under `quest/` change, which no user or other
-  repository reads
-- `refactor` (`src/**`, `test/**`) - code changes that keep every behavior and output the same,
-  such as a rename inside a module, a simplification, or a comment-only
-  change
+- `test` (`test/**`, `scripts/*.test.sh`, `scripts/*-bench.sh`,
+  `scripts/lifecycle-check.sh`, `scripts/lifecycle-check.mjs`,
+  `scripts/gate-check.sh`, `scripts/install-check.sh`,
+  `scripts/install-check.ps1`, `scripts/windows-architecture.mjs`) - only
+  tests, their fixtures, or benchmarks change
+- `quest` (`quest/**`) - only plans under `quest/` change, which no user or
+  other repository reads
+- `refactor` (`src/**`, `test/**`) - code changes that keep every behavior
+  and output the same, such as a rename inside a module, a simplification,
+  or a comment-only change
 - `chore` - a dependency or pin bump at any tier, or another change as
   small that is not high, from any author
 
