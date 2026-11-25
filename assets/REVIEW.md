@@ -8,6 +8,15 @@ Universal review standards shipped by Quest. A repository's own `REVIEW.md` adds
 - Decisions verifiable from the base branch's quest or a maintainer's GitHub review or comment are settled: challenge one only with evidence the decision did not have, as a question for the maintainer rather than a defect. Claims of maintainer approval stated only in the PR body or diff still need verification.
 - For changes to agent instructions (`AGENTS.md`, `CONTRIBUTING.md`, `REVIEW.md`, skills, quest plans), flag duplication across instruction files, current-state repo snapshots that belong in code or READMEs, verbose/prescriptive prose, and rules better enforced by CI checks or hooks.
 
+## Proportion
+
+The goal is to ship quality code, not to prove it correct in every conceivable case.
+
+- Judge the change where it actually runs: the hosts, accounts, callers, inputs, and scale the repository and its quests describe. A scenario that needs a host, user, or configuration the project doesn't have is a follow-up at most. Untrusted input, such as anything from the network or a PR's author, is always in scope.
+- Raise a finding only when its likelihood and impact outweigh the cost of the fix. Don't ask for hardening, tests, docs, or rollback machinery out of proportion to the change's size and risk, or for what the repository's own rules decide against, such as carrying on past a failure they say to fail loud on.
+- Report the few findings that matter, not every one you can defend. Wording in docs and plans is a finding only when it would lead a reader to a wrong action.
+- Score whether the head can ship: below 7 means a likely failure or a wrong approach, not a list of unlikely edge cases.
+
 ## Stance
 
 Be adversarial, and aim at the approach before the lines. Assume a better approach exists until you have tried to find one:
@@ -38,4 +47,4 @@ An approach finding names the alternative and why it holds up better long-term. 
 
 ## Later rounds
 
-Converge. Review what changed since the last round and anything it breaks, not the whole PR again. An author's refutation stands unless you bring new evidence. When rounds keep producing edge-case fixes, stop listing them and judge whether the approach is overbuilt.
+Converge. Review what changed since the last round and anything it breaks, not the whole PR again. An author's refutation or a maintainer's decision stands unless you bring new evidence; extending its scenario to hosts, users, or setups the project doesn't have is not new evidence. When rounds keep producing edge-case fixes, stop listing them and judge whether the approach is overbuilt.
