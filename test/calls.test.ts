@@ -1,7 +1,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 
 import {
 	type CallLine,
@@ -217,7 +217,15 @@ test("the call log keeps whole lines and reads from the day before a window's", 
 	expect(readCalls(Date.parse("2026-11-16T00:30:00Z"), env)).toEqual([]);
 	logCall({ ...line, running: [""] }, env, Date.parse(line.at));
 	logCall(line, env, Date.parse(line.at));
-	expect(() => readCalls(Date.parse("2026-11-14T20:00:00Z"), env)).toThrow("is not a shell call quest logged");
+	const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+	try {
+		expect(readCalls(Date.parse("2026-11-14T20:00:00Z"), env)).toEqual([line, line]);
+		expect(stderr).toHaveBeenCalledWith(
+			expect.stringContaining("2026-11-14.jsonl:4, not a shell call quest logged"),
+		);
+	} finally {
+		stderr.mockRestore();
+	}
 });
 
 test("reading a window also reads each earlier day a call in it began on", () => {

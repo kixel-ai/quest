@@ -99,17 +99,28 @@ function compareFindings(a: Finding, b: Finding): number {
 	);
 }
 
+/** What `check` validates beyond the tree's own structure. */
+export interface CheckOptions {
+	/**
+	 * Whether `## Audit` and `## Skipped audits` items must name an audit this
+	 * build ships. A build older than the tree, such as a base binary checking a
+	 * PR that ships a new audit and its stub, turns this off.
+	 */
+	auditNames?: boolean;
+}
+
 /**
  * Validate a whole tree. `docs` is every quest document, and `exists` reports
  * whether a repository-relative path (a file or a directory) exists, which is
  * how links outside the tree resolve. Returns every finding, sorted.
  */
-export function check(docs: Doc[], exists: (path: string) => boolean): Finding[] {
+export function check(docs: Doc[], exists: (path: string) => boolean, options: CheckOptions = {}): Finding[] {
 	const found: Finding[] = [];
 	const known = new Set(docs.map((d) => d.path));
+	const auditNames = options.auditNames ?? true;
 
 	for (const doc of docs) {
-		headings(found, docs, doc);
+		headings(found, docs, doc, auditNames);
 		links(found, exists, known, doc);
 	}
 
@@ -144,7 +155,7 @@ function collisions(found: Finding[], known: Set<string>, docs: Doc[]) {
 	}
 }
 
-function headings(found: Finding[], docs: Doc[], doc: Doc) {
+function headings(found: Finding[], docs: Doc[], doc: Doc, auditNames: boolean) {
 	if (!isEpic(docs, doc)) {
 		if (size(doc) === null)
 			found.push({ path: doc.path, line: null, message: "quest title must be '# [XS|S|M|L|XL] Title'" });
@@ -222,7 +233,7 @@ function headings(found: Finding[], docs: Doc[], doc: Doc) {
 	const names = AUDITS.map((audit) => audit.name).join(", ");
 	entries(doc, AUDIT).forEach((entry, index) => {
 		const message =
-			auditOf(entry) === null
+			auditNames && auditOf(entry) === null
 				? `'## ${AUDIT}' item must be the name of an audit quest ships (${names})`
 				: index > 0
 					? `'## ${AUDIT}' names one audit; split the others into quests of their own`
@@ -240,7 +251,7 @@ function headings(found: Finding[], docs: Doc[], doc: Doc) {
 			});
 	}
 	for (const entry of entries(doc, SKIPPED)) {
-		if (skippedOf(entry) === null) {
+		if (auditNames && skippedOf(entry) === null) {
 			found.push({
 				path: doc.path,
 				line: entry.line,

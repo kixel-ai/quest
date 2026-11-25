@@ -2,7 +2,7 @@
 // a time. It holds the `quest:active` label, and the ID of the timeline event
 // that added the label is its hold token, since sessions often share an account.
 // `quest merge` takes no label: the pinned auto-merge or merge-queue entry it creates is the queue signal.
-import { REVIEW_CONTEXT } from "../github/review-trust";
+import { REVIEW_CONTEXT, unreviewedHigh } from "../github/review-trust";
 import {
 	ACTIVE_LABEL,
 	formatFinding,
@@ -148,7 +148,7 @@ export interface LandRequest {
  * auto-merge whose commit body pins `sha`, with a method {@link signalMethod} picks.
  * That request only signals the queue: `quest land` lands with its own method. It takes no label.
  * It first refuses a head whose quest check finds anything, so the refusal comes before a queue
- * build is spent, even on a base whose gate checks it again.
+ * build is spent, even on a base whose gate checks it again, and a high head no `quest review` status covers.
  */
 export async function land(pr: PullRequest, request: LandRequest, deps: GitHubDependencies): Promise<void> {
 	const { sha, method: named, direct = false } = request;
@@ -174,6 +174,9 @@ export async function land(pr: PullRequest, request: LandRequest, deps: GitHubDe
 	};
 	await passing(labels.github, pr, snapshot.url, sha);
 	await unsignaled(labels.github, pr, snapshot.url, sha);
+	const unreviewed = await unreviewedHigh(labels.github, { ...pr, base: snapshot.base }, sha, snapshot.body);
+	if (unreviewed !== null)
+		throw new Refusal(`${snapshot.url} head ${unreviewed}; run quest review on it, then land it again`);
 	const findings = await request.check({
 		remote: `https://github.com/${pr.owner}/${pr.repo}.git`,
 		base: snapshot.base,

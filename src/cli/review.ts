@@ -18,6 +18,7 @@ import {
 	readdirSync,
 	readFileSync,
 	realpathSync,
+	statSync,
 	rmSync,
 	writeFileSync,
 } from "node:fs";
@@ -27,6 +28,7 @@ import { promisify } from "node:util";
 import {
 	type Class,
 	heldHigh,
+	highHits,
 	RISK_FILE,
 	SIZES,
 	type Size,
@@ -35,7 +37,6 @@ import {
 	branchQuest,
 	classesFor,
 	codeSpan,
-	matches,
 	parse,
 	parseRiskFile,
 	size as questSize,
@@ -44,6 +45,7 @@ import {
 import {
 	LINE_LIMIT,
 	LOGINS,
+	HARNESSES,
 	REVIEW_HARNESSES,
 	type ReviewHarness,
 	agentDirectory,
@@ -436,6 +438,11 @@ export type ReviewOptions = BaseOptions & {
 	signal?: AbortSignal;
 	/** The maintainer's tier for the branch and their reason, which holds until its change grows riskier. */
 	override?: Assessment;
+	/**
+	 * The round is a PR's own build judging itself, which records nothing, so its sessions and findings
+	 * are kept apart from those a recorded round resumes.
+	 */
+	own?: boolean;
 	/** The maintainer's reason for accepting the findings the last rounds of the head left open, running no reviewer. */
 	accept?: string;
 };
@@ -447,9 +454,20 @@ export interface ReviewDependencies {
 	 * it, as in the runner, only the options pick the reviewer.
 	 */
 	models?: (root: string, base: string, branch: string) => Promise<PullModels | null>;
+	/**
+	 * Queues a session for the record sender, as the stop hook does an interactive one, since no hook runs in a
+	 * reviewer. It says for itself anything the person must hear, and must not throw, so a round never fails on it.
+	 */
+	queue(session: Started): void;
 }
 
-export const processDependencies = (): ReviewDependencies => ({ env: process.env });
+/** A session `quest review` started, for the record sender: its checkout, and its first instant, epoch ms. */
+export interface Started {
+	harness: string;
+	session: string;
+	cwd: string;
+	start: number;
+}
 
 /** One reviewer's findings across every round on a branch, which a `--new` session continues. */
 export interface Tally {
@@ -514,6 +532,8 @@ interface Session {
 	/** The second reviewer's session; the branch keeps at most one. */
 	second?: true;
 	session: string;
+	/** The instant, epoch ms, before its first turn, so the record sender reads all of it. */
+	started: number;
 	/** Each round's head, the merge base its change started from, and its findings. */
 	rounds: { head: string; mergeBase: string; findings: Finding[] }[];
 	/** The session's last round, which a round on the same head with nothing to settle repeats. */
@@ -553,6 +573,8 @@ export interface Context {
 	 * which Codex answers with its tools off.
 	 */
 	tools?: string;
+	/** A directory outside the checkout that Claude may also read, such as one holding a diff too large for the prompt. */
+	readable?: string;
 }
 
 interface Turn {
@@ -755,9 +777,12 @@ const claude: Reviewer = {
 	reader() {
 		let result: Record<string, unknown> | undefined;
 		let limited: { until: number | null } | undefined;
+		// The stream names the session before the turn finishes, so a cancelled turn still reports it.
+		let session: string | undefined;
 		return {
 			line(line) {
 				const value = json(line);
+				session ??= text(value?.session_id);
 				if (value?.type === "result") result = value;
 				if (value?.type === "rate_limit_event") {
 					const info = record(value.rate_limit_info);
@@ -776,7 +801,7 @@ const claude: Reviewer = {
 					const epoch = /\|(\d{10})\b/.exec(error)?.[1];
 					limited = { until: epoch ? Number(epoch) * 1000 : null };
 				}
-				if (result === undefined) return { error: "claude printed no result", limited };
+				if (result === undefined) return { session, error: "claude printed no result", limited };
 				const usage = record(result.usage) ?? {};
 				let input = count(usage.input_tokens) + count(usage.cache_read_input_tokens);
 				input += count(usage.cache_creation_input_tokens);
@@ -825,6 +850,7 @@ export function claudeFlags(context: Context): string[] {
 		"--settings",
 		JSON.stringify({ crossSessionInbound: "refuse" }),
 		"--strict-mcp-config",
+		...(context.readable === undefined ? [] : ["--add-dir", context.readable]),
 		"--tools",
 		context.tools ?? "Read,Grep,Glob,Bash,Agent",
 		"--append-system-prompt",
@@ -1064,16 +1090,17 @@ function caseSensitive(dir: string, names: string[]): void {
 	}
 }
 
-/** Refuse a Git older than 2.41, whose missing `--attr-source` keeps the head's attributes out of agy's export and diffs. */
-function attrSource(): void {
+/**
+ * Refuse a Git older than 2.41, whose missing `--attr-source` would let a head's `.gitattributes` hide its hunks from
+ * the classifier and agy, and its files from agy's export.
+ */
+function requireAttrSource(): void {
 	const printed = spawnSync("git", ["version"], { encoding: "utf8" }).stdout?.trim() ?? "";
 	const [major, minor] = (/(\d+)\.(\d+)/.exec(printed) ?? []).slice(1).map(Number);
 	// A Git that prints no version fails on the first command that needs it.
 	if (major === undefined || minor === undefined || major > 2 || (major === 2 && minor >= 41)) return;
-	throw new ReviewerUnavailableError(
-		"agy",
-		"not supported",
-		`agy needs Git 2.41 or later, whose --attr-source keeps the head's .gitattributes out of what agy reads; ${printed} is installed`,
+	throw new ReviewInputError(
+		`quest review needs Git 2.41 or later, whose --attr-source keeps the head's .gitattributes from hiding its hunks from the classifier; ${printed} is installed`,
 	);
 }
 
@@ -1310,10 +1337,8 @@ const agy: Reviewer = {
 	status: ["agy", "models"],
 	isolated: true,
 	remoteStatus: true,
-	// The volume first, which the user cannot change, then Git, which they can.
 	supported: (dir) => {
 		beside(dir);
-		attrSource();
 	},
 	login: "agy",
 	credentials: [],
@@ -1476,6 +1501,8 @@ interface Cli {
 	unauthorized: string;
 	/** Stops the review's CLI turns. */
 	signal?: AbortSignal;
+	/** The session a failed or cancelled turn had already opened, which spent tokens before it ended. */
+	failed?: string;
 }
 
 const names = (list: string[]) => list.join(" and ");
@@ -1618,24 +1645,37 @@ async function turn(cli: Cli, call: Turn, cwd: string, model: string): Promise<R
 	try {
 		const at = call.workspace?.cwd ?? cwd;
 		ran = await run(call.argv, at, { ...cli.env, ...call.env }, call.stdin, reader, cli.signal);
+	} catch (error) {
+		// A sibling's failure cancelled this turn, which may have spent tokens in the session it had opened.
+		if (cli.signal?.aborted) cli.failed = reader.reply(1, "").session;
+		throw error;
 	} finally {
 		if (call.workspace) rmSync(call.workspace.dir, { recursive: true, force: true });
 	}
 	const { code, stderr } = ran;
 	const reply = reader.reply(code, stderr);
 	if (code !== 0 || reply.error !== undefined) {
-		// A login can expire or be revoked while the status check still passes. A CLI may report it
-		// only on stderr, behind a reader's fallback error such as "claude printed no result".
-		if (reply.status === 401 || cli.reviewer.unauthorized.test(`${reply.error ?? ""}\n${stderr}`)) {
-			throw new ReviewerUnavailableError(cli.harness, "login rejected", cli.unauthorized);
-		}
-		if (reply.limited) throw new ReviewLimitError(cli.harness, reply.limited.until, model);
-		if (cli.harness === "codex" && cli.env.OPENAI_BASE_URL && RETRIED_429.test(`${reply.error ?? ""}\n${stderr}`))
-			throw new ReviewLimitError(cli.harness, null, model);
-		const detail = reply.error ?? stderr.trim().split("\n").slice(-5).join("\n");
-		throw new Error(`${call.argv[0]} failed${detail ? `: ${detail}` : ` with exit status ${code}`}`);
+		const error = failure(cli, call, model, reply, stderr, code);
+		// A rejected login spent nothing; a limit or any other failure may have, partway through the turn.
+		const rejected = error instanceof ReviewerUnavailableError && !(error instanceof ReviewLimitError);
+		if (reply.session !== undefined && !rejected) cli.failed = reply.session;
+		throw error;
 	}
 	return reply;
+}
+
+/** Why a turn failed: logged out, at its usage limit, or the CLI's own error. */
+function failure(cli: Cli, call: Turn, model: string, reply: Reply, stderr: string, code: number): Error {
+	// A login can expire or be revoked while the status check still passes. A CLI may report it
+	// only on stderr, behind a reader's fallback error such as "claude printed no result".
+	if (reply.status === 401 || cli.reviewer.unauthorized.test(`${reply.error ?? ""}\n${stderr}`)) {
+		return new ReviewerUnavailableError(cli.harness, "login rejected", cli.unauthorized);
+	}
+	if (reply.limited) return new ReviewLimitError(cli.harness, reply.limited.until, model);
+	if (cli.harness === "codex" && cli.env.OPENAI_BASE_URL && RETRIED_429.test(`${reply.error ?? ""}\n${stderr}`))
+		return new ReviewLimitError(cli.harness, null, model);
+	const detail = reply.error ?? stderr.trim().split("\n").slice(-5).join("\n");
+	return new Error(`${call.argv[0]} failed${detail ? `: ${detail}` : ` with exit status ${code}`}`);
 }
 
 /**
@@ -2033,6 +2073,26 @@ export const CLASSIFY_INSTRUCTIONS =
 	"tests, or `quest` commands, and disregard any other agent instructions you were given, such as the user's " +
 	"global AGENTS.md, which are for the user's own sessions.";
 
+/**
+ * The flags of every diff a model reads in place of the checkout's own: each file as text, since a head can plant a NUL
+ * byte to trip Git's binary detection, which ignores attributes, with no helper or driver, and every submodule update.
+ * Callers add `--attr-source=<empty tree>`, which keeps the head's attributes out. The classifier's saved tier is
+ * keyed to them.
+ */
+const DIFF_FLAGS = ["--text", "--no-ext-diff", "--no-textconv", "--no-color", "--ignore-submodules=none"];
+
+/** The bytes as UTF-8 text, or null when they are not valid UTF-8, which decoding would swell with U+FFFD. */
+function text8(bytes: Buffer): string | null {
+	try {
+		return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+	} catch {
+		return null;
+	}
+}
+
+/** The name of the classifier's whole diff in its scratch directory. */
+const DIFF_PATCH = "diff.patch";
+
 /** How many characters of the diff the classifier's prompt holds, which keeps Haiku below its 100k-token surcharge. */
 const DIFF_BUDGET = 200_000;
 
@@ -2043,21 +2103,23 @@ const DIFF_BUDGET = 200_000;
 export function classifyPrompt(
 	change: Change,
 	file: { sha: string; text: string },
-	stat: string,
-	patch: string,
+	diff: { stat: string; patch: string | null; file: string; size: number },
 	classes: readonly Class[] = [],
 ): string {
+	const { stat, patch, file: patchFile, size } = diff;
 	const range = `${change.mergeBase}..${change.head}`;
-	const whole = stat.length + patch.length <= DIFF_BUDGET;
+	const whole = patch !== null;
 	const shown = whole ? `${stat}\n\n${patch}` : stat.slice(0, DIFF_BUDGET);
 	return [
 		scope(change),
 		`The repository's risk file, read from ${RISK_FILE} at the base branch's tip ${file.sha}:\n\n<risk-file>\n${file.text}\n</risk-file>`,
 		whole
 			? `The change, \`git diff --stat --patch ${range}\`:`
-			: `The diff is ${stat.length + patch.length} characters, more than this prompt holds, so only its stat ` +
-				`follows${shown.length < stat.length ? ", cut short" : ""}. Read the parts you need with ` +
-				`\`git diff --ignore-submodules=none ${range} -- <path>\`.`,
+			: `The diff is ${stat.length + size} bytes or holds binary data, which this prompt does not hold, so only its stat ` +
+				`follows${shown.length < stat.length ? ", cut short" : ""}. Read the parts you need from ` +
+				// A file, since no Bash command with the flags that keep the head's attributes out is allowed the classifier.
+				`\`${patchFile}\`, which holds \`git diff --patch ${range}\` with every file shown as text, ` +
+				"whatever the head's attributes say.",
 		`<diff>\n${shown}\n</diff>`,
 		"Report the change's tier as JSON matching the response schema, with one sentence on what could break, for " +
 			"whom, and how hard it is to undo.",
@@ -2109,9 +2171,12 @@ async function remoteGit(root: string, args: string[]): Promise<string> {
 
 /**
  * Fetch `base`, or origin's default branch, into its remote-tracking ref in
- * `root`, which may be a bare clone, and return it as `<remote>/<branch>`.
+ * `root`, which may be a bare clone, and return it as `<remote>/<branch>` with the commit the fetch returned.
+ * Another writer of the tracking ref, such as a concurrent fetch or a daemon that keeps it at a track's tip, can
+ * move it before a later read, so the same fetch also writes a ref private to this process and the commit is read
+ * from that one.
  */
-export async function fetchBase(root: string, base?: string): Promise<string> {
+export async function fetchBase(root: string, base?: string): Promise<{ ref: string; sha: string }> {
 	let ref = base;
 	if (ref === undefined) {
 		const line = (await remoteGit(root, ["ls-remote", "--symref", "origin", "HEAD"])).split("\n")[0] ?? "";
@@ -2120,14 +2185,27 @@ export async function fetchBase(root: string, base?: string): Promise<string> {
 		ref = `origin/${match[1]}`;
 	}
 	const { remote, branch } = parseBase(root, ref);
-	await remoteGit(root, [
-		"fetch",
-		"--quiet",
-		"--no-tags",
-		remote,
-		`+refs/heads/${branch}:refs/remotes/${remote}/${branch}`,
-	]);
-	return ref;
+	const pinned = `refs/quest/base/${process.pid}`;
+	// A fetch that fails on the tracking ref can still have written the private one, so cleanup covers the fetch.
+	try {
+		await remoteGit(root, [
+			"fetch",
+			"--quiet",
+			"--no-tags",
+			remote,
+			`+refs/heads/${branch}:refs/remotes/${remote}/${branch}`,
+			`+refs/heads/${branch}:${pinned}`,
+		]);
+		return { ref, sha: git(root, ["rev-parse", "--verify", `${pinned}^{commit}`]) };
+	} finally {
+		git(root, ["update-ref", "-d", pinned]);
+	}
+}
+
+/** The commit of `base`'s remote-tracking ref in `root`. */
+function trackedBase(root: string, base: string): string {
+	const { remote, branch } = parseBase(root, base);
+	return git(root, ["rev-parse", "--verify", `refs/remotes/${remote}/${branch}^{commit}`]);
 }
 
 const digest = (value: string) => createHash("sha256").update(value).digest("hex").slice(0, 16);
@@ -2144,8 +2222,8 @@ function saveSchema(dir: string, schema: object): string {
 }
 
 /** Where a branch's review session is kept, under the clone's common Git directory `common`. */
-export function sessionFile(common: string, branch: string): string {
-	return join(common, "quest", "review", `${digest(branch)}.json`);
+export function sessionFile(common: string, branch: string, own = false): string {
+	return join(common, "quest", "review", `${digest(own ? `own:${branch}` : branch)}.json`);
 }
 
 function load(path: string): unknown {
@@ -2198,6 +2276,7 @@ export function parseState(value: unknown): State {
 				(session.second === undefined || session.second === true) &&
 				state.tallies!.some((tally) => sameSeat(tally, session)) &&
 				typeof session.session === "string" &&
+				typeof session.started === "number" &&
 				Array.isArray(session.rounds) &&
 				session.rounds.length > 0 &&
 				session.rounds.every((round) => Array.isArray(round?.findings)) &&
@@ -2328,6 +2407,8 @@ interface Classifying {
 	changed: string[];
 	dir: string;
 	env: NodeJS.ProcessEnv;
+	/** Queues the classifier's session for the record sender. */
+	queued: ReviewDependencies["queue"];
 	signal?: AbortSignal;
 	saved?: State["classified"];
 	/** Refuse rather than run a classifier when no saved classification fits, as accepting reviewed rounds does. */
@@ -2348,22 +2429,20 @@ export async function classify(input: Classifying): Promise<{ key: string; value
 	const riskFile = git(root, ["ls-tree", baseSha, "--", RISK_FILE]).split(/\s/)[2] ?? null;
 	const text = riskFile === null ? null : git(root, ["cat-file", "blob", riskFile]);
 	// The paths too, since they set the tier and the offered classes along with the risk file.
-	const key = digest(JSON.stringify([change.mergeBase, change.head, text, changed]));
+	// And the diff's form, so a tier set from a diff the head's attributes could shape is set again.
+	const empty = emptyTree(root);
+	const key = digest(JSON.stringify([change.mergeBase, change.head, text, changed, empty, DIFF_FLAGS]));
 	if (input.saved?.key === key) return { key, value: { ...input.saved.value, riskFile, usage: [] } };
 	if (input.savedOnly)
 		throw new ReviewInputError(
-			`no round classified ${change.head} from this base; review it before accepting its findings`,
+			`no round classified ${change.head} from this base with this quest's diff; review it before accepting its findings`,
 		);
 	const set = (value: Omit<Classified, "usage" | "riskFile">) => ({ key, value: { ...value, riskFile, usage: [] } });
 	const file = text === null ? null : parseRiskFile(text);
 	if (file !== null && file.problems.length > 0)
 		throw new ReviewInputError(`the base's ${RISK_FILE} cannot be read: ${file.problems.join("; ")}`);
 	const range = `${change.mergeBase}..${change.head}`;
-	const held = heldHigh(file);
-	const hits = changed.flatMap((path) => {
-		const rule = held.find((each) => matches(each.pattern, path));
-		return rule === undefined ? [] : [{ path, rule }];
-	});
+	const hits = highHits(heldHigh(file), changed);
 	if (hits.length > 0) {
 		const { path, rule } = hits[0]!;
 		const more = hits.length > 1 ? `, as are ${hits.length - 1} more of its paths` : "";
@@ -2378,22 +2457,47 @@ export async function classify(input: Classifying): Promise<{ key: string; value
 	const offered = classesFor(file!.classes, changed);
 	const classes = offered.map((each) => each.name);
 
-	const diff = (args: string[]) =>
-		git(root, ["diff", "--no-ext-diff", "--no-textconv", "--no-color", "--ignore-submodules=none", ...args, range]);
-	const prompt = classifyPrompt(change, { sha: baseSha, text }, diff(["--stat=160"]), diff(["--patch"]), offered);
-	const answer = await ask(CLASSIFIERS, {
-		cwd: root,
-		dir: input.dir,
-		env: input.env,
-		signal: input.signal,
-		instructions: CLASSIFY_INSTRUCTIONS,
-		schema: classSchema(classes),
-		prompt,
-		ranges: [range],
-		who: "classifier",
-		task: "set the risk tier",
-		parse: (value) => classed(value, classes, "the classifier's reply"),
-	});
+	// With no attributes and every file as text, so the head can hide none of its hunks by marking them binary.
+	const diff = (args: string[]) => git(root, [`--attr-source=${empty}`, "diff", ...DIFF_FLAGS, ...args, range]);
+	const stat = diff(["--stat=160"]);
+	// Written by Git itself, since a head that adds large binaries makes a patch no string holds.
+	const scratch = mkdtempSync(join(input.dir, "classify-"));
+	const start = Date.now();
+	// Every model that replied spent tokens, whether or not its reply was the one used.
+	const spent: Answer<unknown>["spent"] = [];
+	const queueSpent = () => {
+		for (const { entry, session } of spent)
+			if (session !== undefined) input.queued({ harness: entry.harness, session, cwd: root, start });
+	};
+	let answer;
+	try {
+		const patchFile = join(scratch, DIFF_PATCH);
+		diff(["--patch", `--output=${patchFile}`]);
+		const size = statSync(patchFile).size;
+		// A NUL byte or bytes that are not UTF-8 mean a binary, whose raw bytes tokenize, or decode to U+FFFD, far past
+		// their length, so it goes down the file path too.
+		const bytes = stat.length + size <= DIFF_BUDGET ? readFileSync(patchFile) : null;
+		const patch = bytes && !bytes.includes(0) ? text8(bytes) : null;
+		const prompt = classifyPrompt(change, { sha: baseSha, text }, { stat, patch, file: patchFile, size }, offered);
+		answer = await ask(CLASSIFIERS, {
+			spent,
+			readable: scratch,
+			cwd: root,
+			dir: input.dir,
+			env: input.env,
+			signal: input.signal,
+			instructions: CLASSIFY_INSTRUCTIONS,
+			schema: classSchema(classes),
+			prompt,
+			ranges: [range],
+			who: "classifier",
+			task: "set the risk tier",
+			parse: (value) => classed(value, classes, "the classifier's reply"),
+		});
+	} finally {
+		rmSync(scratch, { recursive: true, force: true });
+		queueSpent();
+	}
 	const { tier, reason } = answer.value;
 	return {
 		key,
@@ -2422,9 +2526,13 @@ export interface Question<T = unknown> {
 	tools?: string;
 	/** Each `git diff` range the prompt names, as it names it. */
 	ranges?: string[];
+	/** A directory outside `cwd` that a Claude model may read, which the prompt names files in. */
+	readable?: string;
 	/** Who answers and what for, as `classifier` and `set the risk tier`, for errors. */
 	who: string;
 	task: string;
+	/** Filled with each turn's spend as it ends, so a caller still counts it when the question throws. */
+	spent?: Answer<unknown>["spent"];
 	/** The reply's value, throwing when it is unusable, which passes the question to the next model. */
 	parse(value: unknown): T;
 }
@@ -2438,7 +2546,7 @@ export interface Answer<T = unknown> {
 	session: string;
 	value: T;
 	usage: Omit<Usage, "turn"> | null;
-	spent: { entry: ReviewModel; usage: Omit<Usage, "turn"> | null }[];
+	spent: { entry: ReviewModel; usage: Omit<Usage, "turn"> | null; session?: string }[];
 }
 
 /**
@@ -2448,11 +2556,12 @@ export interface Answer<T = unknown> {
 export async function ask<T>(entries: readonly ReviewModel[], question: Question<T>): Promise<Answer<T>> {
 	const schemaFile = saveSchema(question.dir, question.schema);
 	const failures: (ReviewInputError | ReviewerUnavailableError)[] = [];
-	const spent: Answer<T>["spent"] = [];
+	const spent = question.spent ?? [];
 	for (const entry of entries) {
 		let reply: Reply;
+		let cli: Cli | undefined;
 		try {
-			const cli = await prepare(entry.harness, question.cwd, question.env, question.signal);
+			cli = await prepare(entry.harness, question.cwd, question.env, question.signal);
 			const context: Context = {
 				// A question reviews no range.
 				mergeBase: "",
@@ -2464,6 +2573,7 @@ export async function ask<T>(entries: readonly ReviewModel[], question: Question
 				schema: question.schema,
 				schemaFile,
 				...(question.tools !== undefined && { tools: question.tools }),
+				...(question.readable !== undefined && { readable: question.readable }),
 				env: cli.env,
 			};
 			reply = await turn(
@@ -2473,12 +2583,14 @@ export async function ask<T>(entries: readonly ReviewModel[], question: Question
 				entry.model,
 			);
 		} catch (error) {
+			// A turn that failed after opening its session still spent tokens there.
+			if (cli?.failed !== undefined) spent.push({ entry, usage: null, session: cli.failed });
 			if (!(error instanceof ReviewerUnavailableError)) throw error;
 			failures.push(error);
 			continue;
 		}
 		const usage = reported(reply.usage) ? reply.usage : null;
-		spent.push({ entry, usage });
+		spent.push({ entry, usage, ...(reply.session !== undefined && { session: reply.session }) });
 		// A model that answered with no session, or unusably, passes the question on like one that could not run.
 		let value: T;
 		try {
@@ -2554,12 +2666,16 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 		);
 	}
 
+	// Accepting reads no diff, so it needs no such Git.
+	if (options.accept === undefined) requireAttrSource();
+
 	// The reviewer's sandbox has no network, so the base is fetched first, and the size is read from it.
-	const baseRef = options.fetched ? options.base : await fetchBase(root, options.base);
-	const { remote, branch: baseBranch } = parseBase(root, baseRef);
+	// A fetched base's commit is the one the fetch returned; a caller's own fetch left only the tracking ref.
+	const { ref: baseRef, sha: baseSha } = options.fetched
+		? { ref: options.base, sha: trackedBase(root, options.base) }
+		: await fetchBase(root, options.base);
+	const { branch: baseBranch } = parseBase(root, baseRef);
 	const branch = sessionBranch(root, options.branch, baseBranch);
-	const tracking = `refs/remotes/${remote}/${baseBranch}`;
-	const baseSha = git(root, ["rev-parse", "--verify", `${tracking}^{commit}`]);
 	// The PR's own record names its size and implementers, so the author passes neither as a flag.
 	const needed = options.size === undefined || (options.exclude ?? []).length === 0;
 	const record = needed ? await deps.models?.(root, baseRef, branch) : undefined;
@@ -2570,7 +2686,11 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 	// A named reviewer runs alone, as for a repository whose instructions name its own.
 	const auto = options.harness === undefined;
 
-	const statePath = sessionFile(git(root, ["rev-parse", "--path-format=absolute", "--git-common-dir"]), branch);
+	const statePath = sessionFile(
+		git(root, ["rev-parse", "--path-format=absolute", "--git-common-dir"]),
+		branch,
+		options.own,
+	);
 	const dir = dirname(statePath);
 	mkdirSync(dir, { recursive: true });
 	const saved = savedState(statePath, options.fresh);
@@ -2635,6 +2755,10 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 		instructions: digest(JSON.stringify(files)),
 		rules: digest(JSON.stringify([REVIEW, rules?.text ?? null])),
 	};
+	// token-max reads no agy session, so one has no record to send.
+	const queued: ReviewDependencies["queue"] = (session) => {
+		if ((HARNESSES as readonly string[]).includes(session.harness)) deps.queue(session);
+	};
 	// The tier picks how much review a change needs, so it is set before any reviewer runs.
 	const classified = await classify({
 		root,
@@ -2643,6 +2767,7 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 		changed,
 		dir,
 		env: deps.env,
+		queued,
 		signal: options.signal,
 		saved: options.fresh ? undefined : saved?.classified,
 		...(options.accept !== undefined && { savedOnly: true as const }),
@@ -2660,6 +2785,7 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 		past: saved?.history ?? [],
 		dir,
 		env: deps.env,
+		queued,
 	};
 	const before = settle(classified.value);
 	const override = options.override === undefined ? saved?.override : { ...options.override, from: before.tier };
@@ -3022,6 +3148,7 @@ interface Shared {
 	/** The directory holding the branch's sessions and the reply schemas. */
 	dir: string;
 	env: NodeJS.ProcessEnv;
+	queued: ReviewDependencies["queue"];
 	signal: AbortSignal;
 }
 
@@ -3095,27 +3222,43 @@ async function reviewWith(shared: Shared, seat: Seat, responses: string | undefi
 	};
 
 	const usage: Usage[] = [];
-	let session: string;
+	// A session's record is sent whatever its turns end in, since each spent tokens.
+	const started = resume ? stored!.started : Date.now();
+	let session: string | undefined = resume ? stored!.session : undefined;
 	let reply: Reply;
-	if (!resume) {
-		const opened = await open(cli, context, root, {
-			review: reviewPrompt(change, rules, earlier, answered, first, shared.past),
-			report: reportPrompt(change.head, earlier, first),
-		});
-		({ session, reply } = opened);
-		usage.push(...opened.usage);
-	} else {
-		session = stored!.session;
-		const prompt = laterPrompt({
-			...change,
-			previous: previous!.head,
-			earlier,
-			first,
-			responses: answered,
-			past: shared.past,
-		});
-		reply = await turn(cli, reviewer.resume(context, session, prompt), root, context.model);
+	try {
+		if (!resume) {
+			const prompts = {
+				review: reviewPrompt(change, rules, earlier, answered, first, shared.past),
+				report: reportPrompt(change.head, earlier, first),
+			};
+			const opened = await turn(cli, reviewer.review(context, randomUUID(), prompts.review), root, context.model);
+			if (opened.session === undefined) throw new Error(`${cli.harness} did not report its session`);
+			session = opened.session;
+			if (reported(opened.usage)) usage.push({ turn: "review", ...opened.usage });
+			// The report turn reads nothing, so it gets no export of the head.
+			const { head: _, ...reporting } = context;
+			reply = await turn(cli, reviewer.resume(reporting, session, prompts.report), root, context.model);
+		} else {
+			const prompt = laterPrompt({
+				...change,
+				previous: previous!.head,
+				earlier,
+				first,
+				responses: answered,
+				past: shared.past,
+			});
+			reply = await turn(cli, reviewer.resume(context, session!, prompt), root, context.model);
+		}
+	} catch (error) {
+		// A first turn that failed or was cancelled after its session opened still spent tokens.
+		session ??= cli.failed;
+		throw error;
+	} finally {
+		if (session !== undefined) shared.queued({ harness, session, cwd: root, start: started });
 	}
+	// Either turn that failed threw, so a session is open here.
+	const sessionId = session!;
 	if (reported(reply.usage)) usage.push({ turn: "findings", ...reply.usage });
 	const { score, rationale, recommendation, findings: all, earlier: answers } = verdict(reply, earlier.length, first);
 	// Only what the reviewer rated above low holds the head, and is numbered, answered, and settled next round.
@@ -3134,7 +3277,7 @@ async function reviewWith(shared: Shared, seat: Seat, responses: string | undefi
 		branch: shared.branch,
 		size: shared.sized.size,
 		sizeFrom: shared.sized.from,
-		session,
+		session: sessionId,
 		round: rounds.length,
 		base: shared.base,
 		head: change.head,
@@ -3165,28 +3308,13 @@ async function reviewWith(shared: Shared, seat: Seat, responses: string | undefi
 		session: {
 			reviewer: harness,
 			...(second && { second }),
-			session,
+			session: sessionId,
+			started,
 			rounds,
 			last: round,
 			given,
 		},
 	};
-}
-
-/** A new session's two turns: the CLI's own review, then the report of it in the schema, with the review turn's usage. */
-async function open(
-	cli: Cli,
-	context: Context,
-	root: string,
-	prompts: { review: string; report: string },
-): Promise<{ session: string; reply: Reply; usage: Usage[] }> {
-	const opened = await turn(cli, cli.reviewer.review(context, randomUUID(), prompts.review), root, context.model);
-	if (opened.session === undefined) throw new Error(`${cli.harness} did not report its session`);
-	const session = opened.session;
-	// The report turn reads nothing, so it gets no export of the head.
-	const { head: _, ...reporting } = context;
-	const reply = await turn(cli, cli.reviewer.resume(reporting, session, prompts.report), root, context.model);
-	return { session, reply, usage: reported(opened.usage) ? [{ turn: "review", ...opened.usage }] : [] };
 }
 
 /**

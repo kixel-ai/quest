@@ -491,7 +491,7 @@ async function reviewIn(dir: Home, verify: () => void) {
 	try {
 		outcome = await review(
 			{ root: fixture.clone, base: "origin/main", harness: dir.harness, effort: EFFORT, fresh: true },
-			{ env: environment(dir) },
+			{ env: environment(dir), queue: () => {} },
 		).catch((error: unknown) => error);
 	} finally {
 		clearTimeout(timer);
@@ -872,7 +872,7 @@ describe("agy", () => {
 		clearAgy();
 		const outcome = await review(
 			{ root: clone, base: "origin/main", harness: "agy", model: AGY_MODEL, effort: EFFORT, fresh: true },
-			{ env: process.env },
+			{ env: process.env, queue: () => {} },
 		).catch((error: unknown) => error);
 		expect(recordedAgy(), "planted configuration ran during the review").toEqual([]);
 		if (insensitive()) {
