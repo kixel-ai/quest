@@ -22,14 +22,13 @@ export interface HighPath {
 	reason: string;
 }
 
-/** The paths every repository holds high, whatever its risk file says. */
+/**
+ * The paths every repository holds high, whatever its risk file says: only the risk file itself. Workflows and
+ * actions are not among them, since their mistakes fail the repository's own checks before they reach a user; a
+ * repository whose workflows ship to users lists them under its own `## High`.
+ */
 export const ALWAYS_HIGH: readonly HighPath[] = [
 	{ pattern: RISK_FILE, reason: "it sets the tier of every later change" },
-	{
-		pattern: ".github/workflows/",
-		reason: "workflows run with the repository's secrets and decide what merges and ships",
-	},
-	{ pattern: ".github/actions/", reason: "the repository's actions run inside its workflows, with their secrets" },
 ];
 
 /** The paths a base with risk file `file`, or none, holds high: {@link ALWAYS_HIGH} and its `## High` list. */

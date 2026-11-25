@@ -175,7 +175,7 @@ Switch to it, merge the claim commit the warning names, and resume that attempt;
 
 Push the quest branch as `quest context` describes for pull requests. The claim push from `quest start`, made before its PR exists, is exempt from confirming it is open.
 
-Prefer the exhaustive solution: a quest's PR handles every case of its problem, including those its reviews find, instead of splitting the rest into new quests.
+Finish the quest's Goal in its PR instead of splitting the rest into new quests. A case a review finds that will not happen is declined, not built.
 Leave work for later only when it waits on an outside condition or a maintainer decision, or lies outside the quest's Goal.
 
 A quest's PR leaves its quest accurate when it merges.

@@ -92,7 +92,6 @@ import {
 	review,
 	nextStep,
 	roundLines,
-	savedReview,
 } from "./review";
 import { type Recorded, pullModels, recordRounds } from "./review-record";
 import {
@@ -685,7 +684,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"stale, or unknown when GitHub cannot compare them, or - when the section holds no record quest review wrote, then the head it names last, then local-review or no-local-review for whether a local reviewer's round passed it; " +
 				"it counts the record only when the latest quest review commit status on that head is success, set by a user with write access to the repository, " +
 				"targets the diff from the head's merge base with the PR's base, and attests the record's risk tier and class (else -, with a warning saying why, and risk and class print - too); risk gives the record's risk " +
-				"tier, the same state for its head, the tier its classifier set before any reviewer raised it, and the " +
+				"tier, the same state for its head, the tier its classifier set, and the " +
 				"reason last, - when the record names none or does not count, or - malformed - and why when its risk lines do not parse; class gives the RISK.md ## Automatic class the record's classifier named, or -; auto-merge gives its method, who enabled it and when, and the head it was " +
 				"enabled on, which differs from head once a push follows, as GitHub keeps auto-merge across a writer's " +
 				"push (- when it cannot be told: a quest land pin names it, and otherwise the head branch's push " +
@@ -699,7 +698,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"reviewer's latest review, marked current or stale against the head; a checkpoint line per bot " +
 				"reviewer that approves or requests changes, its round, and its review, when that review is of the " +
 				"head, while its latest verdict on the head is neither an approval nor a dismissal, and ends its third, sixth, ... round (one commit it reviewed), as " +
-				"/quest-review's design checkpoint; a reacted:<content> line per " +
+				"where /quest-review stops for the user's decision; a reacted:<content> line per " +
 				"reaction on the PR or a review; a thread line per unresolved review thread, led by its node ID; a " +
 				"signal line per finding or decision that holds the head from landing (see the README); and last, " +
 				"for an open PR, a duplicate line per quest it adds that another open PR also adds, at the same path or under the same title " +
@@ -1653,19 +1652,12 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 			else for (const line of messageLines(found)) print(line);
 		});
 
-	const reviewers = [...SIZES, "high" as const]
-		.map((list) => `${list} ${REVIEWERS[list].map((e) => `${e.harness} ${e.model} ${e.effort}`).join(", then ")}`)
-		.join("; ");
+	const reviewers = SIZES.map(
+		(list) => `${list} ${REVIEWERS[list].map((e) => `${e.harness} ${e.model} ${e.effort}`).join(", then ")}`,
+	).join("; ");
 	const classifiers = CLASSIFIERS.map((e) => `${e.harness} ${e.model} ${e.effort}`).join(", then ");
 	/** quest review's exit code for `error`: 2 for a usage error, 3 when no reviewer could run, else 1. */
-	const reviewFailure = (error: unknown, json = false): number => {
-		// A failure after a raise saved the rounds that ran, so they print for their findings to be answered.
-		const reviewed = savedReview(error);
-		if (reviewed !== undefined) {
-			const { rounds, tallies, risk, skipped } = reviewed;
-			if (json) print(JSON.stringify({ rounds, tallies, risk, skipped, record: null, next: null }));
-			else for (const line of roundLines(reviewed)) print(line);
-		}
+	const reviewFailure = (error: unknown): number => {
 		const outage = error instanceof ReviewerUnavailableError || error instanceof ReviewOutageError;
 		if (error instanceof ReviewInputError || outage) {
 			out.stderr(`error: ${error.message}\n`);
@@ -1679,18 +1671,18 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		.summary("Have a model no weaker than the latest writer review the committed branch, read-only")
 		.description(
 			"Review the checkout's committed branch against its base with a reviewer its size picks, never one " +
-				`weaker than the model that changed it last, which may review its own work. Each size, and the high list a high head uses, ranks its reviewers (harness, model, effort): ${reviewers}. The ` +
+				`weaker than the model that changed it last, which may review its own work. Each size ranks its two reviewers (harness, model, effort): ${reviewers}. The ` +
 				"first whose model is not avoided reviews. One that cannot run, as its CLI or provider reports before any " +
 				"finding is saved, passes the round to the next whose model is not avoided: a CLI that is not installed, " +
 				"logged out, or has its login rejected, or sent to a gateway with no credential, passes over every model of that CLI, and a model at its usage limit " +
 				"only itself; the run's report and record name each it passed over and why. A reviewer --harness, --model, " +
 				"or --effort names never passes the round on. " +
 				"--exclude-model names each model to avoid, with every model weaker than it; without it, every model " +
-				"weaker than the latest writer is avoided (Sonnet than any other, Sol than Fable and Astra), " +
+				"weaker than the latest writer is avoided, which only Sonnet is, than any other, " +
 				"so a reviewer is never weaker than the writer: the model the last Implementer line names in the `## Models` record of the body of the branch's open PR. " +
 				"When it names none or an `unknown` model, none is avoided. " +
 				"--harness names the only reviewer instead of the pick and the second reviewer, at the model and effort of its first entry whose model is not avoided, and --model and " +
-				"--effort override that reviewer's, or without --harness, the size pick's; a --model the list names, in any spelling such as openai/gpt-6.2-astra, runs on its own entry's harness and effort, passed to the CLI as given, and one it does not at --harness's first entry; a repository whose AGENTS.md names other reviewers " +
+				"--effort override that reviewer's, or without --harness, the size pick's; a --model the list names, in any spelling such as openai/gpt-6.2-sol, runs on its own entry's harness and effort, passed to the CLI as given, and one it does not at --harness's first entry; a repository whose AGENTS.md names other reviewers " +
 				"passes them. A --harness run keeps the other reviewers' sessions for the next run of the pick, and refuses while one has findings to settle, as a run of the pick does while a reviewer only --harness runs has some. When the latest writer changes the size's pick to one with no session on the branch, its first session settles the open findings of the reviewer it replaces. The reviewers run at once, and the first to fail stops the others and fails the " +
 				"run, saving no round. The " +
 				"size is --size, else the size of the quest a quest/ branch names, read from the base's tip so a " +
@@ -1717,7 +1709,9 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"asking what the change breaks), given the range, Quest's shared review rules, the base's REVIEW.md, if " +
 				"any (which adds to them and takes precedence), and any responses up front, then resumes that session " +
 				"for one turn that reports the review in one " +
-				"JSON schema without reading anything again. --responses gives the author's fixes and refutations of " +
+				"JSON schema without reading anything again. Each finding is high, medium, or low, its body ending with the " +
+				"fix the reviewer recommends; a low one is a note, printed and recorded for the author to take or leave, " +
+				"never numbered, answered, or carried, so a round with only notes passes the head. --responses gives the author's fixes and refutations of " +
 				"the last round's findings, required while that round reported any; the reply settles each of those " +
 				"findings, by its number in the prompt, as fixed, refuted, or still open. Findings are numbered across " +
 				"the reviewers in the order the round printed them, and each reviewer settles only its own, given " +
@@ -1729,7 +1723,9 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"starts a new session that reviews the whole change and still weighs --responses. A round that would " +
 				"resume on the head the last round reviewed, when that round found nothing, runs no reviewer and " +
 				"repeats that round, marked unchanged, so on the same head only a reviewer with findings to settle runs. " +
-				"--new starts new sessions, continuing each reviewer's tally of its findings on the branch, less those it drops unsettled, unless the saved state is one this quest cannot read. Each reviewer's session is kept per branch in the clone's common Git directory, so any worktree of the clone resumes it. " +
+				"Every prompt lists the findings the branch's rounds refuted or the maintainer accepted, with their reasons, so " +
+				"no reviewer reports them again. " +
+				"--new starts new sessions, keeping that list and continuing each reviewer's tally of its findings on the branch, less those it drops unsettled, unless the saved state is one this quest cannot read. Each reviewer's session is kept per branch in the clone's common Git directory, so any worktree of the clone resumes it. " +
 				"A checked-out branch with an upstream other than the base continues its upstream branch's session, so a " +
 				"temporary branch tracking the PR's head shares the head's rounds. " +
 				"--branch names the branch instead of the checked-out one, as a detached HEAD requires, such as a " +
@@ -1758,8 +1754,8 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"default volume, and on a Git older than 2.41, which has no --attr-source. The user's skills' text still reaches it, and their MCP servers start, with no tool it can call. A " +
 				"RESOURCE_EXHAUSTED quota error is its usage limit.\n\n" +
 				"Before the reviewers run, the head gets a risk tier, low, medium, or high, from its change alone, never " +
-				"from who wrote it. A changed path, either side of a rename, that a pattern holds makes it high: RISK.md, " +
-				"everything under .github/workflows/ and .github/actions/, and each pattern the `## High` list of the base's " +
+				"from who wrote it: who is hurt if it is wrong, and whether anything catches it first. A changed path, " +
+				"either side of a rename, that a pattern holds makes it high: RISK.md, and each pattern the `## High` list of the base's " +
 				"RISK.md names, read from the base's tip so a change cannot lower its own tier. Each item of that list is a " +
 				"backticked path from the repository's root, where `*` and `?` stay within one segment and a whole `**` " +
 				"segment spans any number, then ` - ` and why its change is high; a RISK.md that cannot be read is a usage " +
@@ -1768,21 +1764,16 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"in one read-only turn and replies with a tier and its reason. One that is logged out, whose login the " +
 				"API rejects, or at its usage limit passes the turn to the next; when none is left, the run fails on the " +
 				"limit that resets first if every one whose CLI is installed hit its own, else as a usage error naming why each failed. A later round on the same head and base " +
-				"RISK.md reuses the tier unless --new. Each reviewer's reply judges the tier too, told the classified one, " +
-				"and can only raise it: the head's tier is the riskiest, with the reason of the first to judge it so. " +
+				"RISK.md reuses the tier unless --new. Reviewers never judge it. " +
 				"The classifier also names the class of RISK.md's ## Automatic list every changed file falls in, or none, " +
 				"offered only the classes whose scope, backticked patterns in parentheses after the class's name, holds " +
 				"every changed path, either side of a rename: each path must match one pattern whole, so a directory " +
 				"needs a trailing / or /**, and a change that touches no path falls in no class. " +
 				"The tier scales the review: a low head with no finding to settle runs no reviewer unless --harness, " +
-				"--model, or --effort names one, and a high head gets a second reviewer: the first of the " +
-				"high list from a vendor other than the pick's that can run, in its own session, which reviews " +
-				"every head while the tier is high and settles its findings after. A head the classifier or the " +
-				"maintainer's override holds high also takes its pick from that list, whatever the PR's size; a " +
-				"reviewer's raise changes only the second reviewer, so the pick stays the same on the head, unless that raise ends the override. --model and " +
-				"--effort change only the pick, so the second reviewer still runs; the one reviewer --harness names runs " +
-				"alone, at its entry in the pick's list, with none. A round that raises the tier to high saves its rounds and " +
-				"runs the second reviewer at once, printing those rounds before the error when that review fails, as when no second reviewer can run. " +
+				"--model, or --effort names one, and a high head gets a second reviewer: its size's entry from the other " +
+				"vendor, in its own session, which reviews every head while the tier is high and settles its findings after. " +
+				"--model and --effort change only the pick, so the second reviewer still runs; the one reviewer --harness " +
+				"names runs alone. " +
 				"--override and --reason record the maintainer's tier for the branch, which holds until the reviewed " +
 				"tier grows riskier than the one overridden, other than to the override's own tier.\n\n" +
 				"Prints the size and where it came from, base, and head, its risk tier and reason, the classifier's tier, " +
@@ -1792,17 +1783,17 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"effort, followed by second for the second reviewer, session, round, an " +
 				"unchanged line for a repeated round, or an accepted line for a round --accept repeats, a usage line per turn (input tokens, the " +
 				"part read from the prompt cache, and output), a score from 0 to 10 for how ready the head is to land with " +
-				"its one-sentence rationale, a raised line with the tier and reason when it raised the classifier's, the finding count, each finding by its number, then the last round's findings with " +
+				"its one-sentence rationale, a recommendation line with the approach the reviewer would build instead when it recommends one, the finding count, each finding by its number, a notes line with the count and each note, then the last round's findings with " +
 				"their numbers and dispositions; then the `record` line below and a last `next` line naming the author's next step: " +
-				"`next checkpoint` when a reviewer's every third round reports other findings, to compare the current approach " +
-				"with the best long-term approach worked out from first principles before fixing them, `next respond` to fix or refute the findings, or `next done`, which for a low head no reviewer ran says so, and for --accept `next done` or `next stop`. A reply without a valid score " +
+				"`next decide` when a reviewer's third or later round still reports findings, to stop until the user picks " +
+				"fixing them as recommended, accepting them, or dropping the PR, `next respond` to fix or refute the findings, or `next done`, which for a low head no reviewer ran says so, and for --accept `next done` or `next stop`. A reply without a valid score " +
 				"fails as any malformed reply does. --json prints " +
 				"one object: `rounds`, one per reviewer, `tallies`, every reviewer's findings across the branch's rounds, `risk`, the head's tier with its classification, `skipped`, each reviewer passed over with its reason, `accepted`, the maintainer's reason under --accept or null, `record`, and `next`.\n\n" +
 				"After each round, it rewrites the `## Review` section of the branch's open PR into the base, the one from the repository the base's remote pushes to, else the only one from another repository whose pushed head `HEAD` contains, as the " +
 				"user the GitHub token names, keeping the rest of the body, and prints `record <url>`: the reviewed " +
 				"head, named in full only once no reviewer reports a finding, the base, the head's risk tier and reason, " +
 				"an `- Overridden:` line, the classifier's tier and who set it, a `- Class:` line, a `- Local review: none` line for a low head no reviewer ran on, a `- Skipped:` line for each reviewer passed over, and each reviewer, its Reviewer line ending in `, second` for the second reviewer, its " +
-				"session and round, score, the tier it raised the risk to and why, its tally of findings across the branch's rounds, and each finding with its disposition. " +
+				"session and round, score, a `- Recommendation:` line with the approach it would build instead, its tally of findings across the branch's rounds, each finding with its disposition, and its notes. " +
 				"On GitHub it then sets the `quest review` commit status on the head, on the same token, so push the head first: success once no finding is open, else failure, " +
 				"its description the head's risk tier and class and whether a local reviewer ran, its target the diff from the head's merge base with the PR's base, which `quest status` counts only from a user who can push. " +
 				"For a token that cannot push, it sets none and prints `; status skipped: <why>` after the record's URL; a status GitHub refuses otherwise prints `; status refused: <why>` and exits 1. " +
@@ -1819,7 +1810,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"eligible reviewer prints one line, " +
 				"`error: <harness> hit its usage limit; resets <time>`, where <time> is the reset as an ISO 8601 UTC " +
 				"timestamp, or `unknown` when the CLI named none; with several, it prints `error: no eligible <list> " +
-				"reviewer could run: <model> <effort> (<error>), ...`, where <list> is the PR's size or high for a high head's list, each error as the only reviewer's would read.",
+				"reviewer could run: <model> <effort> (<error>), ...`, where <list> is the PR's size, each error as the only reviewer's would read.",
 		)
 		.option("--base <remote/branch>", "Base branch to review against (default: origin's default branch)")
 		.addOption(
@@ -1935,6 +1926,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 						// An acceptance is the status alone, so one no status records has not happened.
 						const accepting = reviewed.accepted !== undefined;
 						const attested = failure === undefined && record !== undefined && "url" in record && !status;
+						if (accepting && attested) reviewed.remember?.();
 						const next = !accepting
 							? nextStep(rounds)
 							: attested
@@ -1969,7 +1961,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 						);
 						return 1;
 					},
-					(error) => reviewFailure(error, options.json),
+					(error) => reviewFailure(error),
 				);
 			},
 		);

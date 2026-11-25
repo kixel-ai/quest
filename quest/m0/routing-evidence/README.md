@@ -75,10 +75,10 @@ Readout, the agent's choices for the implementer to revisit:
   `/quest-run` and `/quest-iterate`. The shadow reviewer
   stopped running on 2026-11-25 (maintainer, rejecting keeping L's shadow
   until its 116 first rounds), so read the shadow pairs gathered before
-  then, and once [reviewer rungs](/quest/m0/reviewer-rungs.md) lands compare
-  reviewer models and efforts from the rungs' draws: findings by severity, fixed against refuted, and later
-  `## Caused by` escapes, per `quest usage`'s reviewer rows. Recommend
-  moving a model up, down, or off its rung with its tally.
+  then, and compare reviewer models and efforts from `quest usage`'s
+  reviewer rows: findings by severity, fixed against refuted, and later
+  `## Caused by` escapes. Recommend moving a model's effort up or down
+  with its tally.
 - Carry the tallies into [the model check](/quest/m1/model-check.md)'s
   baseline.
 - Chart the arms' cost against quality as
@@ -173,9 +173,14 @@ three hosts' saved review rounds:
     routes them.
   - Astra picks for XL:
     [kixel-ai/quest#831](https://github.com/kixel-ai/quest/pull/831). Its
-    Fable seat beside the L pick was dropped on 2026-11-23 for
-    [reviewer rungs](/quest/m0/reviewer-rungs.md), which seats Fable as a
-    rung member.
+    Fable seat beside the L pick was dropped on 2026-11-23.
+  - Lineup of 2026-11-25 (maintainer): Opus writes S through XL and Fable
+    writes nothing, so L's Fable arm ended; each size reviews on Sol, with
+    Opus beside it on a high head and in its place on a medium one when
+    Sol cannot run;
+    no list names Fable, Astra, or Neon. On 2026-11-24, Fable xhigh as a
+    second reviewer took $976 of $1,430 of review spend, at $82 a PR
+    against Sol xhigh's $8, for 23 high findings against 44.
   - Cost metric? ✅ Mean spend per merged PR, every session's, plus the
     spend of later PRs that name it under `## Caused by`, with a bootstrap
     95% interval, the median reported beside it (rejected: the median
@@ -190,12 +195,9 @@ three hosts' saved review rounds:
     effort, and a token and cost table. Behind local review it still
     found something on 147 of 272 high-tier and 148 of 549 medium-tier
     merged PRs, 93% of its findings accepted, most likely for its model
-    differing from the mostly-Sol pick. Once kixel-ai/quest#819's second
-    seat runs on high heads (Sol and Fable xhigh on Opus's work, Opus and
-    Astra xhigh on Fable's, never weaker than the writer), compare what Pullfrog still
+    differing from the mostly-Sol pick. Now that a high head seats Sol and Opus, compare what Pullfrog still
     finds behind it per dollar, and recommend retiring it once
-    [review seats](/quest/m0/review-seats.md)' one, two, or three vendor
-    seats match it, with its tally. The gate retired first: on 2026-11-24
+    the Sol and Opus seats match it, with its tally. The gate retired first: on 2026-11-24
     its review quota ran out, and the maintainer removed the `Pullfrog
     approval` ruleset in
     [kixel-ai/dotfiles#297](https://github.com/kixel-ai/dotfiles/pull/297), so only a maintainer's local `quest review` record
@@ -208,19 +210,13 @@ three hosts' saved review rounds:
     needs about 100 PRs an arm for.
   - XL? ✅ No splitting rule: the maintainer judged XL quests harder, not
     bigger (rejected: split XL at plan time; measure XL against split
-    work first). Tally XL under Fable against this audit's baseline: 11
+    work first). Tally XL under Opus xhigh against this audit's baseline: 11
     merged, 82% later culprits, 7.5 rounds. That baseline is not all Opus:
     the maintainer has implemented and reviewed XL quests by hand with
     Fable, and those sessions' `Implementer:` lines may say Opus or
     `unknown`, so read each XL PR's sessions for its model before crediting
-    either. The baseline's rounds were reviewed by Sol xhigh, and since
-    [kixel-ai/quest#831](https://github.com/kixel-ai/quest/pull/831) Astra
-    high reviews XL, with Astra medium its shadow, so credit Fable with no
-    change in rounds or first-round findings that the reviewer change
-    could explain.
-  - Pace: report each Fable arm's fall-throughs, quests that started on
-    Fable but fell to Opus at its usage limit. When they exceed a fifth of
-    the L arm's quests, recommend running a quarter of L on Fable instead.
+    either. The baseline's rounds were reviewed by Sol xhigh, as XL's are
+    again.
 
 Baseline from the 2026-11-11 audit, at API list price:
 
@@ -267,6 +263,5 @@ Baseline from the 2026-11-11 audit, at API list price:
 
 ## Related
 
-- [Reviewer rungs](/quest/m0/reviewer-rungs.md) - the per-round reviewer draw whose tallies the readout compares
 - [Model check](/quest/m1/model-check.md) - retunes the tables each
   milestone from these tallies

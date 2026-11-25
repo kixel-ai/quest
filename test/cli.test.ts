@@ -201,11 +201,9 @@ test("unblocked routes a quest with a decision open one size up, and XL stays XL
 	tree.append("quest/m0/epic/one.md", "- Maintainer: pick a name.\n");
 	expect(models(tree)).toEqual(["null high"]);
 	tree.write("quest/m0/epic/one.md", "# [L] One\n\n## Goal\n\nWork.\n");
-	expect(models(tree)).toEqual(["B medium high"]);
+	expect(models(tree)).toEqual(["null high"]);
 	tree.write("quest/m0/epic/one.md", "# [XL] One\n\n## Goal\n\nWork.\n\n## Waiting\n\n- Maintainer: pick.\n");
-	expect(models(tree)).toEqual(["null high xhigh"]);
-	tree.write("quest/m0/epic/one.md", "# [XL] One\n\n## Goal\n\nWork.\n");
-	expect(models(tree)).toEqual(["null high xhigh"]);
+	expect(models(tree)).toEqual(["null xhigh"]);
 });
 
 test("models ranks a size's writers, or the one entry that runs a PR's writer", () => {
@@ -216,7 +214,6 @@ test("models ranks a size's writers, or the one entry that runs a PR's writer", 
 		stderr: "",
 	});
 	expect(JSON.parse(tree.run("models", "XL", "--json").stdout)).toEqual([
-		{ harness: "claude", model: "claude-fable-5-2", effort: "high" },
 		{ harness: "claude", model: "claude-opus-5-5", effort: "xhigh" },
 	]);
 	const writer = (size: string, model: string) => tree.run("models", size, "--writer", model).stdout;
@@ -233,18 +230,19 @@ test("models ranks a size's writers, or the one entry that runs a PR's writer", 
 	}
 	expect(tree.run("models", "XXL").code).toBe(2);
 	const arm = (size: string, name: string) => tree.run("models", size, "--arm", name);
-	expect(arm("L", "A").stdout).toBe("claude\tclaude-opus-5-5\thigh\n");
-	expect(arm("L", "B").stdout).toBe("claude\tclaude-fable-5-2\tmedium\n");
+	expect(arm("S", "A").stdout).toBe("claude\tclaude-opus-5-5\tmedium\n");
+	expect(arm("S", "B").stdout).toBe("claude\tclaude-sonnet-5-5\thigh\n");
 	expect(arm("XS", "A").stdout).toBe("claude\tclaude-sonnet-5-5\thigh\n");
 	expect(arm("M", "B")).toMatchObject({ code: 2, stderr: expect.stringContaining("M runs no writer arms") });
+	expect(arm("L", "B")).toMatchObject({ code: 2, stderr: expect.stringContaining("L runs no writer arms") });
 	expect(arm("XL", "B")).toMatchObject({ code: 2, stderr: expect.stringContaining("XL runs no writer arms") });
-	expect(arm("L", "C").code).toBe(2);
-	expect(tree.run("models", "L", "--arm", "A", "--writer", "claude-opus-5-5").code).toBe(2);
+	expect(arm("S", "C").code).toBe(2);
+	expect(tree.run("models", "S", "--arm", "A", "--writer", "claude-opus-5-5").code).toBe(2);
 });
 
 test("unblocked splits a size's quests between its arms by path, and keeps each quest's arm", () => {
 	const tree = Tree.baseline();
-	for (let n = 0; n < 40; n++) tree.write(`quest/m0/epic/q${n}.md`, `# [L] Q${n}\n\n## Goal\n\nWork.\n`);
+	for (let n = 0; n < 40; n++) tree.write(`quest/m0/epic/q${n}.md`, `# [S] Q${n}\n\n## Goal\n\nWork.\n`);
 	const arms = () =>
 		Object.fromEntries(
 			JSON.parse(tree.run("unblocked", "--json").stdout).map((quest: { path: string; arm: string }) => [

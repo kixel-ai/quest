@@ -32,9 +32,7 @@ export const CLAUDE_LOGGED_OUT =
 
 /**
  * The findings turn's reply, `reply`: FAKE_REPLY, or one finding. A JSON reply without `earlier` settles
- * each earlier finding the prompt numbers as FAKE_DISPOSITION says, `fixed` by default, and one without `risk`
- * reports FAKE_RAISE's tier, else the tier the prompt says the change was classified. FAKE_RAISE as
- * `<tier>@<effort>` raises only in turns at that effort.
+ * each earlier finding the prompt numbers as FAKE_DISPOSITION says, `fixed` by default.
  */
 const REPLY = `
 const listed = /<earlier-findings>\\n([\\s\\S]*?)\\n<\\/earlier-findings>/.exec(stdin)?.[1] ?? "";
@@ -43,19 +41,11 @@ const earlier = [...listed.matchAll(/^(\\d+)\\. /gm)].map((m) => ({
 	disposition: process.env.FAKE_DISPOSITION ?? "fixed",
 	reason: "Checked against the head.",
 }));
-const classified = /was classified (low|medium|high) risk/.exec(stdin)?.[1] ?? "medium";
-const [raise, raiseAt] = (process.env.FAKE_RAISE ?? "").split("@");
-const effort = argv.includes("--effort")
-	? argv[argv.indexOf("--effort") + 1]
-	: JSON.parse((argv.find((arg) => arg.startsWith("model_reasoning_effort=")) ?? "=null").split("=")[1]);
-const risk = raise && (!raiseAt || raiseAt === effort)
-	? { tier: raise, reason: "It rewrites the wire format peers read." }
-	: { tier: classified, reason: "As classified." };
 let reply = process.env.FAKE_REPLY ?? JSON.stringify({ score: 8, rationale: "Lands once the off-by-one is fixed.", findings: [${JSON.stringify(FINDING)}] });
 try {
 	const parsed = JSON.parse(reply);
 	if (parsed && typeof parsed === "object" && !("earlier" in parsed)) reply = JSON.stringify({ ...parsed, earlier });
-	if (parsed && typeof parsed === "object" && !("risk" in parsed)) reply = JSON.stringify({ ...JSON.parse(reply), risk });
+	if (parsed && typeof parsed === "object" && !("recommendation" in parsed)) reply = JSON.stringify({ ...JSON.parse(reply), recommendation: null });
 } catch {}
 `;
 
@@ -435,7 +425,6 @@ export function setup(host: "CLAUDECODE" | "CODEX_THREAD_ID" | null = "CLAUDECOD
 		"FAKE_HANG",
 		"FAKE_DISPOSITION",
 		"FAKE_RISK",
-		"FAKE_RAISE",
 		"FAKE_DENIED",
 		"FAKE_CLASSIFY",
 	]) {
@@ -460,7 +449,7 @@ export function effortOf(call: Call): string | null {
 	return setting ? JSON.parse(setting.slice("model_reasoning_effort=".length)) : null;
 }
 
-/** The turns at `effort`, so the size's pick and its shadow, which run at once on the same CLI, read apart. */
+/** The turns at `effort`, so two seats on the same CLI read apart. */
 export const at = (calls: Call[], effort: string) => calls.filter((call) => effortOf(call) === effort);
 
 export async function quest(...args: string[]): Promise<{ code: number; stdout: string; stderr: string }> {
