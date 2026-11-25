@@ -13,8 +13,8 @@ guardrails from that evidence. Every cost is measured so it can be driven
 toward zero.
 
 This epic's own work is the end-to-end check: one real PR, taken from its
-first session to a week after its merge, shows on Kixel Code's factory
-page with its tier and reason, its cost on every axis, its reviews, and
+first session to a week after its merge, shows on Kixel Quest's
+[factory page](https://kixel.quest/factory) with its tier and reason, its cost on every axis, its reviews, and
 anything it broke, and the numbers match what `quest usage` prints for it.
 
 Non-goals: storing records in PR bodies or git; a dashboard in `quest`
@@ -98,6 +98,44 @@ a merge queue, and diff-scoped gates in moq-dev/moq and moq-dev/moq.pro.
 
 No post describes attributing cost, model, and effort to each change, so
 that part has no precedent to copy.
+
+### Check of 2026-11-25
+
+Run on [kixel-ai/quest#899](https://github.com/kixel-ai/quest/pull/899),
+which has the evidence. No PR could pass yet: the factory's oldest merge
+is 2026-11-23 04:40 UTC, and the hosts' record senders first sent between
+2026-11-23 04:47 and 21:44 UTC, so no PR with every session recorded is a
+week past its merge. The earliest such quest PR found is
+[#850](https://github.com/kixel-ai/quest/pull/850), merged 2026-11-24 03:02
+UTC, whose sessions all ran on one host after its sender started; check
+it, or an earlier one whose sessions all reached Kixel Quest. Run `quest
+usage --pr <n>` with `--ssh` for every host that ran its sessions.
+
+Per axis, on #819, #832, #849, #850, #871, and #887:
+
+- Tier and reason: shown, and identical to `quest usage`.
+- Cost: the factory shows one price per PR, and of the other axes only
+  sessions, once; every other axis's drill-down
+  (`/factory/pulls?set=axis:<axis>`) fails with "Something went wrong".
+  Prices disagree: #850 $50.73 on the factory against ~$76.51 in `quest
+  usage`, and #832, #849, and #871 $0.00 against ~$4.24, ~$0.82, and
+  ~$0.54. `quest usage` splits time and reads waits only on its own host,
+  so a remote session's time can't be matched.
+- Reviews: the factory names a PR's reviewers only when the PR broke
+  something, and never its rounds, scores, or findings.
+- Breakage: the factory flags a PR whose merge commit's push run went
+  red, as "found by a check, 2s after it merged". #871 changed only
+  `assets/CONTEXT.md` and is flagged for a test run killed mid-suite
+  (run 45521382739); `quest usage` counts only `## Caused by` lines and
+  reports nothing for it.
+- `quest usage` drops sessions recorded under `moq-dev/quest`, the
+  repository's name before 2026-11-23: [transferred
+  repositories](/quest/m0/telemetry/transferred-repos.md). It skips them
+  only on PRs from before the transfer, so the next check is unaffected.
+
+## Scheduled
+
+- 2026-12-01 - the first day a PR whose every session reached Kixel Quest, such as #850, is a week past its merge
 
 ## Related
 
