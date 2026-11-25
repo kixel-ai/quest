@@ -55,7 +55,7 @@ and [for eval](https://github.com/kixel-ai/quest/pull/831#issuecomment-711801176
 - Never weaker than the writer? ✅ Drop that rule under rungs: "each
   reviewer can be a random rung. drop it under rungs." A down-draw may
   seat a model weaker than the writer; only the writer's own model stays
-  excluded (rejected: keep the never-weaker rule as a constraint on the
+  excluded, until the 2026-11-25 amendment below (rejected: keep the never-weaker rule as a constraint on the
   draw). [kixel-ai/quest#819](https://github.com/kixel-ai/quest/pull/819)'s
   `weaker()` in `src/cli/models.ts`, its widening of `--exclude-model` to
   every model weaker than the one named, its help text on weaker models,

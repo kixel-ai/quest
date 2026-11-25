@@ -168,8 +168,6 @@ export interface Usage {
 /** One reviewer's finished round, as `quest review` prints it. */
 export interface Round {
 	reviewer: ReviewHarness;
-	/** The round is the shadow's: the size's pick one effort away, whose findings measure what that step buys. */
-	shadow?: true;
 	/** The round is the second reviewer's, from a vendor other than the pick's, which a high-risk head gets too. */
 	second?: true;
 	model: string;
@@ -460,8 +458,6 @@ export const processDependencies = (): ReviewDependencies => ({ env: process.env
 /** One reviewer's findings across every round on a branch, which a `--new` session continues. */
 export interface Tally {
 	reviewer: ReviewHarness;
-	/** The shadow's tally, kept apart from the size's pick of the same harness. */
-	shadow?: true;
 	/** The second reviewer's tally, kept apart from the pick's. */
 	second?: true;
 	/** Its latest round's model, effort, and session, which the record names even once a run leaves it out. */
@@ -515,8 +511,6 @@ interface State {
 /** One reviewer's session on a branch. */
 interface Session {
 	reviewer: ReviewHarness;
-	/** The shadow's session; the branch keeps at most one. */
-	shadow?: true;
 	/** The second reviewer's session; the branch keeps at most one. */
 	second?: true;
 	session: string;
@@ -2151,9 +2145,9 @@ function load(path: string): unknown {
 	}
 }
 
-/** A reviewer's seat on a branch: its harness, and whether it is the shadow or the second reviewer. */
-export type SeatId = { reviewer: ReviewHarness; shadow?: true; second?: true };
-const seatKey = (seat: SeatId) => `${seat.reviewer}${seat.shadow ? " shadow" : ""}${seat.second ? " second" : ""}`;
+/** A reviewer's seat on a branch: its harness, and whether it is the second reviewer. */
+export type SeatId = { reviewer: ReviewHarness; second?: true };
+const seatKey = (seat: SeatId) => `${seat.reviewer}${seat.second ? " second" : ""}`;
 /** Whether two reviewers hold the same seat: the same harness and role. */
 export const sameSeat = (a: SeatId, b: SeatId) => seatKey(a) === seatKey(b);
 
@@ -2172,9 +2166,9 @@ export function parseState(value: unknown): State {
 		state.tallies.every(
 			(tally) =>
 				typeof tally?.reviewer === "string" &&
-				(tally.shadow === undefined || tally.shadow === true) &&
+				// A shadow, the pick one effort away, no longer runs: state that holds one needs --new.
+				!("shadow" in tally) &&
 				(tally.second === undefined || tally.second === true) &&
-				!(tally.shadow && tally.second) &&
 				(tally.session === undefined || typeof tally.session === "string") &&
 				typeof tally.rounds === "number" &&
 				typeof tally.fixed === "number" &&
@@ -2186,7 +2180,7 @@ export function parseState(value: unknown): State {
 		state.sessions.every(
 			(session) =>
 				typeof session?.reviewer === "string" &&
-				(session.shadow === undefined || session.shadow === true) &&
+				!("shadow" in session) &&
 				(session.second === undefined || session.second === true) &&
 				state.tallies!.some((tally) => sameSeat(tally, session)) &&
 				typeof session.session === "string" &&
@@ -2200,7 +2194,6 @@ export function parseState(value: unknown): State {
 				typeof session.given === "object" &&
 				session.given !== null,
 		) &&
-		state.sessions.filter((session) => session.shadow).length <= 1 &&
 		state.sessions.filter((session) => session.second).length <= 1 &&
 		(state.classified === undefined ||
 			(typeof state.classified?.key === "string" &&
@@ -2517,7 +2510,6 @@ export function settle(classified: Classified, rounds: Round[]): Risk {
 				classified,
 				raisedBy: {
 					reviewer: round.reviewer,
-					...(round.shadow && { shadow: true }),
 					...(round.second && { second: true }),
 				},
 			};
@@ -2533,14 +2525,14 @@ export function overridden(risk: Risk, override: Override | undefined): Risk {
 }
 
 /**
- * Review the checkout's committed branch: one round of each reviewer on the same head, the size's pick and its
- * shadow while it runs, or only `--harness`'s, each resuming its session on the branch unless `fresh`.
+ * Review the checkout's committed branch: one round of each reviewer on the same head, the size's pick and any
+ * second reviewer, or only `--harness`'s, each resuming its session on the branch unless `fresh`.
  * Every reviewer runs at once, and the first to fail stops the others and fails the whole, saving no round. A pick
  * that cannot run, logged out, not installed, or at its usage limit, passes the round to the size's next eligible
  * reviewer, unless the options name the reviewer; once none is left, the run fails as an outage.
  *
  * The head's tier scales the review: a low head with nothing left to settle gets no local review, and a high one gets
- * no shadow but a second reviewer from another vendor from the high list, which a round that raises the tier
+ * a second reviewer from another vendor from the high list, which a round that raises the tier
  * to high runs at once. A head classified or overridden high also takes its pick from that list.
  */
 export async function review(options: ReviewOptions, deps: ReviewDependencies): Promise<Reviewed> {
@@ -2568,7 +2560,7 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 	const avoided = authored(options, recordedLatest(record, options));
 	// Accepting runs no reviewer, so it picks none.
 	let candidates = options.accept === undefined ? rankedReviewers(sized.size, options, avoided) : [];
-	// A named reviewer runs without the shadow, as for a repository whose instructions name its own.
+	// A named reviewer runs alone, as for a repository whose instructions name its own.
 	const auto = options.harness === undefined;
 
 	const statePath = sessionFile(git(root, ["rev-parse", "--path-format=absolute", "--git-common-dir"]), branch);
@@ -2584,8 +2576,7 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 		firsts.set(session, next);
 		next += session.rounds.at(-1)!.findings.length;
 	}
-	// A shadow, the pick one effort away, no longer runs, so its session is dropped with its findings.
-	const sessions = all.filter((session) => runs(session) && !session.shadow);
+	const sessions = all.filter(runs);
 	// A login or a missing CLI rules out its harness's every model; a usage limit only the model that hit it.
 	const down = new Map<ReviewHarness, ReviewerUnavailableError>();
 	// Models passed over this run, which no later seat falls to.
@@ -3010,7 +3001,6 @@ export function tallied(tallies: Tally[], rounds: { round: Round; settles?: Seat
 		}
 		const own = by.get(seatKey(round)) ?? {
 			reviewer: round.reviewer,
-			...(round.shadow && { shadow: true as const }),
 			...(round.second && { second: true as const }),
 			model: round.model,
 			effort: round.effort,
@@ -3256,7 +3246,7 @@ export function roundLines({ rounds, risk, skipped, head, base, sized, accepted 
 	for (const round of rounds) {
 		lines.push(
 			"",
-			`reviewer ${round.reviewer} ${round.model} ${round.effort}${round.shadow ? " shadow" : round.second ? " second" : ""}`,
+			`reviewer ${round.reviewer} ${round.model} ${round.effort}${round.second ? " second" : ""}`,
 			`session ${round.session}`,
 			`round ${round.round}`,
 			...(accepted !== undefined

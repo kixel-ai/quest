@@ -1525,24 +1525,25 @@ size. Each size ranks its reviewers, the same for every repository:
 | PR size | Reviewer | When the reviewer is weaker than its writer | Then, while those are out |
 |---|---|---|---|
 | XS | Codex `gpt-6.2-sol` medium | Claude Code `claude-opus-5-5` low | Codex `gpt-6.2-astra` medium, then Claude Code `claude-fable-5-2` medium |
-| S | Codex `gpt-6.2-sol` medium | Claude Code `claude-opus-5-5` low | Codex `gpt-6.2-astra` medium, then Claude Code `claude-fable-5-2` medium |
-| M, or none | Codex `gpt-6.2-sol` high | Claude Code `claude-opus-5-5` medium | Codex `gpt-6.2-astra` high, then Claude Code `claude-fable-5-2` high |
+| S | Codex `gpt-6.2-sol` medium | Claude Code `claude-opus-5-5` medium | Codex `gpt-6.2-astra` medium, then Claude Code `claude-fable-5-2` medium |
+| M, or none | Codex `gpt-6.2-sol` high | Claude Code `claude-opus-5-5` high | Codex `gpt-6.2-astra` high, then Claude Code `claude-fable-5-2` high |
 | L | Codex `gpt-6.2-sol` xhigh | Claude Code `claude-opus-5-5` high | Codex `gpt-6.2-astra` xhigh, then Claude Code `claude-fable-5-2` high |
 | XL | Codex `gpt-6.2-astra` high | Claude Code `claude-opus-5-5` xhigh | Codex `gpt-6.2-sol` xhigh, then Claude Code `claude-fable-5-2` high |
 
 Sol is weaker than Fable and Astra, so Opus reviews what either wrote below XL.
 A model may review its own work, in a session of its own, so the writer's model
 is never skipped for that alone. The rest of the row follows in order while
-those before it are out. Fable never reviews above high: its usage limit is the
-XL writers', and its xhigh costs far more than Opus xhigh.
+those before it are out, Opus never below the size's writer effort. The lists
+never run Fable above high: its usage limit is the XL writers', and its xhigh
+costs far more than Opus xhigh.
 
 The reviewers run at once;
 the first to fail, such as on a usage limit, stops the others, and the round
 saves none.
 
 A reviewer that cannot run passes the round to the next eligible one, so
-Astra reviews what Opus changed last while Sol is out, and Fable while all of
-Codex is. That is a failure the CLI or provider reports before any finding is
+Opus reviews what Opus changed last while Sol is out, at no lower effort than
+its writer, and Fable while all of Codex is out. That is a failure the CLI or provider reports before any finding is
 saved, never text in the diff or a reply: a CLI that is not installed, logged
 out, or has its login rejected, or sent to a gateway with no credential,
 passes over every model of that CLI, and a
@@ -1756,8 +1757,7 @@ maintainer's checkout of a contributor's fork PR. It
 prints `record <url>`. The record
 names the reviewed head and the base's short SHA, the head's risk tier and who
 classified it, then for each reviewer its
-harness, model, and effort, its Reviewer line ending in `, shadow` for the
-shadow or `, second` for the second reviewer, the session and round, the score and rationale, the tier it raised the
+harness, model, and effort, its Reviewer line ending in `, second` for the second reviewer, the session and round, the score and rationale, the tier it raised the
 risk to and why, its tally, each finding with
 its location, and the last round's findings with their dispositions. The
 tally, as `- Rounds: 3; first round 2 (medium 2); findings 4 (high 1, medium 3): fixed 3, refuted 1, open 0`,
@@ -1895,8 +1895,7 @@ says so. A high head gets a
 second reviewer: the first of the `high` list (Codex `gpt-6.2-sol` xhigh,
 Claude Code `claude-opus-5-5` xhigh, Claude Code `claude-fable-5-2` high,
 Codex `gpt-6.2-astra` xhigh) from a vendor other than the pick's that can
-run, so Sol and Opus review Opus's work, and Opus and Astra Sol's or
-Fable's. It is marked `second`, in a session of its own that
+run, so Sol and Opus review Opus's work, and Opus and Astra Fable's. It is marked `second`, in a session of its own that
 reviews every head while the tier is high and settles its findings after. A
 head the classifier or `--override` holds high also takes its pick from that
 list, whatever the PR's size; a reviewer's raise changes only the second

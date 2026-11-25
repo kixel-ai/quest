@@ -73,16 +73,17 @@ export const unfit =
 
 /**
  * Each list's reviewers, ranked: the first not {@link weaker} than the latest writer's model reviews the PR, which
- * may be the writer's own model, and one that cannot run passes the review to the next. Another Codex model and then
- * Fable close each size's list, so a PR still has a reviewer while Sol, or all of Codex, is out. A high head reviews
+ * may be the writer's own model, and one that cannot run passes the review to the next. Opus never runs below the
+ * size's writer effort, since it may review its own work. Another Codex model and then Fable close each size's list,
+ * so a PR still has a reviewer while Sol, or all of Codex, is out. A high head reviews
  * from `high`, whatever its size: the pick, then a second reviewer from the other vendor, so Sol and Opus review
  * Opus's work, Opus and Astra Fable's. XL starts on Astra, the vendor's frontier model, at high rather than xhigh. Fable
  * never reviews above high, since its usage limit is the XL writers', and xhigh costs it far more than Opus xhigh.
  */
 export const REVIEWERS: Record<Listing, readonly ReviewModel[]> = {
 	XS: [sol("medium"), opus("low"), astra("medium"), fable("medium")],
-	S: [sol("medium"), opus("low"), astra("medium"), fable("medium")],
-	M: [sol("high"), opus("medium"), astra("high"), fable("high")],
+	S: [sol("medium"), opus("medium"), astra("medium"), fable("medium")],
+	M: [sol("high"), opus("high"), astra("high"), fable("high")],
 	L: [sol("xhigh"), opus("high"), astra("xhigh"), fable("high")],
 	XL: [astra("high"), opus("xhigh"), sol("xhigh"), fable("high")],
 	high: [sol("xhigh"), opus("xhigh"), fable("high"), astra("xhigh")],
