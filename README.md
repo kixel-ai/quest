@@ -355,7 +355,9 @@ The check is a floor, not a review: any edit to the quest passes, so reviewers
 still judge whether a rewrite matches what remains.
 
 `quest check` also compares the repository's skill stubs with the skills its
-binary carries, and reports a missing, outdated, or retired one. A job that
+binary carries, and reports a missing, outdated, or retired one, and reports
+each audit its binary ships that no quest names and `## Skipped audits` does
+not list, so an upgrade that adds an audit asks for `quest init`. A job that
 checks a PR with a binary built from the base passes `--no-stubs`, since that
 binary's skills would reject a PR that changes a stub; the PR's own binary
 checks them in its own `quest check`. This repository's merge queue and

@@ -604,7 +604,7 @@ test("init refuses a stub's path that other work holds, writing nothing", () => 
 	expect(snapshot(dir)).toEqual(before);
 });
 
-test("a held audit path leaves the skill stub findings in place", () => {
+test("stub check reports a held audit path beside the skill stub findings", () => {
 	const dir = tempDir();
 	init(dir);
 	write(dir, "quest/m0/work.md", QUEST);
@@ -613,7 +613,26 @@ test("a held audit path leaves the skill stub findings in place", () => {
 	rmSync(join(dir, ".claude/skills/quest-start"), { recursive: true });
 	expect(stubFindings(dir)).toEqual([
 		".claude/skills/quest-start/SKILL.md: is missing; run the repository's pinned `quest init` and commit the result",
+		"quest/m1/audit-deps.md is in the way of the `deps` audit's stub, which no quest names; remove or rename it before running `quest init`",
 	]);
+});
+
+test("stub check flags a shipped audit without a stub until a quest names it or the root skips it", () => {
+	const dir = tempDir();
+	init(dir);
+	write(dir, "quest/m0/work.md", QUEST);
+	const stub = read(dir, "quest/m1/audit-instructions.md");
+	rmSync(join(dir, "quest/m1/audit-instructions.md"));
+	expect(stubFindings(dir)).toEqual([
+		"quest/m1/audit-instructions.md: is missing; run the repository's pinned `quest init` and commit the result, or list `instructions` under `## Skipped audits` in `quest/README.md`",
+	]);
+
+	write(dir, "quest/m1/audit-instructions.md", stub);
+	expect(stubFindings(dir)).toEqual([]);
+
+	rmSync(join(dir, "quest/m1/audit-instructions.md"));
+	write(dir, "quest/README.md", `${read(dir, "quest/README.md")}\n## Skipped audits\n\n- instructions\n`);
+	expect(stubFindings(dir)).toEqual([]);
 });
 
 test("init refuses a quest whose branch a new milestone would nest under", () => {

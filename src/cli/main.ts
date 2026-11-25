@@ -261,8 +261,9 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"one that leaves work rewrites it to what remains. Any other branch adds no finding. Fetch <ref> " +
 				"first: a stale base can predate the quest and skip it.\n\n" +
 				"A repository's own check also compares its skill stubs with the skills this binary carries, and " +
-				"reports a missing, outdated, or retired one. --no-stubs skips that, for a binary built from a base " +
-				"that checks a PR whose stubs follow the PR's own skills. It also reads the repository's RISK.md, if " +
+				"reports a missing, outdated, or retired one, and reports each audit this binary ships that no quest " +
+				"names and the root README does not skip, whose stub quest init would plant. --no-stubs skips both, " +
+				"for a binary built from a base that checks a PR whose stubs follow the PR's own skills. It also reads the repository's RISK.md, if " +
 				"any, as quest review reads the base's, and reports each item of its ## High list that is not a " +
 				"backticked path pattern, ` - `, and a reason, and each item of its ## Automatic list that is not a " +
 				"backticked class name, an optional scope of backticked path patterns joined by `, ` in parentheses, " +
@@ -279,7 +280,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		)
 		.option("--base <ref>", "Also check the quest branch's diff from its merge base with this ref")
 		.option("--branch <name>", "The PR's head branch, when it differs from the current branch (needs --base)")
-		.option("--no-stubs", "Skip the comparison of the repository's skill stubs with this binary's skills")
+		.option("--no-stubs", "Skip the comparison of the repository's skill and audit stubs with this binary's")
 		.option(
 			"--fix",
 			"First drop list links to quests the history deleted and epics' links to their own quests, and promote misleveled section headings",

@@ -342,7 +342,7 @@ export function hook(input: unknown, deps: HookDependencies = { env: process.env
 			const context =
 				stubs === 0
 					? CONTEXT
-					: `${CONTEXT}\nQuest skill stubs here differ from what quest ${version} installs (\`quest check\` lists ${stubs}): in a PR, run \`quest init\` with the repository's pinned quest, bumping the pin first if it is older.\n`;
+					: `${CONTEXT}\nQuest's skill and audit stubs here differ from what quest ${version} plants (\`quest check\` lists ${stubs}): in a PR, run \`quest init\` with the repository's pinned quest, bumping the pin first if it is older, or list an unwanted audit under \`## Skipped audits\` in \`quest/README.md\`.\n`;
 			return JSON.stringify({ hookSpecificOutput: { hookEventName: event, additionalContext: context } });
 		}
 		case "PreToolUse": {
