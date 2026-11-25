@@ -54,13 +54,15 @@ const day = (ms: number) => new Date(ms).toISOString().slice(0, 10);
 export function appendLog(dir: string, value: unknown, now: number, what: string): void {
 	try {
 		mkdirSync(dir, { recursive: true, mode: 0o700 });
-		const line = Buffer.from(`${JSON.stringify(value)}\n`);
 		const fd = openSync(
 			join(dir, `${day(now)}.jsonl`),
 			constants.O_WRONLY | constants.O_APPEND | constants.O_CREAT | constants.O_NOFOLLOW,
 			0o600,
 		);
 		try {
+			// A short write, as on a full disk, leaves a line cut short. Starting each record on a fresh line in the
+			// same write costs such a fragment only its own record, even when another writer's lands right after it.
+			const line = Buffer.from(`\n${JSON.stringify(value)}\n`);
 			const written = writeSync(fd, line);
 			if (written !== line.length) throw new Error(`wrote ${written} of ${line.length} bytes`);
 		} finally {
@@ -91,8 +93,8 @@ export function logDays(dir: string): string[] {
 }
 
 /**
- * The lines in `dir`'s files from `since`'s UTC day on, as `parse` reads each, failing on a line it cannot read
- * except a last one still being written.
+ * The lines in `dir`'s files from `since`'s UTC day on, as `parse` reads each, skipping and reporting on stderr each
+ * line it cannot read.
  */
 export function readLog<T>(dir: string, since: number, parse: (line: string) => T | null, what: string): T[] {
 	return readDays(
@@ -108,17 +110,15 @@ export function readDays<T>(dir: string, days: string[], parse: (line: string) =
 	const read: T[] = [];
 	for (const name of days) {
 		const path = join(dir, `${name}.jsonl`);
-		const lines = readFileSync(path, "utf8").split("\n");
-		lines.forEach((line, i) => {
-			if (line === "") return;
-			const value = parse(line);
-			if (value === null) {
-				// A writer appends whole lines, so only a last line still being written may be cut short.
-				if (i === lines.length - 1) return;
-				throw new Error(`${path}:${i + 1} is not ${what} quest logged`);
-			}
-			read.push(value);
-		});
+		readFileSync(path, "utf8")
+			.split("\n")
+			.forEach((line, i) => {
+				if (line === "") return;
+				const value = parse(line);
+				// A short write leaves a line cut short, which no one will repair; one bad line must not stop the rest.
+				if (value === null) process.stderr.write(`quest: skipped ${path}:${i + 1}, not ${what} quest logged\n`);
+				else read.push(value);
+			});
 	}
 	return read;
 }
@@ -135,7 +135,7 @@ export function logWait(
 	appendLog(waitsDirectory(env), logged, options.now ?? Date.now(), "wait");
 }
 
-/** The waits logged on this host that ended at or after `since`, failing on a line it cannot read. */
+/** The waits logged on this host that ended at or after `since`, skipping a line it cannot read. */
 export function readWaits(since: number, env: NodeJS.ProcessEnv = process.env): LoggedWait[] {
 	return readLog(waitsDirectory(env), since, parseLogged, "a wait").filter((w) => Date.parse(w.end) >= since);
 }

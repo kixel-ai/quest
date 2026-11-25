@@ -179,7 +179,8 @@ function treeCheck(dir: string, commit: string): Keyed[] {
 			{ lines: source.text.split(/\r\n?|\n/), entries: docs[index].entries },
 		]),
 	);
-	return check(docs, exists).map((finding) => {
+	// As `--no-stubs` does: a head may ship an audit this binary does not, with its stub.
+	return check(docs, exists, { auditNames: false }).map((finding) => {
 		const file = files.get(finding.path);
 		const line = finding.line;
 		if (line === null || file === undefined) return { finding, key: `${finding.path}\0${finding.message}\0` };

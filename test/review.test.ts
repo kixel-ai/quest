@@ -41,6 +41,7 @@ import {
 	tallied,
 	verdict,
 } from "../src/cli/review";
+import { runsFromCheckout, runsFromHead } from "../src/cli/own-build";
 import { withReview } from "../src/cli/review-record";
 import { implementer, recorded, sameModel } from "../src/cli/models-record";
 import { tempDir } from "./fixture";
@@ -56,6 +57,7 @@ import {
 	fakes,
 	git,
 	quest,
+	questFrom,
 	setup,
 	write,
 } from "./review-fakes";
@@ -1024,6 +1026,44 @@ fakes("--base reviews against another branch, fetched first, with that branch's 
 	expect(unknown.stderr).toContain("--base must be <remote>/<branch>");
 });
 
+fakes("the base is the commit the round's fetch returned, whatever moves the tracking ref afterwards", async () => {
+	const s = setup();
+	const old = git(s.repo, "rev-parse", "origin/main");
+	// A second writer of the tracking ref, such as another fetch, runs as soon as the fetch has written its refs.
+	const hook = join(s.repo, ".git", "hooks", "reference-transaction");
+	write(
+		s.repo,
+		".git/hooks/reference-transaction",
+		`#!/bin/sh\n[ "$1" = committed ] && grep -q '^0* [0-9a-f]* refs/quest/base' && git update-ref refs/remotes/origin/main ${old}\nexit 0\n`,
+	);
+	chmodSync(hook, 0o755);
+	const advance = (name: string) => {
+		git(s.repo, "checkout", "-q", "main");
+		write(s.repo, "NEWS.md", `${name}\n`);
+		git(s.repo, "add", ".");
+		git(s.repo, "commit", "-qm", name);
+		git(s.repo, "push", "-q", "origin", "main");
+		git(s.repo, "checkout", "-q", "feature");
+		return git(s.repo, "rev-parse", "main");
+	};
+
+	// The fetch moves the tracking ref, then the writer sets it back.
+	const moved = advance("moved");
+	git(s.repo, "update-ref", "refs/remotes/origin/main", old);
+	const first = await quest("--root", s.repo, "review");
+	expect(first.code).toBe(0);
+	expect(first.stdout).toContain(`base ${moved} origin/main\n`);
+	expect(git(s.repo, "rev-parse", "refs/remotes/origin/main")).toBe(old);
+
+	// The tracking ref is already current, so the fetch writes only the private ref, and the writer still sets it back.
+	git(s.repo, "update-ref", "refs/remotes/origin/main", moved);
+	const second = await quest("--root", s.repo, "review", "--new");
+	expect(second.code).toBe(0);
+	expect(second.stdout).toContain(`base ${moved} origin/main\n`);
+
+	expect(git(s.repo, "for-each-ref", "refs/quest")).toBe("");
+});
+
 test.skipIf(caseInsensitive)(
 	"agy's read rules leave every path outside the turn's directory under a denied one, and none inside",
 	() => {
@@ -1375,7 +1415,7 @@ agyFakes("agy is refused where a directory leading to its workspace matches name
 	expect(s.calls().filter((call) => call.argv[0] !== "models")).toEqual([]);
 });
 
-agyFakes("agy is refused with a Git older than 2.41, which has no --attr-source", async () => {
+fakes("a review is a usage error with a Git older than 2.41, which has no --attr-source", async () => {
 	const s = setup("CLAUDECODE");
 	const real = execFileSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).trim();
 	write(
@@ -1384,11 +1424,11 @@ agyFakes("agy is refused with a Git older than 2.41, which has no --attr-source"
 		`#!/bin/sh\nif [ "$1" = version ]; then echo "git version 2.40.1"; exit 0; fi\nexec "${real}" "$@"\n`,
 	);
 	chmodSync(join(s.bin, "git"), 0o755);
-	const result = await quest("--root", s.repo, "review", ...AGY);
-	expect(result.code, result.stderr).toBe(3);
-	expect(result.stderr).toContain("agy needs Git 2.41 or later");
+	const result = await quest("--root", s.repo, "review");
+	expect(result.code, result.stderr).toBe(2);
+	expect(result.stderr).toContain("quest review needs Git 2.41 or later");
 	expect(result.stderr).toContain("git version 2.40.1 is installed");
-	expect(s.calls().filter((call) => call.argv[0] !== "models")).toEqual([]);
+	expect(s.calls()).toEqual([]);
 });
 
 agyFakes("agy's status check failing other than on its login fails as it is, rather than as logged out", async () => {
@@ -1955,6 +1995,60 @@ fakes(
 			"R100\tsrc/lib.ts\tdocs/lib.md",
 		);
 		expect((await offered()).names).toEqual(["any", null]);
+	},
+	20_000,
+);
+
+fakes(
+	"the classifier sees every hunk, whatever the head's attributes and bytes say",
+	async () => {
+		const s = setup();
+		moveBase(s.repo, (dir) => write(dir, "RISK.md", riskFile([])));
+		vi.stubEnv("FAKE_RISK", JSON.stringify({ tier: "medium", reason: "It changes the output." }));
+		vi.stubEnv("FAKE_REPLY", JSON.stringify({ score: 10, rationale: "Lands as is.", findings: [] }));
+		// A head that marks its source binary.
+		write(s.repo, "src/lib.ts", "export const x = 3;\n");
+		write(s.repo, ".gitattributes", "src/lib.ts -diff\n");
+		git(s.repo, "add", ".");
+		git(s.repo, "commit", "-qm", "hide the hunks");
+		const first = await quest("--root", s.repo, "review");
+		expect(first.code, first.stderr).toBe(0);
+		const [call] = classifying(s.calls());
+		expect(call!.stdin).toContain("-export const x = 1;\n+export const x = 3;");
+		expect(call!.stdin).not.toContain("Binary files");
+		// Bytes that are not UTF-8, before any NUL byte is in the diff, would decode to far more characters, so they go down the file path too.
+		writeFileSync(join(s.repo, "src/bin.ts"), Buffer.alloc(150_000, 0xff));
+		git(s.repo, "add", ".");
+		git(s.repo, "commit", "-qm", "plant invalid UTF-8");
+		expect((await quest("--root", s.repo, "review")).code).toBe(0);
+		const bin = classifying(s.calls()).at(-1)!;
+		expect(bin.stdin).not.toContain("\uFFFD");
+		expect(bin.stdin).toContain("or holds binary data");
+		// A NUL byte planted in another file, which Git calls binary itself, or a real binary keeps its bytes out of the
+		// prompt, which names the file of the whole diff instead.
+		write(s.repo, "src/nul.ts", "export const y = 1;\0\n");
+		git(s.repo, "add", ".");
+		git(s.repo, "commit", "-qm", "plant a NUL byte");
+		expect((await quest("--root", s.repo, "review")).code).toBe(0);
+		const nul = classifying(s.calls()).at(-1)!;
+		expect(nul.stdin).not.toContain("\0");
+		expect(nul.stdin).toContain("or holds binary data");
+		expect(Object.values(nul.readable!)[0]).toContain("+export const y = 1;\0");
+		// Past the budget, the prompt holds the stat and names a file of the attribute-free diff, which the turn may read.
+		write(s.repo, "src/big.ts", `${"export const z = 1;\n".repeat(11_000)}`);
+		git(s.repo, "add", ".");
+		git(s.repo, "commit", "-qm", "grow past the budget");
+		expect((await quest("--root", s.repo, "review")).code).toBe(0);
+		const big = classifying(s.calls()).at(-1)!;
+		expect(big.stdin).not.toContain("<diff>\n\n+");
+		const dir = big.argv[big.argv.indexOf("--add-dir") + 1]!;
+		const [name, patch] = Object.entries(big.readable!)[0]!;
+		expect(big.stdin).toContain(`\`${join(dir, name)}\`, which holds`);
+		expect(patch).toContain("+export const x = 3;");
+		expect(patch).toContain("+export const y = 1;\0");
+		expect(patch).toContain("+export const z = 1;");
+		// The scratch directory is gone once the classifier has answered.
+		expect(existsSync(dir)).toBe(false);
 	},
 	20_000,
 );
@@ -3272,4 +3366,74 @@ test("a question about data alone runs with no tools on either CLI", () => {
 	])
 		expect(codex).toContain(off);
 	expect(codexFlags(context)).not.toContain("features.shell_tool=false");
+});
+
+fakes("a review run from the judged checkout's own source records nothing", async () => {
+	const s = setup();
+	const own = [join(s.repo, "src/lib.ts")];
+	const installed = [join(s.bin, "codex")];
+	// An installed quest and a source run in another checkout both record as ever.
+	const outside = await questFrom(installed, "--root", s.repo, "review", "--json");
+	expect(JSON.parse(outside.stdout).record).toEqual({ skipped: "origin is not on GitHub or Kixel Quest" });
+
+	const inside = await questFrom(own, "--root", s.repo, "review", "--new");
+	expect(inside.stderr).toBe("");
+	expect(inside.code).toBe(0);
+	// The round ran, and the report says to rerun instead of naming a forge.
+	expect(inside.stdout).toContain("score 8 ");
+	expect(inside.stdout).toContain(
+		"record skipped: this quest runs from the source of the checkout it judges; rerun with an installed quest for the record that counts\n",
+	);
+	expect(inside.stdout).not.toContain("origin is not on GitHub");
+
+	const json = await questFrom(own, "--root", s.repo, "review", "--new", "--json");
+	expect(JSON.parse(json.stdout).record).toEqual({
+		skipped: expect.stringContaining("rerun with an installed quest"),
+	});
+});
+
+test("a source run in a checkout is that checkout's own build, an installed one is not", () => {
+	const s = setup();
+	const other = tempDir();
+	git(other, "init", "-q");
+	write(other, "bin.ts", "");
+	expect(runsFromCheckout(s.repo, undefined)).toBe(false);
+	expect(runsFromCheckout(s.repo, [join(s.repo, "src/lib.ts")])).toBe(true);
+	// A subdirectory of the checkout, and a path that is gone, stand beside it.
+	expect(runsFromCheckout(join(s.repo, "src"), [join(s.repo, "src/lib.ts"), "/$bunfs/root/quest"])).toBe(true);
+	expect(runsFromCheckout(s.repo, [join(s.repo, "missing"), "/$bunfs/root/quest"])).toBe(false);
+	expect(runsFromCheckout(s.repo, [join(other, "bin.ts")])).toBe(false);
+	expect(runsFromCheckout(s.repo, [join(s.bin, "codex")])).toBe(false);
+	// A root that is no checkout is not one to judge.
+	expect(runsFromCheckout(other + "/nowhere", [join(other, "bin.ts")])).toBe(false);
+});
+
+test("quest merge from the checkout's own source refuses before any write", async () => {
+	const s = setup();
+	const result = await questFrom(
+		[join(s.repo, "src/lib.ts")],
+		"--root",
+		s.repo,
+		"merge",
+		"https://github.com/example/project/pull/7",
+		"--land",
+		"a".repeat(40),
+	);
+	expect(result).toMatchObject({ code: 2, stdout: "" });
+	expect(result.stderr).toContain("rerun with an installed quest");
+});
+
+test("quest merge refuses from any directory when the running source holds the PR's head", async () => {
+	const s = setup();
+	const other = tempDir();
+	git(other, "init", "-q");
+	const head = git(s.repo, "rev-parse", "HEAD");
+	const url = "https://github.com/example/project/pull/7";
+	// --root names another checkout, but the source that runs holds the pinned head.
+	const own = await questFrom([join(s.repo, "src/lib.ts")], "--root", other, "merge", url, "--land", head);
+	expect(own.stderr).toContain("rerun with an installed quest");
+	expect(own).toMatchObject({ code: 2, stdout: "" });
+	expect(own.stderr).toContain("rerun with an installed quest");
+	expect(runsFromHead(head, [join(s.bin, "codex")])).toBe(false);
+	expect(runsFromHead("a".repeat(40), [join(s.repo, "src/lib.ts")])).toBe(false);
 });
