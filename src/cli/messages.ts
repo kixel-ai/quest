@@ -189,12 +189,7 @@ export function repositories(
 	// By checkout, so its subdirectories and removed worktrees share one lookup.
 	const hosts = new Map<string, RemoteHost | null>();
 	const kixel = kixelUrl(env);
-	const named = (host: RemoteHost | null) =>
-		host === null
-			? null
-			: host.forge === "kixel"
-				? `${new URL(kixel).host}/${host.repository.owner}/${host.repository.repo}`
-				: `${host.repository.owner}/${host.repository.repo}`;
+	const named = (host: RemoteHost | null) => forgeName(host, kixel);
 	const name = (dir: string): string => {
 		let found = names.get(dir);
 		if (found === undefined) {
@@ -232,15 +227,35 @@ export function repositories(
 	};
 }
 
-/** The physical path of `dir`, or null when it does not exist, as when its worktree is removed while being read. */
+/**
+ * The physical path of `dir`, or null when it cannot be resolved, as when its worktree is removed while being read or
+ * a directory on its path became a file: a session's recorded directory is history, not input to validate.
+ */
 function physical(dir: string): string | null {
 	try {
 		return realpathSync(dir);
-	} catch (error) {
-		if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
-		throw error;
+	} catch {
+		return null;
 	}
 }
+
+/** A repository on either forge as the output names it, or null for none. */
+function forgeName(host: RemoteHost | null, kixel: string): string | null {
+	if (host === null) return null;
+	const { owner, repo } = host.repository;
+	return host.forge === "kixel" ? `${new URL(kixel).host}/${owner}/${repo}` : `${owner}/${repo}`;
+}
+
+/**
+ * The repository the checkout holding the existing directory `dir` names, as the output names it, or null when its
+ * origin names neither forge. Unlike `Repositories.name`, it never names a missing directory by its history.
+ */
+export function checkoutRepository(dir: string, env: NodeJS.ProcessEnv): string | null {
+	return forgeName(originHost(checkoutRoot(realpathSync(dir)), env), kixelUrl(env));
+}
+
+/** A repository's `owner/name`, whichever forge it is on. */
+const ownerName = (name: string) => name.split("/").slice(-2).join("/").toLowerCase();
 
 /** Files under `dir` with `.jsonl` names written since `since`, recursively; a log untouched since holds nothing newer. */
 function logsSince(dir: string, since: number): string[] {
@@ -419,12 +434,15 @@ export function readCodexMessages(path: string, since: number, repositories: Rep
 			typed = payload.originator !== T3_CODEX;
 			unmarked = writesNoProvenance(payload.cli_version);
 			session = payload.id;
-			// The directory's origin names it as other harnesses' sessions there are named; the URL Codex recorded, which
-			// can be rewritten or outdated, names only a directory that no longer has one.
+			// The directory's origin names it as other harnesses' sessions there are named, since the URL Codex recorded
+			// can carry an `insteadOf` rewrite to the same owner/name elsewhere; a recorded repository of another
+			// owner/name means the directory has since held another checkout, and one that names none, no checkout.
 			const dir = typeof payload.cwd === "string" ? repositories.name(payload.cwd, payload.id) : null;
 			const url = (payload.git as Record<string, unknown> | undefined)?.repository_url;
 			const recorded = typeof url === "string" ? repositories.origin(url) : null;
-			const repository = dir !== null && !isAbsolute(dir) ? dir : (recorded ?? dir);
+			const current = dir !== null && !isAbsolute(dir);
+			const repository =
+				current && (recorded === null || ownerName(recorded) === ownerName(dir)) ? dir : (recorded ?? dir);
 			if (repository === null) throw new Error(`${path} names no directory`);
 			where = repository;
 			return true;
@@ -739,7 +757,7 @@ export function messages(query: MessagesQuery, deps: MessagesDependencies): Entr
 	}
 	if (existsSync(t3)) found.push(...readT3Messages(state, from, scope));
 	// The others are counted, never named; a directory no origin names can hold this repository's sessions.
-	const others = new Set(found.filter((entry) => !keep(entry)).map((entry) => entry.repository));
+	const others = new Set(found.filter((entry) => !keep(entry)).map((entry) => folded(entry.repository)));
 	if (others.size) {
 		const unnamed = [...others].filter((name) => isAbsolute(name)).length;
 		deps.warn?.(

@@ -780,6 +780,15 @@ describe("messages", () => {
 				codexTurn("2026-11-06T11:00:00Z", [["and test", "user"]]),
 			),
 		);
+		const reused = "11111111-2222-3333-4444-555555555555";
+		writeFileSync(
+			join(home, ".codex", "sessions", `rollout-2026-11-06T10-00-00-${reused}.jsonl`),
+			lines(
+				// The directory held another repository's checkout when Codex recorded it.
+				codexMeta({ id: reused, cwd: proj, git: { repository_url: "https://github.com/Acme/Old.git" } }),
+				codexTurn("2026-11-06T11:30:00Z", [["old work", "user"]]),
+			),
+		);
 		const state = join(home, ".t3", "userdata", "statev2.sqlite");
 		mkdirSync(dirname(state), { recursive: true });
 		t3State(state, proj, [], join(home, "t3-gone"));
@@ -801,9 +810,9 @@ describe("messages", () => {
 			["message", "codex", "acme/proj", "and test"],
 		]);
 		expect(notes).toEqual([
-			"printed acme/proj's entries only, leaving out 2 other repositories', 2 of them directories no GitHub or Kixel Quest origin names",
+			"printed acme/proj's entries only, leaving out 3 other repositories', 2 of them directories no GitHub or Kixel Quest origin names",
 		]);
-		expect(messages({ since: "2026-11-01", repository: null }, { env: {}, home })).toHaveLength(4);
+		expect(messages({ since: "2026-11-01", repository: null }, { env: {}, home })).toHaveLength(5);
 		// A provider row SQLite cannot read, with no message of its own, maps no session and fails no read.
 		const broken = new DatabaseSync(state);
 		broken.prepare("INSERT INTO projection_projects VALUES ('theirs', ?)").run(other);
@@ -814,7 +823,7 @@ describe("messages", () => {
 		`);
 		broken.close();
 		expect(read()).toEqual(mine);
-		expect(messages({ since: "2026-11-01", repository: null }, { env: {}, home })).toHaveLength(4);
+		expect(messages({ since: "2026-11-01", repository: null }, { env: {}, home })).toHaveLength(5);
 	});
 
 	test("names each forge's repository from the configured origin of the physical directory", () => {
