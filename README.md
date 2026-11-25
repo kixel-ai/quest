@@ -1519,7 +1519,7 @@ whole branch at the PR's size.
 `quest review` has a model no weaker than the latest writer review the checkout's
 committed and pushed branch before it is marked ready for review, at an effort set by the PR's
 size. It needs Git 2.41 or later, whose `--attr-source` keeps a head's
-`.gitattributes` from hiding its hunks from the reviewers, and is a usage error
+`.gitattributes` from hiding its hunks from the risk classifier, and is a usage error
 before it; `--accept` runs no diff and is exempt. Each size has two reviewers,
 the same for every repository:
 

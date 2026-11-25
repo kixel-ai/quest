@@ -1076,7 +1076,7 @@ function requireAttrSource(): void {
 	// A Git that prints no version fails on the first command that needs it.
 	if (major === undefined || minor === undefined || major > 2 || (major === 2 && minor >= 41)) return;
 	throw new ReviewInputError(
-		`quest review needs Git 2.41 or later, whose --attr-source keeps the head's .gitattributes from hiding its hunks from the reviewers; ${printed} is installed`,
+		`quest review needs Git 2.41 or later, whose --attr-source keeps the head's .gitattributes from hiding its hunks from the classifier; ${printed} is installed`,
 	);
 }
 
@@ -2076,10 +2076,10 @@ export function classifyPrompt(
 		`The repository's risk file, read from ${RISK_FILE} at the base branch's tip ${file.sha}:\n\n<risk-file>\n${file.text}\n</risk-file>`,
 		whole
 			? `The change, \`git diff --stat --patch ${range}\`:`
-			: `The diff is ${stat.length + size} characters or holds binary data, which this prompt does not hold, so only its stat ` +
+			: `The diff is ${stat.length + size} bytes or holds binary data, which this prompt does not hold, so only its stat ` +
 				`follows${shown.length < stat.length ? ", cut short" : ""}. Read the parts you need from ` +
 				// A file, since no Bash command with the flags that keep the head's attributes out is allowed the classifier.
-				`\`${patchFile}\`, which holds \`git diff --stat --patch ${range}\` with every file shown as text, ` +
+				`\`${patchFile}\`, which holds \`git diff --patch ${range}\` with every file shown as text, ` +
 				"whatever the head's attributes say.",
 		`<diff>\n${shown}\n</diff>`,
 		"Report the change's tier as JSON matching the response schema, with one sentence on what could break, for " +
