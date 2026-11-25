@@ -682,7 +682,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"url, state, draft, head, mergeable, merge-state, review-decision, review-record, risk, class, auto-merge, merge-queue, " +
 				"landing-stopped, and checks, whose state and counts follow the checks that count, pending while an open PR's base requires a check or workflow nothing reports; review-record gives whether the PR body's ## Review record " +
 				"covers the head, as current, diff-identical (git diff <base>...<head> prints the same as for the head it names), " +
-				"stale, or unknown when GitHub cannot compare them, then the head it names last; risk gives the record's risk " +
+				"stale, or unknown when GitHub cannot compare them, then the head it names last, or - when the section holds no record quest review wrote or it names no full SHA; risk gives the record's risk " +
 				"tier, the same state for its head, the tier its classifier set before any reviewer raised it, and the " +
 				"reason last, - when the record names none, or - malformed - and why when its risk lines do not parse; class gives the RISK.md ## Automatic class the record's classifier named, or -; auto-merge gives its method, who enabled it and when, and the head it was " +
 				"enabled on, which differs from head once a push follows, as GitHub keeps auto-merge across a writer's " +
@@ -869,7 +869,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"resolution an App posted on the PR and refuses (exit 3) when the PR's head is no longer the one it " +
 				"resolved. Fetches that head and base, recomputes the merge's conflicted result as the daemon did, " +
 				"applies the fixer's patch, and checks the resolved tree before committing with your identity. Prints the commit and the push command; " +
-				"nothing is pushed and the working tree is untouched.",
+				"nothing is pushed and the working tree is untouched. The commit is no recorded mechanical fix, so the pushed head needs a review that counts for it.",
 		)
 		.argument("<pr>", "GitHub PR URL, or a PR number in origin")
 		.action((value: string) => {

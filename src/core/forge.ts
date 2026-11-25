@@ -64,8 +64,8 @@ export interface Thread {
 }
 
 /**
- * The head the PR body's `## Review` section names last, the latest reviewed one: a round's record, or a line after
- * it for low-severity fixes or a skip. `current` is the PR's head; `diff-identical` an earlier head whose diff from
+ * The head the `## Review` section holding `quest review`'s record names last, the latest reviewed one: a round's, or a
+ * line after it for low-severity fixes. `current` is the PR's head; `diff-identical` an earlier head whose diff from
  * the base (`git diff <base>...<sha>`) matches the head's; `unknown` one the forge cannot compare, such as a diff too
  * large to render.
  */
@@ -135,7 +135,7 @@ export interface Status {
 	reviews: Review[];
 	/** The design checkpoints online reviewers put on the head. */
 	checkpoints: { reviewer: string; round: number; url: string }[];
-	/** Null when the `## Review` section names no full SHA. */
+	/** Null when the `## Review` section holds no record `quest review` wrote, or it names no full SHA. */
 	reviewRecord: ReviewRecord | null;
 	/**
 	 * The head's risk tier as the `## Review` record names it, and the classifier's own tier, lower when a reviewer

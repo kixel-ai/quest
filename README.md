@@ -579,7 +579,7 @@ comes last, and a missing value prints as `-`:
 | --- | --- |
 | `url`, `state`, `draft`, `head` | The PR URL; `open`, `closed`, or `merged`; `true` or `false`; the head SHA. |
 | `mergeable`, `merge-state`, `review-decision` | GitHub's values, lowercased. |
-| `review-record` | Whether the PR body's [`## Review` record](#review-locally) still covers the head, and the head it names last: `current` when it is the head, `diff-identical` when `git diff <base>...<head>` prints the same as for it, `stale` otherwise, or `unknown` when GitHub cannot compare them, such as a diff too large; `-` when the record names no full SHA. Whose record counts is the reader's call. |
+| `review-record` | Whether the PR body's [`## Review` record](#review-locally) still covers the head, and the head it names last: `current` when it is the head, `diff-identical` when `git diff <base>...<head>` prints the same as for it, `stale` otherwise, or `unknown` when GitHub cannot compare them, such as a diff too large; `-` when the section holds no record `quest review` wrote, or it names no full SHA. Whose record counts is the reader's call. |
 | `risk` | The record's [risk tier](#risk-tiers), `low`, `medium`, or `high`; the same state as `review-record` for the head it names; the tier its classifier set before any reviewer raised it; and the reason. `-` when the record names none, and `- malformed -` with why when its risk lines do not parse, which `quest merge` refuses. |
 | `class` | The `## Automatic` class of the base's `RISK.md` the record's classifier found the change in, or `-`. |
 | `auto-merge` | Method, who enabled it, when, and the head it was enabled on. |
@@ -1030,10 +1030,17 @@ restart only where the host leaves its process group alive (under systemd,
 `KillMode=process` on the daemon's unit); otherwise its handback names the signal
 and the restart. After the wrapper exits, the
 daemon validates every result, ancestry, and protected path before lease-pushing
-as the bot. The protected set as a whole must match the pinned head or its merge with the
-current base, including content and mode. It covers `flake.nix`, `flake.lock`,
-`shell.nix`, `default.nix`, `nix/`, `.envrc`, `.github/`, `.gitmodules`, and gitlinks
-anywhere. Collection copies at most 100 MiB of Git metadata the fixer added into a
+as the bot. A head that takes none of the base's history keeps the protected set as
+the pinned head has it, content and mode; one that does merges the whole base the
+fixer was given, resolves no conflict in the protected set, not even by keeping the
+PR's side, nor one Git's merge names no conflicted file for, such as a directory
+rename split, and keeps that set as a plain merge of the base leaves it. It covers
+`flake.nix`, `flake.lock`, `shell.nix`, `default.nix`, `nix/`, `.envrc`, `.github/`,
+`.gitmodules`, gitlinks anywhere, and every path `quest review` holds high from the
+base's `RISK.md`; on a high PR, one whose `## Review` record rates it high or whose
+own change touches such a path, it covers every path. So a high change lands only
+after a local review. The watcher's own merge with the quest merge driver, below, is
+no fixer edit: it runs no model and resolves only `quest/` files. Collection copies at most 100 MiB of Git metadata the fixer added into a
 clean object repository. It skips the packs fetched at launch, whose objects the clean
 repository borrows from the daemon's own. It ignores fixer configuration and never
 follows the fixer's Git alternates. Pack indexes are rebuilt with
@@ -1045,12 +1052,14 @@ status or signal, with the tail of the job's retained log. A validated fix whose
 GitHub refuses, such as a merged base's `.github/workflows` changes that the App lacks
 the `workflows` permission to push, is handed back with its resolution. So is a fix
 that edits protected paths beyond what the base merge carries, such as a conflict in
-`flake.nix` the fixer resolved: those never land automatically. The resolution is the
+`flake.nix` or a high path the fixer resolved: those never land automatically. The resolution is the
 PR head, the base, the resolved tree, and the fixer's edits as a patch against the
 merge's conflicted result, or against the head itself for a fix that merges no base,
 sized to GitHub's 65,536-character comment limit. A maintainer
 runs `quest land apply <pr>`, which refuses a moved head, rebuilds and checks that
-tree, and prints an unpushed commit and its push command to run after reviewing it.
+tree, and prints an unpushed commit and its push command to run after reviewing it;
+it records no mechanical fix, so the pushed head needs a review that counts for it,
+as `/quest-merge` defines one.
 A resolution too large for the comment hands back plainly.
 
 Every base the watcher merges into a PR head, for a conflict's clean merge or an
@@ -1072,7 +1081,8 @@ to trusted git and GitHub clients, never the fixer. API tokens stay in the
 daemon, refresh before expiry, and are replaced on a 401. Pass errors are
 logged and retried with bounded exponential backoff. `flock` prevents two
 daemons using the repository (including separate worktrees) or one state
-directory; `quest` must be on PATH for the merge driver. Full logs stay in the
+directory; `quest` must be on PATH for the merge driver, and `--fixer` refuses to start
+with a Git older than 2.39, whose `merge-tree -z` prints free-form messages. Full logs stay in the
 state directory: `--state`, or by default systemd's `$STATE_DIRECTORY` or the
 XDG state home, in `<owner>-<repo>@<base>`, never inside the checkout. Each
 pass deletes a log 7 days after its last write once no job or waiting removal
@@ -1774,8 +1784,8 @@ for the reviewer that raised it when a new size pick's reviewer fixes or
 refutes it, but one that reviewer keeps open becomes its own, since its round
 reports it again. `--new` drops the findings it leaves unsettled from the
 tallies. A reviewer the run left out keeps a block with only its session and
-tally. `quest status` takes the last full SHA the section names as the
-reviewed head, so the head appears in full only once no reviewer reports a
+tally. `quest status` takes the last full SHA a section holding that record
+names as the reviewed head, so the head appears in full only once no reviewer reports a
 finding, and model text
 appears as inline code, which mentions or links nothing and never holds a full
 SHA. The section runs to the next level-1 or
