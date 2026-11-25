@@ -1750,6 +1750,8 @@ fakes("each round rewrites the Review section of the branch's open PR, keeping t
 		expect(unpushed.code).toBe(1);
 		expect(unpushed.stdout).toContain("\nnext stop: an acceptance counts only once a maintainer's token sets");
 		expect(pull.body).toBe(before);
+		// Nor does the branch remember its findings as accepted, which a later reviewer would then omit.
+		expect(readFileSync(sessionFile(join(s.repo, ".git"), "feature"), "utf8")).not.toContain('"accepted"');
 		vi.stubGlobal("fetch", github);
 		const accepted = await quest("--root", s.repo, "review", "--accept", "  It pings  no one. ");
 		expect(accepted.code, accepted.stderr).toBe(0);

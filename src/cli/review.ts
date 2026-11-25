@@ -485,6 +485,8 @@ export interface Reviewed {
 	sized: { size: Size; from: string };
 	/** The maintainer's reason for accepting the open findings of `rounds`, which repeat the head's last rounds. */
 	accepted?: string;
+	/** Keeps the accepted findings among those the branch settled; for the caller to run once the acceptance is attested. */
+	remember?: () => void;
 }
 
 /**
@@ -2700,10 +2702,8 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 				reason: options.accept!,
 			})),
 		);
-		save(
-			statePath,
-			state(sessions, tallies, risk, [...past, ...accepted.filter((each) => !past.some(same(each)))]),
-		);
+		// An acceptance GitHub does not attest has not happened, so the caller saves it only once it is.
+		const kept = [...past, ...accepted.filter((each) => !past.some(same(each)))];
 		return {
 			rounds: last.map((round) => ({ ...round, usage: [], unchanged: true })),
 			tallies,
@@ -2714,6 +2714,7 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 			base,
 			sized,
 			accepted: options.accept,
+			remember: () => save(statePath, state(sessions, tallies, risk, kept)),
 		};
 	}
 	if (!named && !settling && risk.tier === "low") {

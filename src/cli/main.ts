@@ -1926,6 +1926,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 						// An acceptance is the status alone, so one no status records has not happened.
 						const accepting = reviewed.accepted !== undefined;
 						const attested = failure === undefined && record !== undefined && "url" in record && !status;
+						if (accepting && attested) reviewed.remember?.();
 						const next = !accepting
 							? nextStep(rounds)
 							: attested

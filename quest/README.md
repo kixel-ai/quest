@@ -42,7 +42,8 @@ reviewers draw from cross-vendor rungs each round instead of a fixed order.
 Superseded 2026-11-25 (maintainer, on the audit of 2026-11-24's sessions,
 which spent 62% on review and its rework): the risk tier seats no reviewer
 when low, Sol when medium, and Sol and Opus when high, each at its size's
-effort; Opus writes every size above XS; and no rung, shadow, or vendor
+effort; Opus writes every size above XS, S's Sonnet arm aside while the
+writer A/B runs; and no rung, shadow, or vendor
 quorum runs. A high head waits for both: while either cannot run, its round
 fails as an outage (rejected: review with the one left).
 

@@ -176,7 +176,8 @@ three hosts' saved review rounds:
     Fable seat beside the L pick was dropped on 2026-11-23.
   - Lineup of 2026-11-25 (maintainer): Opus writes S through XL and Fable
     writes nothing, so L's Fable arm ended; each size reviews on Sol, with
-    Opus beside it on a high head and in its place when Sol cannot run;
+    Opus beside it on a high head and in its place on a medium one when
+    Sol cannot run;
     no list names Fable, Astra, or Neon. On 2026-11-24, Fable xhigh as a
     second reviewer took $976 of $1,430 of review spend, at $82 a PR
     against Sol xhigh's $8, for 23 high findings against 44.
