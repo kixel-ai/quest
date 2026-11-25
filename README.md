@@ -763,14 +763,16 @@ for the approval, and refuses where nothing would wait, since an admin's token
 would merge or enqueue past the requirement.
 It also refuses while a [signal](#signals-that-hold-a-head) holds the head,
 naming each, and while the PR body's `## Review` record has risk lines that do
-not parse, until `quest review` rewrites it. A high head lands only once a
-`quest review` status that `quest status` counts covers its diff, on that head
-or on an earlier one whose diff from the base is identical: one whose
-`## Review` record rates it high or does not count, whose commits carry a
-`quest review` status rating it high, or whose change from its merge base with
-the base touches a path the base's `RISK.md` holds high, as
-[Risk tiers](#risk-tiers) says. So any push after the last review that changes
-the diff, a person's or a helper's, waits for a new round.
+not parse, until `quest review` rewrites it. A head is high when its
+`## Review` record rates it high or does not count, when a `quest review`
+status on any of its commits rates it high, or when its change from its merge
+base with the base touches a path the base's `RISK.md` holds high, as
+[Risk tiers](#risk-tiers) says, or reaches GitHub's 300-file compare limit. A
+high head lands only once a `quest review` status that `quest status` counts
+covers its diff, on that head or on an earlier one whose diff from the base is
+identical, unless the head itself carries a `quest review` status that is not
+a pass. So any push after the last review that changes the diff, a person's or
+a helper's, waits for a new round.
 It enables auto-merge bound to that SHA, or merges at once when nothing is
 left to wait for. `--squash` or `--rebase` picks the method, and it refuses one
 the repository disallows; otherwise it uses the only method the repository
