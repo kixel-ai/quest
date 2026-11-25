@@ -48,7 +48,8 @@ on, so they are low.
 ## Automatic
 
 A low PR whose author has write access lands without the maintainer's pick
-when its whole diff falls in one class below, judged by the diff alone:
+when its whole diff falls in one class below, or in quest's built-in
+`quest` class for plans under `quest/`, judged by the diff alone:
 a PR title's commit type is only the author's claim. Only a PR the
 maintainer picks changes this list, proposed with `quest usage`'s numbers
 for the class: its PRs merged, the culprits among them, and their wait on a

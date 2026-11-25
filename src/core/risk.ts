@@ -287,7 +287,7 @@ export interface RecordedRisk {
 	session: string | null;
 	/** The head the record names: in full, or its first 12 characters while a finding is open. */
 	head: string;
-	/** The `## Automatic` class the classifier found the change in, or null for none. */
+	/** The class, built in or the risk file's `## Automatic` one, the classifier found the change in, or null. */
 	class: string | null;
 	/** The tier before the maintainer overrode it to `tier`, or null when they did not. */
 	overridden: Tier | null;

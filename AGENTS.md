@@ -26,7 +26,8 @@ Do not edit `CONTRIBUTING.md`, `assets/CONTEXT.md`, `assets/AGENTS.md`, or
 - Starting or spawning quests stops at PR creation. It merges only on a
   /quest-merge pick: the user's, the one /quest-plan's interview gives its own
   PR, or the standing one /quest-run gives a low-risk PR in a class
-  `RISK.md` lists under `## Automatic` that adds or expands no quests, or a
+  `quest status` names, built in or under `RISK.md`'s `## Automatic`, that
+  adds or expands no quests, or a
   trivial PR in `RISK.md`'s `chore` class as /quest-run admits it; and
   only after repository checks and reviews pass.
 - Pull requests land as squash merges.

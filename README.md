@@ -1849,7 +1849,7 @@ run catches what those miss.
 
 | Tier | Local review | Lands on |
 |---|---|---|
-| Low | None, unless `--harness`, `--model`, or `--effort` names one | Its own, once its class is in `RISK.md`'s `## Automatic` list; else the maintainer's pick |
+| Low | None, unless `--harness`, `--model`, or `--effort` names one | Its own, once it is in a built-in class or one in `RISK.md`'s `## Automatic` list; else the maintainer's pick |
 | Medium | The size's pick | The maintainer's pick |
 | High | Both of the size's reviewers | The maintainer's pick, with the full brief |
 

@@ -145,8 +145,8 @@ export interface Status {
 	/**
 	 * The head's risk tier as the `## Review` record names it, and the classifier's own tier, lower when a reviewer
 	 * raised it; null when the record names none or does not count, as for `reviewRecord`. `state` is the review record's, which a line after it carries to a
-	 * later head, else `current` when the record names the head and `stale` when not. `class` is the risk file's
-	 * `## Automatic` class the classifier found the change in, or null. A record whose risk lines do not parse is
+	 * later head, else `current` when the record names the head and `stale` when not. `class` is the class, built
+	 * in or the risk file's `## Automatic` one, the classifier found the change in, or null. A record whose risk lines do not parse is
 	 * `malformed`, with why, which `quest merge` refuses.
 	 */
 	risk:
