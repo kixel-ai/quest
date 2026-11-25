@@ -21,7 +21,7 @@ name: Queue
 # <number>'s picked head: a merge commit whose second parent (`HEAD^2`) is the
 # base it tested. The build runs as for a merge group, and the base's required
 # checks besides `quest land`, reported on that commit, decide whether the PR
-# lands, so the required job reports the build's result there.
+# lands, so the `Queue` report posts the build's result there.
 on:
   merge_group:
     types: [checks_requested]
@@ -34,26 +34,17 @@ permissions:
 # another to replace, and cancelling one would report `Queue` cancelled.
 
 jobs:
-  # The build runs in queue-build.yml so its runner group can admit that
-  # workflow alone; see that file. It calls main's copy, not the merge group's,
-  # since the group admits that workflow only at refs/heads/main: a PR's edit to
-  # queue-build.yml runs only after it lands.
+  # The build, and the `Queue` context main's ruleset requires, run in
+  # queue-build.yml so its runner group can admit that workflow alone; see that
+  # file. No job here needs a GitHub-hosted runner, so landing never waits on
+  # one. It calls main's copy, not the merge group's, since the group admits
+  # that workflow only at refs/heads/main: a PR's edit to queue-build.yml runs
+  # only after it lands.
   build:
     name: Queue build
     uses: kixel-ai/quest/.github/workflows/queue-build.yml@main
-
-  # The required context. A reusable workflow's jobs report as
-  # `Queue build / Build`, so this job reports the build's result under the
-  # name main's ruleset requires. It runs even when the build fails or is
-  # cancelled, since a skipped context would pass the group.
-  queue:
-    name: Queue
-    needs: build
-    if: always()
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - name: Require the build to pass
-        env:
-          RESULT: ${{ needs.build.result }}
-        run: '[[ "$RESULT" == success ]] || { echo "::error::the queue build ended $RESULT" >&2; exit 1; }'
+    # The build's report job posts the required `Queue` check run itself.
+    permissions:
+      contents: read
+      pull-requests: read
+      checks: write
