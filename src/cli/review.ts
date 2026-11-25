@@ -1062,16 +1062,17 @@ function caseSensitive(dir: string, names: string[]): void {
 	}
 }
 
-/** Refuse a Git older than 2.41, whose missing `--attr-source` keeps the head's attributes out of agy's export and diffs. */
-function attrSource(): void {
+/**
+ * Refuse a Git older than 2.41, whose missing `--attr-source` would let a head's `.gitattributes` hide its hunks from
+ * the classifier and agy, and its files from agy's export.
+ */
+function requireAttrSource(): void {
 	const printed = spawnSync("git", ["version"], { encoding: "utf8" }).stdout?.trim() ?? "";
 	const [major, minor] = (/(\d+)\.(\d+)/.exec(printed) ?? []).slice(1).map(Number);
 	// A Git that prints no version fails on the first command that needs it.
 	if (major === undefined || minor === undefined || major > 2 || (major === 2 && minor >= 41)) return;
-	throw new ReviewerUnavailableError(
-		"agy",
-		"not supported",
-		`agy needs Git 2.41 or later, whose --attr-source keeps the head's .gitattributes out of what agy reads; ${printed} is installed`,
+	throw new ReviewInputError(
+		`quest review needs Git 2.41 or later, whose --attr-source keeps the head's .gitattributes from hiding its hunks from the reviewers; ${printed} is installed`,
 	);
 }
 
@@ -1223,8 +1224,8 @@ function agyAgent(context: Context): string {
  */
 export function agyTurn(context: Context, prompt: string, flags: string[]): Turn {
 	const files: Record<string, string> = { [`workspace/.agents/agents/${AGY_AGENT}.md`]: agyAgent(context) };
-	// Unquoted, since the reviewer reads each path as written, and the diffs with no attributes, so the head can mark
-	// none of its own hunks binary.
+	// Unquoted, since the reviewer reads each path as written, and the diffs with no attributes and as text, so the
+	// head can mark none of its own hunks binary, or plant a NUL byte in them.
 	if (context.head !== undefined)
 		files["files.txt"] = git(context.root, [
 			"-c",
@@ -1242,6 +1243,7 @@ export function agyTurn(context: Context, prompt: string, flags: string[]): Turn
 			"core.quotePath=false",
 			`--attr-source=${empty}`,
 			"diff",
+			"--text",
 			"--no-ext-diff",
 			"--no-textconv",
 			"--no-color",
@@ -1308,10 +1310,8 @@ const agy: Reviewer = {
 	status: ["agy", "models"],
 	isolated: true,
 	remoteStatus: true,
-	// The volume first, which the user cannot change, then Git, which they can.
 	supported: (dir) => {
 		beside(dir);
-		attrSource();
 	},
 	login: "agy",
 	credentials: [],
@@ -2043,6 +2043,7 @@ export function classifyPrompt(
 	file: { sha: string; text: string },
 	stat: string,
 	patch: string,
+	emptyTree: string,
 	classes: readonly Class[] = [],
 ): string {
 	const range = `${change.mergeBase}..${change.head}`;
@@ -2055,7 +2056,8 @@ export function classifyPrompt(
 			? `The change, \`git diff --stat --patch ${range}\`:`
 			: `The diff is ${stat.length + patch.length} characters, more than this prompt holds, so only its stat ` +
 				`follows${shown.length < stat.length ? ", cut short" : ""}. Read the parts you need with ` +
-				`\`git diff --ignore-submodules=none ${range} -- <path>\`.`,
+				// With no attributes, so the head cannot mark the hunks that set its tier binary.
+				`\`git --attr-source=${emptyTree} diff --text --ignore-submodules=none ${range} -- <path>\`.`,
 		`<diff>\n${shown}\n</diff>`,
 		"Report the change's tier as JSON matching the response schema, with one sentence on what could break, for " +
 			"whom, and how hard it is to undo.",
@@ -2317,6 +2319,9 @@ function recordedLatest(record: ModelsRecord, options: ReviewOptions): string | 
 	return record.implementers.at(-1)?.fields?.model;
 }
 
+/** The form of the diff the classifier reads, which its saved tier is keyed to. */
+const DIFF_FORM = "attr-source=empty text";
+
 /** What the classifier reads, where it saves its schema, how its CLI runs, and the branch's last classification. */
 interface Classifying {
 	root: string;
@@ -2342,7 +2347,8 @@ export async function classify(input: Classifying): Promise<{ key: string; value
 	const { root, baseSha, change, changed } = input;
 	const text = exists(root, baseSha, RISK_FILE) ? show(root, baseSha, RISK_FILE) : null;
 	// The paths too, since they set the tier and the offered classes along with the risk file.
-	const key = digest(JSON.stringify([change.mergeBase, change.head, text, changed]));
+	// And the diff's form, so a tier set from a diff the head's attributes could shape is set again.
+	const key = digest(JSON.stringify([change.mergeBase, change.head, text, changed, DIFF_FORM]));
 	if (input.saved?.key === key) return { key, value: { ...input.saved.value, usage: [] } };
 	if (input.savedOnly)
 		throw new ReviewInputError(
@@ -2372,9 +2378,28 @@ export async function classify(input: Classifying): Promise<{ key: string; value
 	const offered = classesFor(file!.classes, changed);
 	const classes = offered.map((each) => each.name);
 
+	// With no attributes and every file as text, so the head can hide none of its hunks by marking them binary.
+	const empty = emptyTree(root);
 	const diff = (args: string[]) =>
-		git(root, ["diff", "--no-ext-diff", "--no-textconv", "--no-color", "--ignore-submodules=none", ...args, range]);
-	const prompt = classifyPrompt(change, { sha: baseSha, text }, diff(["--stat=160"]), diff(["--patch"]), offered);
+		git(root, [
+			`--attr-source=${empty}`,
+			"diff",
+			"--text",
+			"--no-ext-diff",
+			"--no-textconv",
+			"--no-color",
+			"--ignore-submodules=none",
+			...args,
+			range,
+		]);
+	const prompt = classifyPrompt(
+		change,
+		{ sha: baseSha, text },
+		diff(["--stat=160"]),
+		diff(["--patch"]),
+		empty,
+		offered,
+	);
 	const answer = await ask(CLASSIFIERS, {
 		cwd: root,
 		dir: input.dir,
@@ -2546,6 +2571,9 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 			"the checkout has uncommitted changes; commit them, since only the committed branch is reviewed",
 		);
 	}
+
+	// Accepting reads no diff, so it needs no such Git.
+	if (options.accept === undefined) requireAttrSource();
 
 	// The reviewer's sandbox has no network, so the base is fetched first, and the size is read from it.
 	const baseRef = options.fetched ? options.base : await fetchBase(root, options.base);

@@ -1375,7 +1375,7 @@ agyFakes("agy is refused where a directory leading to its workspace matches name
 	expect(s.calls().filter((call) => call.argv[0] !== "models")).toEqual([]);
 });
 
-agyFakes("agy is refused with a Git older than 2.41, which has no --attr-source", async () => {
+fakes("a review is a usage error with a Git older than 2.41, which has no --attr-source", async () => {
 	const s = setup("CLAUDECODE");
 	const real = execFileSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).trim();
 	write(
@@ -1384,11 +1384,11 @@ agyFakes("agy is refused with a Git older than 2.41, which has no --attr-source"
 		`#!/bin/sh\nif [ "$1" = version ]; then echo "git version 2.40.1"; exit 0; fi\nexec "${real}" "$@"\n`,
 	);
 	chmodSync(join(s.bin, "git"), 0o755);
-	const result = await quest("--root", s.repo, "review", ...AGY);
-	expect(result.code, result.stderr).toBe(3);
-	expect(result.stderr).toContain("agy needs Git 2.41 or later");
+	const result = await quest("--root", s.repo, "review");
+	expect(result.code, result.stderr).toBe(2);
+	expect(result.stderr).toContain("quest review needs Git 2.41 or later");
 	expect(result.stderr).toContain("git version 2.40.1 is installed");
-	expect(s.calls().filter((call) => call.argv[0] !== "models")).toEqual([]);
+	expect(s.calls()).toEqual([]);
 });
 
 agyFakes("agy's status check failing other than on its login fails as it is, rather than as logged out", async () => {
@@ -1955,6 +1955,38 @@ fakes(
 			"R100\tsrc/lib.ts\tdocs/lib.md",
 		);
 		expect((await offered()).names).toEqual(["any", null]);
+	},
+	20_000,
+);
+
+fakes(
+	"the classifier sees every hunk, whatever the head's attributes and bytes say",
+	async () => {
+		const s = setup();
+		moveBase(s.repo, (dir) => write(dir, "RISK.md", riskFile([])));
+		vi.stubEnv("FAKE_RISK", JSON.stringify({ tier: "medium", reason: "It changes the output." }));
+		vi.stubEnv("FAKE_REPLY", JSON.stringify({ score: 10, rationale: "Lands as is.", findings: [] }));
+		// A head that marks its source binary, and plants a NUL byte in another file, which Git calls binary itself.
+		write(s.repo, "src/lib.ts", "export const x = 3;\n");
+		write(s.repo, "src/nul.ts", "export const y = 1;\0\n");
+		write(s.repo, ".gitattributes", "src/lib.ts -diff\n");
+		git(s.repo, "add", ".");
+		git(s.repo, "commit", "-qm", "hide the hunks");
+		const first = await quest("--root", s.repo, "review");
+		expect(first.code, first.stderr).toBe(0);
+		const [call] = classifying(s.calls());
+		expect(call!.stdin).toContain("-export const x = 1;\n+export const x = 3;");
+		expect(call!.stdin).toContain("+export const y = 1;\0");
+		expect(call!.stdin).not.toContain("Binary files");
+		// Past the budget, the prompt holds the stat and names the attribute-free command to read the rest with.
+		write(s.repo, "src/big.ts", `${"export const z = 1;\n".repeat(11_000)}`);
+		git(s.repo, "add", ".");
+		git(s.repo, "commit", "-qm", "grow past the budget");
+		expect((await quest("--root", s.repo, "review")).code).toBe(0);
+		const big = classifying(s.calls()).at(-1)!;
+		const empty = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
+		expect(big.stdin).toContain(`\`git --attr-source=${empty} diff --text --ignore-submodules=none `);
+		expect(big.stdin).not.toContain("<diff>\n\n+");
 	},
 	20_000,
 );

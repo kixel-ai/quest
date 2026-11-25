@@ -1731,8 +1731,7 @@ not covered. The rules' own file is denied too. `agy` compares its rules with a
 path's case as written, so on a volume that matches names case-insensitively,
 such as macOS's default, `/USERS/...` passes a rule naming `/Users`: quest
 refuses to run `agy` where any directory leading to its agent directory is on
-one, or with a Git older than 2.41, which has no `--attr-source`; either passes a
-classifier turn to the next and exits 3 for `--harness agy`.
+one, which passes a classifier turn to the next and exits 3 for `--harness agy`.
 An `agy models` that fails other than on the login fails as it is. Your skills' text
 still reaches it, and your MCP servers start, with no tool it can call. A
 `RESOURCE_EXHAUSTED` quota error counts as its usage limit, resetting at the
@@ -1875,8 +1874,11 @@ until a review classifies the head again. It runs as Claude Code
 Antigravity `gemini-3.8-flash` at low, each when those before it are missing,
 logged out, have their login rejected, or hit their usage limit. When none can
 run, the review fails on the limit that resets first if every one whose CLI is
-installed hit its own, and otherwise as a usage error naming why each failed. A diff past 200,000 characters gives it only the
-stat, and it reads the parts it needs. The tier is kept with the reviewers'
+installed hit its own, and otherwise as a usage error naming why each failed. Its diff ignores the head's
+`.gitattributes` and treats every file as text, so a head cannot hide hunks by
+marking them binary, which needs Git 2.41 or later for `--attr-source`: older,
+`quest review` is a usage error naming it. A diff past 200,000 characters gives
+it only the stat, and it reads the parts it needs with that same command. The tier is kept with the reviewers'
 sessions, so a later round on the same head and base `RISK.md` reuses it, and
 `--new` classifies again. The record names it after the base:
 
