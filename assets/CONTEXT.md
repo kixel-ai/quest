@@ -53,7 +53,7 @@ Language and PR topic packs (`pr`, `rust`, `ts`, `uniffi`) load lazily via hooks
 
 ## Communication
 
-- Write everything people read for what they act on or need to trust the result: lead with the outcome, say it once plainly, and cut narration, restated context, hedges, recaps, and what went as expected.
+- Keep what people read short: lead with the outcome and cut anything they wouldn't miss.
 - Link every issue, PR, and commit you show the user by full URL, never a bare `#123`; sub-agents report the URLs for the parent to link.
 - Block on user decisions with context and a recommendation (`quest guide questions`). An agent that cannot prompt puts each decision in its report and under `## Waiting` in its PR.
 - A plan is a starting point: when a finding undercuts it, say what changed and propose alternatives with your recommendation. When recorded decisions conflict, follow the newest and note it in the PR body.
