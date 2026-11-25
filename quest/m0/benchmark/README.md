@@ -128,10 +128,6 @@ Per axis, on #819, #832, #849, #850, #871, and #887:
   `assets/CONTEXT.md` and is flagged for a test run killed mid-suite
   (run 45521382739); `quest usage` counts only `## Caused by` lines and
   reports nothing for it.
-- `quest usage` drops sessions recorded under `moq-dev/quest`, the
-  repository's name before 2026-11-23: [transferred
-  repositories](/quest/m0/telemetry/transferred-repos.md). It skips them
-  only on PRs from before the transfer, so the next check is unaffected.
 
 ## Scheduled
 
