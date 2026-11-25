@@ -1785,7 +1785,8 @@ and prints `record skipped: <why>`. It edits as the user the GitHub token names
 `quest review` commit status on the head on the same token, so push the head
 first: `success` once no finding is open, else `failure`, described by the
 head's risk tier and class and whether a local reviewer ran, as `Risk low,
-class test: passed with no local reviewer`, its target the diff from the
+class test: passed with no local reviewer`, or `findings accepted` after
+`--accept`, its target the diff from the
 head's merge base with the PR's base. `quest status` counts a record only
 through that status, set by someone who can push, so a contributor's own record
 counts for nothing, and a failing one blocks `quest merge --land` as any failed
@@ -1920,6 +1921,16 @@ override's own tier, which agrees with it, and `quest usage`
 counts overrides as a reading of the tier's accuracy. So a raise to medium on
 a head overridden from low to high ends the override, and the next run on that
 head picks from the PR's size list again.
+
+`--accept <reason>` records the maintainer's acceptance of the findings the
+head's last rounds left open, as when they side with the author against a
+reviewer that keeps a finding, or pick merge as is at a design checkpoint. It
+runs no reviewer: it repeats each reviewer's last round of the head, failing as
+a usage error when none reviewed it, adds `- Accepted by the maintainer:
+<reason>`, lists their findings as accepted, names the head in full, and sets
+the `quest review` status to `success`, described `findings accepted`. Like
+any status, it counts only from a user who can push. It takes no option that
+would run or reset a round.
 
 ## Audit cost and accuracy
 

@@ -953,6 +953,7 @@ describe("whose review record counts", () => {
 		// Whether a local reviewer ran comes from the status alone, whatever the body claims.
 		for (const [outcome, review] of [
 			["passed", "local-review"],
+			["findings accepted", "local-review"],
 			["passed with no local reviewer", "no-local-review"],
 		] as const)
 			expect(await read(record(A, risk), attest(attestation("low", "test", outcome)))).toMatchObject({
@@ -986,6 +987,19 @@ describe("whose review record counts", () => {
 		expect((await read(added, { statuses: { [B]: passed(B) } })).warnings).toEqual(
 			untrusted(`${C} has no quest review status`),
 		);
+	});
+
+	test("counts no record GitHub cannot compare with its base, still reading the PR", async () => {
+		for (const status of [403, 404, 422]) {
+			const unread = await read(record(A), { mergeBase: status });
+			expect(unread.record).toBe("review-record -");
+			expect(unread.warnings).toHaveLength(1);
+			expect(unread.warnings[0]).toMatch(
+				new RegExp(
+					`^example/project#1's ## Review record does not count: GitHub cannot compare ${A} with main`,
+				),
+			);
+		}
 	});
 
 	test("reads no status for a section that names no full SHA", async () => {

@@ -20,7 +20,7 @@ The head is landable when:
 - no review requests changes, other than an online reviewer's the base does not require, whose findings are all fixed or refuted with their threads resolved; an approval its base requires may still be to come, since the queue waits for it.
 
 While its required checks are only pending, report that the pick stands until they pass; do not wait for them.
-A required reviewer's change request that stands once its findings are fixed or refuted and their threads resolved is the user's call.
+Any other change request that stands once its findings are fixed or refuted and their threads resolved is the user's call.
 Any other head needs `/quest-iterate`: run it, saying what the head needs, such as a review, fixes, a failed check fixed or rerun, flaky ones included, or decisions, then run this skill again once it finishes; if it stops for the user instead, report that.
 Run it in this session, where its interview can ask the user; under a coordinator such as `/quest-run`, return the PR to the loop, which dispatches it in a sub-agent.
 A PR that adds follow-ups also needs the pick round's answers recorded before queueing, as the guide's Creation section describes: ask about each follow-up that round has not asked, in a question of its own, then run `/quest-iterate` with the answers unless the head already records them.

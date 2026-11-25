@@ -97,8 +97,8 @@ function classifiedBy({ by }: Risk["classified"]): string {
  * reviewer the run skipped since it could not run, then every tally on the branch, each round's reviewer's beside its
  * round, and a reviewer the run left out on its own.
  */
-export function reviewRecord({ rounds, tallies, risk, skipped, head, base }: Reviewed): string {
-	const clean = passed({ rounds, tallies });
+export function reviewRecord({ rounds, tallies, risk, skipped, head, base, accepted }: Reviewed): string {
+	const clean = passed({ rounds, tallies, accepted });
 	const lines = [
 		MARK,
 		"",
@@ -110,6 +110,7 @@ export function reviewRecord({ rounds, tallies, risk, skipped, head, base }: Rev
 		`- Classified: ${risk.classified.tier} by ${classifiedBy(risk.classified)}`,
 		...(risk.classified.class === null ? [] : [`- Class: \`${risk.classified.class}\``]),
 		...(rounds.length === 0 ? [`- Local review: none, since the head is low risk`] : []),
+		...(accepted === undefined ? [] : [`- Accepted by the maintainer: ${code(accepted)}`]),
 		// Outside the Reviewer blocks, which `parseReview` reads as reviewers that ran.
 		...skipped.map(
 			(skip) => `- Skipped: ${HARNESSES[skip.harness]}, ${skip.model}, ${skip.effort} effort: ${skip.reason}`,
@@ -127,7 +128,12 @@ export function reviewRecord({ rounds, tallies, risk, skipped, head, base }: Rev
 		if (tally === undefined) throw new Error(`no tally for ${round.reviewer}'s round`);
 		lines.push(`- Rounds: ${tally.rounds}; ${findingsText(counted(tally))}`);
 		if (round.findings.length === 0) lines.push("- Findings: none");
-		else lines.push("- Findings, open until the next round settles them:");
+		else
+			lines.push(
+				accepted === undefined
+					? "- Findings, open until the next round settles them:"
+					: "- Findings, accepted by the maintainer:",
+			);
 		for (const finding of round.findings)
 			lines.push(`  - ${capitalized(finding.severity)}, ${code(located(finding))}: ${code(finding.title)}`);
 		const settled = round.earlier?.findings ?? [];
@@ -304,9 +310,10 @@ export function withReview(body: string, record: string): string {
 	return `${body.slice(0, start)}\n\n${record}\n${end < body.length ? "\n" : ""}${body.slice(end)}`;
 }
 
-/** Whether a run passed its head: no finding open, including a reviewer's the run left out. */
-const passed = ({ rounds, tallies }: Pick<Reviewed, "rounds" | "tallies">) =>
-	rounds.every((round) => round.findings.length === 0) && tallies.every((tally) => counted(tally).open === 0);
+/** Whether a run passed its head: no finding open, including a reviewer's the run left out, or the maintainer accepted them. */
+const passed = ({ rounds, tallies, accepted }: Pick<Reviewed, "rounds" | "tallies" | "accepted">) =>
+	accepted !== undefined ||
+	(rounds.every((round) => round.findings.length === 0) && tallies.every((tally) => counted(tally).open === 0));
 
 /**
  * Where a round's record went: the PR whose body holds it, and why its status was not set, skipped for a token that
@@ -427,7 +434,13 @@ export async function recordRounds(root: string, reviewed: Reviewed, deps: Claim
 	const next = withReview(pull.body, reviewRecord(reviewed));
 	if (next !== pull.body) await pull.edit(next);
 	const ok = passed(reviewed);
-	const outcome = !ok ? "findings open" : reviewed.rounds.length === 0 ? "passed with no local reviewer" : "passed";
+	const outcome = !ok
+		? "findings open"
+		: reviewed.accepted !== undefined
+			? "findings accepted"
+			: reviewed.rounds.length === 0
+				? "passed with no local reviewer"
+				: "passed";
 	const status = await pull.attest({
 		head: reviewed.head,
 		from: git(root, ["merge-base", reviewed.base.sha, reviewed.head]),

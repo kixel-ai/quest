@@ -1788,7 +1788,10 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"session and round, score, the tier it raised the risk to and why, its tally of findings across the branch's rounds, and each finding with its disposition. " +
 				"On GitHub it then sets the `quest review` commit status on the head, on the same token, so push the head first: success once no finding is open, else failure, " +
 				"its description the head's risk tier and class and whether a local reviewer ran, its target the diff from the head's merge base with the PR's base, which `quest status` counts only from a user who can push. " +
-				"For a token that cannot push, it sets none and prints `; status skipped: <why>` after the record's URL; a status GitHub refuses otherwise prints `; status refused: <why>` and exits 1. With no " +
+				"For a token that cannot push, it sets none and prints `; status skipped: <why>` after the record's URL; a status GitHub refuses otherwise prints `; status refused: <why>` and exits 1. " +
+				"--accept <reason> runs no reviewer: it repeats each reviewer's last round of the head, failing as a usage error when none reviewed it, " +
+				"records them with `- Accepted by the maintainer: <reason>` and their findings as accepted, naming the head in full, sets the status to success " +
+				"described `findings accepted`, and prints `next done`; like any status, it counts only from a user who can push. With no " +
 				"such PR, several from other repositories that `HEAD` contains, or a remote off GitHub, it prints `record skipped: <why>` and changes nothing.\n\n" +
 				"Exits 0 once the round finishes, whatever it found, 2 for invalid arguments " +
 				"or a checkout that cannot be reviewed, 3 when no eligible reviewer could run, each not installed, logged " +
@@ -1837,6 +1840,10 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 			).choices(TIERS),
 		)
 		.option("--reason <text>", "Why the maintainer overrode the tier, which --override requires")
+		.option(
+			"--accept <reason>",
+			"Accept the findings the head's last rounds left open, for the maintainer's reason, running no reviewer",
+		)
 		.option("--json", "Print one JSON object")
 		.action(
 			(options: {
@@ -1851,8 +1858,24 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				size?: Size;
 				responses?: string;
 				new?: boolean;
+				accept?: string;
 				json?: boolean;
 			}) => {
+				const accept = options.accept?.replace(/\s+/g, " ").trim();
+				if (accept === "") throw new UsageError("--accept needs the maintainer's reason");
+				// Accepting judges the rounds already run on the head, so it takes nothing that would run or reset one.
+				if (
+					accept !== undefined &&
+					(options.responses ??
+						options.override ??
+						options.harness ??
+						options.model ??
+						options.effort ??
+						options.new) !== undefined
+				)
+					throw new UsageError(
+						"--accept runs no reviewer, so it takes no --responses, --override, --harness, --model, --effort, or --new",
+					);
 				const responses =
 					options.responses === undefined
 						? undefined
@@ -1872,6 +1895,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 						responses,
 						fresh: options.new,
 						override,
+						accept,
 					},
 					{
 						...reviewDependencies(),
@@ -1881,6 +1905,10 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				pending = run.then(
 					async (reviewed) => {
 						const { rounds, tallies, risk, skipped } = reviewed;
+						const next =
+							reviewed.accepted === undefined
+								? nextStep(rounds)
+								: "next done: the maintainer accepted the findings left open on this head";
 						// The rounds are saved in their sessions either way, so their report prints before a failed record.
 						let record: Recorded | undefined;
 						let failure: unknown;
@@ -1897,7 +1925,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 									risk,
 									skipped,
 									record: record ?? null,
-									next: nextStep(rounds),
+									next,
 								}),
 							);
 						else {
@@ -1908,7 +1936,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 										? `record ${record.url}${record.status === undefined ? "" : "skipped" in record.status ? `; status skipped: ${record.status.skipped}` : `; status refused: ${record.status.refused}`}`
 										: `record skipped: ${record.skipped}`,
 								);
-							print(nextStep(rounds));
+							print(next);
 						}
 						if (failure === undefined)
 							return record !== undefined &&

@@ -136,6 +136,8 @@ export function setup(
 		 * maintainer's passing status attesting the body's risk on the head alone.
 		 */
 		statuses?: Record<string, Node | null>;
+		/** The status GitHub refuses every merge-base compare with, instead of naming `MERGE_BASE`. */
+		mergeBase?: number;
 		/** Each login's permission on the repository, or the status GitHub refuses it with; by default `maintainer` is an admin. */
 		permissions?: Record<string, string | number>;
 	} = {},
@@ -193,7 +195,9 @@ export function setup(
 			}
 			const compare = /^\/repos\/example\/project\/compare\/main\.\.\.([0-9a-f]{40})$/.exec(path.pathname);
 			if (compare && new Headers(init?.headers).get("Accept") !== "application/vnd.github.diff")
-				return Response.json({ merge_base_commit: { sha: MERGE_BASE } });
+				return options.mergeBase === undefined
+					? Response.json({ merge_base_commit: { sha: MERGE_BASE } })
+					: Response.json({ message: "refused" }, { status: options.mergeBase });
 			if (compare) {
 				const diff = options.diffs?.[compare[1]!];
 				if (diff === undefined) throw new Error("unexpected compare request");

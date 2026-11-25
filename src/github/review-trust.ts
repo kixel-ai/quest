@@ -1,13 +1,13 @@
 // Whose `## Review` record `quest status` counts: only one a `quest review` commit status attests, set on the reviewed
 // head by a user with write access to the base repository, since anyone can write a SHA into their own PR's body.
 import { type PullRequest, type Repository, type Tier, recordedRisk, reviewSection } from "../core";
-import { type GitHubReader, object, string } from "./client";
+import { GitHubDeadline, type GitHubReader, object, string } from "./client";
 
 /** The commit status context `quest review` sets on each head it records. */
 export const REVIEW_CONTEXT = "quest review";
 
 /** A run's outcome as its status names it, including whether a local reviewer ran, which a standing pick needs. */
-export type Outcome = "passed" | "passed with no local reviewer" | "findings open";
+export type Outcome = "passed" | "passed with no local reviewer" | "findings accepted" | "findings open";
 
 /** The status description `quest review` sets: the head's risk and class, which the body's record must match, and its outcome. */
 export function attestation(tier: Tier, kind: string | null, outcome: Outcome): string {
@@ -23,7 +23,7 @@ export function reviewTarget(repository: Repository, from: string, sha: string):
 }
 
 const ATTESTED =
-	/^Risk (low|medium|high)(?:, class ([a-z0-9-]+))?: (passed|passed with no local reviewer|findings open)$/;
+	/^Risk (low|medium|high)(?:, class ([a-z0-9-]+))?: (passed|passed with no local reviewer|findings accepted|findings open)$/;
 
 /** Repository permissions that can push. */
 const WRITE = ["admin", "maintain", "write"];
@@ -98,11 +98,18 @@ async function attestedOutcome(
 	if (!WRITE.includes(found))
 		return `${name}, who set the ${REVIEW_CONTEXT} status on ${sha}, has ${found} access to ${pr.owner}/${pr.repo}, not write`;
 	// A retargeted PR, or a base reset under it, has another diff than the one reviewed, from another merge base.
-	const compared = await github.request(
-		`/repos/${pr.owner}/${pr.repo}/compare/${encodeURIComponent(pr.base)}...${sha}?per_page=1`,
-		{ allow: [404] },
-	);
-	if (compared.status === 404) return `GitHub cannot compare ${sha} with ${pr.base}`;
+	let compared: Response;
+	try {
+		compared = await github.request(
+			`/repos/${pr.owner}/${pr.repo}/compare/${encodeURIComponent(pr.base)}...${sha}?per_page=1`,
+			{ allow: [404, 422] },
+		);
+	} catch (error) {
+		// A deadline is the caller's to handle; any other failure leaves the record unverified, not the PR unread.
+		if (error instanceof GitHubDeadline || !(error instanceof Error)) throw error;
+		return `GitHub cannot compare ${sha} with ${pr.base}: ${error.message}`;
+	}
+	if (!compared.ok) return `GitHub cannot compare ${sha} with ${pr.base} (HTTP ${compared.status})`;
 	const from = string(object(object(await compared.json()).merge_base_commit).sha);
 	if (String(targetUrl).toLowerCase() !== reviewTarget(pr, from, sha))
 		return `the ${REVIEW_CONTEXT} status on ${sha} attests another diff than ${pr.base}'s, from ${from}: ${String(targetUrl)}`;
@@ -114,5 +121,5 @@ async function attestedOutcome(
 	// A malformed risk is left for `quest status` to print and `quest merge` to refuse.
 	if (!("malformed" in risk) && (risk.tier !== attested[1] || risk.class !== (attested[2] ?? null)))
 		return `its risk differs from the ${REVIEW_CONTEXT} status on ${sha}: ${String(description)}`;
-	return { localReview: attested[3] === "passed" };
+	return { localReview: attested[3] !== "passed with no local reviewer" };
 }

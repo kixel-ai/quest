@@ -1854,6 +1854,34 @@ fakes("each round rewrites the Review section of the branch's open PR, keeping t
 		expect(record).not.toMatch(/\b[0-9a-f]{40}\b/);
 		expect(pull.body.startsWith("Fixes averaging.\r\n\r\n## Review\r\n\nRewritten")).toBe(true);
 		expect(writes).toHaveLength(2);
+
+		// The maintainer accepts the finding the reviewer keeps: no reviewer runs, and the head passes.
+		const refused = await quest(
+			"--root",
+			s.repo,
+			"review",
+			"--accept",
+			"Kept.",
+			"--responses",
+			join(s.repo, ".tmp", "responses.md"),
+		);
+		expect(refused.code).toBe(2);
+		const calls = s.calls().length;
+		const accepted = await quest("--root", s.repo, "review", "--accept", "  It pings  no one. ");
+		expect(accepted.code, accepted.stderr).toBe(0);
+		expect(s.calls()).toHaveLength(calls);
+		expect(accepted.stdout).toMatch(/\nnext done: the maintainer accepted the findings left open on this head\n$/);
+		const kept = git(s.repo, "rev-parse", "HEAD");
+		const final = pull.body.split("## Review\r\n\n")[1]!.split("\n\n## Models")[0];
+		expect(final).toContain(`- Head: ${kept}\n`);
+		expect(final).toContain("- Accepted by the maintainer: `It pings no one.`\n");
+		expect(final).toContain("- Session: `thread-1`, round 2\n");
+		expect(final).toContain("- Findings, accepted by the maintainer:\n  - High, `src/lib.ts`:");
+		expect(writes.statuses.at(-1)).toMatchObject({
+			sha: kept,
+			state: "success",
+			description: "Risk medium: findings accepted",
+		});
 	} finally {
 		vi.unstubAllGlobals();
 	}
@@ -3031,6 +3059,21 @@ fakes("a status GitHub refuses fails the run, unless the token cannot push, wher
 		} finally {
 			vi.unstubAllGlobals();
 		}
+	}
+});
+
+fakes("accepting a head no round reviewed is a usage error, and runs no reviewer", async () => {
+	const s = setup();
+	const pull = { number: 9, body: "" };
+	onGitHub(s.repo, [pull]);
+	try {
+		const result = await quest("--root", s.repo, "review", "--accept", "Fine.");
+		expect(result.code).toBe(2);
+		expect(result.stderr).toContain(`no round reviewed ${git(s.repo, "rev-parse", "HEAD")}`);
+		expect(s.calls().filter((call) => !call.argv.includes("claude-haiku-5-5"))).toEqual([]);
+		expect(pull.body).toBe("");
+	} finally {
+		vi.unstubAllGlobals();
 	}
 });
 

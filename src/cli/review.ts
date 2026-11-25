@@ -473,6 +473,8 @@ export type ReviewOptions = BaseOptions & {
 	signal?: AbortSignal;
 	/** The maintainer's tier for the branch and their reason, which holds until its change grows riskier. */
 	override?: Assessment;
+	/** The maintainer's reason for accepting the findings the last rounds of the head left open, running no reviewer. */
+	accept?: string;
 };
 
 export interface ReviewDependencies {
@@ -522,6 +524,8 @@ export interface Reviewed {
 	head: string;
 	base: Round["base"];
 	sized: { size: Size; from: string };
+	/** The maintainer's reason for accepting the open findings of `rounds`, which repeat the head's last rounds. */
+	accepted?: string;
 }
 
 /**
@@ -2656,7 +2660,7 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 
 	// The first candidate's seats are checked before the classifier spends a turn.
 	let at = 0;
-	let planned = plan(candidates[0]!);
+	if (options.accept === undefined) plan(candidates[0]!);
 
 	const head = git(root, ["rev-parse", "HEAD"]);
 	let mergeBase: string;
@@ -2735,6 +2739,23 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 	const settling =
 		options.responses !== undefined || sessions.some((session) => session.rounds.at(-1)!.findings.length > 0);
 	const low = overridden(before, override);
+	// Accepting runs no reviewer: it repeats each reviewer's last round of this head, whose open findings it accepts.
+	if (options.accept !== undefined) {
+		const last = sessions.map((session) => session.last).filter((round) => round.head === head);
+		if (last.length === 0)
+			throw new ReviewInputError(`no round reviewed ${head}; review it before accepting its findings`);
+		return {
+			rounds: last.map((round) => ({ ...round, unchanged: true })),
+			tallies,
+			risk: low,
+			skipped: [],
+			branch,
+			head,
+			base,
+			sized,
+			accepted: options.accept,
+		};
+	}
 	if (!named && !settling && low.tier === "low") {
 		save(statePath, state(sessions, tallies, low));
 		return { rounds: [], tallies, risk: low, skipped: [], branch, head, base, sized };
@@ -2783,7 +2804,7 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 		return secondTo(routed);
 	};
 	let second = secondFor(candidates[0]!);
-	planned = plan(candidates[0]!, second);
+	let planned = plan(candidates[0]!, second);
 	let done: Seated[];
 	for (;;) {
 		try {

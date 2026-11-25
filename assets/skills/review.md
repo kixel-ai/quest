@@ -34,7 +34,7 @@ When the user overrides the tier, pass it with `--override <tier> --reason <thei
 Each round ends with a `next` line: follow it until a round of the head reports no finding you have not refuted; never block on the score.
 Fix in the PR every review finding relevant to it that you do not refute and every gap the change exposes; in other code you read, fix easy findings and suggest the rest as follow-ups.
 Refute a finding only with evidence the reviewer cannot rebut: a `path:line`, a command's output, or a recorded maintainer decision.
-A finding the reviewer keeps against such a refutation is a decision for the user.
+A finding the reviewer keeps against such a refutation is a decision for the user: once they accept it, or pick merge as is at a checkpoint, run `quest review --accept <their reason>` on the pushed head, which records the open findings as accepted and passes the head without another round; otherwise fix or refute it.
 Write each round's `--responses` file in the checkout's `.tmp/`.
 
 At a `next checkpoint` line, which a reviewer's every third round prints when it reports findings, stop before fixing them and reconsider the approach; `quest status <pr>` prints a `checkpoint` line when an online reviewer's round is due the same way.
