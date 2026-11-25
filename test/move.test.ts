@@ -109,6 +109,11 @@ describe("remove", () => {
 		expect(remove([{ path: "quest/a.md", text: last }], gone).get("quest/a.md")).toBe("# [S] A\n\n## Goal\n\nG.\n");
 	});
 
+	test("keeps a Parked item that opens with a link, so a removal never unparks work", () => {
+		const text = "# M1\n\n## Goal\n\nG.\n\n## Parked\n\n- [B](/quest/b.md) - resume once it lands\n";
+		expect(remove([{ path: "quest/m1/README.md", text }], gone).has("quest/m1/README.md")).toBe(false);
+	});
+
 	test("leaves prose, sections with other content, and other sections alone", () => {
 		const text =
 			"# [S] A\n\n## Goal\n\nAfter [B](/quest/b.md).\n\n- [B](/quest/b.md) in a goal list\n\n" +
