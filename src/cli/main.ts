@@ -1678,7 +1678,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"only itself; the run's report and record name each it passed over and why. A reviewer --harness, --model, " +
 				"or --effort names never passes the round on. " +
 				"--exclude-model names each model to avoid, with every model weaker than it; without it, every model " +
-				"weaker than the latest writer is avoided (Sonnet than any other, Sol than Fable and Astra), " +
+				"weaker than the latest writer is avoided, which only Sonnet is, than any other, " +
 				"so a reviewer is never weaker than the writer: the model the last Implementer line names in the `## Models` record of the body of the branch's open PR. " +
 				"When it names none or an `unknown` model, none is avoided. " +
 				"--harness names the only reviewer instead of the pick and the second reviewer, at the model and effort of its first entry whose model is not avoided, and --model and " +

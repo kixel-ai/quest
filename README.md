@@ -1520,7 +1520,7 @@ whole branch at the PR's size.
 committed and pushed branch before it is marked ready for review, at an effort set by the PR's
 size. Each size has two reviewers, the same for every repository:
 
-| PR size | Reviewer | When Sol is out or weaker than the writer, and a high head's second |
+| PR size | Reviewer | When Sol is out, and a high head's second |
 |---|---|---|
 | XS | Codex `gpt-6.2-sol` low | Claude Code `claude-opus-5-5` medium |
 | S | Codex `gpt-6.2-sol` medium | Claude Code `claude-opus-5-5` medium |
@@ -1558,8 +1558,8 @@ change cannot lower its own review; any other PR, such as a skill's own, takes
 the `Size:` line of the `## Models` record in its open PR's body, and a PR with
 neither gets M's reviewers. `--size` overrides both. The first reviewer whose
 model is not weaker than the latest writer's reviews, which may be the writer's
-own model: Sonnet is weaker than every other model, so no list names it, and
-Sol is weaker than Fable and Astra. The record's last `Implementer:` line
+own model: only Sonnet is weaker, than every other model, so no list names
+it. The record's last `Implementer:` line
 names the latest writer, since each session moves its line last whenever it pushes, or
 `--exclude-model` names each model to avoid instead, with every model weaker
 than it. Without a record, or when its last line names an `unknown` model,
@@ -1603,7 +1603,7 @@ A logged-out error names the profile the CLI checked, `CLAUDE_CONFIG_DIR` or
 quest review                                  # round 1 against origin's default branch
 quest review --responses .tmp/responses.md    # round 2: the new head, with fixes and refutations
 quest review --base origin/release --new      # a new session against another base
-quest review --size S --exclude-model claude-fable-5-2  # an S PR, with no record in its body, that no model weaker than Fable may review
+quest review --size S --exclude-model gpt-6.2-sol  # an S PR, with no record in its body, that Sol must not review
 quest review --branch quest/m1/foo --responses .tmp/responses.md  # a detached checkout of that branch's head
 ```
 

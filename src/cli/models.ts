@@ -43,18 +43,11 @@ export const WRITERS: Record<Size, readonly Model[]> = {
 };
 
 /**
- * The writers each model is weaker than, so it never reviews their work: Sonnet is weaker than every other model,
- * and Sol is weaker than the frontier models. A model may review its own work, in a session of its own.
+ * Whether model `reviewer` is too weak to review what model `writer` wrote: only Sonnet is, of any other model's
+ * work. A model may review its own work, in a session of its own.
  */
-const WEAKER_THAN: ReadonlyMap<string, readonly string[]> = new Map([
-	["gpt-6.2-sol", ["claude-fable-5-2", "gpt-6.2-astra"]],
-	// Retired, yet a gateway may still serve it to `--model`.
-	["gpt-6.1-sol", ["claude-fable-5-2", "gpt-6.2-astra"]],
-]);
-
-/** Whether model `reviewer` is too weak to review what model `writer` wrote. */
 export const weaker = (reviewer: string, writer: string): boolean =>
-	reviewer !== writer && (reviewer === "claude-sonnet-5-5" || (WEAKER_THAN.get(reviewer)?.includes(writer) ?? false));
+	reviewer !== writer && reviewer === "claude-sonnet-5-5";
 
 /**
  * Whether an entry runs model `model` or a {@link weaker} one, as `--exclude-model` avoids. `model` is a listed
@@ -66,8 +59,8 @@ export const unfit =
 		entry.model === model || weaker(entry.model, model);
 
 /**
- * Each size's two reviewers, one per vendor: Sol reviews a medium head alone, Opus takes its place when Sol cannot
- * run or is {@link weaker} than the latest writer, and a high head gets both. Opus reviews at the effort it writes
+ * Each size's two reviewers, one per vendor: Sol reviews a medium head alone, whoever wrote it, Opus takes its
+ * place when Sol cannot run, and a high head gets both. Opus reviews at the effort it writes
  * the size at, since it may review its own work. No list names Fable, whose xhigh reviews measured at ten times
  * Sol xhigh's cost per PR for half its high findings, or Astra, which no review showed finding what these two
  * missed.

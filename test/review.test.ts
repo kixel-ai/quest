@@ -88,9 +88,10 @@ test("each size's reviewer is the first no weaker than the latest writer, which 
 	expect(at("S", authored({ exclude: ["gpt-6.2-sol"] }))).toBe("claude claude-opus-5-5 medium");
 	// A provider-qualified spelling of a listed model is that model, whether a record or --exclude-model names it.
 	expect(at("S", authored({ exclude: ["openai/gpt-6.2-sol"] }))).toBe("claude claude-opus-5-5 medium");
-	// Work a stronger model wrote, as --model can run, avoids Sol, as does retired Sol 6.1.
-	expect(at("S", authored({}, "anthropic/claude-fable-5-2"))).toBe("claude claude-opus-5-5 medium");
-	expect(weaker("gpt-6.1-sol", "claude-fable-5-2")).toBe(true);
+	// Sol reviews what any model wrote; only Sonnet is too weak for another's work.
+	expect(at("S", authored({}, "anthropic/claude-fable-5-2"))).toBe("codex gpt-6.2-sol medium");
+	expect(weaker("gpt-6.2-sol", "claude-fable-5-2")).toBe(false);
+	expect(weaker("claude-sonnet-5-5", "claude-opus-5-5")).toBe(true);
 	// A qualified --model keeps its spelling yet matches its entry.
 	expect(pickReviewer("XL", { harness: "codex", model: "openai/gpt-6.2-sol" }, () => false)).toEqual({
 		harness: "codex",
@@ -103,7 +104,6 @@ test("each size's reviewer is the first no weaker than the latest writer, which 
 	).toBe(true);
 	expect(at("M", authored({ exclude: ["other-model"] }))).toBe("codex gpt-6.2-sol high");
 	// --exclude-model avoids every model weaker than one it names too.
-	expect(at("M", authored({ exclude: ["claude-fable-5-2"] }))).toBe("claude claude-opus-5-5 high");
 	const sonnet = { harness: "claude" as const, model: "claude-sonnet-5-5", effort: "high" };
 	expect(authored({ exclude: ["claude-opus-5-5"] })(sonnet)).toBe(true);
 	expect(authored({}, "claude-opus-5-5")(sonnet)).toBe(true);
@@ -119,8 +119,6 @@ test("each size's reviewer is the first no weaker than the latest writer, which 
 	const ranked = (choice: Parameters<typeof rankedReviewers>[1], wrote: typeof none) =>
 		rankedReviewers("L", choice, wrote).map(({ harness, model, effort }) => `${harness} ${model} ${effort}`);
 	expect(ranked({}, byOpus)).toEqual(["codex gpt-6.2-sol xhigh", "claude claude-opus-5-5 high"]);
-	// A reviewer is never weaker than the writer: Sol never reviews Fable's work.
-	expect(ranked({}, authored({}, "claude-fable-5-2"))).toEqual(["claude claude-opus-5-5 high"]);
 	expect(ranked({ effort: "high" }, byOpus)).toEqual(["codex gpt-6.2-sol high"]);
 	expect(ranked({ model: "gpt-6-astra" }, byOpus)).toEqual(["codex gpt-6-astra xhigh"]);
 	expect(ranked({ harness: "claude" }, () => false)).toEqual(["claude claude-opus-5-5 high"]);
@@ -336,8 +334,8 @@ fakes.for([
 );
 
 const OPUS_WROTE = ["--exclude-model", "claude-opus-5-5"];
-// Avoids Astra and Sol, which is weaker than it, so a Claude model reviews.
-const CLAUDE_REVIEWS = ["--exclude-model", "gpt-6.2-astra"];
+// Avoids Sol, so a Claude model reviews.
+const CLAUDE_REVIEWS = ["--exclude-model", "gpt-6.2-sol"];
 
 fakes("a reviewer at its usage limit passes the round to the next eligible one, and the record names it", async () => {
 	const s = setup(null);
@@ -2500,25 +2498,15 @@ fakes("the PR's Models record sizes the review and names its latest writer", asy
 	const pull: FakePull = { number: 9, body: body("- Size: L", fable) };
 	onGitHub(s.repo, [pull]);
 	try {
-		// Fable wrote it, so Sol, weaker than it, is avoided, and Opus reviews it at L's effort.
+		// Sol reviews it at L's effort, whoever wrote it.
 		const wrote = await quest("--root", s.repo, "review");
 		expect(wrote.stderr).toBe("");
-		expect(wrote.stdout).toMatch(/^size L ## Models\n[\s\S]*\nreviewer claude claude-opus-5-5 high\n/);
+		expect(wrote.stdout).toMatch(/^size L ## Models\n[\s\S]*\nreviewer codex gpt-6.2-sol xhigh\n/);
 
 		// Flags override the record.
 		const flagged = await quest("--root", s.repo, "review", "--new", "--size", "XS", "--exclude-model", "x");
 		expect(flagged.stdout).toMatch(/^size XS --size\n[\s\S]*\nreviewer codex gpt-6.2-sol low\n/);
 
-		// Only the latest implementer counts, whoever wrote earlier.
-		pull.body = body("- Implementer: Codex, unknown, unknown effort", fable);
-		expect((await quest("--root", s.repo, "review", "--new")).stdout).toContain(
-			"reviewer claude claude-opus-5-5 high\n",
-		);
-		// A display name counts as its ID does.
-		pull.body = body("- Size: S", "- Implementer: Claude Code, Fable 5.2, high effort");
-		expect((await quest("--root", s.repo, "review", "--new")).stdout).toContain(
-			"reviewer claude claude-opus-5-5 medium\n",
-		);
 		// The writer's own model may review it: Sol reviews Sol's work.
 		pull.body = body("- Size: S", "- Implementer: Codex, gpt-6.2-sol, high effort");
 		expect((await quest("--root", s.repo, "review", "--new")).stdout).toContain(
