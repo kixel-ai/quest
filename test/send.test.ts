@@ -252,6 +252,8 @@ test("a session `quest review` queued is sent on the PR it reviewed, as the role
 		session("sub", "x", { branches: [], parent: "cls", cwd: root }),
 		session("deep", "x", { branches: [], parent: "cls", cwd: `${root}/src` }),
 		session("deeper", "x", { branches: [], parent: "sub", cwd: `${root}/src` }),
+		// One whose checkout's own branch heads another PR, as under `quest review --branch`, still follows the review.
+		session("aside", "quest/m0/a", { parent: "cls", cwd: root }),
 		session("early", "kix-review/2"),
 		// An implementer's sub-agent in another checkout keeps out of the fork's PR.
 		session("impl", "fix/y", { repositories: ["ann/proj"], cwd: "/fork" }),
@@ -272,6 +274,7 @@ test("a session `quest review` queued is sent on the PR it reviewed, as the role
 		["sub", [8], "classifying", "fix/y"],
 		["deep", [8], "classifying", "fix/y"],
 		["deeper", [8], "classifying", "fix/y"],
+		["aside", [8], "classifying", "fix/y"],
 		["early", [], "reviewing", "feature/z"],
 		["impl", [8], "implementing", "fix/y"],
 		["away", [], "implementing", null],

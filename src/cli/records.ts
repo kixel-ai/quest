@@ -78,14 +78,6 @@ export function buildRecords(input: RecordInput): Map<Session, SessionRecord> {
 	const parentOf = (s: Session) => (s.parent === null ? undefined : byId.get(id(s.harness, s.parent)));
 	const pinOf = (s: Session) => (s.id === null ? undefined : input.pins?.get(id(s.harness, s.id)));
 
-	const descendants = (s: Session, seen = new Set<Session>()): Pull[] => {
-		seen.add(s);
-		return (children.get(s) ?? []).flatMap((child) => {
-			if (seen.has(child)) return [];
-			const own = input.own.get(child);
-			return own ? [own, ...descendants(child, seen)] : descendants(child, seen);
-		});
-	};
 	// Another host's directories cannot be looked up here, so its sessions compare their exact directories.
 	const rootOf = (s: Session) => (s.cwd === null ? null : s.host === null ? checkoutRoot(s.cwd) : s.cwd);
 	// Whether a chain of ancestors in this session's checkout reaches one `quest review` queued, so a grandchild keeps its
@@ -96,18 +88,28 @@ export function buildRecords(input: RecordInput): Map<Session, SessionRecord> {
 		if (!parent || root === null || root !== rootOf(parent) || depth >= input.sessions.length) return false;
 		return pinOf(parent) !== undefined || inReview(parent, depth + 1);
 	};
+	// A sub-agent of a review works on the PR the review was queued with, even where its checkout's own branch heads
+	// another, as under `quest review --branch`.
+	const ownOf = (s: Session) => (inReview(s) ? undefined : input.own.get(s));
+	const descendants = (s: Session, seen = new Set<Session>()): Pull[] => {
+		seen.add(s);
+		return (children.get(s) ?? []).flatMap((child) => {
+			if (seen.has(child)) return [];
+			const own = ownOf(child);
+			return own ? [own, ...descendants(child, seen)] : descendants(child, seen);
+		});
+	};
 	// Bounded by the sessions' count, so a cycle in recorded lineage cannot loop.
 	const pullsOf = (s: Session, depth = 0): { pulls: Pull[]; via: "own" | "parent" | "children" | "none" } => {
-		const own = input.own.get(s);
+		const own = ownOf(s);
 		if (own) return { pulls: [own], via: "own" };
 		const parent = parentOf(s);
 		if (parent && depth < input.sessions.length) {
 			// A session known to be in another repository keeps out of its parent's PRs, as a sub-agent in another
 			// checkout does. One anywhere in the checkout `quest review` ran in keeps the PR it reviewed, a fork's included.
 			const known = input.known?.(s) ?? null;
-			const reviewing = inReview(s);
 			const inherited = pullsOf(parent, depth + 1).pulls.filter(
-				(p) => known === null || reviewing || (p.repository !== null && known.includes(p.repository)),
+				(p) => known === null || inReview(s) || (p.repository !== null && known.includes(p.repository)),
 			);
 			if (inherited.length) return { pulls: inherited, via: "parent" };
 		}
@@ -131,7 +133,7 @@ export function buildRecords(input: RecordInput): Map<Session, SessionRecord> {
 		const skill = factsOf(s)?.skill;
 		const fromSkill = skill ? SKILL_ROLES[skill] : undefined;
 		if (fromSkill) return fromSkill;
-		const own = input.own.get(s);
+		const own = ownOf(s);
 		const parent = parentOf(s);
 		// A sub-agent with no skill of its own works for its parent, unless that parent hands out whole PRs.
 		if (parent && depth < input.sessions.length) {
@@ -150,7 +152,7 @@ export function buildRecords(input: RecordInput): Map<Session, SessionRecord> {
 	for (const s of input.sessions) {
 		const { pulls, via } = pullsOf(s);
 		if (input.emit ? !input.emit.has(s) : pulls.length === 0) continue;
-		const own = input.own.get(s);
+		const own = ownOf(s);
 		const branch =
 			own?.branch ??
 			pinOf(s)?.branch ??
