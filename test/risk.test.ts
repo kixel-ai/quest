@@ -303,9 +303,36 @@ test("the review record's class and override read back", () => {
 			record(["- Overridden: from medium by the maintainer", "- Classified: low by default", "- Class: `tests`"]),
 		),
 	).toMatchObject({ tier: "low", class: "tests", overridden: "medium" });
-	const malformed = { malformed: "the ## Review record's class or override is malformed" };
+	const malformed = { malformed: "the ## Review record's class, override, or held raise is malformed" };
 	expect(recordedRisk(record(["- Classified: low by default", "- Class: tests"]))).toEqual(malformed);
 	expect(recordedRisk(record(["- Classified: low by default", "- Overridden: by someone"]))).toEqual(malformed);
+	expect(recordedRisk(record(["- Classified: low by default", "- Held: high"]))).toEqual(malformed);
+});
+
+test("a failed run's held raise is the record's tier, with its reason and no class or override, while riskier", () => {
+	const record = (held: string) =>
+		[
+			"## Review",
+			"",
+			held,
+			`- Head: ${"a".repeat(40)}`,
+			"- Risk: medium, `the maintainer says so`",
+			"- Overridden: from high by the maintainer",
+			"- Classified: low by default",
+			"- Class: `tests`",
+		].join("\n");
+	expect(recordedRisk(record("- Held: high, `it drops a field`"))).toMatchObject({
+		tier: "high",
+		reason: "it drops a field",
+		classified: "low",
+		class: null,
+		overridden: null,
+	});
+	expect(recordedRisk(record("- Held: low, `docs`"))).toMatchObject({
+		tier: "medium",
+		class: "tests",
+		overridden: "high",
+	});
 });
 
 test("tiers order from low to high", () => {

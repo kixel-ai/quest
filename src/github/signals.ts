@@ -1,6 +1,6 @@
 // What holds a PR's head from landing besides its checks: an online reviewer's finding on the head that no writer has
 // answered, and a maintainer decision recorded in a comment after the head was committed that nothing has answered.
-import type { Repository, Signal } from "../core";
+import type { Repository, Signal, Tier } from "../core";
 import { type GitHubReader, type ObjectValue, array, object, string } from "./client";
 import { type Activity, bodyFindings, isBot, login, readActivity, reviewerOf } from "./online-review";
 
@@ -193,6 +193,56 @@ export async function readSignals(
 			{ head: pull.head, signals: signals(pull, writers, carried?.get(number)) },
 		]),
 	);
+}
+
+/** The first line of a comment that overrides a PR's risk tier, naming the tier it replaces and why. */
+export const OVERRIDE = /^Risk override: (low|medium|high) from (low|medium|high), (`+) ?(.*?) ?\3$/;
+
+/** A maintainer's override of a PR's risk tier, from their comment on it. */
+export interface TierOverride {
+	tier: Tier;
+	/** The tier the maintainer overrode, which a riskier change ends a lowering override past. */
+	from: Tier;
+	reason: string;
+	url: string;
+}
+
+/** Whether `name` can push to `repository`. */
+export async function canPush(client: GitHubReader, repository: Repository, name: string): Promise<boolean> {
+	const response = await client.request(
+		`/repos/${repository.owner}/${repository.repo}/collaborators/${encodeURIComponent(name)}/permission`,
+		{ allow: [404] },
+	);
+	return response.status !== 404 && WRITE.includes(string(object(await response.json()).permission));
+}
+
+/**
+ * The latest override of PR `number`'s tier, from a comment whose first line matches {@link OVERRIDE}, by an account
+ * that can push to `repository`, or null for none. Anyone can comment, so another account's override counts for
+ * nothing.
+ */
+export async function readOverride(
+	client: GitHubReader,
+	repository: Repository,
+	number: number,
+): Promise<TierOverride | null> {
+	const comments = await client.all(
+		`/repos/${repository.owner}/${repository.repo}/issues/${number}/comments?per_page=100`,
+	);
+	const pushes = new Map<string, boolean>();
+	for (const comment of comments.reverse()) {
+		const found = OVERRIDE.exec(
+			String(comment.body ?? "")
+				.split("\n")[0]!
+				.trim(),
+		);
+		const user = comment.user == null ? null : object(comment.user);
+		if (found === null || user === null || user.type === "Bot" || typeof user.login !== "string") continue;
+		if (!pushes.has(user.login)) pushes.set(user.login, await canPush(client, repository, user.login));
+		if (pushes.get(user.login))
+			return { tier: found[1] as Tier, from: found[2] as Tier, reason: found[4]!, url: string(comment.html_url) };
+	}
+	return null;
 }
 
 /** Signals as one line each, for a refusal or a comment. */

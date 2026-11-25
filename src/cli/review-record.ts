@@ -3,25 +3,29 @@
 import {
 	DEFAULT,
 	PATHS,
+	type PullRequest,
 	REVIEW_MARK,
 	SEATS,
 	codeSpan,
 	passed,
-	recordedHeld,
 	recordedRisk,
+	recordedRun,
 	reviewSection,
 } from "../core";
 import { DRAWN, RUNG_NAMES } from "./models";
 import { recorded } from "./models-record";
 import { type ClaimDependencies, upstream } from "./claims";
 import { pullsFrom } from "../github/claims";
-import { object, repositoryPath } from "../github/client";
+import { type GitHub, object, repositoryPath } from "../github/client";
+import { OVERRIDE, canPush, readOverride } from "../github/signals";
 import { git } from "./git";
 import { contains } from "./land";
 import { requireRemote } from "./github";
 import {
 	type HeldRaise,
+	type Override,
 	type PullModels,
+	ReviewInputError,
 	type Reviewed,
 	type Risk,
 	type Round,
@@ -111,7 +115,14 @@ function classifiedBy({ by }: Risk["classified"]): string {
  * reviewer the run skipped since it could not run, then every tally on the branch, each round's reviewer's beside its
  * round, and a reviewer of an earlier run on its own.
  */
-export function reviewRecord({ rounds, tallies, risk, skipped, head, base }: Reviewed): string {
+export function reviewRecord({
+	rounds,
+	tallies,
+	risk,
+	skipped,
+	head,
+	base,
+}: Pick<Reviewed, "rounds" | "tallies" | "risk" | "skipped" | "head" | "base">): string {
 	const open =
 		rounds.reduce((sum, round) => sum + round.findings.length, 0) +
 		tallies.reduce((sum, tally) => sum + counted(tally).open, 0);
@@ -358,7 +369,17 @@ async function openPull(
 	baseRef: string,
 	branch: string,
 	deps: ClaimDependencies,
-): Promise<{ url: string; body: string; edit(body: string): Promise<void> } | { skipped: string }> {
+): Promise<
+	| {
+			url: string;
+			body: string;
+			edit(body: string): Promise<void>;
+			/** GitHub's client and the PR, where it is on GitHub, for reads the forge does not answer. */
+			github: { client: GitHub; pull: PullRequest } | null;
+			comment(body: string): Promise<string>;
+	  }
+	| { skipped: string }
+> {
 	// The checkout's top level: a subdirectory would look for the quest tree below it.
 	const top = git(root, ["rev-parse", "--show-toplevel"]);
 	const { remote, branch: base } = parseBase(top, baseRef);
@@ -392,10 +413,13 @@ async function openPull(
 			: ((object(
 					await (await up.github.client.request(`${repositoryPath(repository)}/pulls/${pull.number}`)).json(),
 				).body as string | null) ?? "");
+	const ref = { ...repository, number: pull.number };
 	return {
 		url: pull.url,
 		body,
-		edit: (body) => hosting.writes().edit({ ...repository, number: pull.number }, { title: null, body }),
+		edit: (body) => hosting.writes().edit(ref, { title: null, body }),
+		github: up.github === null ? null : { client: up.github.client, pull: ref },
+		comment: (body) => hosting.writes().comment(ref, { body, thread: null }),
 	};
 }
 
@@ -408,35 +432,69 @@ export async function pullModels(
 ): Promise<PullModels | null> {
 	const pull = await openPull(root, baseRef, branch, deps);
 	if ("skipped" in pull) return null;
-	return { ...recorded(pull.body), risk: recordedRisk(pull.body), held: recordedHeld(pull.body) };
+	const run = recordedRun(pull.body);
+	return {
+		...recorded(pull.body),
+		risk: recordedRisk(pull.body),
+		passed: run !== null && passed(run),
+		// Overrides are comments, which only GitHub's reads here answer.
+		override:
+			pull.github === null
+				? null
+				: await readOverride(pull.github.client, pull.github.pull, pull.github.pull.number),
+	};
 }
 
 /**
- * Hold `raise` in the record of the open PR from its branch: a `- Held:` line naming the head and the raised tier,
- * which the next run on that head reads, and no head named in full, so a pass at a lower tier, of this head or one
- * diff-identical to it, no longer counts. The rest of the record, its reviewers' evidence, stays as it was, until a run rewrites it.
+ * Post the maintainer's `override` of the tier as a comment on the open PR from `branch`, the only place an override
+ * lives, so every clone reads it. Its author must be able to push, or it would count for nothing.
+ */
+export async function postOverride(
+	root: string,
+	baseRef: string,
+	branch: string,
+	override: Override,
+	deps: ClaimDependencies,
+): Promise<void> {
+	const pull = await openPull(root, baseRef, branch, deps);
+	if ("skipped" in pull) throw new ReviewInputError(`--override comments on the branch's PR: ${pull.skipped}`);
+	if (pull.github === null) throw new ReviewInputError("--override reads its comment back from GitHub only");
+	const { client, pull: ref } = pull.github;
+	const viewer = await (await deps.forge(ref)).viewer();
+	if (!(await canPush(client, ref, viewer)))
+		throw new ReviewInputError(
+			`--override needs an account that can push to ${ref.owner}/${ref.repo}, not ${viewer}`,
+		);
+	const body = `Risk override: ${override.tier} from ${override.from}, ${code(override.reason)}`;
+	if (!OVERRIDE.test(body))
+		throw new ReviewInputError(`--reason cannot be written as an override: ${override.reason}`);
+	await pull.comment(body);
+}
+
+/**
+ * Hold a failed run's raise in the record of the open PR from its branch, as a `- Held:` line before its `- Head:`.
+ * The record's tier is then the raised one, for every reader and every head, so the record's run no longer passes,
+ * until a run at that tier passes. The rest of the record, its reviewers' evidence, stays as it was; a section with no
+ * record gets the run's header, with no reviewers, to hold it.
  */
 export async function recordHeld(root: string, raise: HeldRaise, deps: ClaimDependencies): Promise<Recorded> {
-	const pull = await openPull(root, raise.base, raise.branch, deps);
+	const pull = await openPull(root, raise.base.ref, raise.branch, deps);
 	if ("skipped" in pull) return pull;
-	const short = raise.head.slice(0, 12);
-	const line = `- Held: ${raise.tier} on ${short}, ${code(raise.reason)}`;
+	const line = `- Held: ${raise.raised.tier}, ${code(raise.raised.reason)}`;
 	const section = reviewSection(pull.body);
-	if (section === null) {
-		await pull.edit(withReview(pull.body, line));
-		return { url: pull.url };
-	}
-	const kept = pull.body
-		.slice(section.start, section.end)
+	const risk = recordedRisk(pull.body);
+	const body =
+		section === null || risk === null || "malformed" in risk
+			? withReview(pull.body, reviewRecord({ ...raise, rounds: [], tallies: [] }))
+			: pull.body;
+	const { start, end } = reviewSection(body)!;
+	const kept = body
+		.slice(start, end)
 		.split("\n")
 		.filter((each) => !each.startsWith("- Held: "))
-		.join("\n")
-		.replaceAll(raise.head, short)
-		// The record's head, even one the raised head is diff-identical to, no longer passes.
-		.replace(/^(- Head: [0-9a-f]{12})[0-9a-f]{28}\b/m, "$1");
+		.join("\n");
 	const at = kept.search(/^- Head: /m);
-	const marked = at < 0 ? `${kept.trimEnd()}\n\n${line}\n` : `${kept.slice(0, at)}${line}\n${kept.slice(at)}`;
-	await pull.edit(`${pull.body.slice(0, section.start)}${marked}${pull.body.slice(section.end)}`);
+	await pull.edit(`${body.slice(0, start)}${kept.slice(0, at)}${line}\n${kept.slice(at)}${body.slice(end)}`);
 	return { url: pull.url };
 }
 

@@ -214,6 +214,9 @@ class FakeGitHub {
 			Object.assign(pull, body);
 			return json(200, pull);
 		}
+		// No PR here has comments, so none overrides its tier.
+		if (/^\/repos\/[^/]+\/[^/]+\/issues\/\d+\/comments$/.test(url.pathname) && method === "GET")
+			return json(200, []);
 		return json(404, { message: `no route for ${method} ${url.pathname}` });
 	}
 }
@@ -909,7 +912,8 @@ describe("start on GitHub, read through the Kixel Quest serving it", () => {
 			sizes: ["S"],
 			implementers: [],
 			risk: null,
-			held: null,
+			passed: false,
+			override: null,
 		});
 		expect(kixel.calls.map(({ call }) => call)).toEqual(["pulls"]);
 		expect(asked.filter((request) => request.startsWith("GET") && request.endsWith("/pulls"))).toEqual([]);

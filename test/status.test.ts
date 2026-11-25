@@ -868,11 +868,10 @@ describe("the review record", () => {
 
 	test("counts no pass once a failed run held a riskier tier, on any head", async () => {
 		// A low head's pass, then a run on a diff-identical later head that raised it to high and could not seat it.
-		const held = (body: string) =>
-			body.replace("- Head: ", `- Held: high on ${A.slice(0, 12)}, \`wire\`\n- Head: `);
+		const held = (body: string) => body.replace("- Head: ", `- Held: high, \`wire\`\n- Head: `);
 		expect(await line(held(low(B)), { diffs: { [A]: "same", [B]: "same" } })).toBe("review-record -");
 		// A held tier no riskier than the record's leaves its pass.
-		expect(await line(low(A).replace("- Head: ", `- Held: low on ${A.slice(0, 12)}, \`docs\`\n- Head: `))).toBe(
+		expect(await line(low(A).replace("- Head: ", `- Held: low, \`docs\`\n- Head: `))).toBe(
 			`review-record current ${A}`,
 		);
 	});
@@ -926,10 +925,12 @@ describe("the risk tier", () => {
 			.replace("- Risk: high, `it rewrites the wire format`", "- Risk: medium, `it changes output`")
 			.replace("session `s-1`", "session `s-1`\n- Class: `docs`");
 		expect((await risk(medium)).risk).toMatchObject({ tier: "medium", class: "docs" });
-		const { risk: held } = await risk(
-			medium.replace("- Head: ", `- Held: high on ${B.slice(0, 12)}, \`it drops a field\`\n- Head: `),
-		);
+		const { risk: held } = await risk(medium.replace("- Head: ", `- Held: high, \`it drops a field\`\n- Head: `));
 		expect(held).toMatchObject({ tier: "high", reason: "it drops a field", classified: "medium", class: null });
+		// A held line that does not parse holds nothing it could be read as, so the record is malformed.
+		expect((await risk(medium.replace("- Head: ", "- Held: severe\n- Head: "))).risk).toMatchObject({
+			state: "malformed",
+		});
 	});
 
 	test("carries to a later head as the review record does", async () => {

@@ -49,7 +49,7 @@ export function recordedRun(body: string): Run | null {
 	const vendors = ran.map((block) => /^- Reviewer: (.+?), \S+, \S+ effort\b/.exec(block)?.[1]);
 	const parsed = risk !== null && !("malformed" in risk) && vendors.every((vendor) => vendor !== undefined);
 	return {
-		tier: parsed ? heldTier(body, risk.tier) : null,
+		tier: parsed ? risk.tier : null,
 		vendors: vendors.filter((vendor) => vendor !== undefined),
 		open: ran.reduce((sum, block) => sum + (block.match(/^ {2}- (?:High|Medium), /gm)?.length ?? 0), 0),
 	};
@@ -312,50 +312,24 @@ export interface RecordedRisk {
 	overridden: Tier | null;
 }
 
-/** A raise of a head's tier that a run which then failed holds in the record, until a run on that head records it. */
-export interface Held {
-	/** The head's first 12 characters. */
-	head: string;
-	tier: Tier;
-	reason: string;
-}
-
-/**
- * The tier `body`'s record holds: `tier`, or the riskier tier a `- Held:` line names. A failed run leaves that line,
- * which is newer than the record's run, so it outranks the record's tier until a run rewrites the record.
- */
-export function heldTier(body: string, tier: Tier): Tier {
-	const held = recordedHeld(body);
-	return held !== null && riskier(held.tier, tier) ? held.tier : tier;
-}
-
-/** The raise `body`'s `## Review` record holds for a head, as a failed run leaves it, or null without one. */
-export function recordedHeld(body: string): Held | null {
-	const section = reviewSection(body);
-	if (section === null) return null;
-	const found = /^- Held: (low|medium|high) on ([0-9a-f]{12}), (`+) ?(.*?) ?\3\r?$/m.exec(
-		body.slice(section.start, section.end),
-	);
-	return found ? { tier: found[1] as Tier, head: found[2]!, reason: found[4]! } : null;
-}
-
 /** A `## Review` record whose risk lines `quest review` did not write, and what is wrong with them. */
 export interface MalformedRisk {
 	malformed: string;
 }
 
 /**
- * The risk `body`'s `## Review` record names, or null when it names none, as a record `quest review` wrote before
- * tiers, or a section with no risk line. It reads risk lines whether or not `quest review` wrote them. A body is its
- * author's text, so a risk line that does not parse is returned as {@link MalformedRisk} for the reader to refuse,
- * rather than thrown to stop a read of many PRs.
+ * The risk `body`'s `## Review` record names, or null when it names none, as a section with no risk line. It reads
+ * risk lines whether or not `quest review` wrote them. A riskier tier a failed run held, on its `- Held:` line, is the
+ * record's tier, with its reason and no class or override, since the raise is newer than the record's run, so every
+ * reader sees one tier. A body is its author's text, so a risk line that does not parse is returned as
+ * {@link MalformedRisk} for the reader to refuse, rather than thrown to stop a read of many PRs.
  */
 export function recordedRisk(body: string): RecordedRisk | MalformedRisk | null {
 	const section = reviewSection(body);
 	if (section === null) return null;
 	const text = body.slice(section.start, section.end);
 	// Any risk line makes a record, so a line that misses its pattern, such as `- Risk:dire`, is malformed, not absent.
-	if (!/^- (?:Risk|Classified|Class|Overridden):/m.test(text)) return null;
+	if (!/^- (?:Risk|Classified|Class|Overridden|Held):/m.test(text)) return null;
 	const line = /^- Risk:(.*?)\r?$/m.exec(text);
 	if (line === null) return { malformed: "the ## Review record's risk is malformed: it has no - Risk: line" };
 	// Model text is an inline code span, as long a run of backticks as it needs, padded when it starts or ends with one.
@@ -368,9 +342,14 @@ export function recordedRisk(body: string): RecordedRisk | MalformedRisk | null 
 	const session = /, session (`+) ?(.*?) ?\1$/.exec(by);
 	const named = /^- Class: `([a-z0-9-]+)`\r?$/m.exec(text);
 	const overridden = /^- Overridden: from (low|medium|high) by the maintainer\r?$/m.exec(text);
-	if (/^- Class:/m.test(text) !== (named !== null) || /^- Overridden:/m.test(text) !== (overridden !== null))
-		return { malformed: "the ## Review record's class or override is malformed" };
-	return {
+	const held = /^- Held: (low|medium|high), (`+) ?(.*?) ?\2\r?$/m.exec(text);
+	if (
+		/^- Class:/m.test(text) !== (named !== null) ||
+		/^- Overridden:/m.test(text) !== (overridden !== null) ||
+		/^- Held:/m.test(text) !== (held !== null)
+	)
+		return { malformed: "the ## Review record's class, override, or held raise is malformed" };
+	const recorded: RecordedRisk = {
 		tier: risk[1] as Tier,
 		reason: risk[3]!,
 		classified: classified[1] as Tier,
@@ -380,6 +359,9 @@ export function recordedRisk(body: string): RecordedRisk | MalformedRisk | null 
 		class: named ? named[1]! : null,
 		overridden: overridden ? (overridden[1] as Tier) : null,
 	};
+	return held !== null && riskier(held[1] as Tier, recorded.tier)
+		? { ...recorded, tier: held[1] as Tier, reason: held[3]!, class: null, overridden: null }
+		: recorded;
 }
 
 /** How the record names a tier the paths set, and the default where the base has no risk file. */

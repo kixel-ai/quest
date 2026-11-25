@@ -1834,7 +1834,14 @@ fakes.each([
  * each PATCH wrote.
  */
 /** An open PR from `feature` into `main`, from `acme/widget` unless `head` names another repository. */
-type FakePull = { number: number; body: string | null; head?: string; sha?: string };
+type FakePull = {
+	number: number;
+	body: string | null;
+	head?: string;
+	sha?: string;
+	/** Comments on the PR, oldest first; `maintainer` can push and anyone else cannot. */
+	comments?: { login: string; body: string }[];
+};
 function onGitHub(repo: string, pulls: FakePull[], fork = false): { body: string }[] {
 	const local = git(repo, "remote", "get-url", "origin");
 	git(repo, "remote", "set-url", "origin", "https://github.com/acme/widget.git");
@@ -1885,6 +1892,28 @@ function onGitHub(repo: string, pulls: FakePull[], fork = false): { body: string
 		}
 		if (patched && (init?.method ?? "GET") === "GET")
 			return json({ body: pulls.find((p) => p.number === Number(patched[1]))!.body });
+		const commented = new RegExp(`^/repos/${owner}/widget/issues/(\\d+)/comments$`).exec(url.pathname);
+		if (commented) {
+			const pull = pulls.find((p) => p.number === Number(commented[1]))!;
+			pull.comments ??= [];
+			const at = (i: number) => `https://github.com/${owner}/widget/pull/${pull.number}#issuecomment-${i}`;
+			if (init?.method === "POST") {
+				const { body } = JSON.parse(String(init.body)) as { body: string };
+				pull.comments.push({ login: "maintainer", body });
+				return json({ html_url: at(pull.comments.length) }, 201);
+			}
+			return json(
+				pull.comments.map((c, i) => ({
+					user: { login: c.login, type: "User" },
+					body: c.body,
+					html_url: at(i + 1),
+				})),
+			);
+		}
+		const permission = new RegExp(`^/repos/${owner}/widget/collaborators/([^/]+)/permission$`).exec(url.pathname);
+		if (permission) return json({ permission: permission[1] === "maintainer" ? "admin" : "read" });
+		if (url.pathname === "/graphql" && String(init?.body).includes("viewer"))
+			return json({ data: { viewer: { login: "maintainer" } } });
 		throw new Error(`unexpected ${init?.method ?? "GET"} ${url.pathname}`);
 	});
 	return writes;
@@ -2451,7 +2480,7 @@ agyFakes("a reviewer raises the tier, and the record keeps the classifier's besi
 			overridden: null,
 		});
 
-		// A raise holds for every later round on its head, whatever they judge it.
+		// A raise holds for every later round, whatever they judge it.
 		vi.stubEnv("FAKE_RAISE", undefined);
 		write(s.repo, ".tmp/responses.md", "1. Fixed.\n2. Fixed.\n3. Fixed.\n");
 		const responses = ["--responses", join(s.repo, ".tmp", "responses.md")];
@@ -2459,16 +2488,33 @@ agyFakes("a reviewer raises the tier, and the record keeps the classifier's besi
 		expect(held.code, held.stderr).toBe(0);
 		expect(held.stdout).toContain("\nrisk high It rewrites the wire format peers read.\n");
 		expect(reviewersOf(held.stdout)).toHaveLength(3);
-		// On a new head the tier is the classifier's again, here medium, and a reviewer never lowers it.
+		// The raise holds the whole branch, on a new head too, until a run at its tier passes, and a reviewer never
+		// lowers it.
 		vi.stubEnv("FAKE_RISK", undefined);
 		vi.stubEnv("FAKE_RAISE", "low");
-		write(s.repo, "src/lib.ts", "export const x = 3;\n");
-		git(s.repo, "commit", "-qam", "another constant");
-		const lower = await quest("--root", s.repo, "review", ...OPUS, ...responses);
+		const commit = (value: number) => {
+			write(s.repo, "src/lib.ts", `export const x = ${value};\n`);
+			git(s.repo, "commit", "-qam", `constant ${value}`);
+		};
+		commit(3);
+		const still = await quest("--root", s.repo, "review", ...OPUS, ...responses);
+		expect(still.code, still.stderr).toBe(0);
+		expect(still.stdout).toContain("\nrisk high It rewrites the wire format peers read.\n");
+		expect(reviewersOf(still.stdout)).toHaveLength(3);
+		expect(still.stdout).not.toContain("\nraised ");
+		// A run at that tier passes, so the next head's tier is the classifier's again, here medium.
+		vi.stubEnv("FAKE_RAISE", undefined);
+		vi.stubEnv("FAKE_REPLY", JSON.stringify({ score: 10, rationale: "Lands as is.", findings: [] }));
+		commit(4);
+		const passing = await quest("--root", s.repo, "review", ...OPUS, ...responses);
+		expect(passing.code, passing.stderr).toBe(0);
+		expect(passing.stdout).toContain("\nrisk high It rewrites the wire format peers read.\n");
+		expect(passing.stdout).toContain("\nnext done");
+		commit(5);
+		const lower = await quest("--root", s.repo, "review", ...OPUS);
 		expect(lower.code, lower.stderr).toBe(0);
 		expect(lower.stdout).toContain("\nrisk medium It changes what the library returns.\n");
 		expect(reviewersOf(lower.stdout)).toHaveLength(2);
-		expect(lower.stdout).not.toContain("\nraised ");
 	} finally {
 		vi.unstubAllGlobals();
 	}
@@ -2576,7 +2622,7 @@ agyFakes("a high head whose vendors fail their status checks names each in its o
 });
 
 agyFakes(
-	"a failed run's raise unpublishes the pass at the lower tier, of its head or one diff-identical to it",
+	"a failed run's raise holds the branch, so a pass at the lower tier no longer counts on any head",
 	async () => {
 		const s = setup();
 		const pull = {
@@ -2593,22 +2639,22 @@ agyFakes(
 			expect(pull.body).toContain(`- Head: ${head}\n`);
 			// A run on a later head with the same diff raises it to high, then cannot seat a third vendor.
 			git(s.repo, "commit", "--allow-empty", "-qm", "the same diff");
-			const later = git(s.repo, "rev-parse", "HEAD");
 			vi.stubEnv("FAKE_RAISE", "high");
 			vi.stubEnv("FAKE_LIMITED", "reset");
 			vi.stubEnv("FAKE_FAILS", "claude-fable-5-2");
 			const failed = await quest("--root", s.repo, "review", ...OPUS);
 			expect(failed.code).toBe(3);
 			expect(failed.stderr).toBe("error: claude hit its usage limit; resets 2030-03-17T17:46:40Z\n");
-			// The record holds the raised tier for the later head and names no head in full, so the two-vendor pass no
-			// longer counts for either, while its reviewers' evidence stays.
-			expect(pull.body).not.toContain(head);
-			expect(pull.body).toContain(
-				`- Held: high on ${later.slice(0, 12)}, \`It rewrites the wire format peers read.\`\n- Head: ${head.slice(0, 12)}\n`,
-			);
+			// The record holds the raised tier for the whole branch, so the two-vendor pass no longer counts, for its
+			// head or the later one, while its reviewers' evidence stays.
+			expect(pull.body).toContain(`- Held: high, \`It rewrites the wire format peers read.\`\n- Head: ${head}\n`);
 			expect(pull.body).toContain("- Score: 10/10, `Lands as is.`");
+			expect(recordedRisk(pull.body)).toMatchObject({ tier: "high", classified: "medium", class: null });
 			expect(passed(recordedRun(pull.body)!)).toBe(false);
-			// A retry, from any clone, starts from the held tier, and its run's record drops the line.
+			// A retry, from any clone and on any head, here a clean merge's, starts from the held tier, and its run's
+			// record drops the line.
+			git(s.repo, "commit", "--allow-empty", "-qm", "a clean merge");
+			const merged = git(s.repo, "rev-parse", "HEAD");
 			vi.stubEnv("FAKE_RAISE", undefined);
 			vi.stubEnv("FAKE_LIMITED", undefined);
 			vi.stubEnv("FAKE_FAILS", undefined);
@@ -2618,7 +2664,7 @@ agyFakes(
 			expect(retry.stdout).toContain("\nrisk high It rewrites the wire format peers read.\n");
 			expect(reviewersOf(retry.stdout)).toHaveLength(3);
 			expect(pull.body).not.toContain("- Held:");
-			expect(pull.body).toContain(`- Head: ${later}\n`);
+			expect(pull.body).toContain(`- Head: ${merged}\n`);
 		} finally {
 			vi.unstubAllGlobals();
 		}
@@ -2812,6 +2858,12 @@ agyFakes(
 
 agyFakes("a raise to the override's own tier agrees with it, so the override holds", async () => {
 	const s = setup();
+	onGitHub(s.repo, [
+		{
+			number: 7,
+			body: "Fixes averaging.\n\n## Models\n\n- Size: S\n- Implementer: Claude Code, claude-opus-5-5, high effort\n",
+		},
+	]);
 	vi.stubEnv("FAKE_REPLY", JSON.stringify({ score: 10, rationale: "Lands as is.", findings: [] }));
 	try {
 		// Classified medium, held high by the maintainer, and judged high by its reviewers too.
@@ -2842,80 +2894,111 @@ agyFakes("a raise to the override's own tier agrees with it, so the override hol
 	}
 });
 
-agyFakes("the PR's record holds the branch's override and a raise, but not the classifier's own tier", async () => {
-	const s = setup();
-	moveBase(s.repo, (dir) => write(dir, "RISK.md", riskFile([])));
-	const pull = {
-		number: 7,
-		body: "Fixes averaging.\n\n## Models\n\n- Size: S\n- Implementer: Claude Code, claude-opus-5-5, high effort\n",
-	};
-	onGitHub(s.repo, [pull]);
-	vi.stubEnv("FAKE_REPLY", JSON.stringify({ score: 10, rationale: "Lands as is.", findings: [] }));
-	const state = join(s.repo, ".git", "quest");
-	try {
-		// Classified high by the model, then classified anew with --new as medium: the record's tier was the
-		// classifier's own, so it does not hold.
-		vi.stubEnv("FAKE_RISK", JSON.stringify({ tier: "high", reason: "It changes the wire format." }));
-		expect(reviewersOf((await quest("--root", s.repo, "review", ...OPUS)).stdout)).toHaveLength(3);
-		vi.stubEnv("FAKE_RISK", JSON.stringify({ tier: "medium", reason: "It changes the output." }));
-		const fresh = await quest("--root", s.repo, "review", ...OPUS, "--new");
-		expect(fresh.code, fresh.stderr).toBe(0);
-		expect(fresh.stdout).toContain("\nrisk medium It changes the output.\n");
-		expect(reviewersOf(fresh.stdout)).toHaveLength(2);
-
-		// The maintainer holds the branch high; a clone that never saw the override restores it from the record.
-		const held = await quest(
-			"--root",
-			s.repo,
-			"review",
-			...OPUS,
-			"--override",
-			"high",
-			"--reason",
-			"It ships tonight.",
-		);
-		expect(held.code, held.stderr).toBe(0);
-		expect(pull.body).toContain("- Overridden: from medium by the maintainer\n");
-		rmSync(state, { recursive: true, force: true });
-		write(s.repo, "src/lib.ts", "export const x = 9;\n");
-		git(s.repo, "commit", "-qam", "another constant");
-		const next = await quest("--root", s.repo, "review", ...OPUS);
-		expect(next.code, next.stderr).toBe(0);
-		expect(next.stdout).toContain("\nrisk high It ships tonight.\n");
-		expect(next.stdout).toContain("\noverridden medium by the maintainer\n");
-		expect(reviewersOf(next.stdout)).toHaveLength(3);
-
-		// An override that lowers the tier holds on the clone that set it while the record names it.
-		const commit = (value: number) => {
-			write(s.repo, "src/lib.ts", `export const x = ${value};\n`);
-			git(s.repo, "commit", "-qam", `constant ${value}`);
+agyFakes(
+	"the PR's comments hold the branch's override, and its record a raise, but not the classifier's own tier",
+	async () => {
+		const s = setup();
+		moveBase(s.repo, (dir) => write(dir, "RISK.md", riskFile([])));
+		const pull: FakePull = {
+			number: 7,
+			body: "Fixes averaging.\n\n## Models\n\n- Size: S\n- Implementer: Claude Code, claude-opus-5-5, high effort\n",
 		};
-		commit(10);
-		const lowered = await quest("--root", s.repo, "review", ...OPUS, "--override", "low", "--reason", "Docs only.");
-		expect(lowered.code, lowered.stderr).toBe(0);
-		expect(pull.body).toContain("- Risk: low, `Docs only.`\n- Overridden: from medium by the maintainer\n");
-		commit(11);
-		expect(reviewersOf((await quest("--root", s.repo, "review", ...OPUS)).stdout)).toHaveLength(1);
-		// A later override in the record, here one another clone raised, replaces this clone's.
-		const low = pull.body;
-		pull.body = low.replace("- Risk: low, `Docs only.`", "- Risk: high, `It ships tonight.`");
-		commit(12);
-		const raisedElsewhere = await quest("--root", s.repo, "review", ...OPUS);
-		expect(raisedElsewhere.stdout).toContain("\nrisk high It ships tonight.\n");
-		expect(reviewersOf(raisedElsewhere.stdout)).toHaveLength(3);
-		// A lowering override the record names, which the PR's author could have written, holds on no other clone.
-		pull.body = low;
-		rmSync(state, { recursive: true, force: true });
-		commit(13);
-		const elsewhere = await quest("--root", s.repo, "review", ...OPUS);
-		expect(elsewhere.code, elsewhere.stderr).toBe(0);
-		expect(elsewhere.stdout).toContain("\nrisk medium It changes the output.\n");
-		expect(reviewersOf(elsewhere.stdout)).toHaveLength(2);
-		expect(pull.body).not.toContain("- Overridden:");
-	} finally {
-		vi.unstubAllGlobals();
-	}
-});
+		onGitHub(s.repo, [pull]);
+		vi.stubEnv("FAKE_REPLY", JSON.stringify({ score: 10, rationale: "Lands as is.", findings: [] }));
+		const state = join(s.repo, ".git", "quest");
+		try {
+			// Classified high by the model, then classified anew with --new as medium: the record's tier was the
+			// classifier's own, so it does not hold.
+			vi.stubEnv("FAKE_RISK", JSON.stringify({ tier: "high", reason: "It changes the wire format." }));
+			expect(reviewersOf((await quest("--root", s.repo, "review", ...OPUS)).stdout)).toHaveLength(3);
+			vi.stubEnv("FAKE_RISK", JSON.stringify({ tier: "medium", reason: "It changes the output." }));
+			const fresh = await quest("--root", s.repo, "review", ...OPUS, "--new");
+			expect(fresh.code, fresh.stderr).toBe(0);
+			expect(fresh.stdout).toContain("\nrisk medium It changes the output.\n");
+			expect(reviewersOf(fresh.stdout)).toHaveLength(2);
+
+			// The maintainer's override is a comment on the PR, so a clone that never saw it reads it there.
+			const held = await quest(
+				"--root",
+				s.repo,
+				"review",
+				...OPUS,
+				"--override",
+				"high",
+				"--reason",
+				"It ships tonight.",
+			);
+			expect(held.code, held.stderr).toBe(0);
+			expect(pull.comments).toEqual([
+				{ login: "maintainer", body: "Risk override: high from medium, `It ships tonight.`" },
+			]);
+			expect(pull.body).toContain("- Overridden: from medium by the maintainer\n");
+			const commit = (value: number) => {
+				write(s.repo, "src/lib.ts", `export const x = ${value};\n`);
+				git(s.repo, "commit", "-qam", `constant ${value}`);
+			};
+			rmSync(state, { recursive: true, force: true });
+			commit(9);
+			const next = await quest("--root", s.repo, "review", ...OPUS);
+			expect(next.code, next.stderr).toBe(0);
+			expect(next.stdout).toContain("\nrisk high It ships tonight.\n");
+			expect(next.stdout).toContain("\noverridden medium by the maintainer\n");
+			expect(reviewersOf(next.stdout)).toHaveLength(3);
+
+			// The latest override counts, and so does one that lowers the tier, on any clone.
+			const lowered = await quest(
+				"--root",
+				s.repo,
+				"review",
+				...OPUS,
+				"--override",
+				"low",
+				"--reason",
+				"Docs only.",
+			);
+			expect(lowered.code, lowered.stderr).toBe(0);
+			expect(pull.body).toContain("- Risk: low, `Docs only.`\n- Overridden: from medium by the maintainer\n");
+			rmSync(state, { recursive: true, force: true });
+			commit(10);
+			expect(reviewersOf((await quest("--root", s.repo, "review", ...OPUS)).stdout)).toHaveLength(1);
+			// Anyone can comment, so an override from an account that cannot push counts for nothing, nor does a record
+			// line the PR's author writes.
+			pull.comments!.push({ login: "contributor", body: "Risk override: low from high, `Trust me.`" });
+			pull.comments!.push({ login: "maintainer", body: "Risk override: medium from medium, `As classified.`" });
+			pull.comments!.push({ login: "contributor", body: "Risk override: low from high, `Trust me.`" });
+			commit(11);
+			const contributed = await quest("--root", s.repo, "review", ...OPUS);
+			expect(contributed.code, contributed.stderr).toBe(0);
+			expect(contributed.stdout).toContain("\nrisk medium It changes the output.\n");
+			expect(reviewersOf(contributed.stdout)).toHaveLength(2);
+			expect(pull.body).not.toContain("- Overridden:");
+			// --override needs an account that can push.
+			vi.stubGlobal(
+				"fetch",
+				((fetch) => async (input: URL, init?: RequestInit) =>
+					new URL(input).pathname === "/graphql" && String(init?.body).includes("viewer")
+						? new Response(JSON.stringify({ data: { viewer: { login: "contributor" } } }))
+						: fetch(input, init))(globalThis.fetch),
+			);
+			const refused = await quest(
+				"--root",
+				s.repo,
+				"review",
+				...OPUS,
+				"--override",
+				"low",
+				"--reason",
+				"Trust me.",
+			);
+			expect(refused.code).toBe(2);
+			expect(refused.stderr).toContain(
+				"--override needs an account that can push to acme/widget, not contributor",
+			);
+		} finally {
+			vi.unstubAllGlobals();
+		}
+	},
+);
 
 fakes("a malformed risk file on the base fails before any model runs", async () => {
 	const s = setup();
@@ -3084,23 +3167,29 @@ fakes("a round on the head the last round passed runs no reviewer and repeats th
 agyFakes("a head that turns high after its round passed gets a run of three vendors", async () => {
 	const s = setup(null);
 	lowRisk(s.repo);
-	const fable = ["--exclude-model", "claude-fable-5-2"];
-	vi.stubEnv("FAKE_REPLY", JSON.stringify({ score: 10, rationale: "Lands as is.", findings: [] }));
-	const first = JSON.parse((await quest("--root", s.repo, "review", "--json", ...fable)).stdout);
-	expect(first.rounds.map((r: Round) => r.model)).toEqual(["gpt-6.2-sol"]);
-	// The maintainer holds the head high: one vendor's round no longer stands for it, so a new run seats three.
-	const high = ["--override", "high", "--reason", "It ships tonight."];
-	const held = JSON.parse((await quest("--root", s.repo, "review", "--json", ...fable, ...high)).stdout);
-	expect(held.rounds.map((r: Round) => [r.round, r.unchanged])).toEqual([
-		[2, false],
-		[2, false],
-		[2, false],
-	]);
-	expect(new Set(held.rounds.map((r: Round) => r.reviewer)).size).toBe(3);
-	const calls = s.calls().length;
-	const again = JSON.parse((await quest("--root", s.repo, "review", "--json", ...fable)).stdout);
-	expect(again.rounds.map((r: Round) => r.unchanged)).toEqual([true, true, true]);
-	expect(s.calls()).toHaveLength(calls);
+	// The maintainer's override is a comment on the branch's PR.
+	onGitHub(s.repo, [{ number: 7, body: "Fixes averaging.\n" }]);
+	try {
+		const fable = ["--exclude-model", "claude-fable-5-2"];
+		vi.stubEnv("FAKE_REPLY", JSON.stringify({ score: 10, rationale: "Lands as is.", findings: [] }));
+		const first = JSON.parse((await quest("--root", s.repo, "review", "--json", ...fable)).stdout);
+		expect(first.rounds.map((r: Round) => r.model)).toEqual(["gpt-6.2-sol"]);
+		// The maintainer holds the head high: one vendor's round no longer stands for it, so a new run seats three.
+		const high = ["--override", "high", "--reason", "It ships tonight."];
+		const held = JSON.parse((await quest("--root", s.repo, "review", "--json", ...fable, ...high)).stdout);
+		expect(held.rounds.map((r: Round) => [r.round, r.unchanged])).toEqual([
+			[2, false],
+			[2, false],
+			[2, false],
+		]);
+		expect(new Set(held.rounds.map((r: Round) => r.reviewer)).size).toBe(3);
+		const calls = s.calls().length;
+		const again = JSON.parse((await quest("--root", s.repo, "review", "--json", ...fable)).stdout);
+		expect(again.rounds.map((r: Round) => r.unchanged)).toEqual([true, true, true]);
+		expect(s.calls()).toHaveLength(calls);
+	} finally {
+		vi.unstubAllGlobals();
+	}
 });
 
 agyFakes("the PR's Models record sizes the review and names its latest writer", async () => {
@@ -3585,30 +3674,36 @@ fakes("--harness reviews alone, and its findings are the next run's to settle", 
 fakes("a finding a later run keeps open carries over once, still its raiser's", async () => {
 	const s = setup(null);
 	lowRisk(s.repo);
-	const first = JSON.parse((await quest("--root", s.repo, "review", "--json", ...FABLE_WROTE)).stdout);
-	expect(first.rounds.map((r: Round) => [r.model, r.findings.length])).toEqual([["gpt-6.2-sol", 1]]);
-	write(s.repo, ".tmp/responses.md", "1. Refuted.\n");
-	const responses = ["--responses", join(s.repo, ".tmp", "responses.md")];
-	// Two seats both keep it open: the first carries it, as Sol's, beside what each found itself.
-	vi.stubEnv("FAKE_DISPOSITION", "open");
-	const medium = ["--override", "medium", "--reason", "It ships tonight."];
-	const kept = JSON.parse(
-		(await quest("--root", s.repo, "review", "--json", ...FABLE_WROTE, ...medium, ...responses)).stdout,
-	);
-	const found = kept.rounds.map((r: Round) => r.findings.map((f) => f.raised?.model ?? null));
-	expect(found).toEqual([[null, "gpt-6.2-sol"], [null]]);
-	// Counted once: Sol's one and the two the seats found, none of them settled.
-	const total = (tallies: Tally[]) =>
-		tallies.reduce((sum, t) => sum + t.findings.high + t.findings.medium + t.findings.low, 0);
-	expect([total(kept.tallies), ...kept.tallies.map((t: Tally) => t.fixed + t.refuted)]).toEqual([3, 0, 0]);
-	// The next run settles all three, the carried one for Sol.
-	vi.stubEnv("FAKE_DISPOSITION", "fixed");
-	write(s.repo, ".tmp/responses.md", "1. Fixed.\n2. Fixed.\n3. Fixed.\n");
-	const settled = JSON.parse(
-		(await quest("--root", s.repo, "review", "--json", ...FABLE_WROTE, ...responses)).stdout,
-	);
-	expect(settled.tallies.reduce((sum: number, t: Tally) => sum + t.fixed, 0)).toBe(3);
-	expect(total(settled.tallies)).toBe(3 + settled.rounds.length);
+	// The maintainer's override is a comment on the branch's PR.
+	onGitHub(s.repo, [{ number: 7, body: "Fixes averaging.\n" }]);
+	try {
+		const first = JSON.parse((await quest("--root", s.repo, "review", "--json", ...FABLE_WROTE)).stdout);
+		expect(first.rounds.map((r: Round) => [r.model, r.findings.length])).toEqual([["gpt-6.2-sol", 1]]);
+		write(s.repo, ".tmp/responses.md", "1. Refuted.\n");
+		const responses = ["--responses", join(s.repo, ".tmp", "responses.md")];
+		// Two seats both keep it open: the first carries it, as Sol's, beside what each found itself.
+		vi.stubEnv("FAKE_DISPOSITION", "open");
+		const medium = ["--override", "medium", "--reason", "It ships tonight."];
+		const kept = JSON.parse(
+			(await quest("--root", s.repo, "review", "--json", ...FABLE_WROTE, ...medium, ...responses)).stdout,
+		);
+		const found = kept.rounds.map((r: Round) => r.findings.map((f) => f.raised?.model ?? null));
+		expect(found).toEqual([[null, "gpt-6.2-sol"], [null]]);
+		// Counted once: Sol's one and the two the seats found, none of them settled.
+		const total = (tallies: Tally[]) =>
+			tallies.reduce((sum, t) => sum + t.findings.high + t.findings.medium + t.findings.low, 0);
+		expect([total(kept.tallies), ...kept.tallies.map((t: Tally) => t.fixed + t.refuted)]).toEqual([3, 0, 0]);
+		// The next run settles all three, the carried one for Sol.
+		vi.stubEnv("FAKE_DISPOSITION", "fixed");
+		write(s.repo, ".tmp/responses.md", "1. Fixed.\n2. Fixed.\n3. Fixed.\n");
+		const settled = JSON.parse(
+			(await quest("--root", s.repo, "review", "--json", ...FABLE_WROTE, ...responses)).stdout,
+		);
+		expect(settled.tallies.reduce((sum: number, t: Tally) => sum + t.fixed, 0)).toBe(3);
+		expect(total(settled.tallies)).toBe(3 + settled.rounds.length);
+	} finally {
+		vi.unstubAllGlobals();
+	}
 });
 
 test("a tally counts each finding once, for the model that raised it, through every round", () => {

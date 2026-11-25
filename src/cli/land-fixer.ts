@@ -14,16 +14,7 @@ import {
 } from "node:fs";
 import { constants as osConstants } from "node:os";
 import { join } from "node:path";
-import {
-	type HighPath,
-	RISK_FILE,
-	heldHigh,
-	heldTier,
-	matches,
-	parseRiskFile,
-	recordedRisk,
-	reviewSection,
-} from "../core";
+import { type HighPath, RISK_FILE, heldHigh, matches, parseRiskFile, recordedRisk, reviewSection } from "../core";
 import { GitHub, type GitHubDependencies, type ObjectValue, object, string } from "../github/client";
 import { baseRemote, commandEnvironment, contains, git, tryGit, type Entry, type Plan } from "./land";
 import { COMMENT_LIMIT, resolution, type Resolution } from "./land-apply";
@@ -769,7 +760,7 @@ export async function importFix(
 				? undefined
 				: "malformed" in risk
 					? "its review record's risk line does not parse, so a new quest review round must rewrite it"
-					: heldTier(body, risk.tier) === "high"
+					: risk.tier === "high"
 						? "its review record rates the pull request high"
 						: undefined;
 		validateFix(root, entry, head, plan.base.sha, high);

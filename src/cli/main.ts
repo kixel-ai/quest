@@ -95,7 +95,7 @@ import {
 	nextStep,
 	roundLines,
 } from "./review";
-import { type Recorded, pullModels, recordHeld, recordRounds } from "./review-record";
+import { type Recorded, postOverride, pullModels, recordHeld, recordRounds } from "./review-record";
 import {
 	BASH_MAX_TIMEOUT_MS,
 	CLAUDE_HOOKS,
@@ -1746,9 +1746,8 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"needs a trailing / or /**, and a change that touches no path falls in no class. " +
 				"The tier sets the seats, each on a vendor of its own and drawn from the run's rung as above: one on a low head, two on medium, and three on high. " +
 				"A seat the drawn rung has no vendor left for fills from the size's rung, then each rung outward, and the run is an outage only when a seat finds no vendor on any rung. " +
-				"A round that raises the tier seats the extra reviewers at once, in the same run; a run is saved whole or not at all, so one that fails there, as when no other vendor's reviewer can run, leaves the branch as it was, but for the raise, which goes to the PR's review record, the only place a head's tier lives, as a `- Held: high on <head>, <reason>` line that leaves the rest of the record and no longer names any head in full, so a retry from any clone seats as many, and `quest status` reports the held tier. A run reads a held raise, and a tier the record's reviewers raised, for its own head, but never the classifier's own tier, which it judges anew. It reads the record before any reviewer runs, so a forge it cannot reach fails the run. The maintainer's override that raises the tier holds from the record on any clone; one that lowers it holds only on the clone that set it, while the record still names it, since a PR's author can edit its body. " +
-				"--override and --reason record the maintainer's tier for the branch, which holds until the reviewed " +
-				"tier grows riskier than the one overridden, other than to the override's own tier.\n\n" +
+				"A round that raises the tier seats the extra reviewers at once, in the same run; a run is saved whole or not at all, so one that fails there, as when no other vendor's reviewer can run, leaves the branch as it was, but for the raise, which goes to the PR's review record as a `- Held: high, <reason>` line that keeps the rest of the record. The record's tier, held or raised by its reviewers above the classifier's, holds the whole branch, whatever the head, until a run at that tier passes, so a retry from any clone seats as many, and every reader of the record, such as `quest status`, sees that tier; the classifier's own tier each run judges anew. A run reads the record and the PR's comments before any reviewer runs, so a forge it cannot reach fails the run. " +
+				"--override and --reason post the maintainer's tier for the branch as a PR comment, `Risk override: <tier> from <tier>, <reason>`, from an account that can push, the only place an override lives, so every clone reads the latest one, and only one whose author can push. It holds until the reviewed tier grows riskier than the one overridden, other than to the override's own tier.\n\n" +
 				"Prints the size and where it came from, base, and head, its risk tier and reason, the classifier's tier, " +
 				"an overridden line with the tier the maintainer overrode, " +
 				"how it was set (model, paths, or default), and reason, a class line naming the class, and for a model a classifier line (harness, model, " +
@@ -1812,7 +1811,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		.addOption(
 			new Option(
 				"--override <tier>",
-				"The maintainer's tier for the branch, in place of the reviewed one until its change grows riskier",
+				"The maintainer's tier for the branch, posted as a comment on its PR",
 			).choices(TIERS),
 		)
 		.option("--reason <text>", "Why the maintainer overrode the tier, which --override requires")
@@ -1855,21 +1854,22 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 					{
 						...reviewDependencies(),
 						models: (dir, base, branch) => pullModels(dir, base, branch, github),
-						// A failed run's raise goes to the PR's record, the only place a head's tier lives, which unpublishes a
-						// pass at a lower tier; one it cannot reach is a warning beside the run's error.
+						// A failed run's raise goes to the PR's record, the only place a branch's tier lives; one it cannot reach is
+						// a warning beside the run's error.
 						raised: (raise) =>
 							recordHeld(root(), raise, github).then(
 								(record) => {
 									if ("skipped" in record)
 										warn(
-											`the raise to ${raise.tier} was not held, so a retry on this head starts from its classified tier: ${record.skipped}`,
+											`the raise to ${raise.raised.tier} was not held, so a retry starts from its classified tier: ${record.skipped}`,
 										);
 								},
 								(error: unknown) =>
 									warn(
-										`holding the raise to ${raise.tier} failed: ${error instanceof Error ? error.message : String(error)}`,
+										`holding the raise to ${raise.raised.tier} failed: ${error instanceof Error ? error.message : String(error)}`,
 									),
 							),
+						override: (dir, base, branch, override) => postOverride(dir, base, branch, override, github),
 					},
 				);
 				pending = run.then(

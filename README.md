@@ -1895,15 +1895,14 @@ the rest are still drawn; the reviewer `--harness` names runs alone. A round
 that raises the tier seats the extra reviewers at once, in the same run; a run
 is saved whole or not at all, so one that fails there, as when none can run,
 leaves the branch as it was, but for the raise. That goes to the PR's review
-record, the only place a head's tier lives, as a `- Held: high on <head>,
-<reason>` line that keeps the rest of the record and no longer names any head
-in full, so a retry from any clone seats as many, and `quest status` reports the
-held tier. A run reads a held raise, and a tier the record's reviewers raised,
-for its own head, but never the classifier's own tier, which it judges anew. It
-reads the record before any reviewer runs, so a forge it cannot reach fails the
-run. The maintainer's override that raises the tier holds from the record on
-any clone; one that lowers it holds only on the clone that set it, while the
-record still names it, since a PR's author can edit its body. When every model of a vendor a seat needs is
+record as a `- Held: high, <reason>` line that keeps the rest of the record.
+The record's tier, held or raised by its reviewers above the classifier's,
+holds the whole branch, whatever the head, until a run at that tier passes, so
+a retry from any clone seats as many, and every reader of the record, such as
+`quest status`, the land fixer, and `quest usage`, sees that tier. The
+classifier's own tier each run judges anew. A run reads the record and the
+PR's comments before any reviewer runs, so a forge it cannot reach fails the
+run. When every model of a vendor a seat needs is
 avoided, as with no `## Models` record, which avoids every model of the harness
 running the command, the run fails as a usage error; when a seat finds no
 other vendor that can run on any rung, as an outage. So a host where `agy`
@@ -1911,14 +1910,18 @@ cannot run, such as macOS's case-insensitive default volume, finds only two
 vendors for a high head, and its run is an outage: review high heads where
 `agy` runs.
 
-`--override <tier> --reason <text>` records the maintainer's tier for the
-branch in place of the reviewed one, as `- Risk: <tier>, <reason>` and
-`- Overridden: from <tier> by the maintainer`. It holds across heads until
-the reviewed tier grows riskier than the one overridden, other than to the
-override's own tier, which agrees with it, and `quest usage`
-counts overrides as a reading of the tier's accuracy. So a raise to medium on
-a head overridden from low to high ends the override, and the next run on that
-head seats two reviewers, not three.
+`--override <tier> --reason <text>` posts the maintainer's tier for the branch
+as a comment on its PR, `Risk override: <tier> from <tier>, <reason>`, naming
+the tier it replaces. A comment is the only place an override lives, so every
+clone reads the latest one, and it counts only when its author can push to the
+repository, which `--override` checks before posting; overrides are read on
+GitHub only. The record names it as `- Risk: <tier>, <reason>` and
+`- Overridden: from <tier> by the maintainer`, and `quest usage` counts
+overrides as a reading of the tier's accuracy. It holds across heads until the
+reviewed tier grows riskier than the one overridden, other than to the
+override's own tier, which agrees with it. So a raise to medium on a head
+overridden from low to high ends the override, and the next run on that head
+seats two reviewers, not three.
 
 ## Audit cost and accuracy
 
