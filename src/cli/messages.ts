@@ -6,7 +6,6 @@ import { closeSync, existsSync, openSync, readdirSync, readSync, realpathSync, s
 import { isAbsolute, join, sep } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { hostedRepository, originHost } from "./forge";
-import { git } from "./git";
 import { type Remote, type RemoteHost, readRemote, remoteHost, urlHost } from "./github";
 import { RECOMMENDED, checkoutRoot } from "./rules";
 import { kixelUrl } from "./tokens";
@@ -130,7 +129,7 @@ export interface Repositories {
 	origin(url: string): string | null;
 	/**
 	 * Whether `repository` is the one the checkout naming `dir`, where `session` ran, names by its configured origin
-	 * or by that URL after `insteadOf` rewrites.
+	 * or by the URL git fetches that origin from, after `insteadOf` rewrites.
 	 */
 	names(dir: string, session: string | undefined, repository: string): boolean;
 }
@@ -194,28 +193,22 @@ export function repositories(
 	const named = (host: RemoteHost | null) => forgeName(host, kixel);
 	const hosted = (url: string) => hostedRepository(kixel, url);
 	// By checkout, so its subdirectories and removed worktrees share one lookup: the repository its origin names, as
-	// `remoteHost` picks it, and the names of its configured URL and of that URL after rewrites, case-folded.
+	// `remoteHost` picks it, and the names of its configured URL and of the URL git uses, case-folded.
 	const origins = new Map<string, { name: string | null; aliases: string[] }>();
 	const origin = (checkout: string) => {
 		let found = origins.get(checkout);
 		if (found === undefined) {
 			let remote: Remote | null = null;
-			let rewritten: string | null = null;
+			let used: string | null = null;
 			try {
 				remote = readRemote(checkout, "origin");
-				// The configured URL after `insteadOf` rewrites. Git fetches from a remote's first URL, which differs from
-				// the configured last one without any rewrite when the remote has several, so the rewrite is asked of git
-				// only then.
-				rewritten =
-					remote === null || remote.used().fetch === remote.configured.fetch
-						? (remote?.configured.fetch ?? null)
-						: git(checkout, ["ls-remote", "--get-url", remote.configured.fetch]).trim();
+				used = remote?.used().fetch ?? null;
 			} catch {
 				// A directory git cannot read, such as a worktree whose repository moved or whose origin is removed
 				// while it is read, is named by itself: a session's recorded directory is history, not input to validate.
 				remote = null;
 			}
-			const urls = remote === null || rewritten === null ? [] : [remote.configured.fetch, rewritten];
+			const urls = remote === null || used === null ? [] : [remote.configured.fetch, used];
 			found = {
 				name: remote === null ? null : named(remoteHost(remote, hosted)),
 				aliases: urls.flatMap((url) => {
@@ -470,9 +463,9 @@ export function readCodexMessages(path: string, since: number, repositories: Rep
 			typed = payload.originator !== T3_CODEX;
 			unmarked = writesNoProvenance(payload.cli_version);
 			session = payload.id;
-			// The directory's origin names it as other harnesses' sessions there are named when the URL Codex recorded
-			// is that origin, or the URL an `insteadOf` rewrite makes of it; a recorded repository it names neither way
-			// means the directory has since held another checkout.
+			// The directory's origin names it as other harnesses' sessions there are named when the URL Codex recorded,
+			// from `git remote get-url origin`, is that origin or the URL git fetches it from after `insteadOf` rewrites;
+			// a recorded repository it names neither way means the directory has since held another checkout.
 			const cwd = typeof payload.cwd === "string" ? payload.cwd : null;
 			const dir = cwd === null ? null : repositories.name(cwd, payload.id);
 			const url = (payload.git as Record<string, unknown> | undefined)?.repository_url;
