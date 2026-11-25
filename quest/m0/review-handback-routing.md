@@ -21,3 +21,7 @@ Today the handback's marker keeps the queue's reason (`failed_checks` or
 
 A new value in an existing record is high under RISK.md, since readers parse
 it: check the forge's `landing-stopped` shape in `src/core/forge.ts` accepts it.
+
+Decided 2026-11-25 (maintainer, /quest-run): ✅ keep this quest, including its
+edit to `assets/skills/run.md` (rejected: keep it without the skill edit; drop
+it).
