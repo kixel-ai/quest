@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
@@ -14,7 +14,6 @@ import {
 	readCodexMessages,
 	readT3Messages,
 	repositories,
-	topLevelCwd,
 } from "../src/cli/messages";
 import { run, tempDir } from "./fixture";
 
@@ -23,8 +22,8 @@ const THREAD = "01a1b8e8-8fca-7793-99d1-062f41f8a7b0";
 const SINCE = Date.parse("2026-11-01T00:00:00");
 
 const lines = (...records: unknown[]) => `${records.map((r) => JSON.stringify(r)).join("\n")}\n`;
-/** Names a directory as itself and an origin URL as `quest messages` does, keeping every repository. */
-const plain = { ...repositories({}, null), name: (dir: string) => dir };
+/** Names a directory as itself and an origin URL as `quest messages` does. */
+const plain = { ...repositories({}), name: (dir: string) => dir };
 
 /** A Claude Code user turn. */
 const turn = (timestamp: string, content: unknown, extra: object = {}) => ({
@@ -603,16 +602,6 @@ describe("readT3Messages", () => {
 		]);
 	});
 
-	test("reads no further into another project's rows than their project", () => {
-		const path = join(tempDir(), "statev2.sqlite");
-		t3State(path, "/elsewhere", [{ id: "a", at: "2026-11-06T10:00:00.000Z", payload: {} }]);
-		const db = new DatabaseSync(path);
-		db.exec("UPDATE orchestration_v2_projection_messages SET payload_json = '{'");
-		db.close();
-		expect(readT3Messages(path, SINCE, { ...repositories({}, "acme/proj"), name: (dir) => dir })).toEqual([]);
-		expect(() => readT3Messages(path, SINCE, plain)).toThrow(SyntaxError);
-	});
-
 	test("fails on a sender or client it does not know", () => {
 		const path = join(tempDir(), "statev2.sqlite");
 		t3State(path, "/work/proj", [
@@ -697,7 +686,7 @@ describe("messages", () => {
 		expect(messages({ since: "2026-11-01", repository: "/gone" }, { env: {}, home })).toEqual([found[2]]);
 	});
 
-	test("names a removed worktree by its checkout, and reads no further into another repository's session", () => {
+	test("names a removed worktree by its checkout, and counts the unnamed directories it drops", () => {
 		const home = tempDir();
 		const checkout = join(home, "proj");
 		mkdirSync(checkout);
@@ -716,15 +705,15 @@ describe("messages", () => {
 				turn("2026-11-06T09:02:00Z", "elsewhere", { cwd: join(home, "gone", "sub") }),
 			),
 		);
-		// Another repository's session in a shape quest does not know fails only a read that includes it.
 		mkdirSync(join(home, ".codex", "sessions"), { recursive: true });
 		writeFileSync(
 			join(home, ".codex", "sessions", `rollout-2026-11-06T10-00-00-${THREAD}.jsonl`),
-			lines(codexMeta({ cwd: "/other" }), codexTurn("2026-11-06T11:00:00Z", [["x", "plugins.mystery"]])),
+			lines(codexMeta({ cwd: "/other" }), codexTurn("2026-11-06T11:00:00Z", [["x", "user"]])),
 		);
+		// A session that prints nothing gets no note on its malformed line, which would name its log.
 		writeFileSync(
 			join(home, ".claude", "projects", "p", "other.jsonl"),
-			`{"partial\n${lines(turn("2026-11-06T09:03:00Z", "theirs", { cwd: "/other" }), turn("2026-11-06T09:04:00Z", "nowhere", { cwd: undefined }))}`,
+			`{"partial\n${lines(turn("2026-11-06T09:03:00Z", "theirs", { cwd: "/other" }))}`,
 		);
 		const notes: string[] = [];
 		const mine = messages(
@@ -733,13 +722,18 @@ describe("messages", () => {
 		);
 		// Only a count of the directories no origin names, which may hold the repository's sessions.
 		expect(notes).toEqual([
-			"left out the sessions in 2 directories no GitHub or Kixel Quest origin names; --all prints them",
+			"left out the entries of 2 directories no GitHub or Kixel Quest origin names; --all prints them",
 		]);
 		expect(mine.map((m) => m.kind === "message" && [m.repository, m.text])).toEqual([
 			["acme/proj", "from a worktree"],
 			["acme/proj", "from a quest worktree"],
 		]);
-		expect(() => messages({ since: "2026-11-01", repository: null }, { env: {}, home })).toThrow(
+		// A record in a shape quest does not know fails a scoped read too, whichever repository it belongs to.
+		writeFileSync(
+			join(home, ".claude", "projects", "p", "nowhere.jsonl"),
+			lines(turn("2026-11-06T09:04:00Z", "nowhere", { cwd: undefined })),
+		);
+		expect(() => messages({ since: "2026-11-01", repository: "acme/proj" }, { env: {}, home })).toThrow(
 			/without a directory/,
 		);
 	});
@@ -762,9 +756,9 @@ describe("messages", () => {
 			lines(
 				// An older record in a shape quest rejects stays outside the window, even reading every repository.
 				turn("2026-10-01T09:00:00Z", "old", { cwd: undefined }),
-				// Another repository's skill never names this repository's answer.
+				// The session's last skill names its answer, wherever it ran, as an unscoped read names it.
 				{ ...skillTurn("2026-11-06T09:00:00Z", "/skills/quest-plan"), cwd: other },
-				// T3 Code removed the worktree this answer came from.
+				// T3 Code removed the worktree this answer came from, after the person resumed the session outside it.
 				claudeAnswer("2026-11-06T09:01:00Z", { "Which color?": "Blue" }, { cwd: join(home, "t3-gone") }),
 				// A directory that still exists keeps its own name, even unnamed.
 				claudeAnswer("2026-11-06T09:02:00Z", { "Which color?": "Red (Recommended)" }, { cwd: scratch }),
@@ -782,13 +776,13 @@ describe("messages", () => {
 		const state = join(home, ".t3", "userdata", "statev2.sqlite");
 		mkdirSync(dirname(state), { recursive: true });
 		t3State(state, checkout, []);
-		// A structured question's answer in a thread whose project is gone.
 		const db = new DatabaseSync(state);
+		// T3 Code's last run of the session ended before the window.
+		db.exec("UPDATE orchestration_v2_projection_runs SET completed_at = '2026-10-01T00:00:00.000Z'");
+		// A structured question's answer in a thread whose project is gone.
 		db.prepare(
 			"INSERT INTO orchestration_v2_projection_messages VALUES ('async-answer:x', 'orphan', NULL, 'user', ?, ?)",
 		).run("2026-11-06T10:00:00.000Z", JSON.stringify({ createdBy: "user", creationSource: "server", text: "Yes" }));
-		// A project no one wrote in during the window is no gap in the evidence.
-		db.exec("INSERT INTO projection_projects VALUES ('idle', '/idle')");
 		db.close();
 		const notes: string[] = [];
 		const read = () =>
@@ -798,17 +792,17 @@ describe("messages", () => {
 			);
 		const mine = read();
 		expect(mine.map((m) => [m.kind, m.harness, m.repository, m.kind === "answer" ? m.skill : m.text])).toEqual([
-			["answer", "claude", "acme/proj", null],
+			["answer", "claude", "acme/proj", "quest-plan"],
 			["message", "codex", "acme/proj", "and test"],
 		]);
 		expect(notes).toEqual([
-			"left out the sessions in 1 directory no GitHub or Kixel Quest origin names; --all prints them",
+			"left out the entries of 1 directory no GitHub or Kixel Quest origin names; --all prints them",
 		]);
 		expect(messages({ since: "2026-11-01", repository: null }, { env: {}, home })).toHaveLength(3);
 		// A provider row SQLite cannot read, with no message of its own, maps no session and fails no read.
 		const broken = new DatabaseSync(state);
+		broken.prepare("INSERT INTO projection_projects VALUES ('theirs', ?)").run(other);
 		broken.exec(`
-			INSERT INTO projection_projects VALUES ('theirs', '${other}');
 			INSERT INTO orchestration_v2_projection_threads VALUES ('their-thread', 'theirs');
 			INSERT INTO orchestration_v2_projection_runs VALUES ('their-run', 'their-thread', 'their-pt', NULL);
 			INSERT INTO orchestration_v2_projection_provider_threads VALUES ('their-pt', '{');
@@ -818,17 +812,7 @@ describe("messages", () => {
 		expect(messages({ since: "2026-11-01", repository: null }, { env: {}, home })).toHaveLength(3);
 	});
 
-	test("finds a record's own directory without decoding it", () => {
-		const record = (fields: string) =>
-			`{"message":{"content":[{"cwd":"/nested"}]},"text":"\\"cwd\\":\\"/str\\"",${fields}}`;
-		expect(topLevelCwd(record(`"cwd":"/work/a\\"b"`))).toBe('/work/a"b');
-		expect(topLevelCwd(record(`"type":"cwd","n":1`))).toBeUndefined();
-		// An escape JSON rejects leaves the line to the reader, which counts it malformed.
-		expect(topLevelCwd(record(`"cwd":"/bad\\q"`))).toBeUndefined();
-		expect(topLevelCwd('{"text":"unterminated')).toBeUndefined();
-	});
-
-	test("names each forge's repository from the configured origin, comparing owner/name without case", () => {
+	test("names each forge's repository from the configured origin of the physical directory", () => {
 		const home = tempDir();
 		const origin = (dir: string, url: string, ...config: string[]) => {
 			mkdirSync(dir);
@@ -841,7 +825,11 @@ describe("messages", () => {
 		origin(join(home, "hosted"), "https://kixel.quest/acme/proj.git");
 		// A rewrite to a mirror leaves the configured origin naming the repository.
 		origin(join(home, "mirrored"), "git@github.com:acme/proj.git", "url./srv/mirror/.insteadOf", "git@github.com:");
-		const scope = repositories({}, "acme/proj");
+		// A symlink in one checkout to a directory of another is that other's.
+		mkdirSync(join(home, "hosted", "src"));
+		symlinkSync(join(home, "hosted", "src"), join(home, "hub", "link"));
+		const scope = repositories({});
+		expect(scope.name(join(home, "hub", "link"))).toBe("kixel.quest/acme/proj");
 		expect(scope.name(join(home, "hub"))).toBe("Acme/Proj");
 		expect(scope.name(join(home, "hosted"))).toBe("kixel.quest/acme/proj");
 		expect(scope.name(join(home, "mirrored"))).toBe("acme/proj");
@@ -851,16 +839,6 @@ describe("messages", () => {
 		mkdirSync(broken);
 		writeFileSync(join(broken, ".git"), "gitdir: /nonexistent\n");
 		expect(scope.name(broken)).toBe(broken);
-		expect(scope.keep(null)).toBe(false);
-		expect(repositories({}, null).keep(null)).toBe(true);
-		const local = repositories({ QUEST_KIXEL_URL: "http://localhost:8787" }, "localhost:8787/Acme/Proj");
-		expect(local.keep("localhost:8787/acme/proj")).toBe(true);
-		expect(repositories({}, "[::1]:8787/Acme/Proj").keep("[::1]:8787/acme/proj")).toBe(true);
-		expect(["Acme/Proj", "kixel.quest/acme/proj", "/work/acme/proj"].map((name) => scope.keep(name))).toEqual([
-			true,
-			false,
-			false,
-		]);
 	});
 
 	test("the command prints only its checkout's repository, every one with --all, and needs a named origin", () => {
