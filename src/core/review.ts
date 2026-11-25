@@ -2,6 +2,9 @@
 
 import { markdown } from "./doc";
 
+/** The line that opens the record `quest review` writes, which only its rounds keep. */
+export const REVIEW_MARK = "Rewritten by `quest review` after each round.";
+
 /**
  * Where the body of the first `## Review` section runs: from after its heading's line to the next level-1
  * or level-2 heading's line, or the end. Only top-level headings count, as Markdown parses them, so an

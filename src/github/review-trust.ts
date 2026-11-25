@@ -1,6 +1,6 @@
 // Whose `## Review` record `quest status` counts: only one a `quest review` commit status attests, set on the reviewed
 // head by a user with write access to the base repository, since anyone can write a SHA into their own PR's body.
-import { type PullRequest, type Repository, type Tier, recordedRisk, reviewSection } from "../core";
+import { type PullRequest, REVIEW_MARK, type Repository, type Tier, recordedRisk, reviewSection } from "../core";
 import { GitHubDeadline, type GitHubReader, object, string } from "./client";
 
 /** The commit status context `quest review` sets on each head it records. */
@@ -53,13 +53,10 @@ export async function trustedReview(
 	warn: (message: string) => void,
 ): Promise<Trusted> {
 	const section = reviewSection(body);
-	const reviewed =
-		section &&
-		body
-			.slice(section.start, section.end)
-			.match(/\b[0-9a-f]{40}\b/g)
-			?.at(-1);
-	// A record naming no full SHA, as one with a finding open, counts for no head, so its risk and class print as none.
+	const text = section === null ? "" : body.slice(section.start, section.end);
+	// As `reviewRecord` reads it: only a section holding `quest review`'s record names a head, by its last full SHA.
+	const reviewed = text.includes(REVIEW_MARK) && text.match(/\b[0-9a-f]{40}\b/g)?.at(-1);
+	// A section naming no head, as a record with a finding open, counts for none, so its risk and class print as none.
 	if (!reviewed) return { body: section === null ? body : "", localReview: false };
 	const attested = await attestedOutcome(github, pr, body, reviewed);
 	if (typeof attested !== "string") return { body, localReview: attested.localReview };

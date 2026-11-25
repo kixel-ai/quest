@@ -682,7 +682,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"url, state, draft, head, mergeable, merge-state, review-decision, review-record, risk, class, auto-merge, merge-queue, " +
 				"landing-stopped, and checks, whose state and counts follow the checks that count, pending while an open PR's base requires a check or workflow nothing reports; review-record gives whether the PR body's ## Review record " +
 				"covers the head, as current, diff-identical (git diff <base>...<head> prints the same as for the head it names), " +
-				"stale, or unknown when GitHub cannot compare them, then the head it names last, then local-review or no-local-review for whether a local reviewer's round passed it; " +
+				"stale, or unknown when GitHub cannot compare them, or - when the section holds no record quest review wrote, then the head it names last, then local-review or no-local-review for whether a local reviewer's round passed it; " +
 				"it counts the record only when the latest quest review commit status on that head is success, set by a user with write access to the repository, " +
 				"targets the diff from the head's merge base with the PR's base, and attests the record's risk tier and class (else -, with a warning saying why, and risk and class print - too); risk gives the record's risk " +
 				"tier, the same state for its head, the tier its classifier set before any reviewer raised it, and the " +
@@ -784,7 +784,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"lacks (GitHub's review decision is review_required or changes_requested), it only arms auto-merge, which waits " +
 				"for it, and refuses where nothing would wait, since an admin's token merges or enqueues past the requirement. It refuses a head on which quest check " +
 				"--no-stubs --base <base> --branch <head branch> finds anything, read from git objects fetched from the base repository, " +
-				"so nothing from the head runs, except findings the base already has; a base without quests skips it. It refuses a body whose ## Review record's risk lines do not parse, until quest review rewrites it. It also refuses while an online reviewer's " +
+				"so nothing from the head runs, except findings the base or the head's merge base with it already has in a list entry or line the head left unchanged; a head without quests skips it when the base or its merge base has none, and one whose quest documents cannot be read is refused. It refuses a body whose ## Review record's risk lines do not parse, until quest review rewrites it. It also refuses while an online reviewer's " +
 				"unanswered finding on the head, or a newer comment opening with 'Maintainer decision', holds it. It uses the method --squash or --rebase names, refusing one " +
 				"the repository disallows; otherwise the only method the repository allows, or else a merge commit. " +
 				"On a base with GitHub's merge queue, which applies its own method, it enqueues that head, or arms " +
@@ -871,7 +871,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"resolution an App posted on the PR and refuses (exit 3) when the PR's head is no longer the one it " +
 				"resolved. Fetches that head and base, recomputes the merge's conflicted result as the daemon did, " +
 				"applies the fixer's patch, and checks the resolved tree before committing with your identity. Prints the commit and the push command; " +
-				"nothing is pushed and the working tree is untouched.",
+				"nothing is pushed and the working tree is untouched. The commit is no recorded mechanical fix, so the pushed head needs a review that counts for it.",
 		)
 		.argument("<pr>", "GitHub PR URL, or a PR number in origin")
 		.action((value: string) => {
@@ -1566,8 +1566,14 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 			execFileSync(command, args, { stdio: ["ignore", "inherit", "inherit"] });
 		},
 		tryRun: (command: string, args: string[]) => {
-			spawnSync(command, args, { stdio: "ignore" });
+			// A nonzero exit is the answer; a spawn error or signal exit is not, so it must not read as "failed".
+			const { status, error, signal } = spawnSync(command, args, { stdio: "ignore" });
+			if (error) throw error;
+			if (status === null) throw new Error(`${command} ${args.join(" ")} ended by signal ${signal}`);
+			return status === 0;
 		},
+		now: () => performance.now(),
+		sleep: (ms: number) => void Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms),
 	});
 	recordsCommand
 		.command("install")

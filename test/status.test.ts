@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
 
+import { REVIEW_MARK } from "../src/core";
 import { GitHubReader } from "../src/github/client";
 import { main } from "../src/cli/main";
 import { statusLines } from "../src/cli/status";
@@ -822,17 +823,18 @@ describe("the review record", () => {
 	const RISK = "\n- Risk: low, `docs only`\n- Classified: low by default";
 	// The maintainer's passing status on `sha`, attesting the record above.
 	const on = (sha: string) => ({ statuses: { [sha]: reviewStatus("SUCCESS", "Risk low: passed", sha) } });
+	const RECORD = `## Review\n\n${REVIEW_MARK}\n\n`;
 	const line = async (body: string, options: Parameters<typeof setup>[1] = {}) => {
 		const fixture = setup([pull({ body, checks: null, reviews: page([]), threads: page([]) })], options);
 		return statusLines(await pullRequestStatus(pr, fixture.deps)).find((l) => l.startsWith("review-record "));
 	};
 
 	test("is current when the section's last full SHA is the head, without comparing", async () => {
-		expect(await line(`## Review\n\n- Head: ${A}${RISK}`)).toBe(`review-record current ${A} local-review`);
+		expect(await line(`${RECORD}- Head: ${A}${RISK}`)).toBe(`review-record current ${A} local-review`);
 	});
 
 	test("carries across a head whose diff from the base matches the reviewed head's, and not otherwise", async () => {
-		const body = `## Review\n\n- Head: ${B}${RISK}`;
+		const body = `${RECORD}- Head: ${B}${RISK}`;
 		expect(await line(body, { ...on(B), diffs: { [A]: "same", [B]: "same" } })).toBe(
 			`review-record diff-identical ${B} local-review`,
 		);
@@ -844,7 +846,7 @@ describe("the review record", () => {
 	test("is unknown, with a warning, when GitHub cannot compare a head", async () => {
 		for (const status of [406, 403]) {
 			const warnings: string[] = [];
-			expect(await line(`## Review\n\n- Head: ${B}${RISK}`, { ...on(B), diffs: { [A]: status }, warnings })).toBe(
+			expect(await line(`${RECORD}- Head: ${B}${RISK}`, { ...on(B), diffs: { [A]: status }, warnings })).toBe(
 				`review-record unknown ${B} local-review`,
 			);
 			expect(warnings).toHaveLength(1);
@@ -854,13 +856,17 @@ describe("the review record", () => {
 	test("reads only the Review section, so a SHA elsewhere names no review", async () => {
 		expect(await line(`Fixes ${A}.\n\n## Review\n\nSkipped.\n\n## Models\n\n${C}`)).toBe("review-record -");
 	});
+
+	test("names no review for a section `quest review` never wrote, such as a skip naming the head", async () => {
+		expect(await line(`## Review\n\nSkipped as trivial at ${A}.`)).toBe("review-record -");
+	});
 });
 
 describe("whose review record counts", () => {
 	const C = "c".repeat(40);
 	const RISK = "\n- Risk: low, `docs only`\n- Classified: low by default";
 	const record = (head: string, risk = RISK) =>
-		`Fixes it.\n\n## Review\n\n- Head: ${head}${risk}\n\n## Models\n\nSize: S`;
+		`Fixes it.\n\n## Review\n\n${REVIEW_MARK}\n\n- Head: ${head}${risk}\n\n## Models\n\nSize: S`;
 	const permissions = { maintainer: "admin", writer: "write", alice: "read" };
 	const passed = (sha: string, login?: string) => reviewStatus("SUCCESS", "Risk low: passed", sha, login);
 	const read = async (body: string, options: Parameters<typeof setup>[1] = {}) => {
@@ -978,7 +984,7 @@ describe("whose review record counts", () => {
 	});
 
 	test("reads the status of the last full SHA, so a land fixer's head or a hand-written line needs its own", async () => {
-		const open = `Fixes it.\n\n## Review\n\nmechanical fix by codex: merged (head ${A})\n- Head: ${B.slice(0, 12)}, named in full once no reviewer reports a finding${RISK}`;
+		const open = `Fixes it.\n\n## Review\n\nmechanical fix by codex: merged (head ${A})\n\n${REVIEW_MARK}\n\n- Head: ${B.slice(0, 12)}, named in full once no reviewer reports a finding${RISK}`;
 		expect(await read(open, { statuses: { [B]: passed(B) } })).toMatchObject({
 			record: "review-record -",
 			warnings: untrusted(`${A} has no quest review status`),
@@ -1016,7 +1022,7 @@ describe("the risk tier", () => {
 		return { line: statusLines(status).find((l) => l.startsWith("risk ")), risk: status.risk };
 	};
 	const record = (head: string, extra = "") =>
-		`## Review\n\n- Head: ${head}\n- Base: origin/main at bbbbbbbbbbbb\n- Risk: high, \`it rewrites the wire format\`\n` +
+		`## Review\n\n${REVIEW_MARK}\n\n- Head: ${head}\n- Base: origin/main at bbbbbbbbbbbb\n- Risk: high, \`it rewrites the wire format\`\n` +
 		`- Classified: medium by Claude Code, claude-haiku-5-5, low effort, session \`s-1\`${extra}`;
 
 	test("names the record's tier, the classifier's, and whether it covers the head", async () => {
@@ -1045,9 +1051,12 @@ describe("the risk tier", () => {
 	});
 
 	test("is absent from a record without one, and marks a malformed one without failing the read", async () => {
-		expect((await risk(`## Review\n\n- Head: ${A}`)).line).toBe("risk -");
+		expect((await risk(`## Review\n\n${REVIEW_MARK}\n\n- Head: ${A}`)).line).toBe("risk -");
 		// Read beside a well-formed PR, as a reader of many PRs does: only the malformed one's risk is marked.
-		const [malformed, sound] = await Promise.all([risk(`## Review\n\n- Head: ${A}\n- Risk:dire`), risk(record(A))]);
+		const [malformed, sound] = await Promise.all([
+			risk(`## Review\n\n${REVIEW_MARK}\n\n- Head: ${A}\n- Risk:dire`),
+			risk(record(A)),
+		]);
 		expect(malformed).toEqual({
 			line: "risk - malformed - the ## Review record's risk is malformed: dire",
 			risk: { state: "malformed", error: "the ## Review record's risk is malformed: dire" },

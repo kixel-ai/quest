@@ -64,8 +64,8 @@ export interface Thread {
 }
 
 /**
- * The head the PR body's `## Review` section names last, the latest reviewed one, which a `quest review` status
- * attests. `current` is the PR's head; `diff-identical` an earlier head whose diff from
+ * The head the `## Review` section holding `quest review`'s record names last, the latest reviewed one, which a
+ * `quest review` status attests. `current` is the PR's head; `diff-identical` an earlier head whose diff from
  * the base (`git diff <base>...<sha>`) matches the head's; `unknown` one the forge cannot compare, such as a diff too
  * large to render.
  */
@@ -136,7 +136,7 @@ export interface Status {
 	/** The design checkpoints online reviewers put on the head. */
 	checkpoints: { reviewer: string; round: number; url: string }[];
 	/**
-	 * Null when the `## Review` section names no full SHA, or no writer's passing `quest review` status attests it.
+	 * Null when the `## Review` section holds no record `quest review` wrote or names no full SHA, or no writer's passing `quest review` status attests it.
 	 * `localReview` is whether that status attests a local reviewer's round, false for a low head none ran on.
 	 */
 	reviewRecord: (ReviewRecord & { localReview: boolean }) | null;
