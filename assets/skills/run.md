@@ -58,6 +58,7 @@ A `/quest-merge` pick covers the PR until it lands or needs the user: when `/que
 Order merges that would otherwise conflict.
 Where the queue runs a fixer, such as `quest land`, it hands back only a decision: ask the user, with its handback comment's diagnosis and recommendation.
 An `unanswered_signal`, which no fixer takes, holds the pick even with one: dispatch `/quest-iterate`.
+An `unreviewed`, a high head no `quest review` status covers, holds the pick only while its handback comment names the PR's current head, since a later push ends the pick, and the head has not risen in tier since the pick, which is the user's call: then dispatch `/quest-review` on the PR and run `/quest-merge` again only if the review pushed nothing, since a push ends the pick. Otherwise take the normal pick flow.
 Without a fixer, after `merge_conflict`, `failed_checks`, `changes_requested`, or `unresolved_conversations` the pick holds, even from an earlier session: dispatch `/quest-iterate`. After `checks_timed_out`, run `/quest-merge` again once; a second timeout of the same head is the user's call.
 Any other reason, such as a person removing it, is the user's call.
 
@@ -67,7 +68,8 @@ Take the quests' and drafts' `## Waiting` items from `quest waiting --json`, whi
 Rewrite a quest that waits in prose into a `## Waiting` section.
 Check each condition yourself, in parallel sub-agents.
 An outside party's item that holds stays, asked about only when the user can advance it, such as by requesting an upstream release.
-Ask each maintainer item left among the round's questions, in that order, saying what it unblocks; a skip stands for the session.
+Ask each maintainer item left among the round's questions, in that order, by its `kind`, saying what it unblocks; a skip stands for the session.
+Rewrite a prose `Maintainer:` item you ask that stays waiting into a decision or an action.
 A `Maintainer (PC):` item needs the user at one of their computers: when the argument says they are away from one, such as `remote` or `on my phone`, read the waits with `--no-pc` and leave those items for a later session; when it says they are at one, such as `at my PC`, ask those first.
 For an action only the user can take, give the exact steps and the check you will run once they report it done; take any secret through the host's secret prompt.
 

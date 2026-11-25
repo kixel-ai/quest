@@ -114,7 +114,7 @@ interface WatchJob extends Process {
 	handback?: string;
 	/** A finding or decision on the head handed it back, so its marker says `unanswered_signal`. */
 	signaled?: boolean;
-	/** The head is high and no `quest review` status covers it, so the handback asks for a review round. */
+	/** The head is high and no `quest review` status covers it, so its marker says `unreviewed` and the handback asks for a review round. */
 	unreviewed?: boolean;
 	/** A validated fix whose push GitHub refused, handed back for `quest land apply`. */
 	resolution?: Resolution;
@@ -777,7 +777,7 @@ async function collect(
 		`handback ${name}`,
 		attribution,
 		handbackLog(job.log, !handback && result?.action === "handback" ? result.log : undefined),
-		job.signaled ? "unanswered_signal" : job.reason,
+		job.signaled ? "unanswered_signal" : job.unreviewed ? "unreviewed" : job.reason,
 		(room) => {
 			const output = job.output ? outputSection(job.output, room) : "";
 			return output + (job.resolution ? resolutionSection(number, job.resolution, room - output.length) : "");

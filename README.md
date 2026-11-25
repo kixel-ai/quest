@@ -247,16 +247,31 @@ second name in one `## Audit`, and `## Skipped audits` outside the root.
 ## Find what waits on you
 
 A quest waiting outside the tree says so in a `## Waiting` section, one item
-per condition, each opening with who acts: `Maintainer:` for a decision or
-action only the maintainer can take, `Maintainer (PC):` for one they can take
-only at one of their computers, such as a local login or a hardware check, or
-the outside party, such as `moq-dev/moq:`. `quest check` rejects an item that
-names nobody, and a maintainer qualifier other than `(PC)`.
+per condition, each opening with who acts and saying what kind of answer it
+needs:
+
+- `Maintainer:` with a nested choice list, one bullet marked `(Recommended)`,
+  is a **decision**; each bullet is a choice, `label` or `label - description`.
+- `Maintainer (action):` is an **action**, a step only the maintainer can take,
+  and `Maintainer (PC):` one they can take only at one of their computers, such
+  as a local login or a hardware check.
+- Every other item, the outside party's such as `moq-dev/moq:` and a
+  `Maintainer:` item without a choice list, is **prose**.
+
+`quest check` rejects an item that names nobody, a maintainer qualifier other
+than `(action)` or `(PC)`, and a malformed choice list: one outside a plain
+`Maintainer:` item, with fewer than two choices, without exactly one
+`(Recommended)` ending a label, with an empty or repeated label, or a second
+one in the same item. Only that marker makes a nested list a choice list, so
+checklists and detail lists stay prose.
 
 ```markdown
 ## Waiting
 
-- Maintainer: open a Hetzner account; `GET /server` on the Robot API answers 200
+- Maintainer: which runner builds the Windows suite? GitHub-hosted runners bill per minute, and a self-hosted one needs a machine.
+  - GitHub-hosted (Recommended) - no machine to keep up
+  - Self-hosted - free minutes, but a Windows host to maintain
+- Maintainer (action): open a Hetzner account; `GET /server` on the Robot API answers 200
 - Maintainer (PC): plug in the capture card; `v4l2-ctl --list-devices` lists it
 - moq-dev/moq: a release carries the VA-API bindings
 ```
@@ -268,11 +283,15 @@ body.
 milestone and the same downstream impact `quest unblocked` counts; a draft
 ranks as the quest its branch carries. Each line gives the dependents, whether
 the quest is otherwise ready or still blocked, its path or the draft's URL, and
-the item; `--maintainer` keeps only the maintainer's, `--no-pc` drops the
-`Maintainer (PC):` ones for a session away from your computers, and `--json`
-prints `{path, pr, dependents, ready, waits}` objects, each wait's `pc` marking
-those. A draft's item that names no
-party is the maintainer's. Drafts come from
+the item with a decision's choices; `--maintainer` keeps only the
+maintainer's, `--no-pc` drops the `Maintainer (PC):` ones for a session away
+from your computers, and `--json` prints `{path, pr, dependents, ready, waits}`
+objects. Each wait is `{line, party, kind, text}`: a decision adds `choices:
+[{label, description, recommended}]` and leaves its choice list out of `text`,
+and an action adds `pc`. A draft's item that names no party is the
+maintainer's prose, warning when it holds a choice list, and since `quest check` never reads PR bodies, a draft's
+malformed choice list reads as prose with a warning, keeping `pc: true`
+under `Maintainer (PC):` so `--no-pc` still drops it. Drafts come from
 the upstream's open PRs, found as for `unblocked --unclaimed`; without the
 remote, off GitHub, or when GitHub cannot be read, it lists the tree's items
 and warns that drafts were skipped. `/quest-run` walks you through them.
@@ -591,7 +610,7 @@ comes last, and a missing value prints as `-`:
 | `class` | The `## Automatic` class of the base's `RISK.md` the record's classifier found the change in, or `-`. |
 | `auto-merge` | Method, who enabled it, when, and the head it was enabled on. |
 | `merge-queue` | Queue state, position, and when it was enqueued. |
-| `landing-stopped` | The reason the latest merge-queue entry, auto-merge, or [`quest land`](#the-watchers-own-queue) queue entry ended (such as `merge_conflict`, `failed_checks`, `manual`, `manually_disabled`, or `merged`), who ended it, and when; `-` once the PR has entered the merge queue or auto-merge again since. |
+| `landing-stopped` | The reason the latest merge-queue entry, auto-merge, or [`quest land`](#the-watchers-own-queue) queue entry ended (such as `merge_conflict`, `failed_checks`, `unreviewed`, `manual`, `manually_disabled`, or `merged`), who ended it, and when; `-` once the PR has entered the merge queue or auto-merge again since. |
 | `checks` | `failure` if any check fails, else `pending` if any is pending or a requirement is unreported, else `success`, and `passed=`, `failing=`, `pending=` counts, all from the checks that count; `-` when the head has no checks and the base requires none. |
 | `check` | `failing` or `pending`, `required` or `optional`, the result, details URL, and name. A required check or required workflow nothing reports yet prints as `pending required expected -` with its name, followed by `(from app <id>)` when the requirement names an app, or the workflow's repository and path, as `owner/name:path`. |
 | `review` | `current` or `stale` against the head, state, reviewer, time, and URL of each reviewer's latest review. |
@@ -924,7 +943,7 @@ addressed recurring right after it, or three unchanged re-enqueues in a row,
 whatever their causes, hand it back. A fix is validated, lease-pushed, and recorded in Review, and a push GitHub refuses, or a fix that edits protected paths, is handed
 back with its resolution for `quest land apply`, as [the land fixer](#the-land-fixer) describes. The watcher then puts the fixed, merged, or requeued head back
 in the queue, unless it is high and no `quest review` status covers its diff, as
-`quest merge --land` requires, which hands it back for a review round. It goes back with `expectedHeadOid` bound to it: it enqueues a head whose
+`quest merge --land` requires, which hands it back for a review round, marked `unreviewed` in `quest status`. It goes back with `expectedHeadOid` bound to it: it enqueues a head whose
 required checks have passed, and arms auto-merge on one whose checks still
 run, so GitHub enqueues it once they pass. Either joins the back of the queue.
 It comments on the PR with what it did, after any note the fixer wrote. A
@@ -1057,7 +1076,7 @@ rename split, and keeps that set as a plain merge of the base leaves it. It cove
 `.gitmodules`, and gitlinks anywhere. A high head gets fixes like any other, but
 the watcher puts it back in the queue only when a `quest review` status covers
 the new head's diff, as `quest merge --land` requires; otherwise it hands the PR back
-for a review round. The watcher's own merge with the quest merge driver, below, is
+for a review round, marked `unreviewed` in `quest status`. The watcher's own merge with the quest merge driver, below, is
 no fixer edit: it runs no model and resolves only `quest/` files. Collection copies at most 100 MiB of Git metadata the fixer added into a
 clean object repository. It skips the packs fetched at launch, whose objects the clean
 repository borrows from the daemon's own. It ignores fixer configuration and never
@@ -1495,8 +1514,8 @@ it:
 | XL | Claude Code `claude-opus-5-5` xhigh |
 
 `quest unblocked --json` lists each ready quest's ranked `models`: its size's
-list, or the next size's while a `Maintainer:` item under its `## Waiting`
-leaves a decision open, since settling it is part of the work; an XL stays
+list, or the next size's while a `Maintainer:` item under its `## Waiting`,
+other than an action, leaves a decision open, since settling it is part of the work; an XL stays
 XL. `/quest-run` starts a quest on the first entry that can run, and falls
 to the next only while nothing is written: when the CLI is missing or logged
 out, or the agent stops at its usage limit with nothing beyond the claim

@@ -1654,6 +1654,7 @@ describe.skipIf(process.platform === "win32")("the watcher's land fixer", () => 
 			expect(handback).toContain(`its head ${fixed} is high, since `);
 			expect(handback).toContain(`${why}, and no quest review status covers it.`);
 			expect(handback).toContain("Recommendation: run /quest-review on its head before picking it again.");
+			expect(handback).toContain("<!-- quest land: unreviewed -->");
 		}
 	});
 
