@@ -22,6 +22,7 @@ import {
 	type Round,
 	type Settled,
 	type Tally,
+	ReviewLimitError,
 	UnansweredError,
 	agyTurn,
 	ask,
@@ -2162,6 +2163,19 @@ fakes("a question no model answers usably throws with what each reply took", asy
 		{ entry: entries[0], usage: { input: 40, cached: 0, output: 3 }, session: expect.any(String) },
 		{ entry: entries[1], usage: { input: 40, cached: 0, output: 3 }, session: expect.any(String) },
 	]);
+});
+
+fakes("a classifier session that hit its usage limit is queued though no classifier answers", async () => {
+	const s = setup();
+	moveBase(s.repo, (dir) => write(dir, "RISK.md", riskFile([])));
+	vi.stubEnv("FAKE_CLASSIFY", "claude-limited,codex-limited,agy-limited");
+	const queued: { harness: string; session: string }[] = [];
+	const error = await review({ root: s.repo }, { env: process.env, queue: (session) => queued.push(session) }).catch(
+		(each: unknown) => each,
+	);
+	expect(error).toBeInstanceOf(ReviewLimitError);
+	// Each opened a session before its limit ended the turn.
+	expect(queued.map((each) => each.harness).sort()).toEqual(["claude", "codex"]);
 });
 
 fakes("a second reviewer with open findings settles them on a head below high, even at a named effort", async () => {

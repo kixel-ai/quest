@@ -2412,11 +2412,13 @@ export async function classify(input: Classifying): Promise<{ key: string; value
 	const prompt = classifyPrompt(change, { sha: baseSha, text }, diff(["--stat=160"]), diff(["--patch"]), offered);
 	const start = Date.now();
 	// Every model that replied spent tokens, whether or not its reply was the one used.
-	const queueSpent = (spent: Answer<unknown>["spent"]) => {
+	const spent: Answer<unknown>["spent"] = [];
+	const queueSpent = () => {
 		for (const { entry, session } of spent)
 			if (session !== undefined) input.queued({ harness: entry.harness, session, cwd: root, start });
 	};
 	const answer = await ask(CLASSIFIERS, {
+		spent,
 		cwd: root,
 		dir: input.dir,
 		env: input.env,
@@ -2429,10 +2431,10 @@ export async function classify(input: Classifying): Promise<{ key: string; value
 		task: "set the risk tier",
 		parse: (value) => classed(value, classes, "the classifier's reply"),
 	}).catch((error: unknown) => {
-		if (error instanceof UnansweredError) queueSpent(error.spent);
+		queueSpent();
 		throw error;
 	});
-	queueSpent(answer.spent);
+	queueSpent();
 	const { tier, reason } = answer.value;
 	return {
 		key,
@@ -2463,6 +2465,8 @@ export interface Question<T = unknown> {
 	/** Who answers and what for, as `classifier` and `set the risk tier`, for errors. */
 	who: string;
 	task: string;
+	/** Filled with each turn's spend as it ends, so a caller still counts it when the question throws. */
+	spent?: Answer<unknown>["spent"];
 	/** The reply's value, throwing when it is unusable, which passes the question to the next model. */
 	parse(value: unknown): T;
 }
@@ -2486,7 +2490,7 @@ export interface Answer<T = unknown> {
 export async function ask<T>(entries: readonly ReviewModel[], question: Question<T>): Promise<Answer<T>> {
 	const schemaFile = saveSchema(question.dir, question.schema);
 	const failures: (ReviewInputError | ReviewerUnavailableError)[] = [];
-	const spent: Answer<T>["spent"] = [];
+	const spent = question.spent ?? [];
 	for (const entry of entries) {
 		let reply: Reply;
 		let cli: Cli | undefined;
@@ -2512,9 +2516,9 @@ export async function ask<T>(entries: readonly ReviewModel[], question: Question
 				entry.model,
 			);
 		} catch (error) {
-			if (!(error instanceof ReviewerUnavailableError)) throw error;
-			// A turn that hit its limit after opening its session still spent tokens there.
+			// A turn that failed after opening its session still spent tokens there.
 			if (cli?.failed !== undefined) spent.push({ entry, usage: null, session: cli.failed });
+			if (!(error instanceof ReviewerUnavailableError)) throw error;
 			failures.push(error);
 			continue;
 		}
