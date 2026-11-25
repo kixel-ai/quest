@@ -12,7 +12,7 @@ import { basename } from "node:path";
 import { describe, expect, test } from "vitest";
 
 import { collect } from "../src/cli/tree";
-import { ONE, TWO, Tree } from "./fixture";
+import { EPIC_README, M0_README, ONE, TWO, Tree } from "./fixture";
 
 const tree = Tree.baseline;
 
@@ -818,6 +818,64 @@ describe("scheduled", () => {
 	test("an empty section is rejected and blocks nothing", () => {
 		const t = tree().append("quest/m0/epic/one.md", "\n## Scheduled\n");
 		t.rejects("'## Scheduled' is empty");
+		expect(t.ready()).toEqual(["quest/m0/epic/one.md"]);
+	});
+});
+
+describe("parked", () => {
+	const parked = "\n## Parked\n\n- until the mesh ships - kept for the demo\n";
+
+	test("a parked quest is blocked until the section is deleted, and work requiring it names the quest", () => {
+		const t = tree().append("quest/m0/epic/one.md", parked);
+		t.accepts();
+		expect(t.ready()).toEqual([]);
+		expect(t.blockers("quest/m0/epic/one.md")).toEqual(["Parked: until the mesh ships - kept for the demo"]);
+		expect(t.blockers("quest/m0/epic/two.md")).toEqual(["quest/m0/epic/one.md"]);
+		t.write("quest/m0/epic/one.md", ONE);
+		expect(t.ready()).toEqual(["quest/m0/epic/one.md"]);
+		expect(t.blockers("quest/m0/epic/one.md")).toEqual([]);
+	});
+
+	test("a parked epic or milestone holds back every quest under it", () => {
+		for (const [readme, body] of [
+			["quest/m0/epic/README.md", EPIC_README],
+			["quest/m0/README.md", M0_README],
+		]) {
+			const t = tree().append(readme, parked);
+			t.accepts();
+			expect(t.ready()).toEqual([]);
+			expect(t.blockers("quest/m0/epic/one.md")).toEqual([
+				readme,
+				"  Parked: until the mesh ships - kept for the demo",
+			]);
+			t.write(readme, body);
+			expect(t.ready()).toEqual(["quest/m0/epic/one.md"]);
+		}
+	});
+
+	test("parking is listed before a date, on the quest and on an epic above it", () => {
+		const t = tree()
+			.append("quest/m0/epic/one.md", `${parked}\n## Scheduled\n\n- 2027-01-15\n`)
+			.append("quest/m0/epic/README.md", `\n## Scheduled\n\n- 2027-01-01\n${parked}`);
+		t.accepts();
+		expect(t.blockers("quest/m0/epic/one.md")).toEqual([
+			"Parked: until the mesh ships - kept for the demo",
+			"Scheduled: 2027-01-15",
+			"quest/m0/epic/README.md",
+			"  Parked: until the mesh ships - kept for the demo",
+			"  Scheduled: 2027-01-01",
+		]);
+	});
+
+	test("a second item is rejected", () => {
+		tree()
+			.append("quest/m0/epic/one.md", "\n## Parked\n\n- until spring\n- until summer\n")
+			.rejects("quest/m0/epic/one.md:10: '## Parked' holds one item");
+	});
+
+	test("an empty section is rejected and parks nothing", () => {
+		const t = tree().append("quest/m0/epic/one.md", "\n## Parked\n");
+		t.rejects("'## Parked' is empty");
 		expect(t.ready()).toEqual(["quest/m0/epic/one.md"]);
 	});
 });

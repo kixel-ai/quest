@@ -382,7 +382,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 			"Rank ready quests by milestone priority, distinct transitive dependents, then path order. " +
 				"Given a path, print what blocks that quest instead.\n\n" +
 				"A quest is ready only when neither it nor any epic above it, milestones included, has a ## Required " +
-				"section or a ## Scheduled date after today's local date. Counts exclude structural epic membership " +
+				"section, a ## Parked item, or a ## Scheduled date after today's local date. Counts exclude structural epic membership " +
 				"but include the quests an epic's ## Required holds back. Other prerequisites may remain for dependents. " +
 				"Invalid trees fail before printing a ranking. Prints a count and path per line; --json prints an " +
 				"ordered array of {path, dependents, hosts, arm, models} objects, where hosts lists the operating systems " +
@@ -483,7 +483,8 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		.command("waiting")
 		.summary("List quests and draft PRs waiting on the maintainer or an outside party")
 		.description(
-			"List every quest with a ## Waiting section and every open draft PR handed back with one: those " +
+			"List every quest with a ## Waiting section, except one that it or an epic above it parks with a " +
+				"## Parked item, and every open draft PR handed back with one: those " +
 				"waiting on the maintainer first, then milestone priority, distinct " +
 				"transitive dependents as quest unblocked counts them, ready before blocked, then path order, with " +
 				"drafts after quests by PR number. A draft ranks as the quest its branch carries, or last when it " +
@@ -492,8 +493,8 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"can take only at one of their computers, such as a local login or a hardware check. A draft's item without a party is the " +
 				"maintainer's; a draft's section without items is one maintainer item " +
 				"holding its prose.\n\n" +
-				"Prints one line per item: dependents, ready or blocked (whether Required entries or a future " +
-				"Scheduled date remain), the quest's path or the draft's URL, and the item. --json prints an ordered array of {path, pr, dependents, " +
+				"Prints one line per item: dependents, ready or blocked (whether Required entries, a Parked item, or a " +
+				"future Scheduled date remain), the quest's path or the draft's URL, and the item. --json prints an ordered array of {path, pr, dependents, " +
 				"ready, waits: [{line, party, pc, text}]} objects, where pr is the draft's URL or null, path is the " +
 				"quest, the quest a draft carries, or null; an item opened Maintainer (PC): has party Maintainer and pc " +
 				"true. " +

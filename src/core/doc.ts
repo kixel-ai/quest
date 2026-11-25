@@ -178,6 +178,9 @@ export function hosts(doc: Doc): Host[] {
 	return HOST.filter((h) => named.has(h));
 }
 
+/** The section that sets work aside: nothing under it is offered until the section is deleted. */
+export const PARKED = "Parked";
+
 /** The section holding the date a quest waits for before it can start. */
 export const SCHEDULED = "Scheduled";
 

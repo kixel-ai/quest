@@ -247,3 +247,38 @@ test("drafts rank as the quest they carry, after quests on a tie, and last when 
 		["https://example.com/pull/3", "quest/m0/a.md", 0, true],
 	]);
 });
+
+test("waiting omits parked work's items but keeps a draft handed back for it", () => {
+	const docs = (parkedReadme: boolean) => {
+		const found = tree(
+			{
+				"parked.md": "\n## Waiting\n\n- Maintainer: pick one.\n\n## Parked\n\n- until spring\n",
+				"live.md": "\n## Waiting\n\n- Maintainer: pick another.\n",
+			},
+			{ "later.md": "\n## Waiting\n\n- moq-dev/moq: a release.\n" },
+		);
+		return parkedReadme
+			? found.map((doc) =>
+					doc.path === "quest/m1/README.md"
+						? parse(doc.path, "# m1\n\n## Goal\n\nWork.\n\n## Parked\n\n- until spring\n")
+						: doc,
+				)
+			: found;
+	};
+	const draft = {
+		url: "https://example.com/pull/1",
+		branch: "quest/m0/parked",
+		body: "## Waiting\n\n- Maintainer: plan it.\n",
+	};
+	for (const [milestone, listed] of [
+		[false, ["quest/m0/live.md", "https://example.com/pull/1", "quest/m1/later.md"]],
+		[true, ["quest/m0/live.md", "https://example.com/pull/1"]],
+	] as const) {
+		const found = waiting(docs(milestone), TODAY, { drafts: [draft] });
+		expect(found.map((quest) => quest.pr ?? quest.path)).toEqual(listed);
+		expect(found.find((quest) => quest.pr !== null)?.ready).toBe(false);
+	}
+	// Unparking is deleting the section: the quest's own item is listed again.
+	const unparked = tree({ "parked.md": "\n## Waiting\n\n- Maintainer: pick one.\n" });
+	expect(waiting(unparked, TODAY).map((quest) => quest.path)).toEqual(["quest/m0/parked.md"]);
+});

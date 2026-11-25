@@ -2,7 +2,7 @@
 
 import { handBackWaits } from "./claim";
 import { type Doc, branchQuest, children, gates, permanent } from "./doc";
-import { ready, treeOrder } from "./ready";
+import { parked, ready, treeOrder } from "./ready";
 import { ROOT, check, formatFinding } from "./rules";
 import { type Wait, onMaintainer, waits } from "./waiting";
 
@@ -103,7 +103,7 @@ export interface WaitingQuest {
 	pr: string | null;
 	/** Distinct transitive dependents, as `quest unblocked` counts them. */
 	dependents: number;
-	/** No `Required` entry or future `Scheduled` date remains on it or an epic above it, so clearing its waits lets the work go on. */
+	/** No `Required` entry, `Parked` item, or future `Scheduled` date remains on it or an epic above it, so clearing its waits lets the work go on. */
 	ready: boolean;
 	waits: Wait[];
 }
@@ -119,8 +119,9 @@ export interface WaitingOptions {
 }
 
 /**
- * Every quest with a `## Waiting` section and every draft in `drafts` handed
- * back with one, holding the items `options` keeps: those waiting on the maintainer first, then milestone order,
+ * Every quest with a `## Waiting` section, unless it or an epic above it is
+ * parked, and every draft in `drafts` handed back with one, holding the items
+ * `options` keeps: those waiting on the maintainer first, then milestone order,
  * descending downstream impact, ready before blocked, then tree order, with
  * drafts after quests in the order given. A draft ranks as the quest its branch
  * carries, or last when it carries none. Readiness is as of `today`, a
@@ -141,7 +142,12 @@ export function waiting(docs: Doc[], today: string, options: WaitingOptions = {}
 		ready: path === null || startable.has(path),
 		waits: found.filter(kept),
 	});
-	const quests = treeOrder(docs).map((path) => entry(path, null, waits(byPath.get(path)!)));
+	// Nobody acts on parked work's waits until it is unparked. A draft for it is
+	// still listed: an open PR is live work whatever its quest says.
+	const quests = treeOrder(docs)
+		.map((path) => byPath.get(path)!)
+		.filter((doc) => !parked(docs, doc))
+		.map((doc) => entry(doc.path, null, waits(doc)));
 	const pulls = drafts.map((draft) => {
 		const quest = branchQuest(draft.branch);
 		return entry(byPath.has(quest) ? quest : null, draft.url, handBackWaits(draft.body));
