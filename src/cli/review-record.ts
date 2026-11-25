@@ -506,14 +506,15 @@ export async function pullModels(
 }
 
 /**
- * Post the maintainer's `override` of the tier as a comment on the open PR from `branch`, the only place an override
- * lives, so every clone reads it. Its author must be able to push, or it would count for nothing.
+ * Post the maintainer's `override` of the tier, or the end of the latest one and why, as a comment on the open PR from
+ * `branch`, the only place an override lives, so every clone reads it. Its author must be able to push, or it would
+ * count for nothing.
  */
 export async function postOverride(
 	root: string,
 	baseRef: string,
 	branch: string,
-	override: Override,
+	override: Override | { ended: string },
 	deps: ClaimDependencies,
 ): Promise<void> {
 	const pull = await openPull(root, baseRef, branch, deps);
@@ -525,6 +526,10 @@ export async function postOverride(
 		throw new ReviewInputError(
 			`--override needs an account that can push to ${ref.owner}/${ref.repo}, not ${viewer}`,
 		);
+	if ("ended" in override) {
+		await pull.comment(`Risk override ended: ${code(override.ended)}`);
+		return;
+	}
 	const body = `Risk override: ${override.tier} from ${override.from}, ${code(override.reason)}`;
 	if (!OVERRIDE.test(body))
 		throw new ReviewInputError(`--reason cannot be written as an override: ${override.reason}`);
@@ -535,7 +540,8 @@ export async function postOverride(
  * Hold a failed run's raise in the record of the open PR from its branch, as a `- Held:` line before its `- Head:`.
  * The record's tier is then the raised one, for every reader and every head, so the record's run no longer passes,
  * until a run at that tier passes. The rest of the record, its reviewers' evidence, stays as it was; a section with no
- * record gets the run's header, with no reviewers, to hold it.
+ * record gets a header at the raised tier, with no reviewers, to hold it. The body is its author's to edit, so a
+ * failing `quest review` status goes first on the run's head and the head the record names, which ends a pass there.
  */
 export async function recordHeld(root: string, raise: HeldRaise, deps: ClaimDependencies): Promise<Recorded> {
 	const pull = await openPull(root, raise.base.ref, raise.branch, deps);
@@ -543,10 +549,41 @@ export async function recordHeld(root: string, raise: HeldRaise, deps: ClaimDepe
 	const line = `- Held: ${raise.raised.tier}, ${code(raise.raised.reason)}`;
 	const section = reviewSection(pull.body);
 	const risk = recordedRisk(pull.body);
-	const body =
-		section === null || risk === null || "malformed" in risk
-			? withReview(pull.body, reviewRecord({ ...raise, rounds: [], tallies: [] }))
-			: pull.body;
+	const valid = section !== null && risk !== null && !("malformed" in risk);
+	const named = valid
+		? pull.body
+				.slice(section.start, section.end)
+				.match(/\b[0-9a-f]{40}\b/g)
+				?.at(-1)
+		: undefined;
+	let status: Unattested | null = null;
+	for (const sha of new Set([raise.head, ...(named === undefined ? [] : [named])])) {
+		let from: string;
+		try {
+			from = git(root, ["merge-base", raise.base.sha, sha]);
+		} catch {
+			// A failing status's target is never read, so a head this clone lacks takes the base.
+			from = raise.base.sha;
+		}
+		const set = await pull.attest({
+			head: sha,
+			from,
+			state: "failure",
+			description: attestation(raise.raised.tier, null, "short of vendors"),
+		});
+		status ??= set;
+	}
+	const body = valid
+		? pull.body
+		: withReview(
+				pull.body,
+				reviewRecord({
+					...raise,
+					risk: { ...raise.risk, ...raise.raised, overridden: undefined, raisedBy: undefined },
+					rounds: [],
+					tallies: [],
+				}),
+			);
 	const { start, end } = reviewSection(body)!;
 	const kept = body
 		.slice(start, end)
@@ -555,7 +592,7 @@ export async function recordHeld(root: string, raise: HeldRaise, deps: ClaimDepe
 		.join("\n");
 	const at = kept.search(/^- Head: /m);
 	await pull.edit(`${body.slice(0, start)}${kept.slice(0, at)}${line}\n${kept.slice(at)}${body.slice(end)}`);
-	return { url: pull.url };
+	return status === null ? { url: pull.url } : { url: pull.url, status };
 }
 
 /**

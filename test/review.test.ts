@@ -1839,7 +1839,10 @@ type FakePull = {
 	body: string | null;
 	head?: string;
 	sha?: string;
-	/** Comments on the PR, oldest first; `maintainer` can push and anyone else cannot. */
+	/**
+	 * Comments on the PR, oldest first; `maintainer` can push, `reader` is a member whose permission the token cannot
+	 * read, and anyone else cannot push.
+	 */
 	comments?: { login: string; body: string }[];
 };
 function onGitHub(
@@ -1925,12 +1928,14 @@ function onGitHub(
 			return json(
 				pull.comments.map((c, i) => ({
 					user: { login: c.login, type: "User" },
+					author_association: ["maintainer", "reader"].includes(c.login) ? "MEMBER" : "CONTRIBUTOR",
 					body: c.body,
 					html_url: at(i + 1),
 				})),
 			);
 		}
 		const permission = new RegExp(`^/repos/${owner}/widget/collaborators/([^/]+)/permission$`).exec(url.pathname);
+		if (permission?.[1] === "reader") return json({ message: "Must have push access" }, 403);
 		if (permission) return json({ permission: permission[1] === "maintainer" ? "admin" : "read" });
 		if (url.pathname === "/graphql" && String(init?.body).includes("viewer"))
 			return json({ data: { viewer: { login: "maintainer" } } });
@@ -2556,6 +2561,7 @@ agyFakes("a reviewer raises the tier, and the record keeps the classifier's besi
 			head: git(s.repo, "rev-parse", "HEAD").slice(0, 12),
 			class: null,
 			overridden: null,
+			held: null,
 		});
 
 		// A raise holds for every later round, whatever they judge it.
@@ -2707,7 +2713,7 @@ agyFakes(
 			number: 7,
 			body: "Fixes averaging.\n\n## Models\n\n- Size: S\n- Implementer: Claude Code, claude-opus-5-5, high effort\n",
 		};
-		onGitHub(s.repo, [pull]);
+		const writes = onGitHub(s.repo, [pull]);
 		vi.stubEnv("FAKE_REPLY", JSON.stringify({ score: 10, rationale: "Lands as is.", findings: [] }));
 		try {
 			// The medium head passes on its two vendors, so the record names it in full.
@@ -2729,6 +2735,11 @@ agyFakes(
 			expect(pull.body).toContain("- Score: 10/10, `Lands as is.`");
 			expect(recordedRisk(pull.body)).toMatchObject({ tier: "high", classified: "medium", class: null });
 			expect(passed(recordedRun(pull.body)!)).toBe(false);
+			// The body is the author's to edit, so failing statuses end the pass on both heads first.
+			const later = git(s.repo, "rev-parse", "HEAD");
+			expect(writes.statuses.slice(-2)).toMatchObject(
+				[later, head].map((sha) => ({ sha, state: "failure", description: "Risk high: short of vendors" })),
+			);
 			// A retry, from any clone and on any head, here a clean merge's, starts from the held tier, and its run's
 			// record drops the line.
 			git(s.repo, "commit", "--allow-empty", "-qm", "a clean merge");
@@ -2743,6 +2754,85 @@ agyFakes(
 			expect(reviewersOf(retry.stdout)).toHaveLength(3);
 			expect(pull.body).not.toContain("- Held:");
 			expect(pull.body).toContain(`- Head: ${merged}\n`);
+		} finally {
+			vi.unstubAllGlobals();
+		}
+	},
+);
+
+agyFakes("a held raise newer than a pass at a riskier tier still holds the branch", async () => {
+	const s = setup();
+	moveBase(s.repo, (dir) => write(dir, "RISK.md", riskFile([])));
+	const pull = {
+		number: 7,
+		body: "Fixes averaging.\n\n## Models\n\n- Size: S\n- Implementer: Claude Code, claude-opus-5-5, high effort\n",
+	};
+	onGitHub(s.repo, [pull]);
+	vi.stubEnv("FAKE_REPLY", JSON.stringify({ score: 10, rationale: "Lands as is.", findings: [] }));
+	try {
+		vi.stubEnv("FAKE_RISK", JSON.stringify({ tier: "high", reason: "It changes the wire format." }));
+		expect((await quest("--root", s.repo, "review", ...OPUS)).code).toBe(0);
+		expect(passed(recordedRun(pull.body)!)).toBe(true);
+		// A later run's raise to medium failed, holding it below the high pass.
+		pull.body = pull.body.replace("- Head: ", "- Held: medium, `It changes the output.`\n- Head: ");
+		expect(recordedRisk(pull.body)).toMatchObject({ tier: "high", held: { tier: "medium" } });
+		write(s.repo, "src/lib.ts", "export const x = 42;\n");
+		git(s.repo, "commit", "-qam", "a smaller change");
+		vi.stubEnv("FAKE_RISK", JSON.stringify({ tier: "low", reason: "Only a constant changes." }));
+		const retry = await quest("--root", s.repo, "review", ...OPUS);
+		expect(retry.code, retry.stderr).toBe(0);
+		expect(retry.stdout).toContain("\nrisk medium It changes the output.\n");
+		expect(reviewersOf(retry.stdout)).toHaveLength(2);
+	} finally {
+		vi.unstubAllGlobals();
+	}
+});
+
+agyFakes(
+	"a change riskier than an override's tier ends it on the PR, so a later smaller one does not revive it",
+	async () => {
+		const s = setup();
+		moveBase(s.repo, (dir) => write(dir, "RISK.md", riskFile([])));
+		const pull: FakePull = {
+			number: 7,
+			body: "Fixes averaging.\n\n## Models\n\n- Size: S\n- Implementer: Claude Code, claude-opus-5-5, high effort\n",
+			comments: [{ login: "maintainer", body: "Risk override: low from medium, `Docs only.`" }],
+		};
+		onGitHub(s.repo, [pull]);
+		vi.stubEnv("FAKE_REPLY", JSON.stringify({ score: 10, rationale: "Lands as is.", findings: [] }));
+		const run = async (tier: string, value: number) => {
+			vi.stubEnv("FAKE_RISK", JSON.stringify({ tier, reason: `It is ${tier}.` }));
+			write(s.repo, "src/lib.ts", `export const x = ${value};\n`);
+			git(s.repo, "commit", "-qam", `constant ${value}`);
+			const out = await quest("--root", s.repo, "review", ...OPUS);
+			expect(out.code, out.stderr).toBe(0);
+			return reviewersOf(out.stdout).length;
+		};
+		try {
+			expect(await run("medium", 1)).toBe(1);
+			expect(await run("high", 2)).toBe(3);
+			expect(pull.comments!.at(-1)).toEqual({
+				login: "maintainer",
+				body: "Risk override ended: `a high change outgrew the override from medium`",
+			});
+			expect(await run("medium", 3)).toBe(2);
+			expect(pull.comments).toHaveLength(2);
+			// Posting the latest override again adds no comment.
+			pull.comments!.push({ login: "maintainer", body: "Risk override: low from medium, `Docs only.`" });
+			write(s.repo, "src/lib.ts", "export const x = 4;\n");
+			git(s.repo, "commit", "-qam", "constant 4");
+			const again = await quest(
+				"--root",
+				s.repo,
+				"review",
+				...OPUS,
+				"--override",
+				"low",
+				"--reason",
+				"Docs only.",
+			);
+			expect(again.code, again.stderr).toBe(0);
+			expect(pull.comments).toHaveLength(3);
 		} finally {
 			vi.unstubAllGlobals();
 		}
@@ -3054,6 +3144,8 @@ agyFakes(
 			pull.comments!.push({ login: "contributor", body: "Risk override: low from high, `Trust me.`" });
 			pull.comments!.push({ login: "maintainer", body: "Risk override: medium from medium, `As classified.`" });
 			pull.comments!.push({ login: "contributor", body: "Risk override: low from high, `Trust me.`" });
+			// A member whose permission the token cannot read counts for nothing either, and fails no run.
+			pull.comments!.push({ login: "reader", body: "Risk override: low from high, `Trust me.`" });
 			commit(11);
 			const contributed = await quest("--root", s.repo, "review", ...OPUS);
 			expect(contributed.code, contributed.stderr).toBe(0);

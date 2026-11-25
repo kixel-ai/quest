@@ -156,6 +156,7 @@ test("the review record's risk reads back, and a record without one names none",
 		head,
 		class: null,
 		overridden: null,
+		held: null,
 	});
 	expect(
 		recordedRisk(
@@ -327,11 +328,14 @@ test("a failed run's held raise is the record's tier, with its reason and no cla
 		classified: "low",
 		class: null,
 		overridden: null,
+		held: { tier: "high", reason: "it drops a field" },
 	});
+	// A lower one leaves the record's tier, though it still holds a branch whose record passed at that tier.
 	expect(recordedRisk(record("- Held: low, `docs`"))).toMatchObject({
 		tier: "medium",
 		class: "tests",
 		overridden: "high",
+		held: { tier: "low", reason: "docs" },
 	});
 });
 

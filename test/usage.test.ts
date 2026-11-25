@@ -1168,7 +1168,7 @@ describe("usage", () => {
 		expect(report.breakages[0]!.culprit).toMatchObject({ tier: "high", size: "L" });
 		expect(text).toContain(
 			"Breakages, by the merged fix naming its culprit under ## Caused by:\n" +
-				"   #10  high, L, written by claude-opus-5-5 high, gpt-6.2-sol medium, reviewed by gpt-6.2-sol high, gemini-3-pro high, claude-opus-5-5 high, gpt-6.2-sol medium; fixed by #11, finder unrecorded, opened before it merged\n" +
+				"   #10  high, L, written by claude-opus-5-5 high, gpt-6.2-sol medium, reviewed by gpt-6.2-sol high, gemini-3-pro high; fixed by #11, finder unrecorded, opened before it merged\n" +
 				"   #2   no tier, XS, written by gpt-6.2-sol low, no local review; fixed by #11, closing incident page 7, found by customer, 17.8d after merge\n",
 		);
 		// #10 is the one PR with a tier, and a later PR fixed it; #11, #5, and #6 of the rest merged.

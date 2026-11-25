@@ -17,7 +17,24 @@ export interface Carried {
 export const DECISION = /^ {0,3}(?![ \t])[^A-Za-z>`~\n]*Maintainer decision\b/i;
 
 /** Repository permissions that can push, whose decisions and answers count. */
-const WRITE = ["admin", "maintain", "write"];
+export const WRITE = ["admin", "maintain", "write"];
+
+/**
+ * `name`'s permission on `repository`, `no` when they are no collaborator, or why GitHub refused to say, as it does
+ * for a token that cannot push.
+ */
+export async function permissionOf(
+	client: GitHubReader,
+	repository: Repository,
+	name: string,
+): Promise<string | { refused: string }> {
+	const response = await client.request(
+		`/repos/${repository.owner}/${repository.repo}/collaborators/${encodeURIComponent(name)}/permission`,
+		{ allow: [403, 404] },
+	);
+	if (response.status === 403) return { refused: String(object(await response.json()).message) };
+	return response.status === 404 ? "no" : string(object(await response.json()).permission);
+}
 
 /** A body's first line of prose, past markup such as a bot's HTML comments and images, cut short. */
 const firstLine = (body: string) =>
@@ -155,12 +172,9 @@ async function writersOf(
 		if (association === "OWNER") writers.add(name);
 		else if ((association === "MEMBER" || association === "COLLABORATOR") && !asked.has(name)) {
 			asked.add(name);
-			const response = await client.request(
-				`/repos/${repository.owner}/${repository.repo}/collaborators/${encodeURIComponent(name)}/permission`,
-				{ allow: [404] },
-			);
-			if (response.status !== 404 && WRITE.includes(string(object(await response.json()).permission)))
-				writers.add(name);
+			const found = await permissionOf(client, repository, name);
+			if (typeof found !== "string") throw new Error(`cannot read the permission of ${name}: ${found.refused}`);
+			if (WRITE.includes(found)) writers.add(name);
 		}
 	}
 	return writers;
@@ -198,6 +212,9 @@ export async function readSignals(
 /** The first line of a comment that overrides a PR's risk tier, naming the tier it replaces and why. */
 export const OVERRIDE = /^Risk override: (low|medium|high) from (low|medium|high), (`+) ?(.*?) ?\3$/;
 
+/** The first line of a comment that ends the override before it, once a change grew riskier than its tier. */
+export const OVERRIDE_ENDED = /^Risk override ended: (`+) ?(.*?) ?\1$/;
+
 /** A maintainer's override of a PR's risk tier, from their comment on it. */
 export interface TierOverride {
 	tier: Tier;
@@ -207,19 +224,17 @@ export interface TierOverride {
 	url: string;
 }
 
-/** Whether `name` can push to `repository`. */
+/** Whether `name` can push to `repository`, false when the token cannot read their permission. */
 export async function canPush(client: GitHubReader, repository: Repository, name: string): Promise<boolean> {
-	const response = await client.request(
-		`/repos/${repository.owner}/${repository.repo}/collaborators/${encodeURIComponent(name)}/permission`,
-		{ allow: [404] },
-	);
-	return response.status !== 404 && WRITE.includes(string(object(await response.json()).permission));
+	const found = await permissionOf(client, repository, name);
+	return typeof found === "string" && WRITE.includes(found);
 }
 
 /**
  * The latest override of PR `number`'s tier, from a comment whose first line matches {@link OVERRIDE}, by an account
- * that can push to `repository`, or null for none. Anyone can comment, so another account's override counts for
- * nothing.
+ * that can push to `repository`, or null for none or once a later such comment ended it. Anyone can comment, so
+ * another account's override counts for nothing, and a token that cannot read whether its author can push, as a
+ * contributor's, reads none.
  */
 export async function readOverride(
 	client: GitHubReader,
@@ -231,16 +246,21 @@ export async function readOverride(
 	);
 	const pushes = new Map<string, boolean>();
 	for (const comment of comments.reverse()) {
-		const found = OVERRIDE.exec(
-			String(comment.body ?? "")
-				.split("\n")[0]!
-				.trim(),
-		);
+		const first = String(comment.body ?? "")
+			.split("\n")[0]!
+			.trim();
+		const found = OVERRIDE.exec(first);
 		const user = comment.user == null ? null : object(comment.user);
-		if (found === null || user === null || user.type === "Bot" || typeof user.login !== "string") continue;
-		if (!pushes.has(user.login)) pushes.set(user.login, await canPush(client, repository, user.login));
-		if (pushes.get(user.login))
-			return { tier: found[1] as Tier, from: found[2] as Tier, reason: found[4]!, url: string(comment.html_url) };
+		if ((found === null && !OVERRIDE_ENDED.test(first)) || user === null || user.type === "Bot") continue;
+		// An owner can push; a member or collaborator may only read; anyone else cannot.
+		const association = String(comment.author_association);
+		if (typeof user.login !== "string" || !["OWNER", "MEMBER", "COLLABORATOR"].includes(association)) continue;
+		if (!pushes.has(user.login))
+			pushes.set(user.login, association === "OWNER" || (await canPush(client, repository, user.login)));
+		if (!pushes.get(user.login)) continue;
+		return found === null
+			? null
+			: { tier: found[1] as Tier, from: found[2] as Tier, reason: found[4]!, url: string(comment.html_url) };
 	}
 	return null;
 }

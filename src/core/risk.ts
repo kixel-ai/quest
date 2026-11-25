@@ -310,6 +310,11 @@ export interface RecordedRisk {
 	class: string | null;
 	/** The tier before the maintainer overrode it to `tier`, or null when they did not. */
 	overridden: Tier | null;
+	/**
+	 * The tier a failed run since the record's run raised the head to, and why, which holds the branch whatever the
+	 * record's run passed at; null when none did.
+	 */
+	held: { tier: Tier; reason: string } | null;
 }
 
 /** A `## Review` record whose risk lines `quest review` did not write, and what is wrong with them. */
@@ -358,6 +363,7 @@ export function recordedRisk(body: string): RecordedRisk | MalformedRisk | null 
 		head: head[1]!,
 		class: named ? named[1]! : null,
 		overridden: overridden ? (overridden[1] as Tier) : null,
+		held: held === null ? null : { tier: held[1] as Tier, reason: held[3]! },
 	};
 	return held !== null && riskier(held[1] as Tier, recorded.tier)
 		? { ...recorded, tier: held[1] as Tier, reason: held[3]!, class: null, overridden: null }

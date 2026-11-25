@@ -2,6 +2,7 @@
 // head by a user with write access to the base repository, since anyone can write a SHA into their own PR's body.
 import { type PullRequest, REVIEW_MARK, type Repository, type Tier, recordedRisk, reviewSection } from "../core";
 import { GitHubDeadline, type GitHubReader, object, string } from "./client";
+import { WRITE, permissionOf } from "./signals";
 
 /** The commit status context `quest review` sets on each head it records. */
 export const REVIEW_CONTEXT = "quest review";
@@ -24,9 +25,6 @@ export function reviewTarget(repository: Repository, from: string, sha: string):
 
 const ATTESTED =
 	/^Risk (low|medium|high)(?:, class ([a-z0-9-]+))?: (?:passed|findings accepted|findings open|short of vendors)$/;
-
-/** Repository permissions that can push. */
-const WRITE = ["admin", "maintain", "write"];
 
 const STATUS_QUERY = `query ReviewStatus($owner: String!, $repo: String!, $sha: GitObjectID!) {
 	repository(owner: $owner, name: $repo) {
@@ -79,13 +77,9 @@ async function untrusted(
 	const name = String(login);
 	if (kind !== "User")
 		return `${name}, who set the ${REVIEW_CONTEXT} status on ${sha}, is a ${String(kind)}, not a user`;
-	const permission = await github.request(
-		`/repos/${pr.owner}/${pr.repo}/collaborators/${encodeURIComponent(name)}/permission`,
-		{ allow: [403, 404] },
-	);
-	if (permission.status === 403)
-		return `cannot read the permission of ${name}, who set the ${REVIEW_CONTEXT} status on ${sha}: ${String(object(await permission.json()).message)}`;
-	const found = permission.status === 404 ? "no" : string(object(await permission.json()).permission);
+	const found = await permissionOf(github, pr, name);
+	if (typeof found !== "string")
+		return `cannot read the permission of ${name}, who set the ${REVIEW_CONTEXT} status on ${sha}: ${found.refused}`;
 	if (!WRITE.includes(found))
 		return `${name}, who set the ${REVIEW_CONTEXT} status on ${sha}, has ${found} access to ${pr.owner}/${pr.repo}, not write`;
 	// A retargeted PR, or a base reset under it, has another diff than the one reviewed, from another merge base.

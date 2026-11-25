@@ -583,7 +583,7 @@ comes last, and a missing value prints as `-`:
 | `url`, `state`, `draft`, `head` | The PR URL; `open`, `closed`, or `merged`; `true` or `false`; the head SHA. |
 | `mergeable`, `merge-state`, `review-decision` | GitHub's values, lowercased. |
 | `review-record` | Whether the PR body's [`## Review` record](#review-locally) still covers the head, and the head it names last: `current` when it is the head, `diff-identical` when `git diff <base>...<head>` prints the same as for it, `stale` otherwise, or `unknown` when GitHub cannot compare them, such as a diff too large; `-` when the section holds no record `quest review` wrote or it names no full SHA, as for a run that did not pass the head, short of the vendors its tier seats or with a finding open, or, with a warning saying why, when no passing [`quest review` commit status](#review-locally) attests it: the latest one on the head it names must be `success`, set by a user with write access to the base repository, its target the diff from the head's merge base with the PR's base, and its description must name the record's risk tier and class. So a record a contributor or a bot wrote, or edited to name another head, base, or tier, counts for nothing. Reading the setter's permission takes a token that can push to the repository; any other sees every record as untrusted. |
-| `risk` | The record's [risk tier](#risk-tiers), `low`, `medium`, or `high`, or the riskier one a failed run held; the same state as `review-record` for the head it names; the tier its classifier set before any reviewer raised it; and the reason. `-` when the record names none or does not count, and `- malformed -` with why when its risk lines do not parse, which `quest merge` refuses. |
+| `risk` | The record's [risk tier](#risk-tiers), `low`, `medium`, or `high`; the same state as `review-record` for the head it names; the tier its classifier set before any reviewer raised it; and the reason. `-` when the record names none or does not count, and `- malformed -` with why when its risk lines do not parse, which `quest merge` refuses. |
 | `class` | The `## Automatic` class of the base's `RISK.md` the record's classifier found the change in, or `-`. |
 | `auto-merge` | Method, who enabled it, when, and the head it was enabled on. |
 | `merge-queue` | Queue state, position, and when it was enqueued. |
@@ -1907,12 +1907,14 @@ the rest are still drawn; the reviewer `--harness` names runs alone. A round
 that raises the tier seats the extra reviewers at once, in the same run; a run
 is saved whole or not at all, so one that fails there, as when none can run,
 leaves the branch as it was, but for the raise. That goes to the PR's review
-record as a `- Held: high, <reason>` line that keeps the rest of the record.
-The record's tier, held or raised by its reviewers above the classifier's,
-holds the whole branch, whatever the head, until a run at that tier passes, so
-a retry from any clone seats as many, and every reader of the record, such as
-`quest status`, the land fixer, and `quest usage`, sees that tier. The
-classifier's own tier each run judges anew. A run reads the record and the
+record as a `- Held: high, <reason>` line that keeps the rest of the record,
+after a failing `quest review` status on the run's head and the head the record
+names, since the author can edit the body. The record's tier, held or raised by
+its reviewers above the classifier's, holds the whole branch, whatever the
+head, until a run at that tier passes, so a retry from any clone seats as many,
+and every reader of the record, such as the land fixer and `quest usage`, sees
+that tier; `quest status` counts no pass beside it, since no status attests it.
+The classifier's own tier each run judges anew. A run reads the record and the
 PR's comments before any reviewer runs, so a forge it cannot reach fails the
 run. When every model of a vendor a seat needs is
 avoided, as with no `## Models` record, which avoids every model of the harness
@@ -1933,7 +1935,10 @@ overrides as a reading of the tier's accuracy. It holds across heads until the
 reviewed tier grows riskier than the one overridden, other than to the
 override's own tier, which agrees with it. So a raise to medium on a head
 overridden from low to high ends the override, and the next run on that head
-seats two reviewers, not three.
+seats two reviewers, not three. The run that ends it posts `Risk override
+ended: <why>`, so no later, smaller change revives it; a token that cannot push
+only warns, and a maintainer's next run ends it. `--override` posts nothing
+when the latest override already says the same.
 
 `--accept <reason>` records the maintainer's acceptance of the findings the
 head's last rounds left open, as when they side with the author against a

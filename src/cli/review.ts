@@ -523,6 +523,8 @@ export interface ReviewDependencies {
 	raised?: (raise: HeldRaise) => Promise<void>;
 	/** Posts the maintainer's override as a comment on the PR from `branch` into `base`, the only place one lives. */
 	override?: (root: string, base: string, branch: string, override: Override) => Promise<void>;
+	/** Ends the override on that PR with a comment saying why, so no later run revives it; a failure only warns. */
+	ended?: (root: string, base: string, branch: string, why: string) => Promise<void>;
 }
 
 /** A failed run's raise, `raised`, past the tier the run began at, `risk`, of `head` on the branch reviewed against `base`. */
@@ -2699,6 +2701,8 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 	const lead = named ? namedReviewer(options, sized.size, avoided) : undefined;
 	// Accepting runs no reviewer, so it seats none.
 	if (lead === undefined && options.accept === undefined) plan(1, []);
+	if (options.override !== undefined && (deps.override === undefined || record == null))
+		throw new ReviewInputError("--override comments on the branch's open PR, and it has none");
 
 	const head = git(root, ["rev-parse", "HEAD"]);
 	let mergeBase: string;
@@ -2748,7 +2752,7 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 	// and a malformed record holds none, which this run rewrites.
 	const recorded = record?.risk && !("malformed" in record.risk) ? record.risk : null;
 	const rated = recorded && (recorded.overridden ?? recorded.tier);
-	const held =
+	const unpassed =
 		recorded !== null && !record!.passed && riskier(rated!, recorded.classified)
 			? {
 					tier: rated!,
@@ -2759,15 +2763,28 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 							: `its reviewers rated it ${rated} before the maintainer's override`,
 				}
 			: undefined;
+	// A failed run's Held line is newer than the record's run, so it holds whatever tier that run passed at.
+	const held = recorded?.held && !(unpassed && riskier(unpassed.tier, recorded.held.tier)) ? recorded.held : unpassed;
 	const before = settle(classified.value, onHead, held);
 	// The maintainer's override lives only in a comment on the PR, from an account that can push, so every clone reads
-	// the same one; --override posts a new one.
-	const override =
-		options.override === undefined ? (record?.override ?? undefined) : { ...options.override, from: before.tier };
-	if (options.override !== undefined) {
-		if (deps.override === undefined) throw new ReviewInputError("--override needs the branch's PR to comment on");
-		await deps.override(root, baseRef, branch, override!);
-	}
+	// the same one; --override posts a new one, unless it is the latest already.
+	const posted = record?.override ?? undefined;
+	const override = options.override === undefined ? posted : { ...options.override, from: before.tier };
+	if (
+		options.override !== undefined &&
+		!(posted?.tier === override!.tier && posted.from === override!.from && posted.reason === override!.reason)
+	)
+		await deps.override!(root, baseRef, branch, override!);
+	// A change riskier than the tier the maintainer overrode, other than to their own tier, ends the override, for
+	// later runs too, so its end goes on the PR beside it.
+	let ended = false;
+	const end = async (risk: Risk) => {
+		if (ended || override === undefined || !riskier(risk.tier, override.from) || risk.tier === override.tier)
+			return;
+		ended = true;
+		await deps.ended?.(root, baseRef, branch, `a ${risk.tier} change outgrew the override from ${override.from}`);
+	};
+	await end(before);
 	const { usage: _, ...value } = classified.value;
 	// Every round the saved state held that `reviewed` leaves out, as of an earlier head or dropped by --new.
 	const past = (reviewed: State["reviewed"]) => [
@@ -2982,13 +2999,16 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 		// The run saves nothing but its raise: every finished round's, even one whose peer then failed, past the tier the
 		// run began at, the maintainer's override applied to both. It goes to the PR's record, which keeps the rest of its
 		// evidence and holds the branch at the raised tier.
+		await end(judged());
 		const raised = overridden(judged(), override);
-		if (riskier(raised.tier, current.tier))
+		// A raise past the tier the record shows also holds, as a maintainer's raising override's when no run seats it.
+		if (riskier(raised.tier, current.tier) || (recorded !== null && riskier(raised.tier, recorded.tier)))
 			await deps.raised?.({ risk: current, skipped, branch, head, base, raised });
 		throw error;
 	}
 	const done = carried(finished, earlier, raisers, open);
 	const after = tallied(tallies, done, raisers);
+	await end(judged());
 	const risk = overridden(judged(), override);
 	save(statePath, state({ mergeBase, given, rounds: [...onHead, ...done] }, runs + 1, after));
 	return { rounds: done, tallies: after, risk, skipped, since, branch, head, base, sized };

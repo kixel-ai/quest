@@ -71,7 +71,8 @@ export function culpritOf(pull: Pull): Culprit {
 	const tier = risk === null || "malformed" in risk ? null : risk.tier;
 	let reviewers: Seat[] = [];
 	try {
-		reviewers = parseReview(pull.body);
+		// Only the latest run's reviewers passed the head that landed.
+		reviewers = parseReview(pull.body).filter((review) => review.round !== null);
 	} catch {
 		// Malformed: no reviewers.
 	}
