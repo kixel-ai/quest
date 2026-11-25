@@ -123,18 +123,35 @@ function choicesOf(list: NestedList): { choices: Choice[]; problems: WaitProblem
 	return { choices, problems };
 }
 
+// The nested lists a marker makes choice lists: under a decision a marker anywhere, so a misplaced one is
+// caught; elsewhere only one ending a label, so a detail bullet such as `Review logs (recommended) first` stays prose.
+function markedLists(parts: Part[], decision: boolean): NestedList[] {
+	return parts.filter(
+		(part): part is NestedList =>
+			typeof part !== "string" &&
+			part.bullets.some((bullet) => (decision ? MARKER.test(bullet.text) : endsLabel(bullet.text))),
+	);
+}
+
+function misplaced(lists: NestedList[]): WaitProblem[] {
+	return lists.map((list) => ({
+		line: list.line,
+		message: `a choice list belongs only under a plain '${MAINTAINER}:' decision`,
+	}));
+}
+
 /**
  * Read one `## Waiting` item: its party, and the kind of answer it needs. An
  * item with a malformed choice list reads as prose beside its problems.
  */
 export function readWait(entry: Pick<Entry, "line" | "parts">): ReadWait {
-	const none: ReadWait = { wait: null, problems: [] };
 	const match = PARTY.exec(render(entry.parts));
-	if (!match) return none;
+	if (!match) return { wait: null, problems: [] };
 	const party = match[1].trim();
 	const qualified = QUALIFIED.exec(party);
 	const qualifier = qualified?.[1].trim().toLowerCase();
-	if (qualifier !== undefined && qualifier !== "pc" && qualifier !== "action") return none;
+	if (qualifier !== undefined && qualifier !== "pc" && qualifier !== "action")
+		return { wait: null, problems: misplaced(markedLists(entry.parts, false)) };
 	const plain = qualified === null && party.toLowerCase() === MAINTAINER.toLowerCase();
 	const base = { line: entry.line, party: qualified ? MAINTAINER : party, text: match[2] };
 	const fallback: Wait =
@@ -142,22 +159,10 @@ export function readWait(entry: Pick<Entry, "line" | "parts">): ReadWait {
 	// A malformed choice list is an unsettled question, never a step to mark done.
 	const broken: Wait = { ...base, kind: "prose" };
 
-	// Only a marker makes a nested list a choice list, so checklists and detail lists stay prose. Under a
-	// decision a marker anywhere counts, so a misplaced one is caught; elsewhere only one ending a label.
-	const marked = entry.parts.filter(
-		(part): part is NestedList =>
-			typeof part !== "string" &&
-			part.bullets.some((bullet) => (plain ? MARKER.test(bullet.text) : endsLabel(bullet.text))),
-	);
+	// Only a marker makes a nested list a choice list, so checklists and detail lists stay prose.
+	const marked = markedLists(entry.parts, plain);
 	if (marked.length === 0) return { wait: fallback, problems: [] };
-	if (!plain)
-		return {
-			wait: broken,
-			problems: marked.map((list) => ({
-				line: list.line,
-				message: `a choice list belongs only under a plain '${MAINTAINER}:' decision`,
-			})),
-		};
+	if (!plain) return { wait: broken, problems: misplaced(marked) };
 	const [list, ...extra] = marked;
 	const { choices, problems } = choicesOf(list);
 	for (const other of extra)

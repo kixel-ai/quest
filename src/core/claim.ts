@@ -72,6 +72,10 @@ function handBackItems(body: string): HandBackItem[] {
 				const line = item.position?.start.line ?? 1;
 				const read = readWait({ line, parts });
 				if (read.wait !== null) return { wait: read.wait, problems: read.problems };
+				const text = collapse(rendered(item)).replace(TASK, "");
+				// A choice list under an unknown qualifier, such as `Maintainer (local):`, stays prose with a warning.
+				if (read.problems.length > 0)
+					return { wait: { line, party: MAINTAINER, kind: "prose", text }, problems: read.problems };
 				// An item that names no party is the maintainer's, so read it as theirs, choice list included.
 				const [lead, ...rest] = parts;
 				const named = readWait({
@@ -79,7 +83,6 @@ function handBackItems(body: string): HandBackItem[] {
 					parts:
 						typeof lead === "string" ? [`${MAINTAINER}: ${lead}`, ...rest] : [`${MAINTAINER}:`, ...parts],
 				});
-				const text = collapse(rendered(item)).replace(TASK, "");
 				return {
 					wait: named.wait ?? { line, party: MAINTAINER, kind: "prose", text },
 					problems: named.problems,

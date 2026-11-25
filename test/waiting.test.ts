@@ -205,6 +205,13 @@ test("a draft's malformed choice list reads as prose, even under an action, with
 	expect(handBackProblems(action)).toEqual([
 		{ line: 4, message: "a choice list belongs only under a plain 'Maintainer:' decision" },
 	]);
+	const unknown = "## Waiting\n\n- Maintainer (local): which runner?\n  - A (Recommended)\n  - B\n";
+	expect(handBackWaits(unknown)).toEqual([
+		{ line: 3, party: "Maintainer", kind: "prose", text: "Maintainer (local): which runner? A (Recommended) B" },
+	]);
+	expect(handBackProblems(unknown)).toEqual([
+		{ line: 4, message: "a choice list belongs only under a plain 'Maintainer:' decision" },
+	]);
 	const body = "Work.\n\n## Waiting\n\n- Maintainer: pick one.\n  - Foo (Recommended)\n  - Bar (Recommended)\n";
 	expect(handBackWaits(body)).toEqual([
 		{ line: 5, party: "Maintainer", kind: "prose", text: "pick one. Foo (Recommended) Bar (Recommended)" },
