@@ -36,7 +36,8 @@ import {
 import {
 	AgentInputError,
 	HARNESSES,
-	type HarnessName,
+	REVIEW_HARNESSES,
+	type ReviewHarness,
 	type Launch,
 	admitAgent,
 	processDependencies,
@@ -1291,7 +1292,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 			.requiredOption("--effort <level>", "Reasoning effort the agent runs at, never max", effortLevel)
 			.requiredOption(
 				"--permission-mode <mode>",
-				"Claude Code's --permission-mode, or Codex's sandbox mode, or dangerously-skip-permissions for agy, which has no sandbox; the agent cannot prompt",
+				"Claude Code's --permission-mode, or Codex's sandbox mode; the agent cannot prompt",
 			);
 	type LaunchOptions = Omit<Launch, "worktree">;
 	const launch = (worktree: string, prompt: string, session: string | undefined, options: LaunchOptions) => {
@@ -1735,7 +1736,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"each directory holding a changed path, never the checkout's, so a change cannot instruct its own " +
 				"reviewer, and is told to disregard other instructions and run no builds, tests, or quest commands. " +
 				"The base is fetched first, since the sandbox has no network.\n\n" +
-				"--harness agy reviews with Google's Antigravity CLI, which also writes; name its --model and --effort, as " +
+				"--harness agy reviews with Google's Antigravity CLI, which only reviews; name its --model and --effort, as " +
 				"gemini-4-neon and xhigh. It runs `agy -p` on the user's own Antigravity login, in the keyring or, over ssh, " +
 				"its configuration directory, with no ANTIGRAVITY_* or AGY_* variable, so no gateway, and GEMINI_API_KEY and " +
 				"GOOGLE_API_KEY never replace the login. Each turn and the status check, `agy models`, run in a new private " +
@@ -1816,7 +1817,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 			new Option(
 				"--harness <name>",
 				"The only reviewer to run, instead of the pick and the second reviewer",
-			).choices(HARNESSES),
+			).choices(REVIEW_HARNESSES),
 		)
 		.option("--model <model>", "Model the pick, or --harness's reviewer, runs instead")
 		.option(
@@ -1859,7 +1860,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				branch?: string;
 				override?: Tier;
 				reason?: string;
-				harness?: HarnessName;
+				harness?: ReviewHarness;
 				model?: string;
 				effort?: string;
 				excludeModel?: string[];

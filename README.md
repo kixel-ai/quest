@@ -132,7 +132,7 @@ $ quest --root examples/export unblocked
 1	quest/m0/export.md
 
 $ quest --root examples/export unblocked --json --limit 1
-[{"path":"quest/m0/export.md","dependents":1,"hosts":[],"arm":"B","models":[{"harness":"claude","model":"claude-sonnet-5-5","effort":"high"},{"harness":"claude","model":"claude-opus-5-5","effort":"medium"},{"harness":"codex","model":"gpt-6.2-sol","effort":"medium"},{"harness":"agy","model":"gemini-4-neon","effort":"medium"}]}]
+[{"path":"quest/m0/export.md","dependents":1,"hosts":[],"arm":"B","models":[{"harness":"claude","model":"claude-sonnet-5-5","effort":"high"},{"harness":"claude","model":"claude-opus-5-5","effort":"medium"},{"harness":"codex","model":"gpt-6.2-sol","effort":"medium"}]}]
 ```
 
 Each plain output line contains the count, a tab, and the path. On a terminal,
@@ -994,7 +994,7 @@ model proxy and, so the fixer can run the repository's checks on its fix, the
 package registries and `github.com`/`codeload.github.com` that the repository's
 dependencies come from.
 The prompt allows only those dependency fetches: no GitHub API, no push, no other
-host. The Claude and Codex logins stay on the proxy, and no Antigravity login enters the container.
+host. The Claude and Codex logins stay on the proxy.
 The wrapper waits for the payload, returns its exit status, and tears down its
 container on exit or SIGTERM. A fixer gets 60 minutes from its start. A wrapper
 that queues for a shared launcher prints `quest land fixer: admitted <unix-seconds>`
@@ -1015,7 +1015,7 @@ to the first of `claude -p` in bare mode (loading no user or checkout configurat
 skills, or MCP servers, and limited to the shell and file tools), then `codex exec` on the proxy
 (`claude-opus-5-5`, `gpt-6.2-sol`, each at `--effort`) that can run: one whose CLI is missing, whose
 variables the wrapper left out, or whose own result or error events report it logged out or at its usage limit passes the fix to the
-next, unless it changed the checkout first, which ends the round, and the error names why each could not run when none can.
+next, unless it changed the checkout first (`HEAD`, a `pr-<n>` branch, or any changed, new, or ignored file), which ends the round, and the error names why each could not run when none can.
 Any other failure ends the round. `--agent <executable>` and repeatable `--agent-arg <argument>`
 run one Claude Code entry in their place, at that executable or with those arguments. It writes `<cwd>/quest-land-result.json`: an array of
 `{number, action:"requeue", reason}`, `{number, action:"fixed", head, reason}`, or
@@ -1464,16 +1464,16 @@ as the agent.
 
 `quest` ranks the harnesses, models, and efforts that write work of each size,
 the same for every repository unless its `AGENTS.md` names others. Claude
-Code writes first; when it cannot run, Codex does, then Antigravity's Gemini,
-each at the effort its size sets:
+Code writes first; when it cannot run, Codex does, at the effort its size
+sets:
 
-| Size | Writer | Then Codex | Then Gemini (`agy`) |
-|---|---|---|---|
-| XS | Claude Code `claude-sonnet-5-5` high | `gpt-6.2-sol` low | `gemini-4-neon` low |
-| S | Claude Code `claude-opus-5-5` medium | `gpt-6.2-sol` medium | `gemini-4-neon` medium |
-| M | Claude Code `claude-opus-5-5` high | `gpt-6.2-sol` high | `gemini-4-neon` high |
-| L | Claude Code `claude-opus-5-5` high | `gpt-6.2-sol` xhigh | `gemini-4-neon` xhigh |
-| XL | Claude Code `claude-opus-5-5` xhigh | `gpt-6.2-sol` xhigh | `gemini-4-neon` xhigh |
+| Size | Writer | Then Codex |
+|---|---|---|
+| XS | Claude Code `claude-sonnet-5-5` high | `gpt-6.2-sol` low |
+| S | Claude Code `claude-opus-5-5` medium | `gpt-6.2-sol` medium |
+| M | Claude Code `claude-opus-5-5` high | `gpt-6.2-sol` high |
+| L | Claude Code `claude-opus-5-5` high | `gpt-6.2-sol` xhigh |
+| XL | Claude Code `claude-opus-5-5` xhigh | `gpt-6.2-sol` xhigh |
 
 `quest unblocked --json` lists each ready quest's ranked `models`: its size's
 list, or the next size's while a `Maintainer:` item under its `## Waiting`
@@ -1504,7 +1504,6 @@ XS, and `quest models` prints the entry to run:
 $ quest models XS
 claude	claude-sonnet-5-5	high
 codex	gpt-6.2-sol	low
-agy	gemini-4-neon	low
 
 $ quest models XS --writer claude-opus-5-5
 claude	claude-opus-5-5	medium
@@ -1512,7 +1511,7 @@ claude	claude-opus-5-5	medium
 
 `--writer` prints the size's entry for that model, or else its entry at the
 nearest size that lists it, the larger on a tie. A model no list names, such
-as `unknown` or a retired one, is an error, and the coordinator then starts the iterate on its
+as Gemini's or a retired one, is an error, and the coordinator then starts the iterate on its
 size's first entry that can run. An iterate on a PR whose first
 `Implementer:` line names an arm runs that arm's entry at the PR's size instead, as `quest models S --arm B`
 prints, and records it as `(iterate, XS, arm B)`. For an arm its size no
@@ -1706,8 +1705,8 @@ change cannot instruct its own reviewer. Quest's shared review rules always come
 stance; the base's `REVIEW.md` is optional, adds repo-specific rules, and takes
 precedence where they conflict.
 
-`--harness agy` reviews with Google's Antigravity CLI, `agy`, which also
-writes: name its
+`--harness agy` reviews with Google's Antigravity CLI, `agy`, which only
+reviews: name its
 model and effort, as `--model gemini-4-neon --effort xhigh`. It runs `agy -p`
 on your own Antigravity login, wherever `agy` keeps it: the OS keyring, or over
 ssh its configuration directory, `~/.gemini/antigravity-cli`. Run `agy` to sign
@@ -2355,9 +2354,7 @@ with the user's environment minus the coordinating session's harness variables
 and credentials (keeping `CLAUDE_CONFIG_DIR` and `CODEX_HOME`), secret-manager
 tokens, and any `quest gate` admission or priority, so it uses the CLI's stored
 login rather than the session's. `--permission-mode` is Claude Code's
-permission mode, or Codex's sandbox mode; `agy` has neither and runs with its
-permission prompts skipped, so it takes only `--permission-mode
-dangerously-skip-permissions`, and nothing confines it to the worktree; the agent cannot prompt. Each
+permission mode, or Codex's sandbox mode; the agent cannot prompt. Each
 repository's running agents are recorded in a user-only directory under
 `$XDG_RUNTIME_DIR` (or the temporary directory), which `quest agent stop --all`
 deletes after stopping them.

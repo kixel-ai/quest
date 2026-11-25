@@ -147,7 +147,7 @@ function plants(clone: string, markers: string): Record<string, string> {
  * runs it in print mode too. Its API key helper runs only beside a credential
  * from the environment, which its own test supplies.
  */
-const CONTROL: Record<Exclude<HarnessName, "agy">, string[]> = {
+const CONTROL: Record<HarnessName, string[]> = {
 	codex: ["codex-config-mcp", "codex-hooks-SessionStart", "codex-hooks-UserPromptSubmit"],
 	claude: [
 		"claude-local-SessionStart",
@@ -292,7 +292,6 @@ function environment(home: Home): NodeJS.ProcessEnv {
 
 /** What a credential variable names when there is no login to copy. */
 const CREDENTIALS: Record<HarnessName, string> = {
-	agy: "nothing, since agy runs only on its own login, so sign in with `agy`",
 	codex: "CODEX_API_KEY",
 	claude: "CLAUDE_CODE_OAUTH_TOKEN (from `claude setup-token`) or ANTHROPIC_API_KEY",
 };

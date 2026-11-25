@@ -1,7 +1,18 @@
 // Untrusted agent side. The host wrapper supplies only a model endpoint and its client key; the agent holds no
 // GitHub credential, and the daemon posts the comments it writes into its result.
 import { spawn, spawnSync } from "node:child_process";
-import { constants, closeSync, existsSync, fstatSync, openSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import {
+	constants,
+	closeSync,
+	existsSync,
+	fstatSync,
+	lstatSync,
+	openSync,
+	readFileSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
 import { basename, join, resolve } from "node:path";
 import { StringDecoder } from "node:string_decoder";
 import prompt from "../../assets/land-fix.md";
@@ -479,18 +490,36 @@ async function run(agent: Attempt, data: string, root: string): Promise<Init> {
 	return init;
 }
 
-/** What the fixers share: the checkout's `HEAD`, its changes and new files (but not the untracked result file each round rewrites), and each PR branch, which a fixer that ran may have moved. */
+/** The most `git` output a snapshot reads, past which it fails rather than hold more. */
+const SNAPSHOT_LIMIT = 256 * 1024 * 1024;
+
+/**
+ * A hash of what the fixers share: the checkout's `HEAD` and each PR branch, which a fixer that ran may have moved,
+ * and each changed, untracked, or ignored path with its size and modification time, since build output a fixer
+ * left would feed the next. The untracked result file each round rewrites is left out.
+ */
 function snapshot(root: string, refs: string[]): string {
-	const git = (...args: string[]) =>
-		spawnSync("git", args, { cwd: root, encoding: "utf8", env: discoveryEnv() }).stdout;
-	return [
-		git("rev-parse", "HEAD"),
-		git("status", "--porcelain", "--untracked-files=all")
-			.split("\n")
-			.filter((line) => line !== `?? ${FIX_RESULT}`)
-			.join("\n"),
-		...refs.map((ref) => git("rev-parse", ref)),
-	].join("\n");
+	const git = (...args: string[]) => {
+		const run = spawnSync("git", args, { cwd: root, env: discoveryEnv(), maxBuffer: SNAPSHOT_LIMIT });
+		if (run.status !== 0)
+			throw new Error(`git ${args[0]} failed in the fixer's checkout: ${run.error?.message ?? run.stderr}`);
+		return run.stdout;
+	};
+	const hash = createHash("sha256").update(git("rev-parse", "HEAD", ...refs));
+	const entries = git("status", "--porcelain=v1", "-z", "--untracked-files=all", "--ignored=traditional")
+		.toString("utf8")
+		.split("\0");
+	for (let i = 0; i < entries.length; i++) {
+		const entry = entries[i]!;
+		if (entry === `?? ${FIX_RESULT}`) continue;
+		hash.update(`${entry}\0`);
+		if (entry.length < 4) continue;
+		const stat = lstatSync(join(root, entry.slice(3)), { bigint: true, throwIfNoEntry: false });
+		hash.update(stat ? `${stat.size} ${stat.mtimeNs}\0` : "-\0");
+		// A rename or copy is followed by its source path, which carries no status.
+		if (entry[0] === "R" || entry[0] === "C") hash.update(`${entries[++i]}\0`);
+	}
+	return hash.digest("hex");
 }
 
 /**

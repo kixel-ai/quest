@@ -27,21 +27,24 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { admission, processAdmission } from "./admission";
 import { discoveryEnv, git } from "./git";
 import { cancelled, interrupts } from "./interrupt";
-import { AGY_LIMIT, LIMIT } from "./limit";
+import { LIMIT } from "./limit";
 import { alive, programCommand, programEnvironment, requireProgram, signalProcess } from "./program";
 import { systemdScopes } from "./supervise";
 import { Worktrees, save } from "./worktree";
 
-/** The agent CLIs `quest` writes and reviews with: Claude Code, Codex, and Google's Antigravity CLI, `agy`. */
-export const HARNESSES = ["claude", "codex", "agy"] as const;
+export const HARNESSES = ["claude", "codex"] as const;
 export type HarnessName = (typeof HARNESSES)[number];
+
+/** The CLIs `quest review` runs: every agent harness, and Google's Antigravity CLI, `agy`, which only reviews. */
+export const REVIEW_HARNESSES = [...HARNESSES, "agy"] as const;
+export type ReviewHarness = (typeof REVIEW_HARNESSES)[number];
 
 /** Everything a launch names on its command line. */
 export interface Launch {
 	harness: HarnessName;
 	model: string;
 	effort: string;
-	/** Claude Code's `--permission-mode`, or Codex's sandbox mode; `agy` has neither, and takes only `AGY_MODE`. */
+	/** Claude Code's `--permission-mode`, or Codex's sandbox mode. */
 	permissionMode: string;
 	worktree: string;
 }
@@ -85,11 +88,6 @@ export const LOGINS = {
 	// Such as "unexpected status 401 Unauthorized: ..." or "Your access token could not be refreshed
 	// because your refresh token was revoked. Please log out and sign in again."
 	codex: { command: "codex login", unauthorized: /\b401 Unauthorized\b|sign in again/ },
-	// Such as "authentication failed or timed out", once a sign-in it cannot open times out.
-	agy: {
-		command: "agy",
-		unauthorized: /authentication failed or timed out|not logged into Antigravity|Please sign in/,
-	},
 } as const satisfies Record<HarnessName, Login>;
 
 /** How one agent CLI is launched and read. The prompt always arrives on stdin. */
@@ -99,8 +97,6 @@ interface Harness {
 	resume(launch: Launch, session: string): string[];
 	/** A reader for one run's stdout, fed line by line so a long run is never held in memory. */
 	reader(): Reader;
-	/** What the CLI reads on stdin for a prompt; by default the prompt itself. */
-	input?(prompt: string): string;
 }
 
 export interface Reader {
@@ -127,11 +123,20 @@ const claude: Harness = {
 	resume: (launch, session) => [...claudeFlags(launch), "--resume", session],
 	reader() {
 		let result: Record<string, unknown> | undefined;
+		// A stream, as `quest land fix` reads, reports a spent limit as a rejected rate_limit_event or a billing_error
+		// before the result, whose message may name neither.
+		let limited = false;
 		return {
 			// The session id is assigned at start, so it is known before any output.
 			line(line) {
 				const value = json(line);
 				if (value?.type === "result") result = value;
+				if (value?.type === "rate_limit_event") {
+					const info = value.rate_limit_info;
+					if (typeof info === "object" && info !== null && "status" in info && info.status === "rejected")
+						limited = true;
+				}
+				if (value?.type === "assistant" && value.error === "billing_error") limited = true;
 				return undefined;
 			},
 			result(stderr) {
@@ -140,7 +145,7 @@ const claude: Harness = {
 				return {
 					session: text(result?.session_id),
 					reply,
-					limited: LIMIT.test(failure),
+					limited: limited || LIMIT.test(failure),
 					unauthorized: result?.api_error_status === 401 || LOGINS.claude.unauthorized.test(failure),
 					failed: result === undefined || result.is_error === true,
 				};
@@ -239,76 +244,7 @@ function codexFlags(launch: Launch): string[] {
 	];
 }
 
-/**
- * `agy -p` with stream-json in and out: the prompt is one user event, the conversation is named by the first `init`
- * event, and the last `result` event holds the reply and whether the turn succeeded. It has no sandbox mode, so a
- * writer runs with permission prompts skipped, as a print-mode turn cannot answer them.
- */
-const agy: Harness = {
-	start: (launch) => ["agy", ...agyFlags(launch)],
-	resume: (launch, session) => ["agy", ...agyFlags(launch), "--conversation", session],
-	input: (prompt) => `${JSON.stringify({ event: "user", message: { role: "user", content: prompt } })}\n`,
-	reader() {
-		let session: string | undefined;
-		let result: Record<string, unknown> | undefined;
-		return {
-			line(line) {
-				const event = json(line);
-				if (event?.event === "init") session = text(event.conversation_id) ?? session;
-				if (event?.event === "result") {
-					const value = event.result;
-					result =
-						typeof value === "object" && value !== null ? (value as Record<string, unknown>) : undefined;
-				}
-				return event?.event === "init" ? session : undefined;
-			},
-			result(stderr) {
-				const reply = text(result?.response);
-				// A denied action ends a print-mode turn early, though it reports success.
-				const denied = Array.isArray(result?.denied_actions) ? result.denied_actions.length : 0;
-				const error =
-					result?.status !== "SUCCESS"
-						? (text(result?.error) ?? "")
-						: denied > 0
-							? `agy denied ${denied} action(s), which ended the turn`
-							: undefined;
-				const failure = `${error ?? ""}\n${stderr}`;
-				return {
-					session: text(result?.conversation_id) || session,
-					reply: reply || error || undefined,
-					limited: AGY_LIMIT.test(failure) || LIMIT.test(failure),
-					unauthorized: LOGINS.agy.unauthorized.test(failure),
-					failed: result === undefined || error !== undefined,
-				};
-			},
-		};
-	},
-};
-
-/** The only permission mode `agy` runs in, named so a launch that asks for a restricted one is refused, not ignored. */
-export const AGY_MODE = "dangerously-skip-permissions";
-
-function agyFlags(launch: Launch): string[] {
-	if (launch.permissionMode !== AGY_MODE)
-		throw new AgentInputError(
-			`agy has no sandbox or permission modes and runs with its permission prompts skipped: pass --permission-mode ${AGY_MODE}`,
-		);
-	return [
-		"-p",
-		"",
-		"--input-format",
-		"stream-json",
-		"--output-format",
-		"stream-json",
-		"--model",
-		launch.model,
-		"--effort",
-		launch.effort,
-		"--dangerously-skip-permissions",
-	];
-}
-
-const HARNESS: Record<HarnessName, Harness> = { claude, codex, agy };
+const HARNESS: Record<HarnessName, Harness> = { claude, codex };
 
 /** A reader for one run of `harness`, which tells a spent usage limit or a rejected login from its own output. */
 export const readerFor = (harness: HarnessName): Reader => HARNESS[harness].reader();
@@ -669,7 +605,7 @@ export async function runAgent(
 						deps.stderr(chunk);
 					});
 					agent.stdin.on("error", () => {}); // An agent that exits early closes its stdin.
-					agent.stdin.end(harness.input?.(prompt) ?? prompt);
+					agent.stdin.end(prompt);
 					agent.once("error", (error: NodeJS.ErrnoException) =>
 						reject(error.code === "ENOENT" ? new Error(`${name} is not installed`) : error),
 					);

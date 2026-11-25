@@ -27,9 +27,9 @@ Each agent runs `/quest-start`; its `quest start` refusing a quest claimed since
 
 Start each on the first entry of its `models` that can run.
 When it has an `arm` and runs that first entry, its brief says to end its `Implementer:` line with the arm, as `(arm B)`.
-A Codex entry starts only in a checkout `quest worktree create` registered, and an `agy` entry only with `--permission-mode dangerously-skip-permissions`, so give each its checkout and mode when you reach it.
-Fall to the next when `quest agent` reports its CLI missing, `cannot run on this host` (Codex without Linux worktree supervision, as on macOS), or logged out, or the agent stops on a usage limit with nothing written beyond the claim commit, continuing in that checkout and claim PR.
-Once a model has written anything, the PR is its: keep its worktree and session id to resume after the reset.
+Fall to the next only while nothing is written beyond the claim commit: when `quest agent` reports its CLI missing, logged out, or `cannot run on this host` (Codex without Linux worktree supervision, as on macOS), or the agent stops on a usage limit.
+The next entry continues the claim PR, but a Codex entry needs a checkout of its own that `quest worktree create --ref <claim branch>` registered: detach the claim branch in the checkout before it, then check it out there.
+Once a model has written anything, the PR is its: keep its worktree and session id to resume after the reset, or once its host can run it.
 Skip a quest whose list runs out, and report each harness's outage once.
 When the list runs out after an agent pushed the claim but nothing beyond it, its checkout included, first release the claim with `quest start --release <quest>` from that checkout, so a later round or another coordinator starts it once a writer can run; it refuses with exit 3 once work was pushed, leaving the PR its writer's.
 

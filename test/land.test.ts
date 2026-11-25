@@ -1738,6 +1738,34 @@ ${requeueScript}
 			"claude",
 			"codex",
 		]);
+
+		// Claude Code's stream may name a spent limit only in a rejected rate_limit_event, ahead of a bare error.
+		rmSync(join(rec, "ran.txt"));
+		fake(
+			"claude",
+			`echo '{"type":"rate_limit_event","rate_limit_info":{"status":"rejected","resetsAt":1900000000}}'\n${claudeFails("API Error")}`,
+		);
+		await fix(dir, log, [1]);
+		expect(ran()).toEqual(["claude", "codex"]);
+		// An allowed one is no outage.
+		rmSync(join(rec, "ran.txt"));
+		fake(
+			"claude",
+			`echo '{"type":"rate_limit_event","rate_limit_info":{"status":"allowed"}}'\n${claudeFails("API Error")}`,
+		);
+		await expect(fix(dir, log, [1])).rejects.toThrow("fixer agent exited 1");
+		expect(ran()).toEqual(["claude"]);
+
+		// Ignored build output counts too, new or rewritten, since the next fixer would build on it.
+		writeFileSync(join(dir, ".git", "info", "exclude"), "build/\n");
+		mkdirSync(join(dir, "build"));
+		writeFileSync(join(dir, "build", "old.txt"), "old");
+		for (const write of ["echo new > build/new.txt", "echo rebuilt >> build/old.txt"]) {
+			rmSync(join(rec, "ran.txt"));
+			fake("claude", `${write}\n${claudeFails("You have hit your weekly limit")}`);
+			await expect(fix(dir, log, [1])).rejects.toThrow("after changing the checkout");
+			expect(ran()).toEqual(["claude"]);
+		}
 	});
 	test("refuses to start an agent without a supplied PR's branch", async () => {
 		const dir = fixRepository();

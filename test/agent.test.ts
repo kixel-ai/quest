@@ -40,7 +40,7 @@ const windows = process.platform === "win32";
 const posix = test.skipIf(windows);
 
 /** The variables a fake agent CLI logs, so a test can compare the environment it was launched with. */
-const LOGGED = /^(CLAUDE|ANTHROPIC|QUEST|OP_|CODEX|AGY|ANTIGRAVITY)/;
+const LOGGED = /^(CLAUDE|ANTHROPIC|QUEST|OP_|CODEX)/;
 
 /**
  * Fake agent CLIs. Each logs its argv, stdin, and the variables it was given,
@@ -120,31 +120,6 @@ if (process.env.FAKE_MODE === "reconnect") event({ type: "error", message: "Reco
 event({ type: "item.completed", item: { id: "item_0", type: "agent_message", text: "first" } });
 event({ type: "item.completed", item: { id: "item_1", type: "agent_message", text: "final reply" } });
 event({ type: "turn.completed", usage: { input_tokens: 1, output_tokens: 1 } });
-`,
-	agy: `
-const fs = require("node:fs");
-const argv = process.argv.slice(2);
-const stdin = fs.readFileSync(0, "utf8");
-const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => ${LOGGED}.test(k)));
-fs.appendFileSync(process.env.FAKE_LOG, JSON.stringify({ argv, stdin, env, cwd: process.cwd() }) + "\\n");
-const event = (value) => console.log(JSON.stringify(value));
-const resume = argv.includes("--conversation");
-const conversation = resume ? argv[argv.indexOf("--conversation") + 1] : "conversation-1";
-event({ event: "init", conversation_id: conversation });
-const result = (fields) => event({ event: "result", result: { conversation_id: conversation, ...fields } });
-if (process.env.FAKE_MODE === "limited") {
-	result({ status: "ERROR", error: "Error 429, Message: Quota exhausted., Status: RESOURCE_EXHAUSTED, Details: [reason:QUOTA_EXHAUSTED]" });
-	process.exit(1);
-}
-if (process.env.FAKE_MODE === "logged-out") {
-	result({ status: "ERROR", error: "authentication failed or timed out" });
-	process.exit(1);
-}
-if (process.env.FAKE_MODE === "denied") {
-	result({ status: "SUCCESS", response: "partial", denied_actions: [{ action: "command" }] });
-	return;
-}
-result({ status: "SUCCESS", response: "final reply" });
 `,
 };
 
@@ -263,8 +238,7 @@ async function quest(...args: string[]): Promise<{ code: number; stdout: string;
 	return { code, stdout, stderr };
 }
 
-const MODE = "dangerously-skip-permissions";
-const launch = (harness: string, mode = "auto") => [
+const launch = (harness: string) => [
 	"--harness",
 	harness,
 	"--model",
@@ -272,7 +246,7 @@ const launch = (harness: string, mode = "auto") => [
 	"--effort",
 	"high",
 	"--permission-mode",
-	mode,
+	"auto",
 ];
 
 test("the agent environment holds no session credentials or harness state", () => {
@@ -450,67 +424,6 @@ test("a logged-out claude exits 4 and names its login command", async () => {
 	expect(result.code).toBe(4);
 	expect(result.stdout).toMatch(/^session \S+\noutcome logged-out\n\nNot logged in · Please run \/login\n$/);
 	expect(result.stderr).toBe("quest: claude is logged out; run `claude auth login`\n");
-});
-
-test("agy writes on its own login: the prompt is a stream-json user event, and its conversation resumes", async () => {
-	const s = setup();
-	const started = await quest("agent", "start", ...launch("agy", MODE), s.worktree, "/quest-start quest/m0/a.md");
-	expect(started).toEqual({
-		code: 0,
-		stdout: "session conversation-1\noutcome finished\n\nfinal reply\n",
-		stderr: "",
-	});
-	const [call] = s.calls();
-	expect(call.argv).toEqual([
-		"-p",
-		"",
-		"--input-format",
-		"stream-json",
-		"--output-format",
-		"stream-json",
-		"--model",
-		"opus",
-		"--effort",
-		"high",
-		"--dangerously-skip-permissions",
-	]);
-	expect(JSON.parse(call.stdin as string)).toEqual({
-		event: "user",
-		message: { role: "user", content: "/quest-start quest/m0/a.md" },
-	});
-	expect(call.env).toEqual({
-		CODEX_HOME: process.env.CODEX_HOME,
-		QUEST_WORKTREE_HOME: process.env.QUEST_WORKTREE_HOME,
-	});
-	const resumed = await quest("agent", "resume", ...launch("agy", MODE), s.worktree, "conversation-1", "go on");
-	expect(resumed.code).toBe(0);
-	expect(s.calls()[1].argv).toEqual([...(call.argv as string[]), "--conversation", "conversation-1"]);
-});
-
-test("agy refuses a permission mode it cannot enforce", async () => {
-	const s = setup();
-	const refused = await quest("agent", "start", ...launch("agy"), s.worktree, "go");
-	expect(refused.code).toBe(2);
-	expect(refused.stderr).toContain("agy has no sandbox or permission modes");
-	expect(s.calls()).toEqual([]);
-});
-
-test("agy at its quota exits 3, and logged out exits 4 naming its login command", async () => {
-	const s = setup();
-	vi.stubEnv("FAKE_MODE", "limited");
-	const limited = await quest("agent", "start", ...launch("agy", MODE), s.worktree, "go");
-	expect(limited.code).toBe(3);
-	expect(limited.stdout).toContain("outcome limited\n");
-	vi.stubEnv("FAKE_MODE", "logged-out");
-	const out = await quest("agent", "start", ...launch("agy", MODE), s.worktree, "go");
-	expect(out.code).toBe(4);
-	expect(out.stdout).toContain("outcome logged-out\n");
-	expect(out.stderr).toBe("quest: agy is logged out; run `agy`\n");
-	// A denied action ends a print-mode turn early though it reports success.
-	vi.stubEnv("FAKE_MODE", "denied");
-	const denied = await quest("agent", "start", ...launch("agy", MODE), s.worktree, "go");
-	expect(denied.code).toBe(1);
-	expect(denied.stdout).toContain("outcome failed\n");
 });
 
 posix("codex runs on its own login and reports its thread, last message, limit, and logout", async () => {

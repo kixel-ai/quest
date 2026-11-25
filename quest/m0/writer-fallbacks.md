@@ -1,18 +1,18 @@
-# [S] The land fixer falls to Gemini when Claude and Codex can't run
+# [S] Codex writes and fixes when Claude can't
 
 ## Goal
 
-`quest land fix` falls from Claude Code and Codex to Gemini's `agy` when both can't run (CLI missing, logged out, or at its usage limit), so a landing queue's fixer rounds don't wait for either reset.
+Each writer list in `src/cli/models.ts`, and the land fixer, falls from Claude to Codex when Claude can't run (CLI missing, logged out, or at its usage limit), so a quest starts on the next vendor instead of waiting for Claude's reset.
+The size still sets each entry's model and effort.
 
 ## Plan
 
-The writer lists already fall from Claude to Codex to Gemini, and the fixer already falls from Claude to Codex ([#898](https://github.com/kixel-ai/quest/pull/898)). The fixer stops there because `agy` runs only on a personal Antigravity login, and the fixer's container runs the PRs' own tests and builds with network access to `github.com` and the package registries, so a login in its HOME is readable by untrusted PR code. A Gemini fixer needs one of:
+Decided 2026-11-22 (maintainer, `/quest-plan` in [kixel-ai/kixel.quest#104](https://github.com/kixel-ai/kixel.quest/pull/104)): ✅ "Claude/Codex/Gemini for coding … T-shirt size determines model/effort" (rejected: Claude-only writers and fixer, decided earlier the same day in [kixel-ai/quest#827](https://github.com/kixel-ai/quest/pull/827)).
 
-- `agy` behind a model proxy that holds the login, as Claude and Codex have (recommended, once a proxy serves Antigravity's models), or
-- a credential for it scoped to the fixer's container alone, rotated, and kept out of the PR's checks.
+Decided 2026-11-25 (maintainer, on [#898](https://github.com/kixel-ai/quest/pull/898)):
 
-Then add `{ harness: "agy", model: "gemini-4-neon" }` to `FIXERS` in `src/cli/models.ts`, run it from an empty directory beside the checkout, since `agy` loads the agent configuration of where it runs, and classify its limit and logout from its result event as `readerFor("agy")` does.
+1. ✅ Ship Claude → Codex only: `agy` leaves every writer list and the land fixer, and stays a reviewer only (rejected: keep `agy` as an unsandboxed writer; drop Gemini writing for good). `agy` would write with permission prompts skipped and no OS sandbox, since Antigravity has no sandbox flag. A separate planning PR adds `quest/m1/agy-writer.md`, which adds Gemini once [agy-sandbox](/quest/m0/agy-sandbox.md) exists.
+2. ✅ The fixer's "nothing written yet" check counts ignored files, and its Claude reader counts Claude Code's structured quota events, a rejected `rate_limit_event` or a `billing_error` (rejected: accept only the quota events; refute both).
+3. ✅ A Codex fallback in `/quest-run` gets a checkout of its own from `quest worktree create`, not the one the coordinator continued in (rejected: reuse that checkout, which Codex refuses).
 
-## Waiting
-
-- Maintainer: choose how the fixer reaches Gemini, a proxy that holds the login (recommended) or a container-scoped credential; check that `quest land fix` with Claude and Codex unavailable runs `agy`.
+[#898](https://github.com/kixel-ai/quest/pull/898) does all of this, so it deletes this file before it lands.
