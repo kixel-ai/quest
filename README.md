@@ -180,6 +180,25 @@ refuses it. On an epic or milestone README, the date holds back every quest
 under it. A past date no longer blocks. `quest check` rejects anything but one
 real `YYYY-MM-DD` date.
 
+## Park work
+
+Work set aside with nothing scheduled, its plans kept, says so in a `## Parked`
+section holding one item that says why and when to resume:
+
+```markdown
+## Parked
+
+- until the mesh ships - kept for the fleet demo
+```
+
+On a quest, epic, or milestone README, it blocks the document and every quest
+under it: `quest unblocked` leaves them out, `quest unblocked <path>` names the
+parking, `quest start` refuses them, and `quest waiting` lists none of their
+`## Waiting` items, though a draft PR handed back for one is still listed.
+Unlike a date, parking never clears on its own; delete the section to unpark.
+`quest check` rejects a second item, one opening with a link (a quest the work
+waits on goes under `## Required`), and parking the root README.
+
 ## Run recurring audits
 
 Quest ships a pack of audits every repository runs once per milestone:

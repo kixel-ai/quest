@@ -2,7 +2,7 @@
 
 import { handBackWaits } from "./claim";
 import { type Doc, branchQuest, children, gates, permanent } from "./doc";
-import { ready, treeOrder } from "./ready";
+import { parked, ready, treeOrder } from "./ready";
 import { ROOT, check, formatFinding } from "./rules";
 import { type Wait, onMaintainer, waits } from "./waiting";
 
@@ -20,7 +20,7 @@ export interface RankedQuest {
 export interface Ranking {
 	/** The rank of the root's child that holds `path`, lowest first; the root itself sorts last. */
 	priority(path: string): number;
-	/** Distinct transitive dependents of `path`, excluding epic membership and milestones, including what an epic requiring it holds back. */
+	/** Distinct transitive dependents of `path`, excluding epic membership, milestones, and parked work, including what an epic requiring it holds back. */
 	impact(path: string): number;
 }
 
@@ -37,6 +37,9 @@ export function ranking(docs: Doc[]): Ranking {
 		reverse.set(target, dependents);
 	};
 	for (const doc of docs) {
+		// Parked work runs nothing, so it neither scores as a dependent nor
+		// passes impact through.
+		if (parked(docs, doc)) continue;
 		// An epic's `Required` holds back everything under it, so each of those
 		// quests depends on its blockers, milestones' included.
 		for (const target of gates(docs, doc)) depend(target, doc.path, false);
@@ -103,7 +106,7 @@ export interface WaitingQuest {
 	pr: string | null;
 	/** Distinct transitive dependents, as `quest unblocked` counts them. */
 	dependents: number;
-	/** No `Required` entry or future `Scheduled` date remains on it or an epic above it, so clearing its waits lets the work go on. */
+	/** No `Required` entry, `Parked` item, or future `Scheduled` date remains on it or an epic above it, so clearing its waits lets the work go on. */
 	ready: boolean;
 	waits: Wait[];
 }
@@ -119,8 +122,9 @@ export interface WaitingOptions {
 }
 
 /**
- * Every quest with a `## Waiting` section and every draft in `drafts` handed
- * back with one, holding the items `options` keeps: those waiting on the maintainer first, then milestone order,
+ * Every quest with a `## Waiting` section, unless it or an epic above it is
+ * parked, and every draft in `drafts` handed back with one, holding the items
+ * `options` keeps: those waiting on the maintainer first, then milestone order,
  * descending downstream impact, ready before blocked, then tree order, with
  * drafts after quests in the order given. A draft ranks as the quest its branch
  * carries, or last when it carries none. Readiness is as of `today`, a
@@ -141,7 +145,12 @@ export function waiting(docs: Doc[], today: string, options: WaitingOptions = {}
 		ready: path === null || startable.has(path),
 		waits: found.filter(kept),
 	});
-	const quests = treeOrder(docs).map((path) => entry(path, null, waits(byPath.get(path)!)));
+	// Nobody acts on parked work's waits until it is unparked. A draft for it is
+	// still listed: an open PR is live work whatever its quest says.
+	const quests = treeOrder(docs)
+		.map((path) => byPath.get(path)!)
+		.filter((doc) => !parked(docs, doc))
+		.map((doc) => entry(doc.path, null, waits(doc)));
 	const pulls = drafts.map((draft) => {
 		const quest = branchQuest(draft.branch);
 		return entry(byPath.has(quest) ? quest : null, draft.url, handBackWaits(draft.body));
