@@ -122,7 +122,7 @@ import { TOKEN_MAX_MISSING, daysBefore, runTokenMax, usage, usageDependencies, u
 import { waitForActivity, WaitTimeout } from "./wait";
 import { version } from "./version";
 import { Worktrees } from "./worktree";
-import { OWN_MERGE, OWN_REVIEW, runsFromCheckout } from "./own-build";
+import { OWN_MERGE, OWN_REVIEW, runsFromCheckout, runsFromHead } from "./own-build";
 import { HOOK_EVENTS, claudeHook } from "./worktree-hook";
 
 /** Where the command writes; the process streams, or a buffer under test. */
@@ -813,7 +813,9 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		.option("--direct", "Merge at once when repository auto-merge is disabled; wait for checks to pass first")
 		.action((value: string, options: { land: string; squash?: boolean; rebase?: boolean; direct?: boolean }) => {
 			if (!/^[\da-f]{40}$/i.test(options.land)) throw new UsageError("--land needs a full 40-character SHA");
-			if (runsFromCheckout(root(), out.entry)) throw new UsageError(OWN_MERGE);
+			// The URL names the PR whatever --root is, so the head it pins is checked as well.
+			if (runsFromCheckout(root(), out.entry) || runsFromHead(options.land, out.entry))
+				throw new UsageError(OWN_MERGE);
 			const { pull, writes } = located(value);
 			const method = options.squash ? "squash" : options.rebase ? "rebase" : null;
 			// Kixel Quest's wire takes a lowercase SHA; GitHub compares either case.
@@ -1914,6 +1916,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 						fresh: options.new,
 						override,
 						accept,
+						own,
 					},
 					{
 						...reviewDependencies(),

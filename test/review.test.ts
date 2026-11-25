@@ -41,7 +41,7 @@ import {
 	tallied,
 	verdict,
 } from "../src/cli/review";
-import { runsFromCheckout } from "../src/cli/own-build";
+import { runsFromCheckout, runsFromHead } from "../src/cli/own-build";
 import { withReview } from "../src/cli/review-record";
 import { implementer, recorded, sameModel } from "../src/cli/models-record";
 import { tempDir } from "./fixture";
@@ -3329,4 +3329,19 @@ test("quest merge from the checkout's own source refuses before any write", asyn
 	);
 	expect(result).toMatchObject({ code: 2, stdout: "" });
 	expect(result.stderr).toContain("rerun with an installed quest");
+});
+
+test("quest merge refuses from any directory when the running source holds the PR's head", async () => {
+	const s = setup();
+	const other = tempDir();
+	git(other, "init", "-q");
+	const head = git(s.repo, "rev-parse", "HEAD");
+	const url = "https://github.com/example/project/pull/7";
+	// --root names another checkout, but the source that runs holds the pinned head.
+	const own = await questFrom([join(s.repo, "src/lib.ts")], "--root", other, "merge", url, "--land", head);
+	expect(own.stderr).toContain("rerun with an installed quest");
+	expect(own).toMatchObject({ code: 2, stdout: "" });
+	expect(own.stderr).toContain("rerun with an installed quest");
+	expect(runsFromHead(head, [join(s.bin, "codex")])).toBe(false);
+	expect(runsFromHead("a".repeat(40), [join(s.repo, "src/lib.ts")])).toBe(false);
 });

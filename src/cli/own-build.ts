@@ -12,12 +12,24 @@ export const OWN_REVIEW =
 export const OWN_MERGE = "this quest runs from the source of the checkout it lands; rerun with an installed quest";
 
 /**
- * Whether one of the `entries` the running quest executes from lies in the same Git checkout as `root`, as
- * `bun src/cli/bin.ts` or a `dist/quest.js` built there does; an installed bundle or binary lives outside every
- * checkout it judges. Without entries, as under test, nothing runs from a checkout.
+ * The top level of each checkout holding one of the `entries` the running quest executes from, as `bun src/cli/bin.ts`
+ * or a `dist/quest.js` built there does; an installed bundle or binary lives outside every checkout. Without
+ * entries, as under test, nothing runs from a checkout.
  */
+function checkouts(entries: string[] | undefined): string[] {
+	const tops: string[] = [];
+	for (const entry of entries ?? []) {
+		try {
+			tops.push(realpathSync(git(dirname(realpathSync(entry)), ["rev-parse", "--show-toplevel"])));
+		} catch {
+			// A path outside any checkout, or inside a compiled binary's virtual file system.
+		}
+	}
+	return tops;
+}
+
+/** Whether quest runs from the checkout of `root`, the one it would judge. */
 export function runsFromCheckout(root: string, entries: string[] | undefined): boolean {
-	if (entries === undefined) return false;
 	let judged: string;
 	try {
 		judged = realpathSync(git(root, ["rev-parse", "--show-toplevel"]));
@@ -25,11 +37,16 @@ export function runsFromCheckout(root: string, entries: string[] | undefined): b
 		// Not a checkout, so the command fails on its own terms.
 		return false;
 	}
-	return entries.some((entry) => {
+	return checkouts(entries).includes(judged);
+}
+
+/** Whether quest runs from a checkout whose `HEAD` holds the commit `head`, so it is built from that PR's own code. */
+export function runsFromHead(head: string, entries: string[] | undefined): boolean {
+	return checkouts(entries).some((top) => {
 		try {
-			return realpathSync(git(dirname(realpathSync(entry)), ["rev-parse", "--show-toplevel"])) === judged;
+			git(top, ["merge-base", "--is-ancestor", head, "HEAD"]);
+			return true;
 		} catch {
-			// A path outside any checkout, or inside a compiled binary's virtual file system.
 			return false;
 		}
 	});
