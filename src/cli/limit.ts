@@ -56,28 +56,3 @@ export function codexReset(message: string, now: Date): number | null {
 	);
 	return date.getTime();
 }
-
-/**
- * Antigravity's failure for a spent quota or a throttled account, as its Go harness renders a Google API error:
- * `Error 429, Message: ..., Status: RESOURCE_EXHAUSTED, Details: [... reason:QUOTA_EXHAUSTED]`.
- */
-export const AGY_LIMIT = /\breason:QUOTA_EXHAUSTED\b|\bStatus: RESOURCE_EXHAUSTED\b|\bError 429,/;
-
-/** A Go duration such as `1h2m3.5s`, as the error's details print one. */
-const GO_DURATION = /^(?:\d+(?:\.\d+)?(?:ns|us|µs|ms|h|m|s))+$/;
-const GO_UNITS: Record<string, number> = { ns: 1e-6, us: 1e-3, µs: 1e-3, ms: 1, s: 1_000, m: 60_000, h: 3_600_000 };
-
-/**
- * When an Antigravity quota resets, in epoch milliseconds: the error's `quotaResetTimeStamp`, else `now` plus its
- * `quotaResetDelay` or a throttle's `retryDelay`, or null when it names none.
- */
-export function agyReset(message: string, now: Date): number | null {
-	const stamp = Date.parse(/\bquotaResetTimeStamp:([^\s\]]+)/.exec(message)?.[1] ?? "");
-	if (!Number.isNaN(stamp)) return stamp;
-	const delay = /\b(?:quotaResetDelay|retryDelay):([^\s\]]+)/.exec(message)?.[1];
-	if (delay === undefined || !GO_DURATION.test(delay)) return null;
-	let ms = 0;
-	for (const [, amount, unit] of delay.matchAll(/(\d+(?:\.\d+)?)(ns|us|µs|ms|h|m|s)/g))
-		ms += Number(amount) * GO_UNITS[unit!]!;
-	return now.getTime() + ms;
-}

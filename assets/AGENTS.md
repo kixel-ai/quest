@@ -48,7 +48,10 @@ Current decisions, open questions, or implementation guidance.
 
 ## Waiting
 
-- Maintainer: the decision or action only they can take, and how to check it is done
+- Maintainer: the decision only they can take, with the context to answer it
+  - First option (Recommended) - why it wins
+  - Second option - what it trades away
+- Maintainer (action): a step only they can take, and how to check it is done
 - moq-dev/moq: a condition another party must meet, and how to check or advance it
 
 ## Scheduled
@@ -83,8 +86,9 @@ An epic carries no size until its last child is deleted; its README is then the 
 A quest without it runs anywhere; `quest unblocked --json` reports the list as `hosts` so a dispatcher routes work without reading prose.
 
 `Waiting` lists what the work waits on outside the tree; each item opens with who acts, `Maintainer:` or the outside party, before a colon.
-Open a step the maintainer can take only at one of their computers, such as a password-manager unlock, a hardware check, or a local login, with `Maintainer (PC):` instead, so a session away from them skips it; a decision or a step on a website stays `Maintainer:`.
-A decision item gives its options and a recommendation.
+A decision is a `Maintainer:` item whose nested list gives each option as `label` or `label - description`, ending exactly one label with `(Recommended)`; clients add "Explain it first" and a free-text answer, so the list names neither.
+Open a step only the maintainer can take with `Maintainer (action):`, or `Maintainer (PC):` when it needs one of their computers, such as a password-manager unlock, a hardware check, or a local login, so a session away from them skips it.
+Write each item to be answered alone, never pointing at text above or elsewhere, since a client may show only the item.
 Remove an item once its condition clears, and the heading with its last item.
 
 `Scheduled` holds one date, `YYYY-MM-DD` on the local calendar, optionally followed by ` - why`.
@@ -128,12 +132,12 @@ A release or pin bump that unblocks work is its own quest.
 So is anything waiting on an outside party or a human action (an upstream fix, a customer, a decision).
 Its `Waiting` section names who acts, the condition, and how to check or advance it; it is deleted once the condition clears.
 Automate a step rather than leave it to a person whenever an agent can take it.
-A `Maintainer:` item says why an agent cannot take the step and what automation was considered.
+A maintainer's action says why an agent cannot take the step and what automation was considered.
 Record a wait there, not in a draft PR holding only evidence or steps for a person.
 Unlike a blocked quest it stays ready, so it resurfaces whenever ready work is triaged instead of stalling in the backlog.
 `quest waiting` lists every waiting item, the maintainer's first, ranked by what each unblocks, and `/quest-run` walks the maintainer through them.
 
-A PR that launches something new for users to try, such as a site, demo, or feature, adds a follow-up quest for the maintainer to try and promote it, its `Maintainer:` item saying where to find it.
+A PR that launches something new for users to try, such as a site, demo, or feature, adds a follow-up quest for the maintainer to try and promote it, its `Maintainer (action):` item saying where to find it.
 
 ## Execution
 
@@ -243,6 +247,8 @@ An answer such as "whatever you recommend" picks your recommendations; act on th
 Do not use asynchronous question tools.
 
 A dialog for a decision, plan, or follow-up offers concrete choices and keeps one option for "Explain it first", which walks the user through the problem, current behavior, and each choice's trade-offs, then asks again without it.
+A `Waiting` decision is asked as its choices and an action as a step only the user can take.
+Write a `Waiting` decision as a `Maintainer:` item holding the question, with its choices in a nested list, one bullet each written `label` or `label - description`, and exactly one label ending in `(Recommended)`; write a step only the maintainer can take as `Maintainer (action):`, or `Maintainer (PC):` when only at one of their computers.
 A dialog for a step only the user can take offers, in this order: the agent taking it, such as by driving the browser, when it plausibly can; "Done / I'll do it now"; "Not at my PC (defer)", which keeps the wait and skips it for the session; and "Drop the wait", which a tool holding fewer options leaves to the user's typed answer.
 
 If no blocking tool is available, or it returns without an answer, put the question and numbered choices in your final reply and end the turn.
@@ -267,4 +273,4 @@ Models are trained on outputs, not prompts, so instructions they write drift int
 - Give a skill one job and a description that opens with when it should and should not run, in the words a request would use. Put its key instructions first, since a harness may keep only a skill's start after compaction.
 - Scope each rule to the case that prompted it; one failure rarely justifies a universal one. Write it plainly, without capitals or emphasis, and as "ask before X" rather than "never X" when X has exceptions: current models take "never" as absolute. Name the routine steps that need no approval, since a broad approval list makes models hold back. A rule with no exceptions belongs in a hook or check.
 - Before adding a rule, try to delete or consolidate one instead. Delete lines whose reason is gone: fixed in code, enforced by a hook or check, or written for older models, such as telling agents to keep going, think harder, or read every doc first.
-- Before changing agent instructions, check the official guidance: [Claude memory](https://code.claude.com/docs/en/memory), [Claude best practices](https://code.claude.com/docs/en/best-practices), [Claude skills](https://code.claude.com/docs/en/skills), [Claude prompting](https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/claude-prompting-best-practices) and its page for each model, [Codex AGENTS.md](https://learn.chatgpt.com/docs/agent-configuration/agents-md), [Codex skills](https://learn.chatgpt.com/docs/build-skills), [Codex prompting](https://learn.chatgpt.com/docs/prompting), [the newest GPT model](https://developers.openai.com/api/docs/guides/latest-model), [Antigravity rules](https://antigravity.google/docs/rules/), [Gemini CLI GEMINI.md](https://geminicli.com/docs/cli/gemini-md/), [Agent Skills](https://agentskills.io/specification), and [agents.md](https://agents.md).
+- Before changing agent instructions, check the official guidance: [Claude memory](https://code.claude.com/docs/en/memory), [Claude best practices](https://code.claude.com/docs/en/best-practices), [Claude skills](https://code.claude.com/docs/en/skills), [Claude prompting](https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/claude-prompting-best-practices) and its page for each model, [Codex AGENTS.md](https://learn.chatgpt.com/docs/agent-configuration/agents-md), [Codex skills](https://learn.chatgpt.com/docs/build-skills), [Codex prompting](https://learn.chatgpt.com/docs/prompting), [the newest GPT model](https://developers.openai.com/api/docs/guides/latest-model), [Agent Skills](https://agentskills.io/specification), and [agents.md](https://agents.md).

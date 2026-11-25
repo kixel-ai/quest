@@ -550,31 +550,6 @@ describe("share", () => {
 				),
 			),
 		).toEqual([[1, 3, 0]]);
-		// Spend no seat names never goes to an Antigravity seat, whose sessions token-max never reads.
-		const gemini = { harness: "Antigravity", model: "gemini-4-neon", effort: "high" };
-		const unnamed = [spend("gpt-6.2-sol", "high", 5)];
-		expect(
-			costs(share(unnamed, [gemini, { harness: "Claude Code", model: "claude-opus-5-5", effort: "high" }])),
-		).toEqual([[1, 5, 0]]);
-		expect(costs(share(unnamed, [gemini]))).toEqual([]);
-		// Nor does a session a record names on that seat, which token-max could not have read.
-		expect(
-			costs(
-				share(
-					[{ ...spend("gpt-6.2-sol", "high", 5), seat: 0 }],
-					[gemini, { harness: "Claude Code", model: "claude-opus-5-5", effort: "high" }],
-				),
-			),
-		).toEqual([[1, 5, 0]]);
-		// Nor does another harness's spend on the same model, as through a gateway.
-		expect(
-			costs(
-				share(
-					[spend("google/gemini-4-neon", "high", 5)],
-					[gemini, { harness: "Claude Code", model: "claude-opus-5-5", effort: "high" }],
-				),
-			),
-		).toEqual([[1, 5, 0]]);
 	});
 });
 
@@ -698,7 +673,7 @@ describe("usage", () => {
 			"- Findings: none",
 			"",
 			// A harness quest review does not run, as a hand-written record may name, reads as any other.
-			"- Reviewer: Gemini CLI, gemini-3-pro, high effort",
+			"- Reviewer: Other CLI, other-model-1, high effort",
 			"- Session: `ses_1`, round 1",
 			"- Score: 8/10, `Fine.`",
 			"- Rounds: 1; findings 0: fixed 0, refuted 0, open 0",
@@ -1044,7 +1019,7 @@ describe("usage", () => {
 			["claude-opus-5-5", "high", false],
 			["gpt-6.2-sol", "high", false],
 			["gpt-6.2-sol", "medium", true],
-			["gemini-3-pro", "high", false],
+			["other-model-1", "high", false],
 		]);
 		expect(ten.online).toEqual([
 			{
@@ -1117,7 +1092,7 @@ describe("usage", () => {
 		expect(report.breakages[0]!.culprit).toMatchObject({ tier: "high", size: "L" });
 		expect(text).toContain(
 			"Breakages, by the merged fix naming its culprit under ## Caused by:\n" +
-				"   #10  high, L, written by claude-opus-5-5 high, gpt-6.2-sol medium, reviewed by gpt-6.2-sol high, gemini-3-pro high, claude-opus-5-5 high, gpt-6.2-sol medium; fixed by #11, finder unrecorded, opened before it merged\n" +
+				"   #10  high, L, written by claude-opus-5-5 high, gpt-6.2-sol medium, reviewed by gpt-6.2-sol high, other-model-1 high, claude-opus-5-5 high, gpt-6.2-sol medium; fixed by #11, finder unrecorded, opened before it merged\n" +
 				"   #2   no tier, XS, written by gpt-6.2-sol low, no local review; fixed by #11, closing incident page 7, found by customer, 17.8d after merge\n",
 		);
 		// #10 is the one PR with a tier, and a later PR fixed it; #11, #5, and #6 of the rest merged.
@@ -1204,30 +1179,6 @@ describe("usage", () => {
 		expect(usageLines(report).join("\n")).toContain(
 			"  unread review: the ## Review record's Rounds line is malformed: garbled",
 		);
-	});
-
-	test("an Antigravity reviewer's spend is a lower bound, since token-max reads none of its sessions", async () => {
-		const body = [
-			"## Models",
-			"",
-			"- Size: M",
-			"",
-			"## Review",
-			"",
-			"Rewritten by `quest review` after each round.",
-			"",
-			`- Head: ${"a".repeat(40)}`,
-			"- Reviewer: Antigravity, gemini-4-neon, high effort",
-			"- Rounds: 1; findings 0: fixed 0, refuted 0, open 0",
-			"",
-		].join("\n");
-		const { root, deps, sessions } = setup({
-			pulls: [pr(40, "quest/m0/gemini", body, "2026-11-06T00:00:00Z", { updated_at: "2026-11-07T00:00:00Z" })],
-		});
-		const report = await usage(root, { since: "2026-11-05" }, deps(sessions));
-		const row = report.reviewers.find((each) => each.harness === "Antigravity")!;
-		expect(row).toMatchObject({ model: "gemini-4-neon", reviewed: 1 });
-		expect(row.spent.complete).toBe(false);
 	});
 
 	test("rolls up the writer A/B by size and arm, leaving out a PR a writer ran off its arm", async () => {

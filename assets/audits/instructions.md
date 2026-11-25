@@ -1,7 +1,7 @@
 # Agent instructions audit
 
 The goal is instructions agents load that are short, agree with each other, follow the current official guidance of every harness and model the repository's agents run, and change what agents do.
-The scope is every file an agent loads as context from the repository: `AGENTS.md` and `CLAUDE.md` at every depth, `GEMINI.md`, `CONTRIBUTING.md`, `REVIEW.md`, skills with their descriptions, path-scoped rules, the context hooks inject, and the prompts and instructions its code plants or sends to agents.
+The scope is every file an agent loads as context from the repository: `AGENTS.md` and `CLAUDE.md` at every depth, `CONTRIBUTING.md`, `REVIEW.md`, skills with their descriptions, path-scoped rules, the context hooks inject, and the prompts and instructions its code plants or sends to agents.
 Machine-level files, such as `~/.claude/CLAUDE.md`, belong to the repository that holds them, and files another repository ships or syncs, such as `quest`'s rules and skill stubs, are fixed at their source: plan a follow-up there instead of editing the copy.
 Turning new mistakes into new rules is not this audit's work, and which models run is not either.
 
@@ -13,7 +13,7 @@ Gather first, over the window since the date the last run's baseline records, or
 
 Look for:
 
-- Load budgets: each harness's loaded set, joined as it joins them from the root to the deepest working directory agents use, measured against the limits its pages give, such as Codex's `project_doc_max_bytes` and skill-list budget, Claude Code's per-file size target and skill-description cap, and Antigravity's per-rule-file and always-on caps. Text past a limit is cut silently.
+- Load budgets: each harness's loaded set, joined as it joins them from the root to the deepest working directory agents use, measured against the limits its pages give, such as Codex's `project_doc_max_bytes` and skill-list budget, and Claude Code's per-file size target and skill-description cap. Text past a limit is cut silently.
 - Files a harness never loads, as `quest guide prompting` describes.
 - Anything the files do against `quest guide prompting`'s rules, such as contradictions and repeats.
 - Commands, flags, paths, and links in instruction files that no longer work.
@@ -25,6 +25,6 @@ Where several harnesses' loaded sets or a large body of evidence are in scope, s
 
 Cut, consolidate, and rewrite in the run's PR, as `quest guide prompting` describes.
 Add a rule only where cutting or merging others cannot fix a finding; that replaces the running steps' `AGENTS.md` proposal for this audit.
-List each edit under the PR's `## Waiting` as its own `Maintainer:` item, to keep or revert with a recommendation, so the maintainer drops one without rejecting the rest; the PR lands only on those answers, and the reverts they ask for make a new head that gets a new review.
+List each edit under the PR's `## Waiting` as its own `Maintainer:` decision, with keep and revert as its choices and your recommendation marked, so the maintainer drops one without rejecting the rest; the PR lands only on those answers, and the reverts they ask for make a new head that gets a new review.
 Landing on those answers is the user's agreement `quest context` asks for before a rule changes, so the run makes these edits without asking first.
 Record as the next stub's baseline the date and commit this run read through, the hosts whose messages it read with how many unnamed directories `quest messages` dropped entries of on each, each harness's loaded size as measured, the date each guidance page was read, and each rule kept against the evidence with why, so the next run reads what changed since.

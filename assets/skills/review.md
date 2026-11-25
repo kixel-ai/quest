@@ -39,7 +39,7 @@ A finding the reviewer keeps against such a refutation is a decision for the use
 Write each round's `--responses` file in the checkout's `.tmp/`.
 
 At a `next decide` line, which prints once a reviewer's third round still reports findings, stop: fix nothing more, change no approach, and run no further round. `quest status <pr>` prints a `checkpoint` line when an online reviewer's third round does the same.
-Report what remains, a line per finding with the fix its reviewer recommends, and recommend one of: fix them as recommended, accept them, or drop the PR. The user decides; an agent that cannot prompt hands the PR back with the choice under `## Waiting`.
+Report what remains, a line per finding with the fix its reviewer recommends, and recommend one of: fix them as recommended, accept them, or drop the PR. The user decides; an agent that cannot prompt hands the PR back with that choice as a `## Waiting` decision.
 Take up a reviewer's recommended approach only on the user's pick. Record it in a PR comment that starts with `Design change:`, and review it with `quest review --new`, which starts new sessions and keeps what the branch already settled.
 
 `quest review` passes a round from a reviewer that is out of quota, logged out, or not installed to the size's next eligible one, and records the skip.

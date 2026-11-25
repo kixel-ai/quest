@@ -329,7 +329,7 @@ test("bumpBody waits on a maintainer only for findings", () => {
 	// It records no review, which a maintainer's fix would need.
 	expect(bumpBody(options)).not.toContain("## Review");
 	expect(bumpBody({ ...options, findings: "quest/a.md: <bad>" })).toContain(
-		"## Waiting\n\n- Maintainer: `quest check`",
+		"## Waiting\n\n- Maintainer (action): `quest check`",
 	);
 	expect(bumpBody({ ...options, findings: "quest/a.md: <bad>" })).toContain("&lt;bad>");
 });

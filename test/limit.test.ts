@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 
-import { AGY_LIMIT, EXHAUSTED, LIMIT, agyReset, codexReset } from "../src/cli/limit";
+import { EXHAUSTED, LIMIT, codexReset } from "../src/cli/limit";
 
 test("usage limits and spent balances match, and other limits do not", () => {
 	for (const message of [
@@ -51,23 +51,4 @@ test("Codex's reset is read in the local time zone, today's by time alone", () =
 	expect(codexReset("... or try again at Jan 2nd, 2027 12:30 PM.", now)).toBe(new Date(2027, 0, 2, 12, 30).getTime());
 	expect(codexReset("You've hit your usage limit.", now)).toBeNull();
 	expect(codexReset("Try again at Foo 2nd, 2027 12:30 PM.", now)).toBeNull();
-});
-
-test("Antigravity's quota reads from its API error: the reset's timestamp, else its delay from now", () => {
-	const now = new Date(Date.UTC(2026, 10, 3, 9, 0));
-	const quota = (metadata: string) =>
-		"Error 429, Message: Quota exhausted., Status: RESOURCE_EXHAUSTED, Details: [map[@type:type.googleapis.com/" +
-		`google.rpc.ErrorInfo domain:cloudcode-pa.googleapis.com metadata:map[${metadata}] reason:QUOTA_EXHAUSTED]]`;
-	expect(AGY_LIMIT.test(quota(""))).toBe(true);
-	expect(AGY_LIMIT.test("Error 400, Message: Request contains an invalid argument., Status: INVALID_ARGUMENT")).toBe(
-		false,
-	);
-	expect(agyReset(quota("quotaResetDelay:3600s quotaResetTimeStamp:2026-11-04T00:00:00Z"), now)).toBe(
-		Date.UTC(2026, 10, 4),
-	);
-	expect(agyReset(quota("quotaResetDelay:1h30m0.5s"), now)).toBe(now.getTime() + 5_400_500);
-	// A throttle names a retry delay instead.
-	expect(agyReset("Status: RESOURCE_EXHAUSTED, Details: [map[retryDelay:42s]]", now)).toBe(now.getTime() + 42_000);
-	expect(agyReset(quota("quotaResetTimeStamp:soon"), now)).toBeNull();
-	expect(agyReset(quota(""), now)).toBeNull();
 });
