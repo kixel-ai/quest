@@ -5,7 +5,8 @@
 The diffs `quest review` shows or names to its reviewers show every change
 the head makes. Neither the local git config nor the head's own
 `.gitmodules` or `.gitattributes` can hide or blank one. The classifier's
-diff is [its own quest](/quest/m0/classifier-attributes.md).
+diff already passes `--attr-source=<empty tree>` and `--text`, and
+`quest review` needs Git 2.41 for it.
 
 ## Plan
 
@@ -27,12 +28,7 @@ them. The diffs the reviewers read do not:
 
 Recommended: name every reviewer diff with
 `--ignore-submodules=none --no-ext-diff --no-textconv`, plus the attribute
-handling `classifier-attributes.md` settles for the classifier
-(`--attr-source=<empty tree>` and `--text`), so all of them read diffs the
-same way. Test each with a fixture head
+handling the classifier's diff has (`--attr-source=<empty tree>` and
+`--text`), so all of them read diffs the same way. Test each with a fixture head
 that hides its change each way: a gitlink under `diff.ignoreSubmodules=all`,
 a `-diff` attribute, and a `diff.external` helper that prints nothing.
-
-## Required
-
-- [The risk classifier sees every hunk](/quest/m0/classifier-attributes.md) - settles the attribute flags and adds the Git 2.41 check these diffs then need

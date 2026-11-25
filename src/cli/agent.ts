@@ -503,13 +503,16 @@ export async function runAgent(
 	const harness = HARNESS[launch.harness];
 	const id = session ?? randomUUID();
 	const [name, ...args] = session === undefined ? harness.start(launch, id) : harness.resume(launch, id);
-	// The CLI is found on PATH, never in the worktree.
-	const program = requireProgram(name, deps.env);
-	const command = checkouts ? undefined : programCommand(program, args, deps.env);
+	// The CLI is found on PATH, never in the worktree. A missing one fails here, before the wait.
+	requireProgram(name, deps.env);
 	const dir = spawnDirectory(deps.base, worktree);
 	// Waited out before the worktree is claimed, so a queued launch holds nothing.
 	const refused = await admitAgent(deps, process.pid);
 	if (refused !== undefined) return refused;
+	// Found again once admitted: `which` returns the file PATH named, which a launcher update during a long wait
+	// may have replaced.
+	const program = requireProgram(name, deps.env);
+	const command = checkouts ? undefined : programCommand(program, args, deps.env);
 
 	const reader = harness.reader();
 	// Claude Code takes the id this command assigns; Codex announces its own.

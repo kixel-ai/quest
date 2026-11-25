@@ -53,7 +53,7 @@ export function startLine(caller: Caller, call: string, command: string, runs: R
 /**
  * The call lines logged on this host from the UTC day before `since`'s on, and from each earlier day while one of
  * them is about a call whose start or background handoff lies earlier, so a group that began before the window ends
- * where it did. Fails on a line it cannot read.
+ * where it did. Skips a line it cannot read.
  */
 export function readCalls(since: number, env: NodeJS.ProcessEnv = process.env): CallLine[] {
 	const dir = callsDirectory(env);

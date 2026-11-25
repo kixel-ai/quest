@@ -4,7 +4,8 @@ import { describe, expect, test, vi } from "vitest";
 
 import type { GitHubDependencies, ObjectValue } from "../src/github/client";
 import { finish, land, release, take } from "../src/cli/hold";
-import { withoutHandBack } from "../src/core";
+import { REVIEW_MARK, withoutHandBack } from "../src/core";
+import { reviewTarget } from "../src/github/review-trust";
 import { type Output, main } from "../src/cli/main";
 import { Refusal } from "../src/core";
 
@@ -18,6 +19,8 @@ const PR = { owner: "example", repo: "project", number: 7 };
 const URL_ = "https://github.com/example/project/pull/7";
 const HEAD = "a".repeat(40);
 const BASE = "b".repeat(40);
+/** The head's merge base with the base. */
+const FORK = "f".repeat(40);
 /** A landing check that finds nothing. */
 const clean = async () => [];
 
@@ -70,6 +73,14 @@ class FakePull {
 	/** The error GitHub answers `enqueuePullRequest` with, if any. */
 	beforeEnqueue?: () => { message: string; type?: string } | undefined;
 	reads = 0;
+	/** The base's RISK.md, absent when null. */
+	risk: string | null = null;
+	/** The paths the PR changes, as GitHub's compare lists them. */
+	files: string[] = [];
+	/** Each commit's diff from the base, by SHA; its SHA by default, so no two commits share one. */
+	diffs: Record<string, string> = {};
+	/** The `quest review` status on each commit, as GraphQL's `StatusContext` gives it. */
+	statuses: Record<string, ObjectValue> = {};
 	private clock = Date.parse("2026-10-21T12:00:00Z");
 
 	/** Add a label as GitHub does: re-adding one already on the PR records no event. */
@@ -126,11 +137,27 @@ class FakePull {
 		if (url.pathname === "/repos/example/project/branches/main") return json(200, { protection: {} });
 		if (url.pathname === "/repos/example/project/actions/runs" && url.searchParams.get("head_sha") === this.head)
 			return json(200, { total_count: this.runs.length, workflow_runs: this.runs });
-		if (url.pathname === `/repos/example/project/compare/main...${this.head}`) {
-			this.comparisons.push(`${url.pathname}${url.search}`);
-			this.afterCompare?.();
-			return json(200, { status: this.comparison, base_commit: { sha: this.base } });
+		const compared = /^\/repos\/example\/project\/compare\/main\.\.\.(\w+)$/.exec(url.pathname);
+		if (compared && new Headers(init.headers).get("Accept") === "application/vnd.github.diff")
+			return new Response(this.diffs[compared[1]!] ?? compared[1]);
+		if (compared) {
+			const files = this.files.map((filename) => ({ filename }));
+			// Only `quest merge`'s own check of the head against the base, which asks for one commit.
+			if (compared[1] === this.head && url.search === "?per_page=1") {
+				this.comparisons.push(`${url.pathname}${url.search}`);
+				this.afterCompare?.();
+			}
+			return json(200, {
+				status: compared[1] === this.head ? this.comparison : "ahead",
+				base_commit: { sha: this.base },
+				merge_base_commit: { sha: FORK },
+				files,
+			});
 		}
+		if (url.pathname === "/repos/example/project/contents/RISK.md")
+			return this.risk === null ? json(404, { message: "Not Found" }) : new Response(this.risk);
+		if (url.pathname === "/repos/example/project/collaborators/maintainer/permission")
+			return json(200, { permission: "write" });
 		if (url.pathname === "/repos/example/project/rules/branches/main") {
 			const checks = this.required.map((context) => ({ context }));
 			return json(200, [
@@ -171,6 +198,29 @@ class FakePull {
 				this.queueEntry = { state: "QUEUED" };
 			}
 			return { data: { [name]: { clientMutationId: null } } };
+		}
+		if (query.includes("query ReviewTiers"))
+			return {
+				data: {
+					repository: {
+						pullRequest: {
+							commits: {
+								pageInfo: { hasPreviousPage: false, startCursor: null },
+								nodes: Object.entries(this.statuses).map(([oid, context]) => ({
+									commit: { oid, status: { context } },
+								})),
+							},
+						},
+					},
+				},
+			};
+		if (query.includes("query ReviewStatus")) {
+			const status = this.statuses[String(variables.sha)];
+			return {
+				data: {
+					repository: { object: { status: status === undefined ? null : { context: status } } },
+				},
+			};
 		}
 		if (query.includes("p7: pullRequest(number: 7)")) {
 			const empty = { pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] };
@@ -999,6 +1049,94 @@ test("iterate and release exit 0 when stdout returns a value", async () => {
 		vi.unstubAllEnvs();
 		vi.unstubAllGlobals();
 	}
+});
+
+describe("merge --land of a high head", () => {
+	const OLD = "c".repeat(40);
+	/** A `## Review` record of `head` at `tier`, and the passing status a maintainer's round sets on it. */
+	const review = (pull: FakePull, head: string, tier: string) => {
+		pull.body = `Summary.\n\n## Review\n\n${REVIEW_MARK}\n\n- Head: ${head}\n- Risk: ${tier}, \`why\`\n- Classified: ${tier} by codex\n`;
+		pull.statuses[head] = {
+			state: "SUCCESS",
+			description: `Risk ${tier}: passed`,
+			targetUrl: reviewTarget({ owner: "example", repo: "project" }, FORK, head),
+			creator: { __typename: "User", login: "maintainer" },
+		};
+	};
+	const land_ = (pull: FakePull) => land(PR, { sha: HEAD, method: "merge", check: clean }, pull.deps());
+
+	test("lands one a review status covers, whatever its tier", async () => {
+		const pull = new FakePull();
+		pull.risk = "# Risk\n\n## High\n\n- `assets/` - every agent loads it\n";
+		pull.files = ["assets/a.md"];
+		review(pull, HEAD, "high");
+		await land_(pull);
+		expect(pull.writes).toEqual([`enablePullRequestAutoMerge ${HEAD} MERGE`]);
+	});
+
+	test("refuses one pushed after the review that rated it high", async () => {
+		const pull = new FakePull();
+		review(pull, OLD, "high");
+		expect(await refused(land_(pull))).toBe(
+			`${URL_} head ${HEAD} is high, since its review record rates it high, and no quest review status covers it; run quest review on it, then land it again`,
+		);
+		expect(pull.writes).toEqual([]);
+	});
+
+	test("refuses an unreviewed head whose change touches a path the base's RISK.md holds high, on either side of a rename", async () => {
+		const pull = new FakePull();
+		pull.risk = "# Risk\n\n## High\n\n- `assets/` - every agent loads it\n";
+		review(pull, OLD, "low");
+		pull.files = ["src/a.ts", "assets/b.md"];
+		expect(await refused(land_(pull))).toContain(
+			`head ${HEAD} is high, since it changes assets/b.md, which is always high: every agent loads it,`,
+		);
+		// RISK.md itself is high even where the base has none.
+		pull.risk = null;
+		pull.files = ["RISK.md"];
+		expect(await refused(land_(pull))).toContain("since it changes RISK.md, which is always high");
+		expect(pull.writes).toEqual([]);
+	});
+
+	test("refuses a head whose record does not count, since its tier is unknown", async () => {
+		const pull = new FakePull();
+		review(pull, OLD, "low");
+		pull.statuses[OLD]!.description = "Risk high: passed";
+		expect(await refused(land_(pull))).toContain(
+			`head ${HEAD} is high, since example/project#7's ## Review record does not count: its risk differs`,
+		);
+	});
+
+	test("lands a head whose diff is the one a high review covers, as after a clean base merge", async () => {
+		const pull = new FakePull();
+		review(pull, OLD, "high");
+		expect(await refused(land_(pull))).toContain("is high");
+		pull.diffs = { [OLD]: "diff", [HEAD]: "diff" };
+		// A failed round on the head itself since outweighs the earlier pass.
+		pull.statuses[HEAD] = { ...pull.statuses[OLD]!, state: "FAILURE", description: "Risk high: findings open" };
+		expect(await refused(land_(pull))).toContain("is high");
+		delete pull.statuses[HEAD];
+		await land_(pull);
+		expect(pull.writes).toEqual([`enablePullRequestAutoMerge ${HEAD} MERGE`]);
+	});
+
+	test("refuses a head an earlier commit's status rates high, whatever the body says", async () => {
+		const pull = new FakePull();
+		review(pull, OLD, "high");
+		pull.body = "Summary.";
+		expect(await refused(land_(pull))).toContain(
+			`head ${HEAD} is high, since the quest review status on ${OLD} rates it high`,
+		);
+	});
+
+	test("lands a head pushed after a low review that touches no high path", async () => {
+		const pull = new FakePull();
+		pull.risk = "# Risk\n\n## High\n\n- `assets/` - every agent loads it\n";
+		review(pull, OLD, "low");
+		pull.files = ["src/a.ts"];
+		await land_(pull);
+		expect(pull.writes).toEqual([`enablePullRequestAutoMerge ${HEAD} MERGE`]);
+	});
 });
 
 describe("merge --land on a base that requires an approval the head lacks", () => {

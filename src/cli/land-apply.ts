@@ -130,7 +130,7 @@ export function resolutionSection(number: number, resolution: Resolution, room: 
 	const { head, base, tree, patch, cause } = resolution;
 	const why =
 		cause === "protected"
-			? "The fixer's resolution edits protected paths, which on a high pull request are all of them, beyond what a clean base merge carries, and only a maintainer's push lands those"
+			? "The fixer's resolution edits protected paths beyond what a clean base merge carries, and only a maintainer's push lands those"
 			: "GitHub refused the fixer's push";
 	const merge = base === head ? "no base merge" : `base \`${base}\``;
 	const review = cause === "protected" ? "reviews its protected edits" : "reviews it";

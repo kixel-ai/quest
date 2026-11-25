@@ -907,6 +907,15 @@ describe("audits", () => {
 			.rejects("quest/README.md:9: '## Skipped audits' item must open with the name of an audit quest ships");
 	});
 
+	test("--no-stubs accepts an audit name this build does not ship, keeping the structure rules", () => {
+		const t = tree()
+			.append("quest/m0/epic/one.md", audit("perf"))
+			.append("quest/README.md", skipped("lint - not ours"));
+		expect(t.run("check", "--no-stubs").code).toBe(0);
+		t.append("quest/m0/epic/two.md", audit("perf", "lint"));
+		expect(t.run("check", "--no-stubs").stderr).toContain("'## Audit' names one audit");
+	});
+
 	test("an Audit section names one audit", () => {
 		tree().append("quest/m0/epic/one.md", audit("deps", "tree")).rejects("'## Audit' names one audit");
 		tree().append("quest/m0/epic/one.md", "\n## Audit\n").rejects("'## Audit' is empty");

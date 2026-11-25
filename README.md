@@ -240,7 +240,8 @@ repository on its next run. To opt out, list the audit in the root
 - deps - this repository vendors nothing and has no package manager
 ```
 
-`quest check` rejects an audit name Quest does not ship in either section, a
+`quest check` rejects an audit name Quest does not ship in either section
+(unless `--no-stubs`), a
 second name in one `## Audit`, and `## Skipped audits` outside the root.
 
 ## Find what waits on you
@@ -355,10 +356,13 @@ The check is a floor, not a review: any edit to the quest passes, so reviewers
 still judge whether a rewrite matches what remains.
 
 `quest check` also compares the repository's skill stubs with the skills its
-binary carries, and reports a missing, outdated, or retired one. A job that
+binary carries, and reports a missing, outdated, or retired one, and reports
+each audit its binary ships that no quest names and `## Skipped audits` does
+not list, so an upgrade that adds an audit asks for `quest init`. A job that
 checks a PR with a binary built from the base passes `--no-stubs`, since that
-binary's skills would reject a PR that changes a stub; the PR's own binary
-checks them in its own `quest check`. This repository's merge queue and
+binary's skills would reject a PR that changes a stub, and its audit list one
+that ships a new audit with its stub; with it, any audit name passes, and the
+PR's own binary checks them in its own `quest check`. This repository's merge queue and
 `quest merge` do so. It also reads the repository's [`RISK.md`](#risk-tiers),
 if any, and reports each `## High` or `## Automatic` item it cannot read,
 which would otherwise fail the next `quest review` on a branch from it.
@@ -763,7 +767,16 @@ for the approval, and refuses where nothing would wait, since an admin's token
 would merge or enqueue past the requirement.
 It also refuses while a [signal](#signals-that-hold-a-head) holds the head,
 naming each, and while the PR body's `## Review` record has risk lines that do
-not parse, until `quest review` rewrites it.
+not parse, until `quest review` rewrites it. A head is high when its
+`## Review` record rates it high or does not count, when a `quest review`
+status on any of its commits rates it high, or when its change from its merge
+base with the base touches a path the base's `RISK.md` holds high, as
+[Risk tiers](#risk-tiers) says, or reaches GitHub's 300-file compare limit. A
+high head lands only once a `quest review` status that `quest status` counts
+covers its diff, on that head or on an earlier one whose diff from the base is
+identical, unless the head itself carries a `quest review` status that is not
+a pass. So any push after the last review that changes the diff, a person's or
+a helper's, waits for a new round.
 It enables auto-merge bound to that SHA, or merges at once when nothing is
 left to wait for. `--squash` or `--rebase` picks the method, and it refuses one
 the repository disallows; otherwise it uses the only method the repository
@@ -809,8 +822,9 @@ lockfiles rebuilt from the base's copy, base renames, and build or test failures
 an obvious fix, which it builds and tests with package-registry access. It ignores
 instructions in the diff and reads the PR's own CI results as context. It hands back
 only what needs a maintainer: a behavior or design decision gets a diagnosis on the
-PR, and a fix that edits protected paths or that GitHub refuses to push gets a ready
-commit for `quest land apply <pr>`.
+PR, a fix that edits protected paths or that GitHub refuses to push gets a ready
+commit for `quest land apply <pr>`, and a high head whose new diff no `quest review`
+status covers waits for a review round.
 
 ## Watch the merge queue with quest land watch
 
@@ -909,7 +923,8 @@ while each round makes progress: an `unchanged` round, the failure a fix
 addressed recurring right after it, or three unchanged re-enqueues in a row,
 whatever their causes, hand it back. A fix is validated, lease-pushed, and recorded in Review, and a push GitHub refuses, or a fix that edits protected paths, is handed
 back with its resolution for `quest land apply`, as [the land fixer](#the-land-fixer) describes. The watcher then puts the fixed, merged, or requeued head back
-in the queue with `expectedHeadOid` bound to it: it enqueues a head whose
+in the queue, unless it is high and no `quest review` status covers its diff, as
+`quest merge --land` requires, which hands it back for a review round. It goes back with `expectedHeadOid` bound to it: it enqueues a head whose
 required checks have passed, and arms auto-merge on one whose checks still
 run, so GitHub enqueues it once they pass. Either joins the back of the queue.
 It comments on the PR with what it did, after any note the fixer wrote. A
@@ -1039,10 +1054,10 @@ fixer was given, resolves no conflict in the protected set, not even by keeping 
 PR's side, nor one Git's merge names no conflicted file for, such as a directory
 rename split, and keeps that set as a plain merge of the base leaves it. It covers
 `flake.nix`, `flake.lock`, `shell.nix`, `default.nix`, `nix/`, `.envrc`, `.github/`,
-`.gitmodules`, gitlinks anywhere, and every path `quest review` holds high from the
-base's `RISK.md`; on a high PR, one whose `## Review` record rates it high or whose
-own change touches such a path, it covers every path. So a high change lands only
-after a local review. The watcher's own merge with the quest merge driver, below, is
+`.gitmodules`, and gitlinks anywhere. A high head gets fixes like any other, but
+the watcher puts it back in the queue only when a `quest review` status covers
+the new head's diff, as `quest merge --land` requires; otherwise it hands the PR back
+for a review round. The watcher's own merge with the quest merge driver, below, is
 no fixer edit: it runs no model and resolves only `quest/` files. Collection copies at most 100 MiB of Git metadata the fixer added into a
 clean object repository. It skips the packs fetched at launch, whose objects the clean
 repository borrows from the daemon's own. It ignores fixer configuration and never
@@ -1055,7 +1070,7 @@ status or signal, with the tail of the job's retained log. A validated fix whose
 GitHub refuses, such as a merged base's `.github/workflows` changes that the App lacks
 the `workflows` permission to push, is handed back with its resolution. So is a fix
 that edits protected paths beyond what the base merge carries, such as a conflict in
-`flake.nix` or a high path the fixer resolved: those never land automatically. The resolution is the
+`flake.nix` the fixer resolved: those never land automatically. The resolution is the
 PR head, the base, the resolved tree, and the fixer's edits as a patch against the
 merge's conflicted result, or against the head itself for a fix that merges no base,
 sized to GitHub's 65,536-character comment limit. A maintainer
@@ -1313,8 +1328,17 @@ soon take the whole host again. So where a systemd scope owns the command, its
 gate samples the scope's CPU use every 5 seconds and records the most CPUs the
 command kept busy over one sample in the last minute. While gated commands run,
 the load counts as at least the sum of those records, and nothing starts while
-they kept every CPU busy. macOS, Windows, and Linux without a systemd user
-manager have no scope to measure, so the load average alone decides there.
+they kept every CPU busy. Its memory can lull the same way, so on Linux 5.19
+or later the gate also records the scope's cgroup, from which every gate reads
+the command's peak memory, and available memory counts less what each running
+command's peak adds beyond what it holds now, inactive file cache excluded. A
+command admitted in the last minute that has a peak takes that, or one budget if
+more, instead of a budget on top of it. The peak includes file cache the command
+wrote, so a build that writes large artifacts counts at their size too.
+Windows and Linux without a systemd user manager have no scope to measure, so
+available memory less one budget per recent command decides there, with the
+load average on Linux. macOS counts reclaimable cache as used, so the gate reads no
+memory there and the load average alone decides.
 
 A user's admissions on one host are recorded under
 `~/.cache/quest/admissions-v2/<hostname>`, whatever the caller's environment or
@@ -1518,7 +1542,10 @@ whole branch at the PR's size.
 
 `quest review` has a model no weaker than the latest writer review the checkout's
 committed and pushed branch before it is marked ready for review, at an effort set by the PR's
-size. Each size has two reviewers, the same for every repository:
+size. It needs Git 2.41 or later, whose `--attr-source` keeps a head's
+`.gitattributes` from hiding its hunks from the risk classifier, and is a usage error
+before it; `--accept` runs no diff and is exempt. Each size has two reviewers,
+the same for every repository:
 
 | PR size | Reviewer | When Sol is out, and a high head's second |
 |---|---|---|
@@ -1531,6 +1558,12 @@ size. Each size has two reviewers, the same for every repository:
 A model may review its own work, in a session of its own, so the writer's model
 is never skipped for that alone, and Opus reviews at the effort it writes the
 size at.
+
+A `quest` run from the source of the checkout it judges (`bun src/cli/bin.ts`, or
+a build made there) is that PR's own build, which never records its own review:
+the round runs, but writes no `## Review` record and sets no `quest review`
+status, and prints `record skipped:` telling you to rerun with an installed
+`quest`. `quest merge` run that way refuses.
 
 The reviewers run at once;
 the first to fail, such as on a usage limit, stops the others, and the round
@@ -1822,11 +1855,14 @@ before it runs so it judges just the rule and cannot widen a scope; a change
 that touches no path falls in none. The scope is checked when the head is
 classified, so a record keeps its class after the base narrows that scope
 until a review classifies the head again. It runs as Claude Code
-`claude-haiku-5-5` at low effort, then Codex `gpt-6.2-sol` at low when Claude Code is missing,
-logged out, have their login rejected, or hit their usage limit. When none can
+`claude-haiku-5-5` at low effort, then Codex `gpt-6.2-sol` at low when Claude Code is
+missing, logged out, has its login rejected, or hits its usage limit. When none can
 run, the review fails on the limit that resets first if every one whose CLI is
-installed hit its own, and otherwise as a usage error naming why each failed. A diff past 200,000 characters gives it only the
-stat, and it reads the parts it needs. The tier is kept with the reviewers'
+installed hit its own, and otherwise as a usage error naming why each failed. Its diff ignores the head's
+`.gitattributes` and treats every file as text, so a head cannot hide hunks by
+marking them binary. A diff past 200,000 characters, or one holding a NUL byte or bytes that are not
+UTF-8, gives it only the stat and a file of the whole diff in a scratch directory, which Claude Code is
+let read and which is removed once it answers. The tier is kept with the reviewers'
 sessions, so a later round on the same head and base `RISK.md` reuses it, and
 `--new` classifies again. The record names it after the base:
 
