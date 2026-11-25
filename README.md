@@ -1313,8 +1313,15 @@ soon take the whole host again. So where a systemd scope owns the command, its
 gate samples the scope's CPU use every 5 seconds and records the most CPUs the
 command kept busy over one sample in the last minute. While gated commands run,
 the load counts as at least the sum of those records, and nothing starts while
-they kept every CPU busy. macOS, Windows, and Linux without a systemd user
-manager have no scope to measure, so the load average alone decides there.
+they kept every CPU busy. Its memory can lull the same way, so on Linux 5.19
+or later the gate also records the scope's peak memory, and available memory
+counts less what each running command's peak adds beyond what it holds now. A
+command admitted in the last minute that has a peak takes that, or one budget if
+more, instead of a budget on top of it. The peak includes file cache the command
+wrote, so a build that writes large artifacts counts at their size too.
+macOS, Windows, and Linux without a systemd user manager have no scope to
+measure, so the load average and one budget per recent command alone decide
+there.
 
 A user's admissions on one host are recorded under
 `~/.cache/quest/admissions-v2/<hostname>`, whatever the caller's environment or

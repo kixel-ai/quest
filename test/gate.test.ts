@@ -33,9 +33,11 @@ import {
 	LEDGER_VERSION,
 	linuxMemory,
 	measure,
+	memoryPeaks,
 	type Owner,
 	owner,
 	processStart,
+	room,
 	RECENT_MS,
 	SETTLE_MS,
 	job,
@@ -91,6 +93,7 @@ function testHost(
 		...fileHost(directory, () => state.now),
 		load: () => state.load,
 		memory: () => state.memory,
+		footprint: () => undefined,
 		sleep: async (ms) => {
 			events.push(`sleep ${ms}`);
 			state.now += ms;
@@ -305,6 +308,95 @@ test("a gate records its admission again once another gate drops it, even while 
 		{ id: "other", at: 2 * SETTLE_MS, ...me },
 		{ id: "build", at: 0, ...me, cores: 0 },
 	]);
+});
+
+/** A gated build in scope `unit` that has held `peak` bytes at most, admitted at `at`. */
+const measuredBuild = (at: number, peak: number) => ({ id: "build", at, ...me, unit: "quest-gate-build.scope", peak });
+
+test("a running command's peak beyond what it holds now queues a check that available memory would admit", async () => {
+	const events: string[] = [];
+	// The build peaked at 10 GiB and lulls at 2, so 9 GiB are available but only 1 is free of it.
+	const state = { now: 0, load: 0, memory: 9 * GiB };
+	const host = testHost(tempDir(), state, events);
+	expect(host.publish(host.ledger(), [measuredBuild(-10 * RECENT_MS, 10 * GiB)])).toBe(true);
+	let build: { current: number; peak: number } | undefined = { current: 2 * GiB, peak: 10 * GiB };
+	host.footprint = () => build;
+	const sleep = host.sleep;
+	host.sleep = async (ms, signal) => {
+		await sleep(ms, signal);
+		// It ends, and its scope with it.
+		build = undefined;
+	};
+	await admit({ load: 4, memory: 4 * GiB }, host, signal, (reason) => events.push(reason));
+	expect(events).toEqual(["memory", `sleep ${SETTLE_MS}`]);
+});
+
+test("a measured command reserves only what its peak adds beyond what available memory shows", () => {
+	const limits = { load: 8, memory: 4 * GiB };
+	const state = { now: 0, load: 0, memory: 5 * GiB };
+	const directory = tempDir();
+	const host = testHost(directory, state);
+	let current = 10 * GiB;
+	host.footprint = () => ({ current, peak: 10 * GiB });
+	// At its peak, a build admitted long ago adds nothing to what available memory shows.
+	host.publish(host.ledger(), [measuredBuild(-10 * RECENT_MS, 10 * GiB)]);
+	expect(room(limits, host, 0)).toBeNull();
+	current = 8 * GiB;
+	expect(room(limits, host, 0)).toBe("memory");
+	// A recent one, not yet reflected, reserves one command's memory, less what it holds beyond that.
+	current = 3 * GiB;
+	host.publish(host.ledger(), [measuredBuild(0, 3 * GiB)]);
+	expect(room(limits, host, 0)).toBeNull();
+	// One its gate has not measured yet reserves a whole command's memory, as a kernel without peaks leaves it.
+	host.publish(host.ledger(), [{ id: "build", at: 0, ...me }]);
+	expect(room(limits, host, 0)).toBe("memory");
+	// So does one whose scope is gone.
+	host.publish(host.ledger(), [measuredBuild(0, 3 * GiB)]);
+	host.footprint = () => undefined;
+	expect(room(limits, host, 0)).toBe("memory");
+	// A peak without its scope reads as a version cut short.
+	writeFileSync(join(directory, "100"), JSON.stringify([{ id: "build", at: 0, ...me, peak: GiB }]));
+	expect(host.ledger()).toEqual({ version: 100, admissions: [] });
+});
+
+test("a gate publishes its command's peak memory only as it grows", async () => {
+	const state = { now: 0, load: 0, memory: Infinity };
+	const host = testHost(tempDir(), state);
+	host.publish(host.ledger(), [{ id: "build", at: 0, ...me }]);
+	host.usage = () => 0;
+	// Before the scope exists, then rising, holding, and gone.
+	const peaks = [undefined, GiB, 3 * GiB, 3 * GiB, undefined];
+	let peak: number | undefined;
+	host.footprint = () => (peak === undefined ? undefined : { current: GiB, peak });
+	const published: string[] = [];
+	const publish = host.publish;
+	host.publish = (base, admissions) => {
+		published.push(`${admissions[0].peak} at ${state.now}`);
+		return publish(base, admissions);
+	};
+	const stop = new AbortController();
+	host.sleep = async () => {
+		if (peaks.length === 0) {
+			stop.abort();
+			throw stop.signal.reason;
+		}
+		state.now += SETTLE_MS;
+		peak = peaks.shift();
+	};
+	await measure(host, { id: "build", unit: "quest-gate-build.scope" }, stop.signal);
+	expect(published).toEqual([`${GiB} at ${2 * SETTLE_MS}`, `${3 * GiB} at ${3 * SETTLE_MS}`]);
+	expect(host.ledger().admissions).toEqual([{ ...measuredBuild(0, 3 * GiB), cores: 0 }]);
+});
+
+test("the kernel's peak memory is read from the gate's own cgroup", () => {
+	const proc = tempDir();
+	const cgroups = tempDir();
+	mkdirSync(join(proc, "self"));
+	writeFileSync(join(proc, "self/cgroup"), "0::/user.slice/gate.scope\n");
+	mkdirSync(join(cgroups, "user.slice/gate.scope"), { recursive: true });
+	expect(memoryPeaks(proc, cgroups)).toBe(false);
+	writeFileSync(join(cgroups, "user.slice/gate.scope/memory.peak"), "0\n");
+	expect(memoryPeaks(proc, cgroups)).toBe(process.platform === "linux");
 });
 
 test("a priority caller waits for memory, never for load, even while a gated command runs", async () => {
@@ -1092,10 +1184,15 @@ describe.runIf(process.platform === "linux")("a systemd scope", () => {
 		const result = owned(spin, process.env, cancellation().cancel);
 		let seen = 0;
 		await until(() => (seen = host.usage(unit) ?? 0) > 0);
+		// The shell holds memory, which its scope's peak covers.
+		const held = host.footprint(unit);
+		if (memoryPeaks()) expect(held?.peak).toBeGreaterThanOrEqual(held?.current ?? Infinity);
+		expect(held?.current ?? 1).toBeGreaterThan(0);
 		writeFileSync(done, "");
 		expect(await result).toBe(0);
 		expect(owned.cpu()).toBeGreaterThanOrEqual(Math.floor(seen / 1000));
 		await until(() => host.usage(unit) === undefined);
+		expect(host.footprint(unit)).toBeUndefined();
 	});
 
 	test("keeps a successful command's exit status when its CPU cannot be read", async () => {
