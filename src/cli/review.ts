@@ -565,13 +565,13 @@ interface Turn {
 	 * instead of the checkout.
 	 */
 	workspace?: { dir: string; cwd: string };
-	/** The directory holding the head's export, with its trailing slash, which a finding may name a file by. */
+	/** The agent directory holding the head's export, in a `review-*` directory of its own, which a finding may name a file in. */
 	exported?: string;
 }
 
 interface Reply {
 	session?: string;
-	/** The head exports the turns behind this reply held, which a finding's absolute path may start with. */
+	/** The agent directories whose turns' head exports a finding's absolute path may start with, earlier rounds' too. */
 	exports?: string[];
 	/** The reply's text: the review, or the schema's JSON. */
 	text?: string;
@@ -1297,7 +1297,7 @@ export function agyTurn(context: Context, prompt: string, flags: string[]): Turn
 		stdin: `${JSON.stringify({ event: "user", message: { role: "user", content } })}\n`,
 		env: {},
 		workspace: { dir, cwd: join(dir, "workspace") },
-		...(context.head !== undefined && { exported: `${dir}/head/` }),
+		...(context.head !== undefined && { exported: dirname(dir) }),
 	};
 }
 
@@ -1638,10 +1638,19 @@ async function turn(cli: Cli, call: Turn, cwd: string, model: string): Promise<R
 	return call.exported === undefined ? reply : { ...reply, exports: [call.exported] };
 }
 
-/** `file` as the repository names it, where an agy reviewer named it by its absolute path in one of the `exports`. */
+/**
+ * `file` as the repository names it, where an agy reviewer named it by its absolute path in a turn's export under one
+ * of the agent directories `exports`: this round's or, in a resumed conversation, an earlier round's, whose directory
+ * is gone. Only quest's own agent directory counts, so a runtime directory that happens to hold `review-*\/head/` does not.
+ */
 function inExport(file: string, exports: string[]): string {
-	const prefix = exports.find((each) => file.startsWith(each));
-	return prefix === undefined ? file : file.slice(prefix.length);
+	for (const root of exports) {
+		const prefix = `${root}/review-`;
+		if (!file.startsWith(prefix)) continue;
+		const stripped = /^[^/]+\/head\/(.*)$/s.exec(file.slice(prefix.length));
+		if (stripped) return stripped[1]!;
+	}
+	return file;
 }
 
 /**

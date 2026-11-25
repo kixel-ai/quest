@@ -2983,17 +2983,18 @@ test("the verdict is checked field by field, settling each earlier finding once"
 			},
 			0,
 		).findings[0]!.file;
-	const dir = "/run/user/1/quest/agent/review-AbC123/head/";
-	expect(exported(`${dir}src/lib.ts`, [dir])).toBe("src/lib.ts");
-	// The review turn's export, which the report turn's reply may name, is stripped as the turn's own is.
-	const earlierDir = "/run/user/1/quest/agent/review-XyZ789/head/";
-	expect(exported(`${earlierDir}src/lib.ts`, [earlierDir, dir])).toBe("src/lib.ts");
-	// Only the export's own prefix, though a tracked path looks like one, and a runtime directory may hold `review-*/head/`.
-	expect(exported("packages/review-ui/head/index.ts", [dir])).toBe("packages/review-ui/head/index.ts");
-	const nested = "/tmp/review-cache/head/run/quest/agent/review-AbC123/head/";
-	expect(exported(`${nested}src/lib.ts`, [nested])).toBe("src/lib.ts");
-	// A path in no export of the turn is left as written.
-	expect(exported(`${earlierDir}src/lib.ts`, [dir])).toBe(`${earlierDir}src/lib.ts`);
+	const agent = "/run/user/1/quest/agent";
+	expect(exported(`${agent}/review-AbC123/head/src/lib.ts`, [agent])).toBe("src/lib.ts");
+	// A resumed conversation repeats an earlier round's export, whose directory is gone.
+	expect(exported(`${agent}/review-XyZ789/head/src/lib.ts`, [agent])).toBe("src/lib.ts");
+	// Only the export's own prefix, though a tracked path looks like one.
+	expect(exported("packages/review-ui/head/index.ts", [agent])).toBe("packages/review-ui/head/index.ts");
+	// And only under quest's agent directory, so a runtime directory holding `review-*/head/` is no earlier match.
+	const nested = "/tmp/review-cache/head/run/quest/agent";
+	expect(exported(`${nested}/review-AbC123/head/src/lib.ts`, [nested])).toBe("src/lib.ts");
+	expect(exported(`${nested}/review-AbC123/head/src/lib.ts`, [agent])).toBe(
+		`${nested}/review-AbC123/head/src/lib.ts`,
+	);
 	for (const score of [-1, 11, 7.5, "7", undefined]) {
 		expect(() => verdict({ structured: { ...scored, score, findings: [] } }, 0)).toThrow("no score from 0 to 10");
 	}
