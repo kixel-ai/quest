@@ -1,7 +1,18 @@
 // Whose `## Review` record `quest status` counts: only one a `quest review` commit status attests, set on the reviewed
 // head by a user with write access to the base repository, since anyone can write a SHA into their own PR's body.
-import { type PullRequest, REVIEW_MARK, type Repository, type Tier, recordedRisk, reviewSection } from "../core";
-import { GitHubDeadline, type GitHubReader, object, string } from "./client";
+import {
+	type PullRequest,
+	REVIEW_MARK,
+	RISK_FILE,
+	type Repository,
+	type Tier,
+	heldHigh,
+	matches,
+	parseRiskFile,
+	recordedRisk,
+	reviewSection,
+} from "../core";
+import { GitHubDeadline, type GitHubReader, object, repositoryPath, string } from "./client";
 
 /** The commit status context `quest review` sets on each head it records. */
 export const REVIEW_CONTEXT = "quest review";
@@ -36,9 +47,10 @@ const STATUS_QUERY = `query ReviewStatus($owner: String!, $repo: String!, $sha: 
 	}
 }`;
 
-/** A PR body as `quest status` reads it, and whether the status attests a local reviewer's round. */
+/** A PR body as `quest status` reads it, the head its status attests, and whether it attests a local reviewer's round. */
 export interface Trusted {
 	body: string;
+	head: string | null;
 	localReview: boolean;
 }
 
@@ -57,11 +69,70 @@ export async function trustedReview(
 	// As `reviewRecord` reads it: only a section holding `quest review`'s record names a head, by its last full SHA.
 	const reviewed = text.includes(REVIEW_MARK) && text.match(/\b[0-9a-f]{40}\b/g)?.at(-1);
 	// A section naming no head, as a record with a finding open, counts for none, so its risk and class print as none.
-	if (!reviewed) return { body: section === null ? body : "", localReview: false };
+	if (!reviewed) return { body: section === null ? body : "", head: null, localReview: false };
 	const attested = await attestedOutcome(github, pr, body, reviewed);
-	if (typeof attested !== "string") return { body, localReview: attested.localReview };
+	if (typeof attested !== "string") return { body, head: reviewed, localReview: attested.localReview };
 	warn(`${pr.owner}/${pr.repo}#${pr.number}'s ## Review record does not count: ${attested}`);
-	return { body: "", localReview: false };
+	return { body: "", head: null, localReview: false };
+}
+
+/** The most files GitHub's REST API lists for a PR. */
+const FILE_LIMIT = 3000;
+
+/**
+ * Why `sha`, the head of `pr` about to land, must wait for a new `quest review` round, or null when it may land.
+ * A head `RISK.md` rates high lands only with a trusted record of `sha` itself, so any push after the last review,
+ * whoever made it, waits for a new one. A head is high when `body`'s record rates it high, is malformed, or does not
+ * count, or when its diff from its merge base with the base touches a path the base's risk file holds high.
+ */
+export async function unreviewedHigh(
+	github: GitHubReader,
+	pr: PullRequest & { base: string },
+	sha: string,
+	body: string,
+): Promise<string | null> {
+	let distrust: string | undefined;
+	const trusted = await trustedReview(github, pr, body, (message) => {
+		distrust = message;
+	});
+	if (trusted.head === sha.toLowerCase()) return null;
+	const high = distrust ?? recordHigh(body) ?? (await pathHigh(github, pr));
+	return high === null ? null : `${sha} is high, since ${high}, and no quest review status covers it`;
+}
+
+/** Why `body`'s risk record makes its PR high, or null. A malformed one does, since the PR's author writes the body. */
+function recordHigh(body: string): string | null {
+	const risk = recordedRisk(body);
+	if (risk === null) return null;
+	if ("malformed" in risk) return risk.malformed;
+	return risk.tier === "high" ? "its review record rates it high" : null;
+}
+
+/**
+ * Why `pr`'s diff from its merge base with the base makes it high, or null: it touches a path the base's risk file
+ * holds high, on either side of a rename, as `quest review` classifies a head.
+ */
+async function pathHigh(github: GitHubReader, pr: PullRequest & { base: string }): Promise<string | null> {
+	const path = repositoryPath(pr);
+	const risk = await github.request(`${path}/contents/${RISK_FILE}?ref=${encodeURIComponent(pr.base)}`, {
+		accept: "application/vnd.github.raw+json",
+		allow: [404],
+	});
+	const file = risk.status === 404 ? null : parseRiskFile(await risk.text());
+	if (file !== null && file.problems.length > 0)
+		return `the base's ${RISK_FILE} cannot be read: ${file.problems.join("; ")}`;
+	const held = heldHigh(file);
+	const rows = await github.all(`${path}/pulls/${pr.number}/files?per_page=100`);
+	if (rows.length >= FILE_LIMIT) return `it changes at least ${FILE_LIMIT} files, more than GitHub lists`;
+	const changed = rows.flatMap((row) => [
+		string(row.filename),
+		...(typeof row.previous_filename === "string" ? [row.previous_filename] : []),
+	]);
+	for (const each of changed) {
+		const rule = held.find(({ pattern }) => matches(pattern, each));
+		if (rule !== undefined) return `it changes ${each}, which is always high: ${rule.reason}`;
+	}
+	return null;
 }
 
 /** Whether a writer's passing `quest review` status on `sha` attests `body`'s record, with a local reviewer or not, or why not. */
