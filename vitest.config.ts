@@ -1,5 +1,11 @@
 import { configDefaults, defineConfig } from "vitest/config";
 
+// Tests spawn `process.execPath` with Bun's own flags and loaders. Under Node, as `bunx vitest`
+// runs it by following vitest's shebang, those children die at once and each test that waits on
+// them hangs to its timeout, so refuse the run up front.
+if (process.versions.bun === undefined)
+	throw new Error("the tests run on Bun: use `just test` or `bun run test`, not `bunx vitest` or `npx vitest`");
+
 // `test/live` runs the real agent CLIs, so it runs only with QUEST_LIVE=1, and
 // alone: `just review-sandbox` on the user's logins. A reviewer turn takes
 // minutes; its timeout only bounds a hung CLI.
