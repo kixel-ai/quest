@@ -1532,6 +1532,12 @@ A model may review its own work, in a session of its own, so the writer's model
 is never skipped for that alone, and Opus reviews at the effort it writes the
 size at.
 
+A `quest` run from the source of the checkout it judges (`bun src/cli/bin.ts`, or
+a build made there) is that PR's own build, which never records its own review:
+the round runs, but writes no `## Review` record and sets no `quest review`
+status, and prints `record skipped:` telling you to rerun with an installed
+`quest`. `quest merge` run that way refuses.
+
 The reviewers run at once;
 the first to fail, such as on a usage limit, stops the others, and the round
 saves none.

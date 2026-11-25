@@ -41,6 +41,7 @@ import {
 	tallied,
 	verdict,
 } from "../src/cli/review";
+import { runsFromCheckout } from "../src/cli/own-build";
 import { withReview } from "../src/cli/review-record";
 import { implementer, recorded, sameModel } from "../src/cli/models-record";
 import { tempDir } from "./fixture";
@@ -56,6 +57,7 @@ import {
 	fakes,
 	git,
 	quest,
+	questFrom,
 	setup,
 	write,
 } from "./review-fakes";
@@ -3272,4 +3274,59 @@ test("a question about data alone runs with no tools on either CLI", () => {
 	])
 		expect(codex).toContain(off);
 	expect(codexFlags(context)).not.toContain("features.shell_tool=false");
+});
+
+fakes("a review run from the judged checkout's own source records nothing", async () => {
+	const s = setup();
+	const own = [join(s.repo, "src/lib.ts")];
+	const installed = [join(s.bin, "codex")];
+	// An installed quest and a source run in another checkout both record as ever.
+	const outside = await questFrom(installed, "--root", s.repo, "review", "--json");
+	expect(JSON.parse(outside.stdout).record).toEqual({ skipped: "origin is not on GitHub or Kixel Quest" });
+
+	const inside = await questFrom(own, "--root", s.repo, "review", "--new");
+	expect(inside.stderr).toBe("");
+	expect(inside.code).toBe(0);
+	// The round ran, and the report says to rerun instead of naming a forge.
+	expect(inside.stdout).toContain("score 8 ");
+	expect(inside.stdout).toContain(
+		"record skipped: this quest runs from the source of the checkout it judges; rerun with an installed quest for the record that counts\n",
+	);
+	expect(inside.stdout).not.toContain("origin is not on GitHub");
+
+	const json = await questFrom(own, "--root", s.repo, "review", "--new", "--json");
+	expect(JSON.parse(json.stdout).record).toEqual({
+		skipped: expect.stringContaining("rerun with an installed quest"),
+	});
+});
+
+test("a source run in a checkout is that checkout's own build, an installed one is not", () => {
+	const s = setup();
+	const other = tempDir();
+	git(other, "init", "-q");
+	write(other, "bin.ts", "");
+	expect(runsFromCheckout(s.repo, undefined)).toBe(false);
+	expect(runsFromCheckout(s.repo, [join(s.repo, "src/lib.ts")])).toBe(true);
+	// A subdirectory of the checkout, and a path that is gone, stand beside it.
+	expect(runsFromCheckout(join(s.repo, "src"), [join(s.repo, "src/lib.ts"), "/$bunfs/root/quest"])).toBe(true);
+	expect(runsFromCheckout(s.repo, [join(s.repo, "missing"), "/$bunfs/root/quest"])).toBe(false);
+	expect(runsFromCheckout(s.repo, [join(other, "bin.ts")])).toBe(false);
+	expect(runsFromCheckout(s.repo, [join(s.bin, "codex")])).toBe(false);
+	// A root that is no checkout is not one to judge.
+	expect(runsFromCheckout(other + "/nowhere", [join(other, "bin.ts")])).toBe(false);
+});
+
+test("quest merge from the checkout's own source refuses before any write", async () => {
+	const s = setup();
+	const result = await questFrom(
+		[join(s.repo, "src/lib.ts")],
+		"--root",
+		s.repo,
+		"merge",
+		"https://github.com/example/project/pull/7",
+		"--land",
+		"a".repeat(40),
+	);
+	expect(result).toMatchObject({ code: 2, stdout: "" });
+	expect(result.stderr).toContain("rerun with an installed quest");
 });
