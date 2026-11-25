@@ -56,9 +56,8 @@ person.
 
 - `test` (`test/**`, `scripts/*.test.sh`, `scripts/*-bench.sh`,
   `scripts/lifecycle-check.sh`, `scripts/lifecycle-check.mjs`,
-  `scripts/gate-check.sh`, `scripts/install-check.sh`,
-  `scripts/install-check.ps1`, `scripts/windows-architecture.mjs`) - only
-  tests, their fixtures, or benchmarks change
+  `scripts/gate-check.sh`, `scripts/install-check.sh`) - only tests, their
+  fixtures, or benchmarks change
 - `quest` (`quest/**`) - only plans under `quest/` change, which no user or
   other repository reads
 - `refactor` (`src/**`, `test/**`) - code changes that keep every behavior
