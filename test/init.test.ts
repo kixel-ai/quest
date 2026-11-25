@@ -652,9 +652,16 @@ test("stub check flags a shipped audit without a stub until a quest names it or 
 	write(dir, "quest/m1/audit-instructions.md", stub.replace("## Audit\n", "Audit\n-----\n"));
 	expect(stubFindings(dir)).toEqual([]);
 	expect(init(dir)).toEqual([]);
+	write(
+		dir,
+		"quest/m1/audit-instructions.md",
+		`# Instructions\n${stub.slice(stub.indexOf("\n"))}`.replace("## Audit\n", "## Au**dit**\n"),
+	);
+	expect(stubFindings(dir)).toEqual([]);
+	expect(init(dir)).toEqual([]);
 
 	rmSync(join(dir, "quest/m1/audit-instructions.md"));
-	write(dir, "quest/README.md", `${read(dir, "quest/README.md")}\n## Skipped audits\n\n- instructions\n`);
+	write(dir, "quest/README.md", `${read(dir, "quest/README.md")}\n## *Skipped* _audits_\n\n- instructions\n`);
 	expect(stubFindings(dir)).toEqual([]);
 });
 

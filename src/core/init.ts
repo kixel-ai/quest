@@ -229,8 +229,8 @@ function auditStub(audit: Audit, after: number | null): string {
 /**
  * Every quest document's path under `quest/`, as `quest check` collects them (symlinked files are read,
  * symlinked directories skipped), and the documents an audit plan reads: the milestone READMEs and any
- * whose text holds either heading's name, however the heading is written. Parsing the rest would double
- * the session hook's time for nothing.
+ * whose text, without emphasis, code, and escape marks, holds either heading's name, so a decorated or
+ * setext heading still counts. Parsing the rest would take a 500-document tree's hook from 0.1s to 0.5s.
  */
 function questDocs(repo: Checkout): { paths: string[]; docs: Doc[] } {
 	const paths: string[] = [];
@@ -242,7 +242,8 @@ function questDocs(repo: Checkout): { paths: string[]; docs: Doc[] } {
 			else if (isQuest(path) && repo.stat(path) === "file") {
 				paths.push(path);
 				const text = repo.read(path);
-				if (MILESTONE.test(path) || text.includes("Audit") || text.includes("Skipped audits"))
+				const plain = text.replace(/[*_`\\]/g, "");
+				if (MILESTONE.test(path) || plain.includes("Audit") || /Skipped\s+audits/.test(plain))
 					docs.push(parse(path, text));
 			}
 		}
