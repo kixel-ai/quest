@@ -539,7 +539,7 @@ function highPaths(root: string, base: string): HighPath[] {
 	const file = parseRiskFile(git(root, ["show", `${base}:${RISK_FILE}`]));
 	if (file.problems.length > 0)
 		throw new Error(
-			`the base's ${RISK_FILE} cannot be read, so no fix lands until the base repairs it: ${file.problems.join("; ")}`,
+			`the base's ${RISK_FILE} cannot be read, so nothing the fixer writes lands until the base repairs it: ${file.problems.join("; ")}`,
 		);
 	return heldHigh(file);
 }
@@ -579,13 +579,17 @@ export function validateFix(root: string, entry: Pick<Entry, "head">, head: stri
 		new ProtectedEdit(
 			`off-limits fixer edit: ${what}, at ${path}${every === undefined ? "" : `; every path is protected, since ${every}`}`,
 		);
-	const gitlinks = new Set<string>();
-	const addGitlinks = (ref: string) => {
-		for (const line of paths(root, ["ls-tree", "-r", ref]))
-			if (line.startsWith("160000 ")) gitlinks.add(line.slice(line.indexOf("\t") + 1));
-	};
-	addGitlinks(head);
-	addGitlinks(entry.head);
+	const merged = tryGit(root, ["merge-tree", "--write-tree", "--name-only", "-z", entry.head, base]);
+	if (merged.status !== 0 && merged.status !== 1) throw new Error("cannot compute protected merge result");
+	const { tree, conflicts, unlisted } = mergeResult(merged.stdout);
+	// The plain merge's gitlinks count even for a fix that merges no base, so it cannot take a path the base made a submodule.
+	const gitlinks = new Set(
+		[head, entry.head, tree].flatMap((ref) =>
+			paths(root, ["ls-tree", "-r", ref])
+				.filter((line) => line.startsWith("160000 "))
+				.map((line) => line.slice(line.indexOf("\t") + 1)),
+		),
+	);
 	// Only the paths whose entries differ need the protection test, not every path of three trees.
 	const edited = (from: string) =>
 		paths(root, ["diff-tree", "-r", "--name-only", "--no-renames", "--ignore-submodules=none", from, head]).find(
@@ -598,11 +602,7 @@ export function validateFix(root: string, entry: Pick<Entry, "head">, head: stri
 		return;
 	}
 	// With the base's history in the head, the pin's copy of a path the base changed reverts that change.
-	if (!contains(root, base, head)) throw new Error("a fix that merges base history must merge all of the base");
-	const merged = tryGit(root, ["merge-tree", "--write-tree", "--name-only", "-z", entry.head, base]);
-	if (merged.status !== 0 && merged.status !== 1) throw new Error("cannot compute protected merge result");
-	const { tree, conflicts, unlisted } = mergeResult(merged.stdout);
-	addGitlinks(tree);
+	if (!contains(root, base, head)) throw new Error("a head that merges base history must merge all of the base");
 	// Some conflicts, such as a directory rename split, name no conflicted file, so one may fall in a protected path.
 	if (unlisted !== undefined || (merged.status === 1 && conflicts.length === 0))
 		throw refuse("it settles a conflict that names no conflicted file", unlisted ?? "an unnamed path");

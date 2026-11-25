@@ -1814,6 +1814,24 @@ ${requeueScript}
 		git(root, "commit", "-qm", "add gitlink");
 		expect(() => validateFix(root, entry, git(root, "rev-parse", "HEAD"), forge.main())).toThrow("protected set");
 	});
+	test("rejects a fix that merges no base taking a path the base made a submodule", async () => {
+		const forge = new Forge();
+		forge.pull("one", { "one.txt": "yes" });
+		const deps = await forge.deps();
+		const plan = await resolveQueue(REPOSITORY, SQUASH, deps);
+		const root = forge.clone();
+		const entry = plan.queue[0];
+		git(root, "checkout", "--quiet", "--detach", forge.main());
+		git(root, "update-index", "--add", "--cacheinfo", "160000", entry.head, "vendor/module");
+		git(root, "commit", "-qm", "base adds a submodule");
+		const base = git(root, "rev-parse", "HEAD");
+		git(root, "checkout", "--quiet", "--detach", entry.head);
+		mkdirSync(join(root, "vendor"));
+		writeFileSync(join(root, "vendor", "module"), "file\n");
+		git(root, "add", "vendor/module");
+		git(root, "commit", "-qm", "take the path");
+		expect(() => validateFix(root, entry, git(root, "rev-parse", "HEAD"), base)).toThrow("protected set");
+	});
 
 	test("accepts one multiline Markdown comment per result and rejects a malformed one", () => {
 		const accepted = { number: 1, action: "requeue", reason: "fine", comment: "Line one\n\n- two\r\n\tthree" };
