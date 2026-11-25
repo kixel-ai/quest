@@ -1112,6 +1112,10 @@ describe("merge --land of a high head", () => {
 		review(pull, OLD, "high");
 		expect(await refused(land_(pull))).toContain("is high");
 		pull.diffs = { [OLD]: "diff", [HEAD]: "diff" };
+		// A failed round on the head itself since outweighs the earlier pass.
+		pull.statuses[HEAD] = { ...pull.statuses[OLD]!, state: "FAILURE", description: "Risk high: findings open" };
+		expect(await refused(land_(pull))).toContain("is high");
+		delete pull.statuses[HEAD];
 		await land_(pull);
 		expect(pull.writes).toEqual([`enablePullRequestAutoMerge ${HEAD} MERGE`]);
 	});

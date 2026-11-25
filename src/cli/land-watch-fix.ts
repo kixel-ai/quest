@@ -830,6 +830,9 @@ async function requeue(
 		// A workflow may have queued the head while the checks above ran, so act on the PR as it is now.
 		pull = await readPull(github, id);
 		if (string(pull.headRefOid) !== head) throw new FixerRefusal("head moved before it was re-enqueued");
+		// A pick on another base since is a maintainer's, judged by that base's rules, so leave it.
+		if (pull.state !== "OPEN" || string(pull.baseRefName) !== base)
+			throw new FixerRefusal(`retargeted from ${base}, or closed, before it was re-enqueued`);
 		if (pull.mergeQueueEntry != null) {
 			await github.graphql("mutation($id: ID!) { dequeuePullRequest(input: { id: $id }) { clientMutationId } }", {
 				id,

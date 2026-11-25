@@ -107,10 +107,22 @@ export async function unreviewedHigh(
 		distrust = message;
 	});
 	const head = sha.toLowerCase();
-	if (trusted.head !== null && (trusted.head === head || (await sameDiff(github, pr, trusted.head, head))))
+	if (trusted.head === head) return null;
+	// A review of an earlier head carries to one with its diff, unless a round on this head has failed since.
+	if (trusted.head !== null && !(await failed(github, pr, head)) && (await sameDiff(github, pr, trusted.head, head)))
 		return null;
 	const high = distrust ?? recordHigh(body) ?? (await statusHigh(github, pr)) ?? (await pathHigh(github, pr, head));
 	return high === null ? null : `${sha} is high, since ${high}, and no quest review status covers it`;
+}
+
+/** Whether `sha` carries a `quest review` status that is not a pass. */
+async function failed(github: GitHubReader, pr: PullRequest, sha: string): Promise<boolean> {
+	const commit = object(
+		(await github.graphql(STATUS_QUERY, { owner: pr.owner, repo: pr.repo, sha })).repository,
+	).object;
+	const rollup = commit == null ? null : object(commit).status;
+	const status = rollup == null ? null : object(rollup).context;
+	return status != null && object(status).state !== "SUCCESS";
 }
 
 /** Whether `a` and `b` have the same diff from their merge bases with the base. One GitHub cannot diff has none. */
