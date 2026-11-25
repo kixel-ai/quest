@@ -242,7 +242,10 @@ test("a session `quest review` queued is sent on the PR it recorded on, as the r
 	reviewed("rev", null, "quest/m0/a", "reviewing");
 	queue({ ...stopped(root), session: "impl" }, env);
 	// A fork's PR heads a repository other than the checkout's origin.
+	// Resumed after its PR opened, so only its later queue names the PR, whichever pending file is read last.
+	reviewed("cls", null, "fix/y", "classifying");
 	reviewed("cls", "https://github.com/acme/proj/pull/8", "fix/y", "classifying");
+	reviewed("cls", null, "fix/y", "classifying");
 	// Reviewed before its PR opens.
 	reviewed("early", null, "feature/z", "reviewing");
 	// Its round skipped the only PR on its branch, a stranger fork's whose head the checkout lacks.

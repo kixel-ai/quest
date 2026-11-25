@@ -468,20 +468,17 @@ async function sendTo(
 					`token-max lists no ${q.pending.harness} session ${q.pending.session} on this host, so its record was dropped`,
 				);
 			}
-			// A session queued twice, as a resumed reviewer is, names the same branch and role each time.
-			const pins: Pins = new Map(
-				group.flatMap((q) =>
-					q.pending.reviewed
-						? [
-								[
-									`${q.pending.harness}\0${q.pending.session}`,
-									{ ...q.pending.reviewed, origin: q.pending.origin },
-								] as const,
-							]
-						: [],
-				),
-			);
+			// Pinned under the origin's current name, so a repository renamed since the review still matches its PR.
 			const here = await current(origin);
+			// A session queued twice, as a resumed reviewer is, names the same branch and role each time, but only a
+			// round after its PR opened names the PR, which a pending file read later must not drop.
+			const pins: Pins = new Map();
+			for (const q of group) {
+				const reviewed = q.pending.reviewed;
+				const pin = `${q.pending.harness}\0${q.pending.session}`;
+				if (reviewed && (reviewed.pull !== null || !pins.has(pin)))
+					pins.set(pin, { ...reviewed, origin: here });
+			}
 			const repositories = new Set([here, key(repository)]);
 			// A sub-agent stops without the stop hook naming it, so each queued session brings its own, routed as its
 			// own checkout routes it, found from the nearest folder still there: a checkout must be a queued one's, or
