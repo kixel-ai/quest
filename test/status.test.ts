@@ -822,9 +822,11 @@ test("refuses a head moved between the paged state and ownership read", async ()
 
 describe("the review record", () => {
 	const C = "c".repeat(40);
-	const RISK = "\n- Risk: low, `docs only`\n- Classified: low by default";
+	const RISK = `\n- Risk: low, \`docs only\`\n- Classified: low by default\n- Risk file: ${RISK_ID}`;
 	// The maintainer's passing status on `sha`, attesting the record above.
-	const on = (sha: string) => ({ statuses: { [sha]: reviewStatus("SUCCESS", "Risk low: passed", sha) } });
+	const on = (sha: string) => ({
+		statuses: { [sha]: reviewStatus("SUCCESS", `Risk low, risk file ${RISK_ID}: passed`, sha) },
+	});
 	const RECORD = `## Review\n\n${REVIEW_MARK}\n\n`;
 	const line = async (body: string, options: Parameters<typeof setup>[1] = {}) => {
 		const fixture = setup([pull({ body, checks: null, reviews: page([]), threads: page([]) })], options);
@@ -1063,23 +1065,41 @@ describe("the risk tier", () => {
 		);
 	});
 
-	test("is stale once the base's risk file is not the one the record was classified against", async () => {
+	test("is stale with its review record once the base's risk file is not the one it was classified against", async () => {
 		const base = (file: { oid: string } | null) => ({ baseRef: { target: { file } } });
 		const read = async (body: string, fields: Node, state = "OPEN") => {
-			const fixture = setup([
-				pull({ body, state, checks: null, reviews: page([]), threads: page([]), ...fields }),
-			]);
-			return (await pullRequestStatus(pr, fixture.deps)).risk;
+			const warnings: string[] = [];
+			const fixture = setup(
+				[pull({ body, state, checks: null, reviews: page([]), threads: page([]), ...fields })],
+				{ warnings },
+			);
+			const status = await pullRequestStatus(pr, fixture.deps);
+			return { risk: status.risk?.state, record: status.reviewRecord?.state, warnings };
 		};
-		// The base changed RISK.md after the review, so it may no longer hold the tier or offer the class.
-		expect(await read(record(A), base({ oid: "0".repeat(40) }))).toMatchObject({ state: "stale" });
-		expect(await read(record(A, "none"), base(null))).toMatchObject({ state: "current" });
-		expect(await read(record(A, "none"), base({ oid: RISK_BLOB }))).toMatchObject({ state: "stale" });
-		expect(await read(record(A), base(null))).toMatchObject({ state: "stale" });
+		const stale = (why: string) => ({
+			risk: "stale",
+			record: "stale",
+			warnings: [
+				`example/project#1's ## Review record ${why}, so it covers the head no longer: run quest review again`,
+			],
+		});
+		const current = { risk: "current", record: "current", warnings: [] };
+		// The base changed RISK.md after the review, so it may no longer hold the tier or offer the class, and the tier
+		// decided how much review the head got.
+		expect(await read(record(A), base({ oid: "0".repeat(40) }))).toEqual(
+			stale(`was classified against RISK.md ${RISK_ID}, but the base's is ${"0".repeat(12)}`),
+		);
+		expect(await read(record(A, "none"), base(null))).toEqual(current);
+		expect(await read(record(A, "none"), base({ oid: RISK_BLOB }))).toEqual(
+			stale(`was classified against RISK.md none, but the base's is ${RISK_ID}`),
+		);
+		expect(await read(record(A), base(null))).toEqual(
+			stale(`was classified against RISK.md ${RISK_ID}, but the base has none`),
+		);
 		// A record that does not say which file it was classified against can be trusted against none.
-		expect(await read(record(A, null), {})).toMatchObject({ state: "stale" });
+		expect(await read(record(A, null), {})).toEqual(stale(`names no risk file, but the base's is ${RISK_ID}`));
 		// A closed PR cannot land, and its base may be gone, so only its head is compared.
-		expect(await read(record(A), { baseRef: null }, "MERGED")).toMatchObject({ state: "current" });
+		expect(await read(record(A), { baseRef: null }, "MERGED")).toEqual(current);
 	});
 
 	test("is absent from a record without one, and marks a malformed one without failing the read", async () => {

@@ -2342,9 +2342,10 @@ interface Classifying {
  */
 export async function classify(input: Classifying): Promise<{ key: string; value: Classified }> {
 	const { root, baseSha, change, changed } = input;
-	const text = exists(root, baseSha, RISK_FILE) ? show(root, baseSha, RISK_FILE) : null;
-	// Read here, not saved, so the record names the file a reused tier was set against.
-	const riskFile = text === null ? null : git(root, ["rev-parse", "--verify", `${baseSha}:${RISK_FILE}`]);
+	// One lookup for the blob and its text, read here rather than saved, so the record names the file a reused tier
+	// was set against.
+	const riskFile = git(root, ["ls-tree", "--object-only", baseSha, "--", RISK_FILE]) || null;
+	const text = riskFile === null ? null : git(root, ["cat-file", "blob", riskFile]);
 	// The paths too, since they set the tier and the offered classes along with the risk file.
 	const key = digest(JSON.stringify([change.mergeBase, change.head, text, changed]));
 	if (input.saved?.key === key) return { key, value: { ...input.saved.value, riskFile, usage: [] } };

@@ -179,12 +179,17 @@ export async function pullRequestStatus(
 		deps.warn,
 	);
 	const record = await reviewRecord(github, pr, { ...first!, body: trusted.body }, deps.warn);
-	status.reviewRecord = record && { ...record, localReview: trusted.localReview };
-	status.risk = risk(trusted.body, {
-		head,
-		record: status.reviewRecord,
-		...(first!.state === "OPEN" && { riskFile: baseRiskFile(first!) }),
-	});
+	const recorded = recordedRisk(trusted.body);
+	// The tier set how much review the head got, so a review classified against a risk file the base no longer has
+	// covers it no longer; only an open PR can still land, and a closed one's base may be gone.
+	const moved = first!.state === "OPEN" ? riskFileMoved(recorded, baseRiskFile(first!)) : null;
+	if (moved !== null) deps.warn(`${pr.owner}/${pr.repo}#${pr.number}'s ## Review record ${moved}`);
+	status.reviewRecord = record && {
+		...record,
+		state: moved === null ? record.state : "stale",
+		localReview: trusted.localReview,
+	};
+	status.risk = risk(recorded, head, status.reviewRecord);
 	if (status.autoMerge !== null) status.autoMerge.head = await enabledHead(github, first!, deps.warn);
 	const signaled = (await readSignals(github, pr, [pr.number])).get(pr.number)!;
 	if (signaled.head !== first!.headRefOid)
@@ -202,19 +207,24 @@ function baseRiskFile(pull: ObjectValue): string | null {
 }
 
 /**
- * The risk the PR body records, judged against the head, its review record, and for an open PR `riskFile`, the blob
- * of the base's risk file at its tip, as {@link Status.risk} describes.
+ * Why `recorded` was classified against another risk file than `riskFile`, the blob at the base's tip, which may no
+ * longer hold its tier or offer its class, or null when it was not.
  */
-function risk(
-	body: string,
-	{ head, record, riskFile }: { head: string; record: ReviewRecord | null; riskFile?: string | null },
-): Status["risk"] {
-	const recorded = recordedRisk(body);
+function riskFileMoved(recorded: ReturnType<typeof recordedRisk>, riskFile: string | null): string | null {
+	if (recorded === null || "malformed" in recorded) return null;
+	const now = riskFileId(riskFile);
+	if (recorded.riskFile === now) return null;
+	const was =
+		recorded.riskFile === null ? "names no risk file" : `was classified against RISK.md ${recorded.riskFile}`;
+	const is = now === "none" ? "the base has none" : `the base's is ${now}`;
+	return `${was}, but ${is}, so it covers the head no longer: run quest review again`;
+}
+
+/** The risk the PR body records, judged against the head as its review record is, as {@link Status.risk} describes. */
+function risk(recorded: ReturnType<typeof recordedRisk>, head: string, record: ReviewRecord | null): Status["risk"] {
 	if (recorded === null) return null;
 	if ("malformed" in recorded) return { state: "malformed", error: recorded.malformed };
-	// A base whose risk file changed may no longer hold the tier or offer the class, so a new review must classify again.
-	const moved = riskFile !== undefined && recorded.riskFile !== riskFileId(riskFile);
-	const state = moved ? "stale" : (record?.state ?? (head.startsWith(recorded.head) ? "current" : "stale"));
+	const state = record?.state ?? (head.startsWith(recorded.head) ? "current" : "stale");
 	return {
 		tier: recorded.tier,
 		reason: recorded.reason,

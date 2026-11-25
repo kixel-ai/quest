@@ -316,6 +316,10 @@ test("the review record's class, override, and risk file read back", () => {
 	const malformed = { malformed: "the ## Review record's class, override, or risk file is malformed" };
 	expect(recordedRisk(record(["- Classified: low by default", "- Class: tests"]))).toEqual(malformed);
 	expect(recordedRisk(record(["- Classified: low by default", "- Overridden: by someone"]))).toEqual(malformed);
+	// Like any risk line, one left alone makes a record whose risk is malformed, not absent.
+	expect(recordedRisk(["## Review", "", "- Risk file: none"].join("\n"))).toEqual({
+		malformed: "the ## Review record's risk is malformed: it has no - Risk: line",
+	});
 	// A full SHA would read as the reviewed head, so the record names the file by 12 characters.
 	expect(recordedRisk(record(["- Classified: low by default", `- Risk file: ${"b".repeat(40)}`]))).toEqual(malformed);
 });

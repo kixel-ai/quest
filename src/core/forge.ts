@@ -138,13 +138,13 @@ export interface Status {
 	/**
 	 * Null when the `## Review` section holds no record `quest review` wrote or names no full SHA, or no writer's passing `quest review` status attests it.
 	 * `localReview` is whether that status attests a local reviewer's round, false for a low head none ran on.
+	 * `state` is `stale` for an open PR whose base's risk file at its tip is not the one the record names, since the
+	 * tier that file set decided how much review the head got.
 	 */
 	reviewRecord: (ReviewRecord & { localReview: boolean }) | null;
 	/**
 	 * The head's risk tier as the `## Review` record names it, and the classifier's own tier, lower when a reviewer
-	 * raised it; null when the record names none or does not count, as for `reviewRecord`. `state` is `stale` for an
-	 * open PR whose base's risk file at its tip is not the one the record names, since that base may no longer hold the
-	 * tier or offer the class; else the review record's, which a line after it carries to a
+	 * raised it; null when the record names none or does not count, as for `reviewRecord`. `state` is the review record's, which a line after it carries to a
 	 * later head, else `current` when the record names the head and `stale` when not. `class` is the risk file's
 	 * `## Automatic` class the classifier found the change in, or null. A record whose risk lines do not parse is
 	 * `malformed`, with why, which `quest merge` refuses.

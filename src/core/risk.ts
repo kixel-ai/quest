@@ -290,7 +290,7 @@ export function recordedRisk(body: string): RecordedRisk | MalformedRisk | null 
 	if (section === null) return null;
 	const text = body.slice(section.start, section.end);
 	// Any risk line makes a record, so a line that misses its pattern, such as `- Risk:dire`, is malformed, not absent.
-	if (!/^- (?:Risk|Classified|Class|Overridden):/m.test(text)) return null;
+	if (!/^- (?:Risk|Classified|Class|Overridden|Risk file):/m.test(text)) return null;
 	const line = /^- Risk:(.*?)\r?$/m.exec(text);
 	if (line === null) return { malformed: "the ## Review record's risk is malformed: it has no - Risk: line" };
 	// Model text is an inline code span, as long a run of backticks as it needs, padded when it starts or ends with one.
