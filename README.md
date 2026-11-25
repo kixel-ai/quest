@@ -626,7 +626,7 @@ comes last, and a missing value prints as `-`:
 | `mergeable`, `merge-state`, `review-decision` | GitHub's values, lowercased. |
 | `review-record` | Whether the PR body's [`## Review` record](#review-locally) still covers the head, and the head it names last: `current` when it is the head, `diff-identical` when `git diff <base>...<head>` prints the same as for it, `stale` otherwise, and also, with a warning, for an open PR once `RISK.md` at the base's tip is not the file the record names, since the tier that file set decided how much review the head got, or `unknown` when GitHub cannot compare them, such as a diff too large; then `local-review`, or `no-local-review` for a low head no local reviewer ran on, as the status below attests; `-` when the section holds no record `quest review` wrote or it names no full SHA, or, with a warning saying why, when no passing [`quest review` commit status](#review-locally) attests it: the latest one on the head it names must be `success`, set by a user with write access to the base repository, its target the diff from the head's merge base with the PR's base, and its description must name the record's risk tier, class, and risk file. So a record a contributor or a bot wrote, or edited to name another head, base, or tier, counts for nothing. Reading the setter's permission takes a token that can push to the repository; any other sees every record as untrusted. |
 | `risk` | The record's [risk tier](#risk-tiers), `low`, `medium`, or `high`; the same state as `review-record` for the head it names, so `stale` once the base's `RISK.md` changes, since that base may no longer hold the tier or offer the class; the tier its classifier set; and the reason. `-` when the record names none or does not count, and `- malformed -` with why when its risk lines do not parse, which `quest merge` refuses. |
-| `class` | The `## Automatic` class of the base's `RISK.md` the record's classifier found the change in, or `-`. |
+| `class` | The class, built in or from the base's `RISK.md` `## Automatic` list, the record's classifier found the change in, or `-`. |
 | `auto-merge` | Method, who enabled it, when, and the head it was enabled on. |
 | `merge-queue` | Queue state, position, and when it was enqueued. |
 | `landing-stopped` | The reason the latest merge-queue entry, auto-merge, or [`quest land`](#the-watchers-own-queue) queue entry ended (such as `merge_conflict`, `failed_checks`, `unreviewed`, `manual`, `manually_disabled`, or `merged`), who ended it, and when; `-` once the PR has entered the merge queue or auto-merge again since. |
@@ -1849,16 +1849,17 @@ run catches what those miss.
 
 | Tier | Local review | Lands on |
 |---|---|---|
-| Low | None, unless `--harness`, `--model`, or `--effort` names one | Its own, once its class is in `RISK.md`'s `## Automatic` list; else the maintainer's pick |
+| Low | None, unless `--harness`, `--model`, or `--effort` names one | Its own, once it is in a built-in class or one in `RISK.md`'s `## Automatic` list; else the maintainer's pick |
 | Medium | The size's pick | The maintainer's pick |
 | High | Both of the size's reviewers | The maintainer's pick, with the full brief |
 
 `/quest-run` carries the picks.
 
 A change is `high`, with no model, when a changed path on either side of a
-rename matches a pattern held high: `RISK.md` itself, and each pattern in the
-`## High` list of the base's `RISK.md`, at the repository's root, which is
-where a repository whose workflows ship to users lists them:
+rename matches a pattern held high: `RISK.md` itself, `.github/workflows/` and
+`.github/actions/`, which run on a PR's branch with the repository's secrets,
+and each pattern in the `## High` list of the base's `RISK.md`, at the
+repository's root:
 
 ````markdown
 # Risk
@@ -1889,10 +1890,15 @@ in `/` or `/**`; ` - `; and the rule over the diff a change meets to fall in
 it. Each section appears at most once. `quest review` reads the file
 from the base's tip, so a change cannot lower its own tier, and fails on one
 it cannot read, which the repository's own `quest check`
-reports first. A base with no `RISK.md` makes every change no path holds high
-`medium`.
+reports first.
 
-Otherwise a classifier reads the diff and the base's `RISK.md` in one read-only
+Every repository also offers the built-in class `quest` (`quest/**`), for a
+change to plans alone; a class the base's `RISK.md` lists by the same name
+replaces it, scope and rule. A base with no `RISK.md` makes every change no
+path holds high `medium`, unless a built-in class's scope holds every changed
+path.
+
+Otherwise a classifier reads the diff and the base's `RISK.md`, if any, in one read-only
 turn and replies with a tier, one sentence on why, and the `## Automatic`
 class every changed file falls in, or none. It is offered only the classes
 whose scope holds every changed path, either side of a rename, checked
@@ -1909,8 +1915,8 @@ installed hit its own, and otherwise as a usage error naming why each failed. It
 marking them binary. A diff past 200,000 characters, or one holding a NUL byte or bytes that are not
 UTF-8, gives it only the stat and a file of the whole diff in a scratch directory, which Claude Code is
 let read and which is removed once it answers. The tier is kept with the reviewers'
-sessions, so a later round on the same head and base `RISK.md` reuses it, and
-`--new` classifies again. The record names it after the base:
+sessions, so a later round on the same head, base `RISK.md`, and built-in
+defaults reuses it, and `--new` classifies again. The record names it after the base:
 
 ```markdown
 - Risk: medium, `It changes the record format quest status parses.`

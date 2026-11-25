@@ -218,7 +218,7 @@ export interface TierRow {
 }
 
 /**
- * The PRs whose classifier found them in one of the risk file's `## Automatic` classes: how many merged, how many
+ * The PRs whose classifier found them in a class, built in or the risk file's `## Automatic` one: how many merged, how many
  * were later fixed, and how long they waited on a person, the numbers that argue for or against merging the class
  * without a pick.
  */
@@ -1194,7 +1194,7 @@ function tierRows(pulls: PullRow[]): TierRow[] {
 	});
 }
 
-/** One row per `## Automatic` class the PRs' classifiers named, by name. */
+/** One row per class, built in or `## Automatic`, the PRs' classifiers named, by name. */
 function classRows(pulls: PullRow[]): ClassRow[] {
 	const names = [...new Set(pulls.flatMap((each) => each.risk?.class ?? []))].sort();
 	return names.map((name) => {
