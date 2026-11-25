@@ -74,7 +74,7 @@ export const unfit =
 /**
  * Each list's reviewers, ranked: the first not {@link weaker} than the latest writer's model reviews the PR, which
  * may be the writer's own model, and one that cannot run passes the review to the next. Opus never runs below the
- * size's writers' efforts, its writer A/B arms' included, since it may review its own work. Another Codex model and then Fable close each size's list,
+ * effort Opus writes the size at, its writer A/B arm's included, since it may review its own work. Another Codex model and then Fable close each size's list,
  * so a PR still has a reviewer while Sol, or all of Codex, is out. A high head reviews
  * from `high`, whatever its size: the pick, then a second reviewer from the other vendor, so Sol and Opus review
  * Opus's work, Opus and Astra Fable's. XL starts on Astra, the vendor's frontier model, at high rather than xhigh. Fable
