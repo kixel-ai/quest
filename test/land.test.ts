@@ -1639,11 +1639,13 @@ ${requeueScript}
 		writeFileSync(log, "failed check");
 		const bin = join(tempDir(), "bin");
 		mkdirSync(bin);
+		// Records stay out of the checkout, whose untracked files a fixer must not leave for the next.
+		const rec = tempDir();
 		// Each fake records that it ran, then ends as its body says.
 		const fake = (name: string, body: string) =>
 			writeFileSync(
 				join(bin, name),
-				`#!/bin/sh\nset -eu\necho ${name} >> '${dir}/ran.txt'\ncat > '${dir}/${name}.stdin'\nprintf '%s\\n' "$@" > '${dir}/${name}.argv'\ncd '${dir}'\n${body}\n`,
+				`#!/bin/sh\nset -eu\necho ${name} >> '${rec}/ran.txt'\ncat > '${rec}/${name}.stdin'\nprintf '%s\\n' "$@" > '${rec}/${name}.argv'\ncd '${dir}'\n${body}\n`,
 				{ mode: 0o755 },
 			);
 		// Each CLI reports its own failure as its events do.
@@ -1658,19 +1660,19 @@ ${requeueScript}
 		vi.stubEnv("ANTHROPIC_API_KEY", "proxy-client");
 		vi.stubEnv("OPENAI_BASE_URL", "http://proxy.test/v1");
 		vi.stubEnv("OPENAI_API_KEY", "proxy-client");
-		const ran = () => readFileSync(join(dir, "ran.txt"), "utf8").trim().split("\n");
+		const ran = () => readFileSync(join(rec, "ran.txt"), "utf8").trim().split("\n");
 		const result = () => parseFixResult(readFileSync(join(dir, "quest-land-result.json"), "utf8"), [1], [])[0];
 
 		await fix(dir, log, [1], undefined, undefined, undefined, "high");
 		expect(ran()).toEqual(["claude", "codex"]);
 		expect(result()).toMatchObject({ agent: "codex", model: "gpt-6.2-sol", effort: "high" });
 		// Codex ran Sol through the proxy.
-		const codex = readFileSync(join(dir, "codex.argv"), "utf8").split("\n");
+		const codex = readFileSync(join(rec, "codex.argv"), "utf8").split("\n");
 		expect(codex[codex.indexOf("--model") + 1]).toBe("gpt-6.2-sol");
 		expect(codex).toContain("--json");
 
 		// A Claude Code the wrapper gave no proxy is passed over the same way, and a Codex that is logged out ends the round.
-		rmSync(join(dir, "ran.txt"));
+		rmSync(join(rec, "ran.txt"));
 		vi.stubEnv("ANTHROPIC_API_KEY", undefined);
 		await fix(dir, log, [1]);
 		expect(ran()).toEqual(["codex"]);
@@ -1681,7 +1683,7 @@ ${requeueScript}
 		vi.stubEnv("ANTHROPIC_API_KEY", "proxy-client");
 
 		// A limit its own commands print is no outage: the failure ends the round rather than start Codex on its work.
-		rmSync(join(dir, "ran.txt"));
+		rmSync(join(rec, "ran.txt"));
 		fake(
 			"claude",
 			`echo '{"type":"user","message":"usage limit reached"}'\necho '{"type":"result","is_error":true,"result":"API Error: 500"}'\nexit 1`,
@@ -1690,13 +1692,13 @@ ${requeueScript}
 		expect(ran()).toEqual(["claude"]);
 
 		// Nor is a finished reply that quotes one.
-		rmSync(join(dir, "ran.txt"));
+		rmSync(join(rec, "ran.txt"));
 		fake("claude", `echo '{"type":"result","is_error":false,"result":"the usage limit check is fixed"}'\nexit 1`);
 		await expect(fix(dir, log, [1])).rejects.toThrow("fixer agent exited 1");
 		expect(ran()).toEqual(["claude"]);
 
 		// A fixer that changed the checkout before its limit ends the round, so Codex never builds on it blind.
-		rmSync(join(dir, "ran.txt"));
+		rmSync(join(rec, "ran.txt"));
 		fake(
 			"claude",
 			`git -c user.name=t -c user.email=t@t -c commit.gpgsign=false commit -q --allow-empty -m partial\ngit branch -f pr-1 HEAD\n${claudeFails("You have hit your weekly limit")}`,
@@ -1705,6 +1707,22 @@ ${requeueScript}
 			"claude is at its usage limit after changing the checkout, so no other fixer ran on its work",
 		);
 		expect(ran()).toEqual(["claude"]);
+
+		// Nor may it leave a new file, even unstaged, but the result file each round rewrites is no change.
+		rmSync(join(rec, "ran.txt"));
+		fake(
+			"claude",
+			`echo '{}' > quest-land-result.json\necho partial > new.txt\n${claudeFails("You have hit your weekly limit")}`,
+		);
+		await expect(fix(dir, log, [1])).rejects.toThrow(
+			"claude is at its usage limit after changing the checkout, so no other fixer ran on its work",
+		);
+		expect(ran()).toEqual(["claude"]);
+		rmSync(join(dir, "new.txt"));
+		fake("claude", `echo '{}' > quest-land-result.json\n${claudeFails("You have hit your weekly limit")}`);
+		fake("codex", requeueScript);
+		await fix(dir, log, [1]);
+		expect(readFileSync(join(rec, "ran.txt"), "utf8").trim().split("\n")).toEqual(["claude", "claude", "codex"]);
 	});
 	test("refuses to start an agent without a supplied PR's branch", async () => {
 		const dir = fixRepository();
