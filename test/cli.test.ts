@@ -27,6 +27,17 @@ test("unblocked with a path prints blockers on stdout and explains on stderr", (
 	expect(out.stderr).toContain("quest: /quest/m0/epic/two.md is blocked;");
 });
 
+test("unblocked names the parking and says how to unpark instead of advising a split", () => {
+	const out = Tree.baseline()
+		.append("quest/m0/epic/README.md", "\n## Parked\n\n- until spring\n")
+		.run("unblocked", "quest/m0/epic/one.md");
+	expect(out.stdout).toBe("quest/m0/epic/README.md\n  Parked: until spring\n");
+	expect(out.stderr).toContain(
+		"quest: quest/m0/epic/one.md is parked; unpark it by deleting the '## Parked' section",
+	);
+	expect(out.stderr).not.toContain("split");
+});
+
 test("unblocked with a ready quest prints nothing", () => {
 	expect(Tree.baseline().run("unblocked", "quest/m0/epic/one.md")).toEqual({ code: 0, stdout: "", stderr: "" });
 });

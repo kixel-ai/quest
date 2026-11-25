@@ -20,7 +20,7 @@ export interface RankedQuest {
 export interface Ranking {
 	/** The rank of the root's child that holds `path`, lowest first; the root itself sorts last. */
 	priority(path: string): number;
-	/** Distinct transitive dependents of `path`, excluding epic membership and milestones, including what an epic requiring it holds back. */
+	/** Distinct transitive dependents of `path`, excluding epic membership, milestones, and parked work, including what an epic requiring it holds back. */
 	impact(path: string): number;
 }
 
@@ -37,6 +37,9 @@ export function ranking(docs: Doc[]): Ranking {
 		reverse.set(target, dependents);
 	};
 	for (const doc of docs) {
+		// Parked work runs nothing, so it neither scores as a dependent nor
+		// passes impact through.
+		if (parked(docs, doc)) continue;
 		// An epic's `Required` holds back everything under it, so each of those
 		// quests depends on its blockers, milestones' included.
 		for (const target of gates(docs, doc)) depend(target, doc.path, false);

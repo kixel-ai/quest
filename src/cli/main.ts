@@ -18,6 +18,7 @@ import {
 	hosts,
 	label,
 	lookup,
+	parked,
 	parseRiskFile,
 	questBranch,
 	RISK_FILE,
@@ -354,7 +355,10 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				warn(`blocked by ${label(blocker)}`);
 			}
 		}
-		if (found.length > 0) {
+		if (parked(docs, doc)) {
+			// Parking holds back the whole plan on purpose, so splitting a piece out would undo it.
+			warn(`${path} is parked; unpark it by deleting the '## Parked' section that holds it back`);
+		} else if (found.length > 0) {
 			// Blocked is not a verdict on the whole plan: the piece of it that
 			// does not need the blocker is split into its own quest.
 			warn(

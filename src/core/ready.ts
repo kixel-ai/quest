@@ -94,18 +94,20 @@ export function ready(docs: Doc[], today: string): string[] {
 		return (
 			!isEpic(docs, doc) &&
 			![doc, ...ancestors(docs, path)].some(
-				(d) =>
-					has(d, "Required") ||
-					parking(d).length > 0 ||
-					entries(d, SCHEDULED).some((entry) => pending(entry, today)),
+				(d) => has(d, "Required") || parks(d) || entries(d, SCHEDULED).some((entry) => pending(entry, today)),
 			)
 		);
 	});
 }
 
 /** Whether `doc` or an epic above it, milestones included, is parked. */
-export function parked(docs: Doc[], doc: Doc): boolean {
-	return [doc, ...ancestors(docs, doc.path)].some((d) => parking(d).length > 0);
+export function parked(docs: readonly Doc[], doc: Doc): boolean {
+	return [doc, ...ancestors(docs, doc.path)].some(parks);
+}
+
+/** Whether `doc` itself has a `Parked` item. */
+function parks(doc: Doc): boolean {
+	return entries(doc, PARKED).length > 0;
 }
 
 /** The `Parked` item setting `doc` aside, labelled with its heading. */
