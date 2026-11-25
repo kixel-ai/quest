@@ -1648,7 +1648,11 @@ function inExport(file: string, exports: string[]): string {
  * The verdict in a reply, checked against `schema` so a malformed reply fails rather than reads as clean,
  * and settling each of the last round's `earlier` findings, numbered from `first`, exactly once.
  */
-export function verdict(reply: { structured?: unknown; text?: string; exports?: string[] }, earlier: number, first = 1): Verdict {
+export function verdict(
+	reply: { structured?: unknown; text?: string; exports?: string[] },
+	earlier: number,
+	first = 1,
+): Verdict {
 	const fields = record(replied(reply, "the reviewer's reply"));
 	const list = fields?.findings;
 	if (!Array.isArray(list)) throw new Error("the reviewer's reply has no findings list");
@@ -3106,7 +3110,12 @@ async function reviewWith(shared: Shared, seat: Seat, responses: string | undefi
 
 	// The last round already passed this head, and has nothing left to settle; it repeats against the run's base
 	// and size.
-	if (resumable && previous!.head === change.head && previous!.mergeBase === change.mergeBase && earlier.length === 0) {
+	if (
+		resumable &&
+		previous!.head === change.head &&
+		previous!.mergeBase === change.mergeBase &&
+		earlier.length === 0
+	) {
 		const { size, from: sizeFrom } = shared.sized;
 		return { round: { ...last!, base: shared.base, size, sizeFrom, usage: [], unchanged: true }, session: stored! };
 	}

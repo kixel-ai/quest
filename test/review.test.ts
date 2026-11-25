@@ -1338,7 +1338,10 @@ agyFakes("the user's own attributes hide no hunk from agy's diff", async () => {
 	const diffs = async () => {
 		const result = await quest("--root", s.repo, "review", ...AGY, "--new");
 		expect(result.code, result.stderr).toBe(0);
-		const call = s.calls().filter((each) => each.workspace?.["diff-1.diff"] !== undefined).at(-1);
+		const call = s
+			.calls()
+			.filter((each) => each.workspace?.["diff-1.diff"] !== undefined)
+			.at(-1);
 		return call!.workspace!["diff-1.diff"]!;
 	};
 	const plain = await diffs();
@@ -1378,7 +1381,10 @@ agyFakes("a head pruned while the status check waited reviews the whole change a
 	write(s.repo, "src/lib.ts", "export const x = 4;\n");
 	git(s.repo, "commit", "-q", "--amend", "-am", "change");
 	// The old head is still in the reflog, so it is here when the round starts, and gone once the status check ran.
-	vi.stubEnv("FAKE_STATUS_RUNS", `git -C '${s.repo}' reflog expire --expire=now --all && git -C '${s.repo}' gc -q --prune=now`);
+	vi.stubEnv(
+		"FAKE_STATUS_RUNS",
+		`git -C '${s.repo}' reflog expire --expire=now --all && git -C '${s.repo}' gc -q --prune=now`,
+	);
 	git(s.repo, "cat-file", "-e", `${gone}^{commit}`);
 	write(s.repo, ".tmp/responses.md", "Fixed at src/lib.ts:1.\n");
 	const later = await quest("--root", s.repo, "review", ...AGY, "--responses", join(s.repo, ".tmp", "responses.md"));
@@ -2117,7 +2123,9 @@ agyFakes("with only Antigravity installed, Gemini Flash classifies, reading the 
 	]);
 	expect(call.workspace!["diff-1.diff"]).toContain("+export const x = 2;");
 	// The question carries the patch, so no head is exported.
-	expect(Object.keys(call.workspace!).filter((name) => name.startsWith("head/") || name === "files.json")).toEqual([]);
+	expect(Object.keys(call.workspace!).filter((name) => name.startsWith("head/") || name === "files.json")).toEqual(
+		[],
+	);
 });
 
 agyFakes(
