@@ -202,6 +202,16 @@ function deps(world: World): GitHubDependencies {
 				if (query.includes("viewer")) return Response.json({ data: { viewer: { login: `${APP}[bot]` } } });
 				if (query.includes("defaultBranchRef"))
 					return Response.json({ data: { repository: { defaultBranchRef: { name: "main" } } } });
+				if (query.includes("query BaseRisk")) {
+					const oid =
+						world.origin &&
+						spawnSync("git", ["rev-parse", "--verify", "--quiet", `refs/heads/${variables.expression}`], {
+							cwd: world.origin,
+							encoding: "utf8",
+						});
+					const found = oid && oid.status === 0 ? { oid: oid.stdout.trim() } : null;
+					return Response.json({ data: { repository: { object: found } } });
+				}
 				if (query.includes("query ReviewTiers"))
 					return Response.json({
 						data: {

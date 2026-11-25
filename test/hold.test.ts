@@ -215,6 +215,10 @@ class FakePull {
 					},
 				},
 			};
+		if (query.includes("query BaseRisk")) {
+			const oid = this.risk === null ? null : blobId(this.risk);
+			return { data: { repository: { object: oid === null ? null : { oid } } } };
+		}
 		if (query.includes("query ReviewStatus")) {
 			const status = this.statuses[String(variables.sha)];
 			return {
@@ -1052,18 +1056,18 @@ test("iterate and release exit 0 when stdout returns a value", async () => {
 	}
 });
 
+/** A blob's SHA as Git names it. */
+const blobId = (text: string) =>
+	createHash("sha1")
+		.update(`blob ${Buffer.byteLength(text)}\0${text}`)
+		.digest("hex");
+
 describe("merge --land of a high head", () => {
 	const OLD = "c".repeat(40);
 	/** A `## Review` record of `head` at `tier`, and the passing status a maintainer's round sets on it. */
 	const review = (pull: FakePull, head: string, tier: string) => {
-		// Classified against the base's risk file as it is now, as `git hash-object` names it.
-		const file =
-			pull.risk === null
-				? "none"
-				: createHash("sha1")
-						.update(`blob ${Buffer.byteLength(pull.risk)}\0${pull.risk}`)
-						.digest("hex")
-						.slice(0, 12);
+		// Classified against the base's risk file as it is now.
+		const file = pull.risk === null ? "none" : blobId(pull.risk).slice(0, 12);
 		pull.body = `Summary.\n\n## Review\n\n${REVIEW_MARK}\n\n- Head: ${head}\n- Risk: ${tier}, \`why\`\n- Risk file: ${file}\n- Classified: ${tier} by codex\n`;
 		pull.statuses[head] = {
 			state: "SUCCESS",

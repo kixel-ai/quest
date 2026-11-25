@@ -1091,7 +1091,7 @@ describe("the risk tier", () => {
 		);
 		expect(await read(record(A, "none"), base(null))).toEqual(current);
 		expect(await read(record(A, "none"), base({ oid: RISK_BLOB }))).toEqual(
-			stale(`was classified against RISK.md none, but the base's is ${RISK_ID}`),
+			stale(`was classified when the base had no RISK.md, but the base's is ${RISK_ID}`),
 		);
 		expect(await read(record(A), base(null))).toEqual(
 			stale(`was classified against RISK.md ${RISK_ID}, but the base has none`),

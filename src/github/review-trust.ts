@@ -136,25 +136,30 @@ export async function unreviewedHigh(
 	return high === null ? null : `${sha} is high, since ${high}, and no quest review status covers it`;
 }
 
-/** The base's risk file, with its git blob SHA, or null where it has none. */
+const BASE_RISK_QUERY = `query BaseRisk($owner: String!, $repo: String!, $expression: String!) {
+	repository(owner: $owner, name: $repo) { object(expression: $expression) { oid } }
+}`;
+
+/**
+ * The base's risk file, with its blob SHA as Git stores it, which `quest review` records, or null where it has none.
+ * The SHA comes from GitHub rather than a hash of the contents API's bytes, which follows a symlink and drops a BOM.
+ */
 async function baseRisk(
 	github: GitHubReader,
 	pr: PullRequest & { base: string },
 ): Promise<{ text: string; blob: string } | null> {
+	const data = await github.graphql(BASE_RISK_QUERY, {
+		owner: pr.owner,
+		repo: pr.repo,
+		expression: `${pr.base}:${RISK_FILE}`,
+	});
+	const blob = object(data.repository).object;
+	if (blob == null) return null;
 	const response = await github.request(
 		`${repositoryPath(pr)}/contents/${RISK_FILE}?ref=${encodeURIComponent(pr.base)}`,
-		{ accept: "application/vnd.github.raw+json", allow: [404] },
+		{ accept: "application/vnd.github.raw+json" },
 	);
-	if (response.status === 404) return null;
-	const bytes = new Uint8Array(await response.arrayBuffer());
-	// Git names a blob by the SHA-1 of a `blob <length>\0` header and its bytes.
-	const header = new TextEncoder().encode(`blob ${bytes.length}\0`);
-	const object = new Uint8Array(header.length + bytes.length);
-	object.set(header);
-	object.set(bytes, header.length);
-	const digest = new Uint8Array(await crypto.subtle.digest("SHA-1", object));
-	const blob = Array.from(digest, (byte) => byte.toString(16).padStart(2, "0")).join("");
-	return { text: new TextDecoder().decode(bytes), blob };
+	return { text: await response.text(), blob: string(object(blob).oid) };
 }
 
 /** Whether `sha` carries a `quest review` status that is not a pass. */
