@@ -20,7 +20,7 @@ import {
 	writeSync,
 } from "node:fs";
 import { availableParallelism, constants, cpus, hostname, loadavg, totalmem, userInfo } from "node:os";
-import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { dirname, isAbsolute, join, normalize, relative, resolve, sep } from "node:path";
 import type { Readable } from "node:stream";
 import { setTimeout as sleep } from "node:timers/promises";
 import { type Cancellation, cancelled, follow, forwards, GROUP, interrupts, received, requested } from "./interrupt";
@@ -36,8 +36,8 @@ import { cgroupUsage, measuredRun, questScope, scopeGroup, startTime, systemdSco
  * (see `processStart`), so a reused process ID holds nothing. `queued` marks a caller still
  * waiting for its turn instead, as of `at`: it holds a place in the queue, the ledger's order of
  * queued entries, and no slot. `cores` is the most CPUs the command kept busy over any
- * SETTLE_MS of the last RECENT_MS, and `peak` the most bytes of memory it has held, in systemd
- * scope `unit`, where its gate measures them (see `measure`).
+ * SETTLE_MS of the last RECENT_MS, and `group` the cgroup of its systemd scope, from which other
+ * gates read its memory, where its gate measures them (see `measure`).
  */
 export interface Admission {
 	id: string;
@@ -46,8 +46,7 @@ export interface Admission {
 	queued?: boolean;
 	start?: string;
 	cores?: number;
-	unit?: string;
-	peak?: number;
+	group?: string;
 }
 
 /** One version of the host's admission ledger and queue. Versions only grow; 0 is the empty ledger. */
@@ -76,16 +75,17 @@ export interface Host {
 	sleep(ms: number, signal: AbortSignal): Promise<void>;
 	/** CPU microseconds the processes in systemd scope `unit` have used, or undefined while it does not exist. */
 	usage(unit: string): number | undefined;
-	/**
-	 * The memory systemd scope `unit` holds now and the most it has held, or undefined while it does
-	 * not exist or the kernel keeps no peak.
-	 */
-	footprint(unit: string): Footprint | undefined;
+	/** The cgroup of systemd scope `unit`, or undefined while it does not exist or the kernel keeps no peak memory. */
+	memoryGroup(unit: string): string | undefined;
+	/** The memory cgroup `group` holds, or undefined once it is gone. */
+	footprint(group: string): Footprint | undefined;
 }
 
-/** Bytes of memory a cgroup holds, reclaimable file cache included. */
+/** Bytes of memory a cgroup holds. */
 export interface Footprint {
+	/** Held now, less the inactive file cache that available memory already counts as free. */
 	current: number;
+	/** The most it has held, file cache included. */
 	peak: number;
 }
 
@@ -230,7 +230,8 @@ function cgroupFootprint(group: string): Footprint | undefined {
 			if (!Number.isSafeInteger(bytes) || bytes < 0) throw new Error(`cannot read ${join(group, file)}`);
 			return bytes;
 		};
-		return { current: read("memory.current"), peak: read("memory.peak") };
+		const current = Math.max(0, read("memory.current") - cgroupStat(group, "inactive_file"));
+		return { current, peak: read("memory.peak") };
 	} catch (error) {
 		if (["ENOENT", "ENODEV"].includes((error as NodeJS.ErrnoException).code ?? "")) return undefined;
 		throw error;
@@ -331,9 +332,12 @@ function parse(text: string): Admission[] {
 				(entry.start === undefined || typeof entry.start === "string") &&
 				(entry.cores === undefined || (Number.isSafeInteger(entry.cores) && entry.cores >= 0)) &&
 				// Both or neither, and only a gate's own scope name, which is passed to systemctl.
-				(entry.peak === undefined) === (entry.unit === undefined) &&
-				(entry.unit === undefined || /^quest-gate-[\w-]+\.scope$/.test(entry.unit)) &&
-				(entry.peak === undefined || (Number.isSafeInteger(entry.peak) && entry.peak >= 0)),
+				// Only a gate scope's cgroup, which other gates read memory files from.
+				(entry.group === undefined ||
+					(typeof entry.group === "string" &&
+						entry.group.startsWith("/sys/fs/cgroup/") &&
+						normalize(entry.group) === entry.group &&
+						/\/quest-gate-[\w-]+\.scope$/.test(entry.group))),
 		);
 	return valid ? (value as Admission[]) : [];
 }
@@ -481,11 +485,11 @@ export function fileHost(directory: string, now = Date.now): Host {
 			// Null once the scope ended, and systemd removed its cgroup.
 			return group === undefined ? undefined : (cgroupUsage(group) ?? undefined);
 		},
-		footprint(unit) {
+		memoryGroup(unit) {
 			peaks ??= memoryPeaks();
-			const group = peaks ? scoped(unit) : undefined;
-			return group === undefined ? undefined : cgroupFootprint(group);
+			return peaks ? scoped(unit) : undefined;
 		},
+		footprint: cgroupFootprint,
 	};
 }
 
@@ -508,15 +512,13 @@ function standing(limits: Limits, host: Host, running: Admission[], recent: Admi
 	for (const admission of new Set([...running, ...recent])) {
 		const isRecent = recent.includes(admission);
 		// Only a running command still holds its scope; one not measured yet keeps the constant.
-		const { peak, unit } = admission;
-		const current =
-			peak !== undefined && unit !== undefined && running.includes(admission)
-				? host.footprint(unit)?.current
-				: undefined;
-		if (peak === undefined || current === undefined) {
+		const footprint =
+			admission.group !== undefined && running.includes(admission) ? host.footprint(admission.group) : undefined;
+		if (footprint === undefined) {
 			if (isRecent) reserved += limits.memory;
 			continue;
 		}
+		const { current, peak } = footprint;
 		const growth = Math.max(0, peak - current);
 		grows += growth;
 		if (isRecent) reserved += Math.max(0, Math.max(peak, limits.memory) - current) - growth;
@@ -695,8 +697,8 @@ export async function admit(
 /**
  * Until `signal` aborts, sample the CPU use of the admitted command in systemd scope `unit` every
  * SETTLE_MS, and keep its admission's `cores` at the most CPUs it kept busy over one sample in the
- * last RECENT_MS, rounded, and its `peak` at the most memory the scope has held, so other callers
- * count it at its busiest rather than at a lull.
+ * last RECENT_MS, rounded, and record the scope's cgroup, from which other callers read its peak
+ * memory, so they count it at its busiest rather than at a lull.
  */
 export async function measure(
 	host: Host,
@@ -709,7 +711,7 @@ export async function measure(
 	let previous = { at: host.now(), usage: 0 };
 	// The admission as last read, to record again should another gate drop it.
 	let known: Admission = { id: admission.id, at: host.now(), pid: process.pid, start: processStart(process.pid) };
-	let peak: number | undefined;
+	let group: string | undefined;
 	for (;;) {
 		try {
 			await host.sleep(SETTLE_MS, signal);
@@ -726,15 +728,14 @@ export async function measure(
 		}
 		while (samples.length > 0 && samples[0].at <= at - RECENT_MS) samples.shift();
 		const cores = Math.round(Math.max(0, ...samples.map((sample) => sample.cores)));
-		// The kernel's peak only grows, so it is published only as it rises.
-		const held = host.footprint(admission.unit)?.peak;
-		if (held !== undefined) peak = Math.max(peak ?? 0, held);
-		const measured = peak === undefined ? { cores } : { cores, unit: admission.unit, peak };
+		// Other gates read the scope's memory live from its cgroup, once it exists.
+		group ??= host.memoryGroup(admission.unit);
+		const measured = group === undefined ? { cores } : { cores, group };
 		// Checked every sample, so an admission another gate dropped counts again within one.
 		for (let ledger = host.ledger(); ; ledger = host.ledger()) {
 			const mine = ledger.admissions.find(({ id }) => id === admission.id);
 			if (mine !== undefined) known = mine;
-			if (mine !== undefined && (mine.cores ?? 0) === cores && mine.peak === peak) break;
+			if (mine !== undefined && (mine.cores ?? 0) === cores && mine.group === group) break;
 			const updated =
 				mine === undefined
 					? [...ledger.admissions, { ...known, ...measured }]

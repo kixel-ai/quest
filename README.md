@@ -1314,8 +1314,9 @@ gate samples the scope's CPU use every 5 seconds and records the most CPUs the
 command kept busy over one sample in the last minute. While gated commands run,
 the load counts as at least the sum of those records, and nothing starts while
 they kept every CPU busy. Its memory can lull the same way, so on Linux 5.19
-or later the gate also records the scope's peak memory, and available memory
-counts less what each running command's peak adds beyond what it holds now. A
+or later the gate also records the scope's cgroup, from which every gate reads
+the command's peak memory, and available memory counts less what each running
+command's peak adds beyond what it holds now, inactive file cache excluded. A
 command admitted in the last minute that has a peak takes that, or one budget if
 more, instead of a budget on top of it. The peak includes file cache the command
 wrote, so a build that writes large artifacts counts at their size too.
