@@ -1623,6 +1623,13 @@ export async function reviewerEnvironment(
  */
 export const RETRIED_429 = /exceeded retry limit, last status: 429\b/;
 
+/** The session a failed turn had already opened, which spent tokens before it failed. */
+const failedSessions = new WeakMap<object, string>();
+
+/** The session id of the turn that threw `error`, when its CLI had reported one. */
+const failedSession = (error: unknown): string | undefined =>
+	typeof error === "object" && error !== null ? failedSessions.get(error) : undefined;
+
 /** Run one reviewer turn on `model`, failing on any error it reports, and as logged out on an authentication error. */
 async function turn(cli: Cli, call: Turn, cwd: string, model: string): Promise<Reply> {
 	const reader = cli.reviewer.reader();
@@ -1636,18 +1643,27 @@ async function turn(cli: Cli, call: Turn, cwd: string, model: string): Promise<R
 	const { code, stderr } = ran;
 	const reply = reader.reply(code, stderr);
 	if (code !== 0 || reply.error !== undefined) {
-		// A login can expire or be revoked while the status check still passes. A CLI may report it
-		// only on stderr, behind a reader's fallback error such as "claude printed no result".
-		if (reply.status === 401 || cli.reviewer.unauthorized.test(`${reply.error ?? ""}\n${stderr}`)) {
-			throw new ReviewerUnavailableError(cli.harness, "login rejected", cli.unauthorized);
-		}
-		if (reply.limited) throw new ReviewLimitError(cli.harness, reply.limited.until, model);
-		if (cli.harness === "codex" && cli.env.OPENAI_BASE_URL && RETRIED_429.test(`${reply.error ?? ""}\n${stderr}`))
-			throw new ReviewLimitError(cli.harness, null, model);
-		const detail = reply.error ?? stderr.trim().split("\n").slice(-5).join("\n");
-		throw new Error(`${call.argv[0]} failed${detail ? `: ${detail}` : ` with exit status ${code}`}`);
+		const error = failure(cli, call, model, reply, stderr, code);
+		// A rejected login spent nothing; a limit or any other failure may have, partway through the turn.
+		const rejected = error instanceof ReviewerUnavailableError && !(error instanceof ReviewLimitError);
+		if (reply.session !== undefined && !rejected) failedSessions.set(error, reply.session);
+		throw error;
 	}
 	return reply;
+}
+
+/** Why a turn failed: logged out, at its usage limit, or the CLI's own error. */
+function failure(cli: Cli, call: Turn, model: string, reply: Reply, stderr: string, code: number): Error {
+	// A login can expire or be revoked while the status check still passes. A CLI may report it
+	// only on stderr, behind a reader's fallback error such as "claude printed no result".
+	if (reply.status === 401 || cli.reviewer.unauthorized.test(`${reply.error ?? ""}\n${stderr}`)) {
+		return new ReviewerUnavailableError(cli.harness, "login rejected", cli.unauthorized);
+	}
+	if (reply.limited) return new ReviewLimitError(cli.harness, reply.limited.until, model);
+	if (cli.harness === "codex" && cli.env.OPENAI_BASE_URL && RETRIED_429.test(`${reply.error ?? ""}\n${stderr}`))
+		return new ReviewLimitError(cli.harness, null, model);
+	const detail = reply.error ?? stderr.trim().split("\n").slice(-5).join("\n");
+	return new Error(`${call.argv[0]} failed${detail ? `: ${detail}` : ` with exit status ${code}`}`);
 }
 
 /**
@@ -3150,6 +3166,10 @@ async function reviewWith(shared: Shared, seat: Seat, responses: string | undefi
 			});
 			reply = await turn(cli, reviewer.resume(context, session!, prompt), root, context.model);
 		}
+	} catch (error) {
+		// A first turn that failed after its session opened still spent tokens.
+		session ??= failedSession(error);
+		throw error;
 	} finally {
 		if (session !== undefined) shared.queued({ harness, session, cwd: root, start: started });
 	}

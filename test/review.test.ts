@@ -337,6 +337,17 @@ const OPUS_WROTE = ["--exclude-model", "claude-opus-5-5"];
 // Avoids Sol, so a Claude model reviews.
 const CLAUDE_REVIEWS = ["--exclude-model", "gpt-6.2-sol"];
 
+fakes("a reviewer's first turn that hit its usage limit after its session opened is still queued", async () => {
+	const s = setup(null);
+	vi.stubEnv("FAKE_FAILS", "gpt-6.2-sol");
+	vi.stubEnv("FAKE_LIMITED", "reset");
+	const queued: { harness: string; session: string }[] = [];
+	await review({ root: s.repo }, { env: process.env, queue: (session) => queued.push(session) });
+	// Sol's session spent tokens before the limit ended its turn, and Opus then answered in its place.
+	expect(queued).toContainEqual(expect.objectContaining({ harness: "codex", session: "thread-1" }));
+	expect(queued.some((each) => each.harness === "claude")).toBe(true);
+});
+
 fakes("a reviewer at its usage limit passes the round to the next eligible one, and the record names it", async () => {
 	const s = setup(null);
 	vi.stubEnv("FAKE_FAILS", "gpt-6.2-sol");
