@@ -1024,6 +1024,43 @@ fakes("--base reviews against another branch, fetched first, with that branch's 
 	expect(unknown.stderr).toContain("--base must be <remote>/<branch>");
 });
 
+fakes("the base is the commit the round's fetch returned, whatever moves the tracking ref afterwards", async () => {
+	const s = setup();
+	const old = git(s.repo, "rev-parse", "origin/main");
+	// A second writer of the tracking ref, such as another fetch, runs as soon as the fetch has written its refs.
+	const hook = join(s.repo, ".git", "hooks", "reference-transaction");
+	write(
+		s.repo,
+		".git/hooks/reference-transaction",
+		`#!/bin/sh\n[ "$1" = committed ] && grep -q refs/quest/base && git update-ref refs/remotes/origin/main ${old}\nexit 0\n`,
+	);
+	chmodSync(hook, 0o755);
+	const advance = (name: string) => {
+		git(s.repo, "checkout", "-q", "main");
+		write(s.repo, "NEWS.md", `${name}\n`);
+		git(s.repo, "add", ".");
+		git(s.repo, "commit", "-qm", name);
+		git(s.repo, "push", "-q", "origin", "main");
+		git(s.repo, "checkout", "-q", "feature");
+		return git(s.repo, "rev-parse", "main");
+	};
+
+	// The fetch moves the tracking ref, then the writer sets it back.
+	const moved = advance("moved");
+	const first = await quest("--root", s.repo, "review");
+	expect(first.code).toBe(0);
+	expect(first.stdout).toContain(`base ${moved} origin/main\n`);
+	expect(git(s.repo, "rev-parse", "refs/remotes/origin/main")).toBe(old);
+
+	// The tracking ref is already current, so the fetch writes only the private ref, and the writer still sets it back.
+	git(s.repo, "update-ref", "refs/remotes/origin/main", moved);
+	const second = await quest("--root", s.repo, "review", "--new");
+	expect(second.code).toBe(0);
+	expect(second.stdout).toContain(`base ${moved} origin/main\n`);
+
+	expect(git(s.repo, "for-each-ref", "refs/quest")).toBe("");
+});
+
 test.skipIf(caseInsensitive)(
 	"agy's read rules leave every path outside the turn's directory under a denied one, and none inside",
 	() => {

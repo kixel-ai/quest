@@ -2107,9 +2107,12 @@ async function remoteGit(root: string, args: string[]): Promise<string> {
 
 /**
  * Fetch `base`, or origin's default branch, into its remote-tracking ref in
- * `root`, which may be a bare clone, and return it as `<remote>/<branch>`.
+ * `root`, which may be a bare clone, and return it as `<remote>/<branch>` with the commit the fetch returned.
+ * Another writer of the tracking ref, such as a concurrent fetch or a daemon that keeps it at a track's tip, can
+ * move it before a later read, so the same fetch also writes a ref private to this process and the commit is read
+ * from that one.
  */
-export async function fetchBase(root: string, base?: string): Promise<string> {
+export async function fetchBase(root: string, base?: string): Promise<{ ref: string; sha: string }> {
 	let ref = base;
 	if (ref === undefined) {
 		const line = (await remoteGit(root, ["ls-remote", "--symref", "origin", "HEAD"])).split("\n")[0] ?? "";
@@ -2118,14 +2121,26 @@ export async function fetchBase(root: string, base?: string): Promise<string> {
 		ref = `origin/${match[1]}`;
 	}
 	const { remote, branch } = parseBase(root, ref);
+	const pinned = `refs/quest/base/${process.pid}`;
 	await remoteGit(root, [
 		"fetch",
 		"--quiet",
 		"--no-tags",
 		remote,
 		`+refs/heads/${branch}:refs/remotes/${remote}/${branch}`,
+		`+refs/heads/${branch}:${pinned}`,
 	]);
-	return ref;
+	try {
+		return { ref, sha: git(root, ["rev-parse", "--verify", `${pinned}^{commit}`]) };
+	} finally {
+		git(root, ["update-ref", "-d", pinned]);
+	}
+}
+
+/** The commit of `base`'s remote-tracking ref in `root`. */
+function trackedBase(root: string, base: string): string {
+	const { remote, branch } = parseBase(root, base);
+	return git(root, ["rev-parse", "--verify", `refs/remotes/${remote}/${branch}^{commit}`]);
 }
 
 const digest = (value: string) => createHash("sha256").update(value).digest("hex").slice(0, 16);
@@ -2548,11 +2563,12 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 	}
 
 	// The reviewer's sandbox has no network, so the base is fetched first, and the size is read from it.
-	const baseRef = options.fetched ? options.base : await fetchBase(root, options.base);
-	const { remote, branch: baseBranch } = parseBase(root, baseRef);
+	// A fetched base's commit is the one the fetch returned; a caller's own fetch left only the tracking ref.
+	const { ref: baseRef, sha: baseSha } = options.fetched
+		? { ref: options.base, sha: trackedBase(root, options.base) }
+		: await fetchBase(root, options.base);
+	const { branch: baseBranch } = parseBase(root, baseRef);
 	const branch = sessionBranch(root, options.branch, baseBranch);
-	const tracking = `refs/remotes/${remote}/${baseBranch}`;
-	const baseSha = git(root, ["rev-parse", "--verify", `${tracking}^{commit}`]);
 	// The PR's own record names its size and implementers, so the author passes neither as a flag.
 	const needed = options.size === undefined || (options.exclude ?? []).length === 0;
 	const record = needed ? await deps.models?.(root, baseRef, branch) : undefined;
