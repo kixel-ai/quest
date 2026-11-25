@@ -767,9 +767,12 @@ const claude: Reviewer = {
 	reader() {
 		let result: Record<string, unknown> | undefined;
 		let limited: { until: number | null } | undefined;
+		// The stream names the session before the turn finishes, so a cancelled turn still reports it.
+		let session: string | undefined;
 		return {
 			line(line) {
 				const value = json(line);
+				session ??= text(value?.session_id);
 				if (value?.type === "result") result = value;
 				if (value?.type === "rate_limit_event") {
 					const info = record(value.rate_limit_info);
@@ -788,7 +791,7 @@ const claude: Reviewer = {
 					const epoch = /\|(\d{10})\b/.exec(error)?.[1];
 					limited = { until: epoch ? Number(epoch) * 1000 : null };
 				}
-				if (result === undefined) return { error: "claude printed no result", limited };
+				if (result === undefined) return { session, error: "claude printed no result", limited };
 				const usage = record(result.usage) ?? {};
 				let input = count(usage.input_tokens) + count(usage.cache_read_input_tokens);
 				input += count(usage.cache_creation_input_tokens);
@@ -1488,6 +1491,8 @@ interface Cli {
 	unauthorized: string;
 	/** Stops the review's CLI turns. */
 	signal?: AbortSignal;
+	/** The session a failed or cancelled turn had already opened, which spent tokens before it ended. */
+	failed?: string;
 }
 
 const names = (list: string[]) => list.join(" and ");
@@ -1623,13 +1628,6 @@ export async function reviewerEnvironment(
  */
 export const RETRIED_429 = /exceeded retry limit, last status: 429\b/;
 
-/** The session a failed turn had already opened, which spent tokens before it failed. */
-const failedSessions = new WeakMap<object, string>();
-
-/** The session id of the turn that threw `error`, when its CLI had reported one. */
-const failedSession = (error: unknown): string | undefined =>
-	typeof error === "object" && error !== null ? failedSessions.get(error) : undefined;
-
 /** Run one reviewer turn on `model`, failing on any error it reports, and as logged out on an authentication error. */
 async function turn(cli: Cli, call: Turn, cwd: string, model: string): Promise<Reply> {
 	const reader = cli.reviewer.reader();
@@ -1637,6 +1635,10 @@ async function turn(cli: Cli, call: Turn, cwd: string, model: string): Promise<R
 	try {
 		const at = call.workspace?.cwd ?? cwd;
 		ran = await run(call.argv, at, { ...cli.env, ...call.env }, call.stdin, reader, cli.signal);
+	} catch (error) {
+		// A sibling's failure cancelled this turn, which may have spent tokens in the session it had opened.
+		if (cli.signal?.aborted) cli.failed = reader.reply(1, "").session;
+		throw error;
 	} finally {
 		if (call.workspace) rmSync(call.workspace.dir, { recursive: true, force: true });
 	}
@@ -1646,7 +1648,7 @@ async function turn(cli: Cli, call: Turn, cwd: string, model: string): Promise<R
 		const error = failure(cli, call, model, reply, stderr, code);
 		// A rejected login spent nothing; a limit or any other failure may have, partway through the turn.
 		const rejected = error instanceof ReviewerUnavailableError && !(error instanceof ReviewLimitError);
-		if (reply.session !== undefined && !rejected) failedSessions.set(error, reply.session);
+		if (reply.session !== undefined && !rejected) cli.failed = reply.session;
 		throw error;
 	}
 	return reply;
@@ -3167,9 +3169,8 @@ async function reviewWith(shared: Shared, seat: Seat, responses: string | undefi
 			reply = await turn(cli, reviewer.resume(context, session!, prompt), root, context.model);
 		}
 	} catch (error) {
-		// A first turn that failed after its session opened still spent tokens. A sibling's failure cancels this seat
-		// with that same error, whose session is the sibling's, not this seat's.
-		if (error !== shared.signal.reason) session ??= failedSession(error);
+		// A first turn that failed or was cancelled after its session opened still spent tokens.
+		session ??= cli.failed;
 		throw error;
 	} finally {
 		if (session !== undefined) shared.queued({ harness, session, cwd: root, start: started });

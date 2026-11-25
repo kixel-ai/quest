@@ -85,7 +85,7 @@ const logged = (call) => {
  * reviewer fails while the next runs. FAKE_QUOTED fails Claude Code's findings
  * turn with a reply that only quotes a limit's message. FAKE_REPLY replaces the
  * findings reply. FAKE_HANG_CLAUDE hangs Claude Code's review turn until it is stopped, as a seat still
- * running when another's failure cancels it.
+ * running when another's failure cancels it. FAKE_HANG_CODEX does the same to Codex's, after it opened its thread.
  */
 export const FAKES: Record<string, string> = {
 	claude: `
@@ -193,6 +193,11 @@ if (process.env.FAKE_HANG && !fs.existsSync(process.env.FAKE_HANG)) {
 	return;
 }
 const event = (value) => console.log(JSON.stringify(value));
+if (process.env.FAKE_HANG_CODEX) {
+	event({ type: "thread.started", thread_id: "thread-1" });
+	setInterval(() => {}, 1000);
+	return;
+}
 const loggedIn = !fake("FAKE_LOGGED_OUT") || process.env.CODEX_API_KEY || process.env.CODEX_ACCESS_TOKEN;
 const rejected = fake("FAKE_REJECTED") ?? (loggedIn ? undefined : "turn");
 if (rejected === "turn") {
