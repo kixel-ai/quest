@@ -11,17 +11,21 @@ Unparking is deleting the declaration; nothing else changes.
 
 Decided 2026-11-24 (maintainer, kixel.ai /quest-run): ✅ plan this (rejected: plan only the forge and launcher quests). kixel-ai/kixel.ai's `quest/m3/README.md` reads "m3: parked … Nothing here is scheduled", yet `quest unblocked --unclaimed` there lists every m3 quest (link-quality, mesh-keys, teleop/proof, browser-mesh), and coordinators skip them by hand.
 
-Recommended: a `## Parked` section, holding one item that says why and when to resume, as `- until the mesh ships - kept for the fleet demo`.
+Decided 2026-11-24 (maintainer, [decision](https://github.com/kixel-ai/quest/pull/875#issuecomment-7152590368)): mechanism ✅ a `## Parked` section (rejected: dateless `Scheduled`, `Maintainer:` wait, README title); `quest waiting` ✅ drops parked quests' items (rejected: list them as blocked).
+
+The `## Parked` section holds one item that says why and when to resume, as `- until the mesh ships - kept for the fleet demo`.
 It blocks the document and everything under it the way a future `## Scheduled` date does today (`ready()` and `blockers()` in `src/core/ready.ts`), reported as `Parked: <item>`, and `quest check` accepts it on any quest, epic, or milestone, with exactly one item.
-Alternatives, not recommended:
+Rejected alternatives:
 
 - A `## Scheduled` item with no date, such as `parked - why`: reuses the plumbing, but a Scheduled date clears on its own, and parked work never does.
 - A `## Waiting` item, `Maintainer: unpark when …`: a waiting quest stays ready by design, so it would still be offered, and `quest waiting` would put the unpark in front of the maintainer on every `/quest-run`, the noise parking exists to remove.
 - Reading "parked" from a README's title: prose, which no other tool reads.
 
-Recommended for `quest waiting`: omit parked work's quest items entirely, rather than listing them as blocked (`ready: false`) as it does a Required or Scheduled block, since nobody acts on work that is not scheduled. A draft PR handed back for a parked quest is still listed: an open PR is live work whatever its quest says.
+For `quest waiting`: omit parked work's quest items entirely, rather than listing them as blocked (`ready: false`) as it does a Required or Scheduled block, since nobody acts on work that is not scheduled. A draft PR handed back for a parked quest is still listed: an open PR is live work whatever its quest says.
 
-Dropped: a `quest check` finding for unparked work whose `Required` names parked work. `quest unblocked <path>` already names the parking in that chain, and a milestone cannot require a later one.
+Unparked work whose `Required` names a parked quest lists that quest as its blocker, not the parking: `blockers()` deliberately leaves a required quest's own blockers to its readiness, so `quest unblocked <parked quest>` is what names `Parked: …`. Keep that; expanding one quest's blockers would make every chain carry its blockers' blockers.
+
+Dropped: a `quest check` finding for unparked work whose `Required` names parked work. The chain already shows the parked quest as the blocker, and a milestone cannot require a later one.
 
 Document the section in the guide's Format and Model (`assets/AGENTS.md`), next to `Scheduled`. Once a release carries it, kixel-ai/kixel.ai adds `## Parked` to its `quest/m3/README.md` as part of its next quest pin bump; that is its tree's work, not this quest's.
 
