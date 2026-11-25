@@ -17,20 +17,18 @@ Decided 2026-11-24 (maintainer, on
 #863's own gates, the fixer's protected set and the standing pick's high
 exclusion, stay until this lands.
 
-Recommended: enforce it in quest's landing paths, `quest merge --land`
-(`src/cli/hold.ts`) and the watcher's requeue after a fix
-(`src/cli/land-watch-fix.ts`), reading the status
+Decided 2026-11-24 (maintainer, `/quest-run` pick of
+[kixel-ai/quest#863](https://github.com/kixel-ai/quest/pull/863)): ✅ keep
+this quest, and enforce it in quest's landing paths (rejected: drop it;
+rely on a GitHub required status check instead). Check in
+`quest merge --land` (`src/cli/hold.ts`) and in the watcher's requeue after
+a fix (`src/cli/land-watch-fix.ts`). Read the status
 [kixel-ai/quest#868](https://github.com/kixel-ai/quest/pull/868) writes
-through its trust check (`src/github/review-trust.ts`), so a forged or
-stale status counts for nothing. Then delete the per-helper high rules it
-subsumes, such as the fixer's every-path protection on a high PR, which
-otherwise hands back fixes the check would hold anyway.
-
-#868's follow-up makes `quest review` a required status check in
-kixel-ai/dotfiles' `bin/repo-settings`. Read that ruleset first: if it
-requires the status on every head, GitHub already holds a high head with
-none on its exact SHA, and this quest reduces to the deletions, though
-such a check also holds the fixer's mechanical fix on a low PR.
+through its trust check, so a forged or stale status counts for nothing.
+Then delete the per-helper high rules it subsumes, such as the fixer's
+every-path protection on a high PR. That way it works in every repository
+with no GitHub setup, and the fixer's mechanical fixes on low PRs are not
+held for a review.
 
 ## Waiting
 
