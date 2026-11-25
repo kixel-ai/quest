@@ -36,8 +36,7 @@ import {
 import {
 	AgentInputError,
 	HARNESSES,
-	REVIEW_HARNESSES,
-	type ReviewHarness,
+	type HarnessName,
 	type Launch,
 	admitAgent,
 	processDependencies,
@@ -1276,7 +1275,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"The agent CLI runs from its absolute path on PATH, never from the worktree; on native Windows " +
 				"a batch shim such as npm's claude.cmd runs through System32's cmd.exe, and stop ends the agent's process tree at once.\n\n" +
 				"The agent runs in <worktree> with the user's environment minus every CLAUDE* (except CLAUDE_CONFIG_DIR), " +
-				"ANTHROPIC*, CODEX_* (except CODEX_HOME), ANTIGRAVITY_*, AGY_*, OP_*, OPENAI_API_KEY, QUEST_GATE_ADMITTED, QUEST_GATE_PRIORITY, " +
+				"ANTHROPIC*, CODEX_* (except CODEX_HOME), OP_*, OPENAI_API_KEY, QUEST_GATE_ADMITTED, QUEST_GATE_PRIORITY, " +
 				"and MBX_SCHEDULER_PRIORITY when QUEST_GATE_PRIORITY=1, so it uses the CLI's stored login rather than the coordinating session's.\n\n" +
 				"Start and resume first wait until the host can carry the agent, as agent admit describes, " +
 				"before claiming the worktree.\n\n" +
@@ -1705,8 +1704,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"Every turn reviews only the branch's own change, from the merge base of HEAD with the base's tip, so " +
 				"a branch behind its base draws no findings on the base's newer code. The first round runs the " +
 				"reviewer's own review (`codex exec review` with custom instructions, or Claude Code's " +
-				"`/code-review <effort> <merge-base>...HEAD` with text after it, or for agy, which has none, a turn " +
-				"asking what the change breaks), given the range, Quest's shared review rules, the base's REVIEW.md, if " +
+				"`/code-review <effort> <merge-base>...HEAD` with text after it), given the range, Quest's shared review rules, the base's REVIEW.md, if " +
 				"any (which adds to them and takes precedence), and any responses up front, then resumes that session " +
 				"for one turn that reports the review in one " +
 				"JSON schema without reading anything again. Each finding is high, medium, or low, its body ending with the " +
@@ -1736,23 +1734,6 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"each directory holding a changed path, never the checkout's, so a change cannot instruct its own " +
 				"reviewer, and is told to disregard other instructions and run no builds, tests, or quest commands. " +
 				"The base is fetched first, since the sandbox has no network.\n\n" +
-				"--harness agy reviews with Google's Antigravity CLI, which only reviews; name its --model and --effort, as " +
-				"gemini-4-neon and xhigh. It runs `agy -p` on the user's own Antigravity login, in the keyring or, over ssh, " +
-				"its configuration directory, with no ANTIGRAVITY_* or AGY_* variable, so no gateway, and GEMINI_API_KEY and " +
-				"GOOGLE_API_KEY never replace the login. Each turn and the status check, `agy models`, run in a new private " +
-				"directory outside any repository, since agy loads the agent configuration of each directory up to the " +
-				"repository's root, which makes an agent directory inside one a usage error. Each turn runs as quest's own " +
-				"agent, whose only tools are view_file and finish and which inherits none of the user's hooks, rules, plugins, or " +
-				"MCP tools, with permissions skipped, since print mode cannot approve a read outside its directory, and deny " +
-				"rules on commands, writes, web requests, MCP calls, and a read of any path outside the turn's directory that " +
-				"its start lists, such as the checkout's untracked files or another CLI's login, and the usual login paths under " +
-				"home before they exist; a file created beside its parents while the turn runs is not covered. With no shell, that directory holds an " +
-				"export of the reviewed head's tracked files, for the review turn alone, writing a symlink as a file holding " +
-				"its target, beside the directory agy runs in, files.txt listing them, and the diff of each range it reviews, " +
-				"both ignoring the head's .gitattributes. agy compares its read rules case-sensitively, so quest refuses to " +
-				"run it where a directory leading to its agent directory matches names case-insensitively, as on macOS's " +
-				"default volume, and on a Git older than 2.41, which has no --attr-source. The user's skills' text still reaches it, and their MCP servers start, with no tool it can call. A " +
-				"RESOURCE_EXHAUSTED quota error is its usage limit.\n\n" +
 				"Before the reviewers run, the head gets a risk tier, low, medium, or high, from its change alone, never " +
 				"from who wrote it: who is hurt if it is wrong, and whether anything catches it first. A changed path, " +
 				"either side of a rename, that a pattern holds makes it high: RISK.md, and each pattern the `## High` list of the base's " +
@@ -1817,7 +1798,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 			new Option(
 				"--harness <name>",
 				"The only reviewer to run, instead of the pick and the second reviewer",
-			).choices(REVIEW_HARNESSES),
+			).choices(HARNESSES),
 		)
 		.option("--model <model>", "Model the pick, or --harness's reviewer, runs instead")
 		.option(
@@ -1860,7 +1841,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				branch?: string;
 				override?: Tier;
 				reason?: string;
-				harness?: ReviewHarness;
+				harness?: HarnessName;
 				model?: string;
 				effort?: string;
 				excludeModel?: string[];

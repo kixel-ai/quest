@@ -4,17 +4,14 @@
 // (quest/m1/model-check.md) audits these lists each milestone.
 import { createHash } from "node:crypto";
 import { type Doc, SIZES, type Size, onMaintainer, size, waits } from "../core";
-import type { HarnessName, ReviewHarness } from "./agent";
+import type { HarnessName } from "./agent";
 
 /** One harness running one model at one effort. */
-export interface Model<H extends ReviewHarness = HarnessName> {
-	harness: H;
+export interface Model {
+	harness: HarnessName;
 	model: string;
 	effort: string;
 }
-
-/** A model `quest review` runs, on any CLI it reviews with. */
-export type ReviewModel = Model<ReviewHarness>;
 
 /** The size of a PR with neither a quest nor `--size`. */
 export const DEFAULT_SIZE: Size = "M";
@@ -55,7 +52,7 @@ export const weaker = (reviewer: string, writer: string): boolean =>
  */
 export const unfit =
 	(model: string) =>
-	(entry: ReviewModel): boolean =>
+	(entry: Model): boolean =>
 		entry.model === model || weaker(entry.model, model);
 
 /**
@@ -65,7 +62,7 @@ export const unfit =
  * Sol xhigh's cost per PR for half its high findings, or Astra, which no review showed finding what these two
  * missed.
  */
-export const REVIEWERS: Record<Size, readonly ReviewModel[]> = {
+export const REVIEWERS: Record<Size, readonly Model[]> = {
 	XS: [sol("low"), opus("medium")],
 	S: [sol("medium"), opus("medium")],
 	M: [sol("high"), opus("high")],
@@ -82,13 +79,11 @@ export const ARM_NAMES: readonly Arm[] = ["A", "B"];
  * can run classifies, past any logged out or at its usage limit. The tier never depends on who wrote the change,
  * so the list is the same for every PR, unlike the reviewers'. Haiku is the
  * cheapest, and the classifier's prompt stays below the 100k input tokens past
- * which it costs five times as much. Gemini Flash, Antigravity's cheapest,
- * comes last, so a contributor whose only plan is Google's can still classify.
+ * which it costs five times as much.
  */
-export const CLASSIFIERS: readonly ReviewModel[] = [
+export const CLASSIFIERS: readonly Model[] = [
 	{ harness: "claude", model: "claude-haiku-5-5", effort: "low" },
 	sol("low"),
-	{ harness: "agy", model: "gemini-3.8-flash", effort: "low" },
 ];
 
 /**

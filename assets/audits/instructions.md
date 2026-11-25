@@ -1,7 +1,7 @@
 # Agent instructions audit
 
 The goal is instructions agents load that are short, agree with each other, follow the current official guidance of every harness and model the repository's agents run, and change what agents do.
-The scope is every file an agent loads as context from the repository: `AGENTS.md` and `CLAUDE.md` at every depth, `GEMINI.md`, `CONTRIBUTING.md`, `REVIEW.md`, skills with their descriptions, path-scoped rules, the context hooks inject, and the prompts and instructions its code plants or sends to agents.
+The scope is every file an agent loads as context from the repository: `AGENTS.md` and `CLAUDE.md` at every depth, `CONTRIBUTING.md`, `REVIEW.md`, skills with their descriptions, path-scoped rules, the context hooks inject, and the prompts and instructions its code plants or sends to agents.
 Machine-level files, such as `~/.claude/CLAUDE.md`, belong to the repository that holds them, and files another repository ships or syncs, such as `quest`'s rules and skill stubs, are fixed at their source: plan a follow-up there instead of editing the copy.
 Turning new mistakes into new rules is not this audit's work, and which models run is not either.
 
@@ -13,7 +13,7 @@ Gather first, over the window since the date the last run's baseline records, or
 
 Look for:
 
-- Load budgets: each harness's loaded set, joined as it joins them from the root to the deepest working directory agents use, measured against the limits its pages give, such as Codex's `project_doc_max_bytes` and skill-list budget, Claude Code's per-file size target and skill-description cap, and Antigravity's per-rule-file and always-on caps. Text past a limit is cut silently.
+- Load budgets: each harness's loaded set, joined as it joins them from the root to the deepest working directory agents use, measured against the limits its pages give, such as Codex's `project_doc_max_bytes` and skill-list budget, and Claude Code's per-file size target and skill-description cap. Text past a limit is cut silently.
 - Files a harness never loads, as `quest guide prompting` describes.
 - Anything the files do against `quest guide prompting`'s rules, such as contradictions and repeats.
 - Commands, flags, paths, and links in instruction files that no longer work.

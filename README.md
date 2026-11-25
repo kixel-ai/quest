@@ -1612,8 +1612,7 @@ with the base's tip, so a branch behind its base draws no findings on code the
 base gained since, which a diff against its tip shows as reverted.
 The first round explores the change once. It runs the reviewer's own review,
 `codex exec review` with custom instructions or Claude Code's `/code-review
-<effort> <merge-base>...HEAD` with text after the target, or for `agy`, which
-has none, a turn asking what the change breaks, given the range, Quest's shared
+<effort> <merge-base>...HEAD` with text after the target, given the range, Quest's shared
 review rules (`assets/REVIEW.md`), the base's `REVIEW.md`, if any (which adds to
 them and takes precedence), and any earlier findings and responses up front. It
 also asks the reviewer to name each contract the change alters and search past
@@ -1682,61 +1681,13 @@ runs `quest review` with the installed CLIs and copies of your logins, and
 fails if any of it runs, the review trusts a new directory, or the reviewer's
 flags let the planted rule allow a command. A login with no file to copy, such
 as one in the macOS keychain, needs the CLI's credential exported instead:
-`CLAUDE_CODE_OAUTH_TOKEN` from `claude setup-token`, or `CODEX_API_KEY`. For
-Antigravity it plants hooks, MCP servers, plugins, rules, and skills in every
-directory `agy` reads them from, with `AGENTS.md`, `GEMINI.md`, and helper
-binaries, and a change asking the reviewer to quote canaries it writes beside
-your login in `~/.gemini` and beside the checkout; on your own login and home,
-it fails if a plant runs, the checkout's instructions reach the reviewer, or
-the reviewer quotes a canary, after showing that `agy`'s defaults load them all
-and that quest's turn reads the canaries without its read rules. It spends real usage, so CI never
+`CLAUDE_CODE_OAUTH_TOKEN` from `claude setup-token`, or `CODEX_API_KEY`. It spends real usage, so CI never
 runs it; run it after upgrading any of the CLIs. The base is fetched first, since
 the sandbox has no network. The reviewer follows the base's `AGENTS.md` and `CLAUDE.md`, at the
 root and in each directory holding a changed path, never the checkout's, so a
 change cannot instruct its own reviewer. Quest's shared review rules always come first and set the default adversarial
 stance; the base's `REVIEW.md` is optional, adds repo-specific rules, and takes
 precedence where they conflict.
-
-`--harness agy` reviews with Google's Antigravity CLI, `agy`, which only
-reviews: name its
-model and effort, as `--model gemini-4-neon --effort xhigh`. It runs `agy -p`
-on your own Antigravity login, wherever `agy` keeps it: the OS keyring, or over
-ssh its configuration directory, `~/.gemini/antigravity-cli`. Run `agy` to sign
-in. No `ANTIGRAVITY_*` or `AGY_*` variable reaches it, so no gateway either,
-and `GEMINI_API_KEY` and `GOOGLE_API_KEY` never replace the login. `agy` loads
-the `.agents/`, `AGENTS.md`, and `GEMINI.md` of every directory from where it
-runs up to the repository's root, so each turn, and its status check, `agy
-models`, runs in a new private directory under quest's agent directory instead,
-and an agent directory inside a repository is a usage error naming
-`XDG_RUNTIME_DIR` and `TMPDIR`. There it runs as an agent quest writes, whose
-only tools are `view_file` and `finish` and which inherits none of your hooks,
-rules, plugins, or MCP tools. Print mode cannot approve a read outside that
-directory, so permissions are skipped, and deny rules on commands, writes, web
-requests, and MCP calls back up the tool list. With no shell, the turn's
-directory holds what `git` would show: an export of the reviewed head's tracked
-files, beside the directory `agy` runs in so none of its configuration loads,
-`files.txt` listing them, and each reviewed range's diff; `agy` 1.5.14 gives an
-agent no search tool. The export and the diffs ignore the head's
-`.gitattributes`, so a head can neither hide a file or its hunks nor run a
-filter driver, and the export writes each symlink as a file holding its target.
-The review turn alone gets the export, since the report turn reads nothing. `agy` has no rule
-that allows only some paths, so a read rule denies each path beside the
-directories leading to the turn's directory, and nothing outside it, such as the
-checkout's untracked files, its `.git`, or another CLI's login, can be read. The
-rules hold what each turn's start lists, so the usual login and key paths under
-your home, such as `~/.codex` and `~/.ssh`, are denied even before they exist,
-and a parent that cannot be listed is a usage error; anything else created
-beside those directories while a turn runs, such as in the runtime directory, is
-not covered. The rules' own file is denied too. `agy` compares its rules with a
-path's case as written, so on a volume that matches names case-insensitively,
-such as macOS's default, `/USERS/...` passes a rule naming `/Users`: quest
-refuses to run `agy` where any directory leading to its agent directory is on
-one, or with a Git older than 2.41, which has no `--attr-source`; either passes a
-classifier turn to the next and exits 3 for `--harness agy`.
-An `agy models` that fails other than on the login fails as it is. Your skills' text
-still reaches it, and your MCP servers start, with no tool it can call. A
-`RESOURCE_EXHAUSTED` quota error counts as its usage limit, resetting at the
-time it names.
 
 It prints the size and its source, base, and head; the head's `risk` tier and
 reason, then `classified` with the classifier's tier, how it was set (`model`,
@@ -1871,8 +1822,7 @@ before it runs so it judges just the rule and cannot widen a scope; a change
 that touches no path falls in none. The scope is checked when the head is
 classified, so a record keeps its class after the base narrows that scope
 until a review classifies the head again. It runs as Claude Code
-`claude-haiku-5-5` at low effort, then Codex `gpt-6.2-sol` at low, then
-Antigravity `gemini-3.8-flash` at low, each when those before it are missing,
+`claude-haiku-5-5` at low effort, then Codex `gpt-6.2-sol` at low when Claude Code is missing,
 logged out, have their login rejected, or hit their usage limit. When none can
 run, the review fails on the limit that resets first if every one whose CLI is
 installed hit its own, and otherwise as a usage error naming why each failed. A diff past 200,000 characters gives it only the
