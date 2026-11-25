@@ -1299,7 +1299,9 @@ while the host-wide 1-minute load average exceeds the host's CPU count, or while
 available memory is below one command's budget: 4 GiB, or a quarter of RAM on
 smaller hosts, where RAM is capped by any container memory limit. On Linux,
 available memory includes reclaimable host and cgroup file cache and is bounded
-by the remaining budget of each enclosing memory cgroup. Load and memory count
+by the remaining budget of each enclosing memory cgroup and of the user manager's
+`background.slice`, which gated commands run in, so a slice at its `memory.high` or
+`memory.max` queues the next command, and a slice's cap below RAM sizes the budget. Load and memory count
 work from every session and user. Windows reports no load average and macOS
 counts reclaimable cache as used memory, so those signals are skipped there.
 
