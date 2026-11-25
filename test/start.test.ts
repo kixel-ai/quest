@@ -905,7 +905,11 @@ describe("start on GitHub, read through the Kixel Quest serving it", () => {
 		const github = () => ({ ...fake.deps(), fetch: globalThis.fetch });
 		const forge = { env: process.env, fetch: globalThis.fetch, now: Date.now, sleep: async () => {}, github };
 		const deps = { github, forge: (repository: Repository) => forgeFor(repository, forge), warn: () => {} };
-		expect(await pullModels(work, "origin/main", "feature", deps)).toEqual({ sizes: ["S"], implementers: [] });
+		expect(await pullModels(work, "origin/main", "feature", deps)).toEqual({
+			sizes: ["S"],
+			implementers: [],
+			risk: null,
+		});
 		expect(kixel.calls.map(({ call }) => call)).toEqual(["pulls"]);
 		expect(asked.filter((request) => request.startsWith("GET") && request.endsWith("/pulls"))).toEqual([]);
 		expect(asked).toContain("GET /repos/example/project/pulls/1");

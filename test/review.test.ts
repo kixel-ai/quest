@@ -388,8 +388,13 @@ fakes("a missing or logged-out reviewer CLI with no reviewer after it is an outa
 	expect(out.code).toBe(3);
 	expect(out.stderr).toContain(CODEX_LOGGED_OUT);
 	// Codex's seat passes to Gemini, the only other vendor Claude Code's session leaves, whose login is checked
-	// too where quest runs agy at all; no turn runs.
-	expect(t.calls().map((call) => call.argv[0])).toEqual(caseInsensitive ? ["login"] : ["login", "models"]);
+	// too where quest runs agy at all, the checks at once, so in either order; no turn runs.
+	expect(
+		t
+			.calls()
+			.map((call) => call.argv[0])
+			.sort(),
+	).toEqual(caseInsensitive ? ["login"] : ["login", "models"]);
 });
 
 const CODEX_PROFILE = "codex is not logged in to the profile CODEX_HOME=/work; run `codex login`";

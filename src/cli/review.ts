@@ -27,7 +27,9 @@ import { promisify } from "node:util";
 import {
 	ALWAYS_HIGH,
 	type Class,
+	type MalformedRisk,
 	RISK_FILE,
+	type RecordedRisk,
 	SEATS,
 	SIZES,
 	type Size,
@@ -509,17 +511,11 @@ export interface ReviewDependencies {
 	models?: (root: string, base: string, branch: string) => Promise<PullModels | null>;
 	/** A number in [0, 1) for each draw: the round's rung, then each rung's order. Defaults to `Math.random`. */
 	random?: () => number;
-	/** Records a raise a failed run made, so a published review of the head at a lower tier no longer counts. */
-	raised?: (raise: HeldRaise) => Promise<void>;
-}
-
-/** A raise a failed run made on `head`, of the branch reviewed against `base`. */
-export interface HeldRaise {
-	base: string;
-	branch: string;
-	head: string;
-	tier: Tier;
-	reason: string;
+	/**
+	 * Records the raise of a run that failed, as a record of its head with no rounds: the tier then lives in the PR's
+	 * review record, the only place it does, and a published pass at a lower tier no longer counts.
+	 */
+	raised?: (reviewed: Reviewed) => Promise<void>;
 }
 
 export const processDependencies = (): ReviewDependencies => ({ env: process.env });
@@ -597,14 +593,6 @@ interface State {
 	classified?: { key: string; value: Omit<Classified, "usage"> };
 	/** The maintainer's override of the branch's tier. */
 	override?: Override;
-	/** A raise on `head` by a round of a run that then failed, which still judges that head's tier. */
-	raised?: Raise;
-}
-
-/** A reviewer's raise of a head's tier, kept apart from its round. */
-export interface Raise extends Assessment {
-	head: string;
-	by: Reviewing;
 }
 
 /** What a turn needs to build its command line. */
@@ -2273,14 +2261,7 @@ export function parseState(value: unknown): State {
 		(state.override === undefined ||
 			(TIERS.includes(state.override?.tier) &&
 				TIERS.includes(state.override.from) &&
-				typeof state.override.reason === "string")) &&
-		(state.raised === undefined ||
-			(typeof state.raised?.head === "string" &&
-				TIERS.includes(state.raised.tier) &&
-				typeof state.raised.reason === "string" &&
-				harness(state.raised.by?.reviewer) &&
-				typeof state.raised.by.model === "string" &&
-				typeof state.raised.by.effort === "string"));
+				typeof state.override.reason === "string"));
 	if (!valid) throw new ReviewInputError("the saved review rounds are not ones quest review reads; pass --new");
 	return state as State;
 }
@@ -2344,7 +2325,10 @@ function detachedMessage(root: string, baseBranch: string): string {
 }
 
 /** A PR's `## Models` record. */
-export type PullModels = ReturnType<typeof recorded>;
+export type PullModels = ReturnType<typeof recorded> & {
+	/** The tier the PR's review record holds for the head it names, or null without one. */
+	risk: RecordedRisk | MalformedRisk | null;
+};
 
 type ModelsRecord = PullModels | null | undefined;
 
@@ -2561,12 +2545,10 @@ function unanswered(
 
 /**
  * The head's risk after `rounds`, each of the head: the classifier's tier, raised to the riskiest a round judged it,
- * the first on a tie.
+ * the first on a tie, or to `held`, the tier the PR's record holds for the head, when riskier still.
  */
-export function settle(classified: Classified, rounds: Round[], held?: Raise): Risk {
+export function settle(classified: Classified, rounds: Round[], held?: Assessment): Risk {
 	let risk: Risk = { tier: classified.tier, reason: classified.reason, classified };
-	if (held && riskier(held.tier, risk.tier))
-		risk = { tier: held.tier, reason: held.reason, classified, raisedBy: held.by };
 	for (const round of rounds)
 		if (round.raised && riskier(round.raised.tier, risk.tier))
 			risk = {
@@ -2574,7 +2556,8 @@ export function settle(classified: Classified, rounds: Round[], held?: Raise): R
 				classified,
 				raisedBy: { reviewer: round.reviewer, model: round.model, effort: round.effort },
 			};
-	return risk;
+	// The record's tier counts after the rounds, so a round that set it is still named as its raiser.
+	return held && riskier(held.tier, risk.tier) ? { tier: held.tier, reason: held.reason, classified } : risk;
 }
 
 /** `risk` as the maintainer's `override` sets it, while `risk` is no riskier than the tier they overrode. */
@@ -2613,9 +2596,11 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 	const branch = sessionBranch(root, options.branch, baseBranch);
 	const tracking = `refs/remotes/${remote}/${baseBranch}`;
 	const baseSha = git(root, ["rev-parse", "--verify", `${tracking}^{commit}`]);
-	// The PR's own record names its size and implementers, so the author passes neither as a flag.
-	const needed = options.size === undefined || (options.exclude ?? []).length === 0;
-	const record = needed ? await deps.models?.(root, baseRef, branch) : undefined;
+	// The PR's own record names its size and implementers, so the author passes neither as a flag, and its review
+	// record the tier its head was last judged.
+	const record = await deps.models?.(root, baseRef, branch);
+	if (record?.risk && "malformed" in record.risk)
+		throw new ReviewInputError(`${record.risk.malformed}; restore it, since it holds the head's tier`);
 	const sized = reviewSize(root, baseSha, options.sizeBranch ?? branch, options.size, recordedSize(record, options));
 	const avoided = authored(options, deps.env, recordedLatest(record, options));
 	const named = options.harness !== undefined || options.model !== undefined || options.effort !== undefined;
@@ -2740,8 +2725,13 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 	const base = { ref: baseRef, sha: baseSha };
 	// Each earlier round on this head still judges its tier, as does the maintainer's override.
 	const onHead = (prior?.rounds ?? []).filter((round) => round.head === head);
-	// So does a raise a failed run met, so retrying the run cannot drop the tier it set.
-	const held = saved?.raised?.head === head ? saved.raised : undefined;
+	// So does the tier the PR's review record holds for this head, the only place it lives, as a raise a failed run
+	// recorded there, so no retry, from any clone, drops it. The tier it judged, before any override.
+	const recorded = record?.risk && !("malformed" in record.risk) ? record.risk : null;
+	const held =
+		recorded !== null && head.startsWith(recorded.head)
+			? { tier: recorded.overridden ?? recorded.tier, reason: recorded.reason }
+			: undefined;
 	const before = settle(classified.value, onHead, held);
 	const override = options.override === undefined ? saved?.override : { ...options.override, from: before.tier };
 	const { usage: _, ...value } = classified.value;
@@ -2753,7 +2743,6 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 	const state = (reviewed: State["reviewed"], runs: number, tallies: Tally[], risk: Risk): State => ({
 		branch,
 		runs,
-		...(held !== undefined && { raised: held }),
 		...(since > 0 && { since }),
 		...(reviewed !== undefined && { reviewed }),
 		...(past(reviewed).length > 0 && { past: past(reviewed) }),
@@ -2925,17 +2914,22 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 		for (let i = 0; i < tasks.length; i++) await tasks[i];
 		if (signal.aborted) throw signal.reason;
 	} catch (error) {
-		// Every finished round's raise, even one whose peer then failed, and the saved state otherwise as it was, so a
-		// failed --new drops nothing.
+		// The run saves nothing, but every finished round's raise, even one whose peer then failed, goes to the PR's
+		// record: a record of this head with no run that passed it, at the raised tier, beside the branch's tallies as
+		// they were, so a failed --new drops nothing.
 		const raised = judged();
-		if (raised.raisedBy !== undefined && riskier(raised.tier, before.tier)) {
-			save(statePath, {
-				...(saved ?? { branch, runs, tallies: [] }),
-				classified: { key: classified.key, value },
-				raised: { head, tier: raised.tier, reason: raised.reason, by: raised.raisedBy },
+		if (riskier(raised.tier, before.tier))
+			await deps.raised?.({
+				rounds: [],
+				tallies: saved?.tallies ?? [],
+				risk: overridden(raised, override),
+				skipped,
+				since,
+				branch,
+				head,
+				base,
+				sized,
 			});
-			await deps.raised?.({ base: baseRef, branch, head, tier: raised.tier, reason: raised.reason });
-		}
 		throw error;
 	}
 	const done = carried(finished, earlier, raisers, open);

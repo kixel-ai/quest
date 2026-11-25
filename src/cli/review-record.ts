@@ -1,6 +1,6 @@
 // `quest review` rewrites the `## Review` section of its branch's open PR after each round, so the head
 // it reviewed counts without an agent copying the round into the body by hand.
-import { DEFAULT, PATHS, SEATS, codeSpan, passed, recordedRisk, reviewSection, riskier } from "../core";
+import { DEFAULT, PATHS, SEATS, codeSpan, passed, recordedRisk, reviewSection } from "../core";
 import { DRAWN, RUNG_NAMES } from "./models";
 import { recorded } from "./models-record";
 import { type ClaimDependencies, upstream } from "./claims";
@@ -10,7 +10,6 @@ import { git } from "./git";
 import { contains } from "./land";
 import { requireRemote } from "./github";
 import {
-	type HeldRaise,
 	type PullModels,
 	type Reviewed,
 	type Risk,
@@ -396,7 +395,7 @@ async function openPull(
 	};
 }
 
-/** The `## Models` record of `branch`'s open PR into `baseRef`, or null when it has no PR. */
+/** The `## Models` record of `branch`'s open PR into `baseRef`, with its review record's risk, or null when it has no PR. */
 export async function pullModels(
 	root: string,
 	baseRef: string,
@@ -405,33 +404,7 @@ export async function pullModels(
 ): Promise<PullModels | null> {
 	const pull = await openPull(root, baseRef, branch, deps);
 	if ("skipped" in pull) return null;
-	return recorded(pull.body);
-}
-
-/**
- * Mark the record of the open PR from `raise.branch` as short of the tier a failed run raised its head to: when it
- * reviews that head at a lower tier, its Risk line takes the raised tier and the head is no longer named in full, so
- * the earlier run's pass no longer counts.
- */
-export async function recordRaise(root: string, raise: HeldRaise, deps: ClaimDependencies): Promise<Recorded> {
-	const pull = await openPull(root, raise.base, raise.branch, deps);
-	if ("skipped" in pull) return pull;
-	const section = reviewSection(pull.body);
-	const risk = recordedRisk(pull.body);
-	const short = raise.head.slice(0, 12);
-	if (section === null || risk === null || "malformed" in risk || !riskier(raise.tier, risk.tier))
-		return { url: pull.url };
-	const text = pull.body.slice(section.start, section.end);
-	if (!text.includes(short)) return { url: pull.url };
-	const marked = text
-		.replace(
-			new RegExp(`^- Head: ${raise.head}\\r?$`, "m"),
-			`- Head: ${short}, named in full once reviewers from ${SEATS[raise.tier]} vendors pass it`,
-		)
-		.replaceAll(raise.head, short)
-		.replace(/^- Risk: .*$/m, `- Risk: ${raise.tier}, ${code(raise.reason)}`);
-	await pull.edit(`${pull.body.slice(0, section.start)}${marked}${pull.body.slice(section.end)}`);
-	return { url: pull.url };
+	return { ...recorded(pull.body), risk: recordedRisk(pull.body) };
 }
 
 /** Record a run in the `## Review` section of its branch's open PR. The edit is the token's user's, which `/quest-merge` counts only when that user wrote the PR. */

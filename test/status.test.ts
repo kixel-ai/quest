@@ -846,6 +846,12 @@ describe("the review record", () => {
 		expect(await line(high(vendors).replace("- Risk: high, `wire`", "- Risk:dire"))).toBe("review-record -");
 		// A recorded skip names no run, so its SHA counts as the review skill has it.
 		expect(await line(`## Review\n\nSkipped as trivial: a typo, at ${A}.`)).toBe(`review-record current ${A}`);
+		// Seats of different runs are not one run's: a round-1 block beside round-2 ones takes no seat.
+		expect(
+			await line(
+				high(["Codex", "Claude Code"]) + "\n\n- Reviewer: Antigravity, m, high effort\n- Session: `s`, round 1",
+			),
+		).toBe("review-record -");
 		// A reviewer of an earlier run, its session naming no round, takes no seat.
 		expect(
 			await line(high(["Codex", "Claude Code"]) + "\n\n- Reviewer: Antigravity, m, high effort\n- Session: `s`"),

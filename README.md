@@ -1880,8 +1880,9 @@ then each rung outward. `--model` and `--effort` name only the first seat, so
 the rest are still drawn; the reviewer `--harness` names runs alone. A round
 that raises the tier seats the extra reviewers at once, in the same run; a run
 is saved whole or not at all, so one that fails there, as when none can run,
-leaves the branch as it was, but for the raise, which holds on that head, so a
-retry seats as many. When every model of a vendor a seat needs is
+leaves the branch as it was, but for the raise. That goes to the PR's review
+record, the only place a head's tier lives, as a record of that head at the
+raised tier with no run that passed it, so a retry from any clone seats as many. When every model of a vendor a seat needs is
 avoided, as with no `## Models` record, which avoids every model of the harness
 running the command, the run fails as a usage error; when a seat finds no
 other vendor that can run on any rung, as an outage. So a host where `agy`

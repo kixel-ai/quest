@@ -405,7 +405,8 @@ describe("PR records", () => {
 		expect(reviewRecord({ ...at, rounds: clean, tallies: settledAll, risk, skipped: [] })).toContain(
 			"- Head: bbbbbbbbbbbb, named in full once reviewers from 2 vendors pass it\n",
 		);
-		const vendors = [clean[0]!, { ...second, reviewer: "claude" as const }];
+		// One run's seats share its number.
+		const vendors = [clean[0]!, { ...second, reviewer: "claude" as const, round: round.round }];
 		expect(reviewRecord({ ...at, rounds: vendors, tallies: settledAll, risk, skipped: [] })).toContain(
 			`- Head: ${"b".repeat(40)}\n`,
 		);

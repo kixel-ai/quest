@@ -29,7 +29,7 @@ export const passed = (run: Run): boolean =>
 	run.tier !== null && run.open === 0 && new Set(run.vendors).size >= SEATS[run.tier];
 
 /**
- * The latest run `body`'s `## Review` record names: the reviewers whose session line names a round, and the high and
+ * The latest run `body`'s `## Review` record names: the reviewers whose session line names its round, and the high and
  * medium findings they left open, since the low ones a later line settles without a round, as `next finish` asks.
  * Null when the record names no run, neither a tier nor a reviewer, as a recorded skip.
  */
@@ -42,7 +42,10 @@ export function recordedRun(body: string): Run | null {
 		.split(/^(?=- Reviewer: )/m)
 		.slice(1);
 	if (risk === null && blocks.length === 0) return null;
-	const ran = blocks.filter((block) => /^- Session: (`+) ?.*? ?\1, round \d+\r?$/m.test(block));
+	// Only the latest run's seats: each block's session line names its round, the branch's run.
+	const round = (block: string) => Number(/^- Session: (`+) ?.*? ?\1, round (\d+)\r?$/m.exec(block)?.[2] ?? 0);
+	const latest = Math.max(0, ...blocks.map(round));
+	const ran = blocks.filter((block) => latest > 0 && round(block) === latest);
 	const vendors = ran.map((block) => /^- Reviewer: (.+?), \S+, \S+ effort\b/.exec(block)?.[1]);
 	const parsed = risk !== null && !("malformed" in risk) && vendors.every((vendor) => vendor !== undefined);
 	return {
