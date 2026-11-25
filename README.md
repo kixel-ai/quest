@@ -2154,7 +2154,7 @@ beside the writer's. A round that reuses its sessions runs no turn and queues no
 session queues it again, and its record replaces the earlier copy. A failure to queue is said on stderr and never fails the round.
 Each carries the branch the round reviewed and its role, classifier or reviewer, which the sender takes over what it
 infers, so a session from the runner's review checkout or a detached one is sent on that branch's PR, a fork's included,
-and a classifier whose reply was unusable is still counted as one.
+as is a sub-agent it starts anywhere in that checkout, and a classifier whose reply was unusable is still counted as one.
 
 Kixel Quest refuses a whole upload naming a repository it does not index or
 the sender cannot read, so the sender asks `GET /forge` which repositories it

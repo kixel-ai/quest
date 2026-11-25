@@ -243,12 +243,13 @@ test("a session `quest review` queued is sent on the PR it reviewed, as the role
 	reviewed("cls", "fix/y", "classifying");
 	// Reviewed before its PR opens.
 	reviewed("early", "feature/z", "reviewing");
-	// The runner's review checkout names its own branch, and a detached one names none. A sub-agent in the same
-	// checkout follows its parent onto the fork's PR.
+	// The runner's review checkout names its own branch, and a detached one names none. A sub-agent anywhere in the
+	// same checkout follows its parent onto the fork's PR.
 	const sessions = [
 		session("rev", "kix-review/1"),
-		session("cls", "x", { branches: [] }),
-		session("sub", "x", { branches: [], parent: "cls" }),
+		session("cls", "x", { branches: [], cwd: root }),
+		session("sub", "x", { branches: [], parent: "cls", cwd: root }),
+		session("deep", "x", { branches: [], parent: "cls", cwd: `${root}/src` }),
 		session("early", "kix-review/2"),
 		// An implementer's sub-agent in another checkout keeps out of the fork's PR.
 		session("impl", "fix/y", { repositories: ["ann/proj"], cwd: "/fork" }),
@@ -267,6 +268,7 @@ test("a session `quest review` queued is sent on the PR it reviewed, as the role
 		["rev", [7], "reviewing", "quest/m0/a"],
 		["cls", [8], "classifying", "fix/y"],
 		["sub", [8], "classifying", "fix/y"],
+		["deep", [8], "classifying", "fix/y"],
 		["early", [], "reviewing", "feature/z"],
 		["impl", [8], "implementing", "fix/y"],
 		["away", [], "implementing", null],

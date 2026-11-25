@@ -1,6 +1,7 @@
 // Each session's record, as `quest usage` prints it and the stop hook sends it: its PRs, role, spend, and waits.
 import { type GatedRun, type Role, type SessionRecord, type SessionWait, type TimeSplit, branchQuest } from "../core";
 import { type CallLine, sessionGroup, shellGroups } from "./calls";
+import { checkoutRoot } from "./rules";
 import { type TranscriptFacts, transcriptFacts } from "./transcript";
 import type { Pins, Pull, Session } from "./usage";
 import type { LoggedWait } from "./waits";
@@ -85,6 +86,8 @@ export function buildRecords(input: RecordInput): Map<Session, SessionRecord> {
 			return own ? [own, ...descendants(child, seen)] : descendants(child, seen);
 		});
 	};
+	// Another host's directories cannot be looked up here, so its sessions compare their exact directories.
+	const rootOf = (s: Session) => (s.cwd === null ? null : s.host === null ? checkoutRoot(s.cwd) : s.cwd);
 	// Bounded by the sessions' count, so a cycle in recorded lineage cannot loop.
 	const pullsOf = (s: Session, depth = 0): { pulls: Pull[]; via: "own" | "parent" | "children" | "none" } => {
 		const own = input.own.get(s);
@@ -92,9 +95,9 @@ export function buildRecords(input: RecordInput): Map<Session, SessionRecord> {
 		const parent = parentOf(s);
 		if (parent && depth < input.sessions.length) {
 			// A session known to be in another repository keeps out of its parent's PRs, as a sub-agent in another
-			// checkout does. One in the very checkout `quest review` ran in keeps the PR it reviewed, a fork's included.
+			// checkout does. One anywhere in the checkout `quest review` ran in keeps the PR it reviewed, a fork's included.
 			const known = input.known?.(s) ?? null;
-			const reviewing = pinOf(parent) !== undefined && s.cwd !== null && s.cwd === parent.cwd;
+			const reviewing = pinOf(parent) !== undefined && rootOf(s) !== null && rootOf(s) === rootOf(parent);
 			const inherited = pullsOf(parent, depth + 1).pulls.filter(
 				(p) => known === null || reviewing || (p.repository !== null && known.includes(p.repository)),
 			);
