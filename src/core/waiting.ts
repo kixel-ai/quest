@@ -159,10 +159,17 @@ export function readWait(entry: Pick<Entry, "line" | "parts">): ReadWait {
 	const [list, ...extra] = marked;
 	const { choices, problems } = choicesOf(list);
 	for (const other of extra)
-		problems.push({ line: other.line, message: "a decision holds one choice list; split the others into items of their own" });
+		problems.push({
+			line: other.line,
+			message: "a decision holds one choice list; split the others into items of their own",
+		});
 	if (problems.length > 0) return { wait: fallback, problems };
 	const question = PARTY.exec(render(entry.parts.filter((part) => part !== list)));
-	if (!question) return none;
+	if (!question)
+		return {
+			wait: fallback,
+			problems: [{ line: entry.line, message: "a decision needs its question before its choices" }],
+		};
 	return { wait: { ...base, kind: "decision", text: question[2], choices }, problems: [] };
 }
 

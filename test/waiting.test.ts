@@ -139,7 +139,12 @@ test("an unmarked list, or a marker mid-sentence outside a decision, stays prose
 	);
 	expect(doc.entries.map((entry) => readWait(entry))).toEqual([
 		{
-			wait: { line: 5, party: "Maintainer", kind: "prose", text: "can you check these? the DNS record the certificate" },
+			wait: {
+				line: 5,
+				party: "Maintainer",
+				kind: "prose",
+				text: "can you check these? the DNS record the certificate",
+			},
 			problems: [],
 		},
 		{
@@ -174,7 +179,8 @@ test("check rejects a malformed choice list by line", () => {
 			"- Maintainer: two picks?\n  - Yes (Recommended)\n  - No (Recommended)\n" +
 			"- Maintainer: misplaced?\n  - Yes - the (Recommended) one\n  - No (recommended)\n" +
 			"- Maintainer: labels?\n  - (Recommended) - empty\n  - Same\n  - same\n" +
-			"- Maintainer: two lists?\n  - A (Recommended)\n  - B\n\n  Or:\n\n  - C (Recommended)\n  - D\n",
+			"- Maintainer: two lists?\n  - A (Recommended)\n  - B\n\n  Or:\n\n  - C (Recommended)\n  - D\n" +
+			"- Maintainer:\n  - E (Recommended)\n  - F\n",
 	});
 	expect(check(docs, () => true).map((f) => `${f.line}: ${f.message}`)).toEqual([
 		"10: '## Waiting' a choice list belongs only under a plain 'Maintainer:' decision",
@@ -185,6 +191,7 @@ test("check rejects a malformed choice list by line", () => {
 		"24: '## Waiting' a choice needs a label",
 		"26: '## Waiting' choice 'same' is listed twice",
 		"33: '## Waiting' a decision holds one choice list; split the others into items of their own",
+		"35: '## Waiting' a decision needs its question before its choices",
 	]);
 });
 

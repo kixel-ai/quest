@@ -14,4 +14,4 @@ Every request re-sends the whole context, and most of a start session's requests
 
 If the quest is complete and no decision is left for the maintainer beyond its follow-ups', run `/quest-review` on it right away.
 Otherwise ask the user each open decision with your recommendation, record the answers in the PR body's `## Decisions` section, and run `/quest-review` once the quest is complete and the PR reflects them.
-When you cannot prompt, leave the PR a draft instead, with each decision and your recommendation under `## Waiting`.
+When you cannot prompt, leave the PR a draft instead, with each decision under `## Waiting` as a choice list, your recommendation marked.

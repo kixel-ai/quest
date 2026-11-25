@@ -377,7 +377,10 @@ export function itemParts(item: ListItem): Part[] {
 			child.type === "list"
 				? {
 						line: line(child),
-						bullets: child.children.map((bullet) => ({ line: line(bullet), text: collapse(rendered(bullet)) })),
+						bullets: child.children.map((bullet) => ({
+							line: line(bullet),
+							text: collapse(rendered(bullet)),
+						})),
 					}
 				: collapse(rendered(child)),
 		)

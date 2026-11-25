@@ -80,7 +80,9 @@ function handBackItems(body: string): HandBackItem[] {
 					line: body.slice(0, start).split("\n").length,
 					party: MAINTAINER,
 					kind: "prose",
-					text: collapse(nodes.map(rendered).join(" ")) || "the draft hands back without saying what it waits on",
+					text:
+						collapse(nodes.map(rendered).join(" ")) ||
+						"the draft hands back without saying what it waits on",
 				},
 				problems: [],
 			});

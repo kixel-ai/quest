@@ -25,6 +25,6 @@ Where several harnesses' loaded sets or a large body of evidence are in scope, s
 
 Cut, consolidate, and rewrite in the run's PR, as `quest guide prompting` describes.
 Add a rule only where cutting or merging others cannot fix a finding; that replaces the running steps' `AGENTS.md` proposal for this audit.
-List each edit under the PR's `## Waiting` as its own `Maintainer:` item, to keep or revert with a recommendation, so the maintainer drops one without rejecting the rest; the PR lands only on those answers, and the reverts they ask for make a new head that gets a new review.
+List each edit under the PR's `## Waiting` as its own `Maintainer:` decision, with keep and revert as its choices and your recommendation marked, so the maintainer drops one without rejecting the rest; the PR lands only on those answers, and the reverts they ask for make a new head that gets a new review.
 Landing on those answers is the user's agreement `quest context` asks for before a rule changes, so the run makes these edits without asking first.
 Record as the next stub's baseline the date and commit this run read through, the hosts whose messages it read with how many unnamed directories `quest messages` dropped entries of on each, each harness's loaded size as measured, the date each guidance page was read, and each rule kept against the evidence with why, so the next run reads what changed since.

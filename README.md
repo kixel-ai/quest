@@ -246,16 +246,31 @@ second name in one `## Audit`, and `## Skipped audits` outside the root.
 ## Find what waits on you
 
 A quest waiting outside the tree says so in a `## Waiting` section, one item
-per condition, each opening with who acts: `Maintainer:` for a decision or
-action only the maintainer can take, `Maintainer (PC):` for one they can take
-only at one of their computers, such as a local login or a hardware check, or
-the outside party, such as `moq-dev/moq:`. `quest check` rejects an item that
-names nobody, and a maintainer qualifier other than `(PC)`.
+per condition, each opening with who acts and saying what kind of answer it
+needs:
+
+- `Maintainer:` with a nested choice list, one bullet marked `(Recommended)`,
+  is a **decision**; each bullet is a choice, `label` or `label - description`.
+- `Maintainer (action):` is an **action**, a step only the maintainer can take,
+  and `Maintainer (PC):` one they can take only at one of their computers, such
+  as a local login or a hardware check.
+- Every other item, the outside party's such as `moq-dev/moq:` and a
+  `Maintainer:` item without a choice list, is **prose**.
+
+`quest check` rejects an item that names nobody, a maintainer qualifier other
+than `(action)` or `(PC)`, and a malformed choice list: one outside a plain
+`Maintainer:` item, with fewer than two choices, without exactly one
+`(Recommended)` ending a label, with an empty or repeated label, or a second
+one in the same item. Only that marker makes a nested list a choice list, so
+checklists and detail lists stay prose.
 
 ```markdown
 ## Waiting
 
-- Maintainer: open a Hetzner account; `GET /server` on the Robot API answers 200
+- Maintainer: which runner builds the Windows suite? GitHub-hosted runners bill per minute, and a self-hosted one needs a machine.
+  - GitHub-hosted (Recommended) - no machine to keep up
+  - Self-hosted - free minutes, but a Windows host to maintain
+- Maintainer (action): open a Hetzner account; `GET /server` on the Robot API answers 200
 - Maintainer (PC): plug in the capture card; `v4l2-ctl --list-devices` lists it
 - moq-dev/moq: a release carries the VA-API bindings
 ```
@@ -267,11 +282,14 @@ body.
 milestone and the same downstream impact `quest unblocked` counts; a draft
 ranks as the quest its branch carries. Each line gives the dependents, whether
 the quest is otherwise ready or still blocked, its path or the draft's URL, and
-the item; `--maintainer` keeps only the maintainer's, `--no-pc` drops the
-`Maintainer (PC):` ones for a session away from your computers, and `--json`
-prints `{path, pr, dependents, ready, waits}` objects, each wait's `pc` marking
-those. A draft's item that names no
-party is the maintainer's. Drafts come from
+the item with a decision's choices; `--maintainer` keeps only the
+maintainer's, `--no-pc` drops the `Maintainer (PC):` ones for a session away
+from your computers, and `--json` prints `{path, pr, dependents, ready, waits}`
+objects. Each wait is `{line, party, kind, text}`: a decision adds `choices:
+[{label, description, recommended}]` and leaves its choice list out of `text`,
+and an action adds `pc`. A draft's item that names no party is the
+maintainer's, and since `quest check` never reads PR bodies, a draft's
+malformed choice list reads as prose with a warning. Drafts come from
 the upstream's open PRs, found as for `unblocked --unclaimed`; without the
 remote, off GitHub, or when GitHub cannot be read, it lists the tree's items
 and warns that drafts were skipped. `/quest-run` walks you through them.

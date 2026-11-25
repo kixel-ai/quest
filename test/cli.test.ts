@@ -75,7 +75,13 @@ test("waiting lists the maintainer's items first, one per line, and says drafts 
 					],
 				},
 				{ line: expect.any(Number), party: "Maintainer", kind: "action", pc: true, text: "log in." },
-				{ line: expect.any(Number), party: "Maintainer", kind: "action", pc: false, text: "approve the install." },
+				{
+					line: expect.any(Number),
+					party: "Maintainer",
+					kind: "action",
+					pc: false,
+					text: "approve the install.",
+				},
 			],
 		},
 	]);
