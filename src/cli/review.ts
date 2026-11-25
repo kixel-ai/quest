@@ -18,6 +18,7 @@ import {
 	readdirSync,
 	readFileSync,
 	realpathSync,
+	statSync,
 	rmSync,
 	writeFileSync,
 } from "node:fs";
@@ -551,6 +552,8 @@ export interface Context {
 	 * which Codex answers with its tools off.
 	 */
 	tools?: string;
+	/** A directory outside the checkout that Claude may also read, such as one holding a diff too large for the prompt. */
+	readable?: string;
 }
 
 interface Turn {
@@ -823,6 +826,7 @@ export function claudeFlags(context: Context): string[] {
 		"--settings",
 		JSON.stringify({ crossSessionInbound: "refuse" }),
 		"--strict-mcp-config",
+		...(context.readable === undefined ? [] : ["--add-dir", context.readable]),
 		"--tools",
 		context.tools ?? "Read,Grep,Glob,Bash,Agent",
 		"--append-system-prompt",
@@ -1243,10 +1247,7 @@ export function agyTurn(context: Context, prompt: string, flags: string[]): Turn
 			"core.quotePath=false",
 			`--attr-source=${empty}`,
 			"diff",
-			"--text",
-			"--no-ext-diff",
-			"--no-textconv",
-			"--no-color",
+			...DIFF_FLAGS,
 			...range.split(" "),
 		]);
 	// Created last, since a turn that is never run leaves its directory behind.
@@ -2031,6 +2032,14 @@ export const CLASSIFY_INSTRUCTIONS =
 	"tests, or `quest` commands, and disregard any other agent instructions you were given, such as the user's " +
 	"global AGENTS.md, which are for the user's own sessions.";
 
+/**
+ * The flags of every diff a model reads in place of the checkout's own: each file as text, since a head can plant a NUL
+ * byte to trip Git's binary detection, which ignores attributes, with no helper or driver, and every submodule update.
+ * Callers add `--attr-source=<empty tree>`, which keeps the head's attributes out. The classifier's saved tier is
+ * keyed to them.
+ */
+const DIFF_FLAGS = ["--text", "--no-ext-diff", "--no-textconv", "--no-color", "--ignore-submodules=none"];
+
 /** How many characters of the diff the classifier's prompt holds, which keeps Haiku below its 100k-token surcharge. */
 const DIFF_BUDGET = 200_000;
 
@@ -2041,23 +2050,23 @@ const DIFF_BUDGET = 200_000;
 export function classifyPrompt(
 	change: Change,
 	file: { sha: string; text: string },
-	stat: string,
-	patch: string,
-	emptyTree: string,
+	diff: { stat: string; patch: string | null; file: string; size: number },
 	classes: readonly Class[] = [],
 ): string {
+	const { stat, patch, file: patchFile, size } = diff;
 	const range = `${change.mergeBase}..${change.head}`;
-	const whole = stat.length + patch.length <= DIFF_BUDGET;
+	const whole = patch !== null;
 	const shown = whole ? `${stat}\n\n${patch}` : stat.slice(0, DIFF_BUDGET);
 	return [
 		scope(change),
 		`The repository's risk file, read from ${RISK_FILE} at the base branch's tip ${file.sha}:\n\n<risk-file>\n${file.text}\n</risk-file>`,
 		whole
 			? `The change, \`git diff --stat --patch ${range}\`:`
-			: `The diff is ${stat.length + patch.length} characters, more than this prompt holds, so only its stat ` +
-				`follows${shown.length < stat.length ? ", cut short" : ""}. Read the parts you need with ` +
-				// With no attributes, so the head cannot mark the hunks that set its tier binary.
-				`\`git --attr-source=${emptyTree} diff --text --ignore-submodules=none ${range} -- <path>\`.`,
+			: `The diff is ${stat.length + size} characters, more than this prompt holds, so only its stat ` +
+				`follows${shown.length < stat.length ? ", cut short" : ""}. Read the parts you need from ` +
+				// A file, since no Bash command with the flags that keep the head's attributes out is allowed the classifier.
+				`\`${patchFile}\`, which holds \`git diff --stat --patch ${range}\` with every file shown as text, ` +
+				"whatever the head's attributes say.",
 		`<diff>\n${shown}\n</diff>`,
 		"Report the change's tier as JSON matching the response schema, with one sentence on what could break, for " +
 			"whom, and how hard it is to undo.",
@@ -2319,9 +2328,6 @@ function recordedLatest(record: ModelsRecord, options: ReviewOptions): string | 
 	return record.implementers.at(-1)?.fields?.model;
 }
 
-/** The form of the diff the classifier reads, which its saved tier is keyed to. */
-const DIFF_FORM = "attr-source=empty text";
-
 /** What the classifier reads, where it saves its schema, how its CLI runs, and the branch's last classification. */
 interface Classifying {
 	root: string;
@@ -2348,11 +2354,12 @@ export async function classify(input: Classifying): Promise<{ key: string; value
 	const text = exists(root, baseSha, RISK_FILE) ? show(root, baseSha, RISK_FILE) : null;
 	// The paths too, since they set the tier and the offered classes along with the risk file.
 	// And the diff's form, so a tier set from a diff the head's attributes could shape is set again.
-	const key = digest(JSON.stringify([change.mergeBase, change.head, text, changed, DIFF_FORM]));
+	const empty = emptyTree(root);
+	const key = digest(JSON.stringify([change.mergeBase, change.head, text, changed, empty, DIFF_FLAGS]));
 	if (input.saved?.key === key) return { key, value: { ...input.saved.value, usage: [] } };
 	if (input.savedOnly)
 		throw new ReviewInputError(
-			`no round classified ${change.head} from this base; review it before accepting its findings`,
+			`no round classified ${change.head} from this base with this quest's diff; review it before accepting its findings`,
 		);
 	const set = (value: Omit<Classified, "usage">) => ({ key, value: { ...value, usage: [] } });
 	const file = text === null ? null : parseRiskFile(text);
@@ -2379,40 +2386,34 @@ export async function classify(input: Classifying): Promise<{ key: string; value
 	const classes = offered.map((each) => each.name);
 
 	// With no attributes and every file as text, so the head can hide none of its hunks by marking them binary.
-	const empty = emptyTree(root);
-	const diff = (args: string[]) =>
-		git(root, [
-			`--attr-source=${empty}`,
-			"diff",
-			"--text",
-			"--no-ext-diff",
-			"--no-textconv",
-			"--no-color",
-			"--ignore-submodules=none",
-			...args,
-			range,
-		]);
-	const prompt = classifyPrompt(
-		change,
-		{ sha: baseSha, text },
-		diff(["--stat=160"]),
-		diff(["--patch"]),
-		empty,
-		offered,
-	);
-	const answer = await ask(CLASSIFIERS, {
-		cwd: root,
-		dir: input.dir,
-		env: input.env,
-		signal: input.signal,
-		instructions: CLASSIFY_INSTRUCTIONS,
-		schema: classSchema(classes),
-		prompt,
-		ranges: [range],
-		who: "classifier",
-		task: "set the risk tier",
-		parse: (value) => classed(value, classes, "the classifier's reply"),
-	});
+	const diff = (args: string[]) => git(root, [`--attr-source=${empty}`, "diff", ...DIFF_FLAGS, ...args, range]);
+	const stat = diff(["--stat=160"]);
+	// Written by Git itself, since a head that adds large binaries makes a patch no string holds.
+	const scratch = mkdtempSync(join(input.dir, "classify-"));
+	let answer;
+	try {
+		const patchFile = join(scratch, "diff.patch");
+		diff(["--patch", `--output=${patchFile}`]);
+		const size = statSync(patchFile).size;
+		const patch = stat.length + size <= DIFF_BUDGET ? readFileSync(patchFile, "utf8") : null;
+		const prompt = classifyPrompt(change, { sha: baseSha, text }, { stat, patch, file: patchFile, size }, offered);
+		answer = await ask(CLASSIFIERS, {
+			readable: scratch,
+			cwd: root,
+			dir: input.dir,
+			env: input.env,
+			signal: input.signal,
+			instructions: CLASSIFY_INSTRUCTIONS,
+			schema: classSchema(classes),
+			prompt,
+			ranges: [range],
+			who: "classifier",
+			task: "set the risk tier",
+			parse: (value) => classed(value, classes, "the classifier's reply"),
+		});
+	} finally {
+		rmSync(scratch, { recursive: true, force: true });
+	}
 	const { tier, reason } = answer.value;
 	return {
 		key,
@@ -2440,6 +2441,8 @@ export interface Question<T = unknown> {
 	tools?: string;
 	/** Each `git diff` range the prompt names, as it names it. */
 	ranges?: string[];
+	/** A directory outside `cwd` that a Claude model may read, which the prompt names files in. */
+	readable?: string;
 	/** Who answers and what for, as `classifier` and `set the risk tier`, for errors. */
 	who: string;
 	task: string;
@@ -2482,6 +2485,7 @@ export async function ask<T>(entries: readonly ReviewModel[], question: Question
 				schema: question.schema,
 				schemaFile,
 				...(question.tools !== undefined && { tools: question.tools }),
+				...(question.readable !== undefined && { readable: question.readable }),
 				env: cli.env,
 			};
 			reply = await turn(

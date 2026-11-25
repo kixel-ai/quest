@@ -1978,15 +1978,21 @@ fakes(
 		expect(call!.stdin).toContain("-export const x = 1;\n+export const x = 3;");
 		expect(call!.stdin).toContain("+export const y = 1;\0");
 		expect(call!.stdin).not.toContain("Binary files");
-		// Past the budget, the prompt holds the stat and names the attribute-free command to read the rest with.
+		// Past the budget, the prompt holds the stat and names a file of the attribute-free diff, which the turn may read.
 		write(s.repo, "src/big.ts", `${"export const z = 1;\n".repeat(11_000)}`);
 		git(s.repo, "add", ".");
 		git(s.repo, "commit", "-qm", "grow past the budget");
 		expect((await quest("--root", s.repo, "review")).code).toBe(0);
 		const big = classifying(s.calls()).at(-1)!;
-		const empty = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
-		expect(big.stdin).toContain(`\`git --attr-source=${empty} diff --text --ignore-submodules=none `);
 		expect(big.stdin).not.toContain("<diff>\n\n+");
+		const dir = big.argv[big.argv.indexOf("--add-dir") + 1]!;
+		const [name, patch] = Object.entries(big.readable!)[0]!;
+		expect(big.stdin).toContain(`\`${join(dir, name)}\`, which holds`);
+		expect(patch).toContain("+export const x = 3;");
+		expect(patch).toContain("+export const y = 1;\0");
+		expect(patch).toContain("+export const z = 1;");
+		// The scratch directory is gone once the classifier has answered.
+		expect(existsSync(dir)).toBe(false);
 	},
 	20_000,
 );

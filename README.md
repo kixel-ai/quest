@@ -1518,7 +1518,10 @@ whole branch at the PR's size.
 
 `quest review` has a model no weaker than the latest writer review the checkout's
 committed and pushed branch before it is marked ready for review, at an effort set by the PR's
-size. Each size has two reviewers, the same for every repository:
+size. It needs Git 2.41 or later, whose `--attr-source` keeps a head's
+`.gitattributes` from hiding its hunks from the reviewers, and is a usage error
+before it; `--accept` runs no diff and is exempt. Each size has two reviewers,
+the same for every repository:
 
 | PR size | Reviewer | When Sol is out, and a high head's second |
 |---|---|---|
@@ -1876,9 +1879,9 @@ logged out, have their login rejected, or hit their usage limit. When none can
 run, the review fails on the limit that resets first if every one whose CLI is
 installed hit its own, and otherwise as a usage error naming why each failed. Its diff ignores the head's
 `.gitattributes` and treats every file as text, so a head cannot hide hunks by
-marking them binary, which needs Git 2.41 or later for `--attr-source`: older,
-`quest review` is a usage error naming it. A diff past 200,000 characters gives
-it only the stat, and it reads the parts it needs with that same command. The tier is kept with the reviewers'
+marking them binary. A diff past 200,000 characters gives it only the
+stat and a file of the whole diff in a scratch directory, which Claude Code is
+let read and which is removed once it answers. The tier is kept with the reviewers'
 sessions, so a later round on the same head and base `RISK.md` reuses it, and
 `--new` classifies again. The record names it after the base:
 
