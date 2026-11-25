@@ -26,9 +26,8 @@ Run it in this session, where its interview can ask the user; under a coordinato
 A PR that adds follow-ups also needs the pick round's answers recorded before queueing, as the guide's Creation section describes: ask about each follow-up that round has not asked, in a question of its own, then run `/quest-iterate` with the answers unless the head already records them.
 
 A review counts for the head its `## Review` record names: a local `quest review` round.
-Read `quest status <pr>`'s `review-record` line rather than comparing diffs yourself: `current` or `diff-identical` (the head's diff from the base is unchanged since the reviewed head) counts.
-Otherwise, the changes since the reviewed head need no new review only when they are conflict-free merges from the base branch, a reviewer's suggested patch applied unchanged, a land fixer's recorded mechanical fix, pushed by its bot, that changes no behavior, or the pick round's answers recorded in the PR's follow-ups.
-A record `quest status` warns was classified against another `RISK.md` than the base's tip covers no later head, even through conflict-free merges: it needs a new `quest review`, which classifies the head under the current rules.
+Read `quest status <pr>`'s `review-record` line rather than comparing diffs yourself: `current` or `diff-identical` (the head's diff from the base is unchanged since the reviewed head) counts, unless `quest status` warns that the record covers the head no longer because the base's `RISK.md` changed since it was classified: it then counts for no head, the one it names included, until a new `quest review`.
+Otherwise, with no such warning, the changes since the reviewed head need no new review only when they are conflict-free merges from the base branch, a reviewer's suggested patch applied unchanged, a land fixer's recorded mechanical fix, pushed by its bot, that changes no behavior, or the pick round's answers recorded in the PR's follow-ups.
 `quest status` counts a record only through the passing `quest review` commit status a maintainer's round set on the head it names, so a contributor's head needs a maintainer's local review; the repository's review policy may require more.
 An online reviewer's approval never stands in for that record.
 A low head's record counts without a local reviewer; a later head's rise in tier ends the pick: tell the user.
