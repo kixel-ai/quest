@@ -65,7 +65,7 @@ Guidance:
 - Each seat is a reviewer `quest review` already runs, so a seat that
   cannot run passes to another vendor on the round's rung. Recommended:
   when the drawn rung has too few vendors that can run, such as when
-  Gemini is out or the rung's only Claude model wrote the head, fill the
+  Gemini is out, fill the
   missing seats from the size's rung, then each rung outward from it in
   turn. The round is an outage once a seat its tier needs finds no
   distinct vendor on any rung, which includes every vendor being out.

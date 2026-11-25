@@ -414,11 +414,11 @@ type BaseOptions = { base?: string; fetched?: false } | { base: string; fetched:
 export type ReviewOptions = BaseOptions & {
 	/** The checkout to review. */
 	root: string;
-	/** The reviewer; defaults to the first of its list whose model is neither the latest writer's nor weaker than it. */
+	/** The reviewer; defaults to the first of its list whose model is not weaker than the latest writer's. */
 	harness?: ReviewHarness;
 	model?: string;
 	effort?: string;
-	/** The models never to pick, with every model weaker than them; without any, the latest writer's is avoided. */
+	/** The models never to pick, with every model weaker than them; without any, those weaker than the latest writer's. */
 	exclude?: string[];
 	/** The PR's size, instead of its quest's or the default. */
 	size?: Size;
@@ -448,7 +448,7 @@ export interface ReviewDependencies {
 	env: NodeJS.ProcessEnv;
 	/**
 	 * The `## Models` record of the open PR from `branch` into `base`, or null when it has none; without
-	 * it, as in the runner, only the options and the running harness pick the reviewer.
+	 * it, as in the runner, only the options pick the reviewer.
 	 */
 	models?: (root: string, base: string, branch: string) => Promise<PullModels | null>;
 }

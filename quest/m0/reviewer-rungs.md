@@ -68,8 +68,7 @@ and [for eval](https://github.com/kixel-ai/quest/pull/831#issuecomment-711801176
   and the draw no longer excludes it (rejected: keep excluding only the
   writer's model; run the second reviewer once at lower effort; drop Fable
   from the reviewer lists). Excluding Opus seated Fable xhigh as the second
-  reviewer of every high head Opus wrote. Main already allows it, with
-  Fable never above high and no shadow, until rungs land.
+  reviewer of every high head Opus wrote.
 - Measure rungs how? ✅ From real PRs' stats in `quest usage`, with no
   `quest eval` run (rejected: score each rung change with `quest eval
   run`). The maintainer: "we don't want to waste tokens on throw-away
@@ -120,9 +119,10 @@ Recommendations, the implementer's to revisit:
   from. Today's handover, where a new pick's first session settles the open
   findings of the reviewer it replaces, already holds the settling half;
   extend it to every round.
-- Delete the shadow end to end: its seat, its state and record fields,
-  `quest usage`'s shadow rows and accuracy exclusion, the README, and the
-  quests that read it, such as the model check's chart.
+- The shadow no longer runs, and saved state holding one is refused. Delete
+  what still reads it: the record parser's `, shadow` mark, `quest usage`'s
+  shadow rows and accuracy exclusion, the README, and the quests that read
+  it, such as the model check's chart.
 - Seat the initial rungs from public benchmarks and list prices, and
   retune them only from `quest usage`'s per-model tallies on real PRs.
 - [kixel-ai/quest#838](https://github.com/kixel-ai/quest/pull/838)'s Gemini

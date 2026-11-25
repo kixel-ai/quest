@@ -1457,8 +1457,8 @@ as the agent.
 
 `quest` ranks the harnesses, models, and efforts that write work of each size,
 the same for every repository unless its `AGENTS.md` names others. Only
-Claude Code writes, so every review crosses vendor or model, and a quest whose
-writers are all at their usage limit waits for one:
+Claude Code writes, and a quest whose writers are all at their usage limit
+waits for one:
 
 | Size | Writer | Fallback |
 |---|---|---|
@@ -1524,7 +1524,7 @@ size. Each size ranks its reviewers, the same for every repository:
 
 | PR size | Reviewer | When the reviewer is weaker than its writer | Then, while those are out |
 |---|---|---|---|
-| XS | Codex `gpt-6.2-sol` medium | Claude Code `claude-opus-5-5` low | Codex `gpt-6.2-astra` medium, then Claude Code `claude-fable-5-2` medium |
+| XS | Codex `gpt-6.2-sol` medium | Claude Code `claude-opus-5-5` medium | Codex `gpt-6.2-astra` medium, then Claude Code `claude-fable-5-2` medium |
 | S | Codex `gpt-6.2-sol` medium | Claude Code `claude-opus-5-5` medium | Codex `gpt-6.2-astra` medium, then Claude Code `claude-fable-5-2` medium |
 | M, or none | Codex `gpt-6.2-sol` high | Claude Code `claude-opus-5-5` high | Codex `gpt-6.2-astra` high, then Claude Code `claude-fable-5-2` high |
 | L | Codex `gpt-6.2-sol` xhigh | Claude Code `claude-opus-5-5` high | Codex `gpt-6.2-astra` xhigh, then Claude Code `claude-fable-5-2` high |
@@ -1543,7 +1543,7 @@ saves none.
 
 A reviewer that cannot run passes the round to the next eligible one, so
 Opus reviews what Opus changed last while Sol is out, at no lower effort than
-its writer, and Fable while all of Codex is out. That is a failure the CLI or provider reports before any finding is
+its writer, and Fable only once Opus is out too. That is a failure the CLI or provider reports before any finding is
 saved, never text in the diff or a reply: a CLI that is not installed, logged
 out, or has its login rejected, or sent to a gateway with no credential,
 passes over every model of that CLI, and a
@@ -1609,7 +1609,7 @@ A logged-out error names the profile the CLI checked, `CLAUDE_CONFIG_DIR` or
 quest review                                  # round 1 against origin's default branch
 quest review --responses .tmp/responses.md    # round 2: the new head, with fixes and refutations
 quest review --base origin/release --new      # a new session against another base
-quest review --size S --exclude-model gpt-6.2-sol  # an S PR that Sol wrote, with no record in its body
+quest review --size S --exclude-model claude-fable-5-2  # an S PR, with no record in its body, that no model weaker than Fable may review
 quest review --branch quest/m1/foo --responses .tmp/responses.md  # a detached checkout of that branch's head
 ```
 
