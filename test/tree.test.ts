@@ -873,6 +873,12 @@ describe("parked", () => {
 			.rejects("quest/m0/epic/one.md:10: '## Parked' holds one item");
 	});
 
+	test("a blank item is rejected", () => {
+		tree()
+			.append("quest/m0/epic/one.md", "\n## Parked\n\n-\n")
+			.rejects("quest/m0/epic/one.md:9: '## Parked' item must say why and when to resume");
+	});
+
 	test("an empty section is rejected and parks nothing", () => {
 		const t = tree().append("quest/m0/epic/one.md", "\n## Parked\n");
 		t.rejects("'## Parked' is empty");

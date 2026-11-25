@@ -220,14 +220,17 @@ function headings(found: Finding[], docs: Doc[], doc: Doc) {
 		if (message !== null) found.push({ path: doc.path, line: entry.line, message });
 	});
 
-	// One reason to resume is what a reader weighs; a second only splits it.
-	for (const entry of entries(doc, PARKED).slice(1)) {
-		found.push({
-			path: doc.path,
-			line: entry.line,
-			message: `'## ${PARKED}' holds one item, saying why and when to resume; merge the others into it`,
-		});
-	}
+	// A blank item would park the work with no reason; one reason to resume is
+	// what a reader weighs, and a second only splits it.
+	entries(doc, PARKED).forEach((entry, index) => {
+		const message =
+			entry.text === ""
+				? `'## ${PARKED}' item must say why and when to resume`
+				: index > 0
+					? `'## ${PARKED}' holds one item, saying why and when to resume; merge the others into it`
+					: null;
+		if (message !== null) found.push({ path: doc.path, line: entry.line, message });
+	});
 
 	// `quest init` plants a stub for every audit no quest names, so a typo
 	// would plant a second run of the audit it meant.
