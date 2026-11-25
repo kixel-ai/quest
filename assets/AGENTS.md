@@ -54,6 +54,10 @@ Current decisions, open questions, or implementation guidance.
 - Maintainer (action): a step only they can take, and how to check it is done
 - moq-dev/moq: a condition another party must meet, and how to check or advance it
 
+## Parked
+
+- until the mesh ships - why the work is set aside and when to resume it
+
 ## Scheduled
 
 - 2027-01-15 - the first day the work may start, such as when a filing window opens
@@ -90,6 +94,10 @@ A decision is a `Maintainer:` item whose nested list gives each option as `label
 Open a step only the maintainer can take with `Maintainer (action):`, or `Maintainer (PC):` when it needs one of their computers, such as a password-manager unlock, a hardware check, or a local login, so a session away from them skips it.
 Write each item to be answered alone, never pointing at text above or elsewhere, since a client may show only the item.
 Remove an item once its condition clears, and the heading with its last item.
+
+`Parked` holds one item saying why the work is set aside, its plans kept, and when to resume it.
+It blocks the quest, and an epic's or milestone's blocks every quest under it; `quest waiting` lists none of their items, since nobody acts on them until the work resumes.
+Unlike a date it never clears on its own: unpark by deleting the section.
 
 `Scheduled` holds one date, `YYYY-MM-DD` on the local calendar, optionally followed by ` - why`.
 The quest is blocked until that day, and an epic's or milestone's date blocks every quest under it.

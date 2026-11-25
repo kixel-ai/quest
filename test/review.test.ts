@@ -966,7 +966,7 @@ fakes.each(["codex", "claude"] as const)(
 			expect(first.argv[first.argv.indexOf("--effort") + 1]).toBe("high");
 		}
 		// The review turn names the range itself, and the report turn only shapes its result.
-		expect(first.stdin).toContain(`\`git diff ${mergeBase}..${head}\``);
+		expect(first.stdin).toContain(`\`${mergeBase}..${head}\``);
 		expect(second.stdin).toContain("Read no files and run no commands");
 		// Only the change's own directories bring their instructions.
 		for (const call of [first, second]) expect(JSON.stringify(call.argv)).not.toContain("BASE-DOCS rule");
@@ -1010,7 +1010,7 @@ fakes("codex reviews read-only with the base's instructions, then reports in the
 	// The base has not moved, so its tip is the merge base, which the review turn's prompt names with the rules.
 	expect(first.argv.slice(0, 3)).toEqual(["exec", "review", "--json"]);
 	expect(first.argv.at(-1)).toBe("-");
-	expect(first.stdin).toContain(`\`git diff ${base}..${head}\``);
+	expect(first.stdin).toContain(`\`${base}..${head}\``);
 	expect(first.stdin).toContain("BASE-REVIEW rule");
 	expect(first.stdin).toContain("Rate each finding high");
 	expect(second.argv.slice(0, 3)).toEqual(["exec", "resume", "--json"]);
@@ -1064,7 +1064,7 @@ fakes("--base reviews against another branch, fetched first, with that branch's 
 	expect(result.code).toBe(0);
 	expect(result.stdout).toContain(`base ${base} origin/release\n`);
 	const [first] = at(s.calls(), "high");
-	expect(first.stdin).toContain(`\`git diff ${base}..`);
+	expect(first.stdin).toContain(`\`${base}..`);
 	const instructions = first.argv.find((arg) => arg.startsWith("developer_instructions="))!;
 	expect(instructions).toContain("RELEASE-ROOT rule");
 	expect(instructions).not.toContain("BASE-ROOT rule");
@@ -1119,13 +1119,13 @@ test("review refuses max effort", async () => {
 });
 
 test("reviewPrompt always includes shared review rules and layers repo REVIEW.md after them", () => {
-	const change = { base: "origin/main", mergeBase: "aaa", head: "bbb" };
-	const withoutRepo = reviewPrompt(change, null);
+	const change = { base: "origin/main", mergeBase: "aaa", head: "bbb", empty: "eee" };
+	const withoutRepo = reviewPrompt(change, "/d/change.patch", null);
 	expect(withoutRepo).toContain("<shared-review-rules>");
 	expect(withoutRepo).toContain("# Shared review rules");
 	expect(withoutRepo).not.toContain("<review-rules>");
 
-	const withRepo = reviewPrompt(change, { sha: "ccc", text: "Repo-only invariant." });
+	const withRepo = reviewPrompt(change, "/d/change.patch", { sha: "ccc", text: "Repo-only invariant." });
 	expect(withRepo).toContain("<shared-review-rules>");
 	expect(withRepo).toContain("<review-rules>\nRepo-only invariant.\n</review-rules>");
 	expect(withRepo.indexOf("<shared-review-rules>")).toBeLessThan(withRepo.indexOf("<review-rules>"));
@@ -1231,7 +1231,7 @@ fakes("a later round resumes the session with the new head and the author's resp
 	expect(resumed.stdin).not.toContain("BASE-REVIEW rule");
 	expect(resumed.stdin).not.toContain("differ from those you were given");
 	const head = git(s.repo, "rev-parse", "HEAD");
-	expect(resumed.stdin).toContain(`\`git diff ${git(s.repo, "rev-parse", "origin/main")}..${head}\``);
+	expect(resumed.stdin).toContain(`\`${git(s.repo, "rev-parse", "origin/main")}..${head}\``);
 	expect(calls.filter((c) => c.argv[1] === "review")).toHaveLength(1);
 });
 
@@ -1811,6 +1811,62 @@ fakes("a submodule update the local git config hides still counts as a changed p
 	);
 });
 
+fakes(
+	"the diffs reviewers are told to run show every change, whatever the config and the head's attributes hide",
+	async () => {
+		const s = setup();
+		vi.stubEnv("FAKE_REPLY", JSON.stringify({ score: 10, rationale: "Lands as is.", findings: [] }));
+		// The local config hides gitlinks and runs a helper that prints nothing, and the head marks its source binary.
+		git(s.repo, "config", "diff.ignoreSubmodules", "all");
+		git(s.repo, "config", "diff.external", "true");
+		const hide = (value: string, message: string) => {
+			write(s.repo, "src/lib.ts", `export const x = ${value};\n`);
+			write(s.repo, ".gitattributes", "src/lib.ts -diff\n");
+			git(s.repo, "add", ".");
+			git(
+				s.repo,
+				"update-index",
+				"--add",
+				"--cacheinfo",
+				`160000,${git(s.repo, "rev-parse", "HEAD")},vendor/lib`,
+			);
+			git(s.repo, "commit", "-qm", message);
+		};
+		// The patches the reviewer may read, which the fake Claude Code records from its `--add-dir`.
+		const read = (call: Call, name: string) => {
+			const dir = call.argv[call.argv.indexOf("--add-dir") + 1]!;
+			expect(call.stdin).toContain(`\`${join(dir, name)}\``);
+			return call.readable![name]!;
+		};
+		hide("3", "hide the change");
+		expect(git(s.repo, "diff", "origin/main", "HEAD")).toBe("");
+		expect((await quest("--root", s.repo, "review", "--harness", "claude")).code).toBe(0);
+		const first = at(s.calls(), "high")[0]!;
+		expect(first.stdin).toContain("never a plain `git diff`");
+		const whole = read(first, "change.patch");
+		expect(whole).toContain("-export const x = 1;\n+export const x = 3;");
+		expect(whole).toContain("+Subproject commit");
+		// Gone once the round is done.
+		expect(existsSync(first.argv[first.argv.indexOf("--add-dir") + 1]!)).toBe(false);
+
+		const previous = git(s.repo, "rev-parse", "HEAD");
+		hide("4", "hide another change");
+		write(s.repo, ".tmp/responses.md", "None.\n");
+		const responses = join(s.repo, ".tmp/responses.md");
+		const later = await quest("--root", s.repo, "review", "--harness", "claude", "--responses", responses);
+		expect(later.code, later.stderr).toBe(0);
+		const resumed = at(s.calls(), "high").at(-1)!;
+		expect(resumed.stdin).toContain(`your last review covered ${previous}`);
+		// The same directory as the first round's, so the resumed turn's flags match.
+		expect(resumed.argv).toEqual(
+			expect.arrayContaining(["--add-dir", first.argv[first.argv.indexOf("--add-dir") + 1]!]),
+		);
+		expect(read(resumed, "since.patch")).toContain("-export const x = 3;\n+export const x = 4;");
+		expect(read(resumed, "change.patch")).toContain("+export const x = 4;");
+	},
+	20_000,
+);
+
 fakes("without a logged-in Claude Code, Codex classifies", async () => {
 	const s = setup();
 	moveBase(s.repo, (dir) => write(dir, "RISK.md", riskFile([])));
@@ -2304,7 +2360,7 @@ fakes("a later round checks only what changed since the reviewed head, and the o
 	const prompt = at(s.calls(), "high").at(-1)!.stdin;
 	const head = git(s.repo, "rev-parse", "HEAD");
 	expect(prompt).toContain(`Check only what changed since ${previous} and the findings below`);
-	expect(prompt).toContain(`\`git diff ${previous} ${head}\``);
+	expect(prompt).toContain(`holds the diff from ${previous} to ${head}`);
 	expect(prompt).toContain("1. high src/lib.ts:2 Off by one");
 });
 

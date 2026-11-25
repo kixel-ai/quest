@@ -180,6 +180,25 @@ refuses it. On an epic or milestone README, the date holds back every quest
 under it. A past date no longer blocks. `quest check` rejects anything but one
 real `YYYY-MM-DD` date.
 
+## Park work
+
+Work set aside with nothing scheduled, its plans kept, says so in a `## Parked`
+section holding one item that says why and when to resume:
+
+```markdown
+## Parked
+
+- until the mesh ships - kept for the fleet demo
+```
+
+On a quest, epic, or milestone README, it blocks the document and every quest
+under it: `quest unblocked` leaves them out, `quest unblocked <path>` names the
+parking, `quest start` refuses them, and `quest waiting` lists none of their
+`## Waiting` items, though a draft PR handed back for one is still listed.
+Unlike a date, parking never clears on its own; delete the section to unpark.
+`quest check` rejects a second item, one opening with a link (a quest the work
+waits on goes under `## Required`), and parking the root README.
+
 ## Run recurring audits
 
 Quest ships a pack of audits every repository runs once per milestone:
@@ -1565,7 +1584,8 @@ whole branch at the PR's size.
 `quest review` has a model no weaker than the latest writer review the checkout's
 committed and pushed branch before it is marked ready for review, at an effort set by the PR's
 size. It needs Git 2.41 or later, whose `--attr-source` keeps a head's
-`.gitattributes` from hiding its hunks from the risk classifier, and is a usage error
+`.gitattributes` from hiding its hunks from the risk classifier and the diffs it writes for
+reviewers, and is a usage error
 before it; `--accept` runs no diff and is exempt. Each size has two reviewers,
 the same for every repository:
 
@@ -1667,7 +1687,9 @@ with the base's tip, so a branch behind its base draws no findings on code the
 base gained since, which a diff against its tip shows as reverted.
 The first round explores the change once. It runs the reviewer's own review,
 `codex exec review` with custom instructions or Claude Code's `/code-review
-<effort> <merge-base>...HEAD` with text after the target, given the range, Quest's shared
+<effort> <merge-base>...HEAD` with text after the target, given the range and a file
+of its diff, written with flags that keep the checkout's config and the head's
+`.gitmodules` and `.gitattributes` from hiding a change, Quest's shared
 review rules (`assets/REVIEW.md`), the base's `REVIEW.md`, if any (which adds to
 them and takes precedence), and any earlier findings and responses up front. It
 also asks the reviewer to name each contract the change alters and search past
