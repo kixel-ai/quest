@@ -29,6 +29,8 @@ interface Item {
 /** An item read as written: an outside party's condition, or a maintainer's item without a marked choice list. */
 export interface Prose extends Item {
 	kind: "prose";
+	/** Set on a `Maintainer (PC):` item read as prose for its malformed choice list, so `--no-pc` still skips it. */
+	pc?: true;
 }
 
 /** The maintainer's choice among the options its choice list gives. */
@@ -198,9 +200,9 @@ function read(entry: Pick<Entry, "line" | "parts">, draft: boolean): ReadWait {
 	// Only a marker makes a nested list a choice list, so checklists and detail lists stay prose.
 	const marked = markedLists(entry.parts, plain);
 	if (marked.length === 0) return { wait: fallback, problems: [] };
-	// A choice list under a qualified or outside party is misplaced, not a question: the item keeps its kind,
-	// so a `Maintainer (PC):` step stays one `--no-pc` drops.
-	if (!plain) return { wait: fallback, problems: misplaced(marked) };
+	// A choice list under a qualified party is an unsettled question too, so it reads as prose, keeping a
+	// `(PC)` qualifier for `--no-pc` to drop.
+	if (!plain) return { wait: qualifier === "pc" ? { ...broken, pc: true } : broken, problems: misplaced(marked) };
 	const [list, ...extra] = marked;
 	const { choices, problems } = choicesOf(list);
 	for (const other of extra)

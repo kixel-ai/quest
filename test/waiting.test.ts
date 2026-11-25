@@ -238,10 +238,10 @@ test("check rejects a malformed choice list by line", () => {
 	]);
 });
 
-test("a draft's malformed choice list reads as prose, or keeps an action's kind, with its problem by line", () => {
+test("a draft's malformed choice list reads as prose, keeping a (PC) qualifier, with its problem by line", () => {
 	const action = "## Waiting\n\n- Maintainer (PC): which camera?\n  - Front (Recommended)\n  - Back\n";
 	expect(handBackWaits(action)).toEqual([
-		{ line: 3, party: "Maintainer", kind: "action", pc: true, text: "which camera? Front (Recommended) Back" },
+		{ line: 3, party: "Maintainer", kind: "prose", pc: true, text: "which camera? Front (Recommended) Back" },
 	]);
 	// So a session away from the maintainer's computers still skips it.
 	const draft = { url: "https://github.com/o/r/pull/1", branch: "fix", body: action };

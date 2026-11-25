@@ -114,7 +114,7 @@ export interface WaitingOptions {
 	drafts?: Draft[];
 	/** Keep only the maintainer's items. */
 	maintainer?: boolean;
-	/** `false` drops `Maintainer (PC):` actions, for a session away from the maintainer's computers. */
+	/** `false` drops `Maintainer (PC):` items, for a session away from the maintainer's computers. */
 	pc?: boolean;
 }
 
@@ -128,7 +128,7 @@ export interface WaitingOptions {
  */
 export function waiting(docs: Doc[], today: string, options: WaitingOptions = {}): WaitingQuest[] {
 	const { drafts = [], maintainer: only = false, pc = true } = options;
-	const kept = (wait: Wait) => (!only || onMaintainer(wait)) && (pc || wait.kind !== "action" || !wait.pc);
+	const kept = (wait: Wait) => (!only || onMaintainer(wait)) && (pc || wait.kind === "decision" || !wait.pc);
 	const rank = ranking(docs);
 	const startable = new Set(ready(docs, today));
 	const maintainer = (quest: WaitingQuest) => (quest.waits.some(onMaintainer) ? 0 : 1);
