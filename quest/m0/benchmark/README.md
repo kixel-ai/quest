@@ -135,7 +135,7 @@ Per axis, on #819, #832, #849, #850, #871, and #887:
 
 ## Scheduled
 
-- 2026-12-01 - the first day a PR whose every session reached Kixel Quest, such as #850, is a week past its merge
+- 2026-12-02 - the first day, in any timezone, that a PR whose every session reached Kixel Quest, such as #850 (merged 2026-11-24 03:02 UTC), is a full week past its merge
 
 ## Related
 
