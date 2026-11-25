@@ -11,7 +11,7 @@ Look for:
 - Lint suppressions: each still needed and saying why. Drop one at a time and rerun its linter on every platform and target the code builds for, not only the one CI lints, since a suppression for another platform looks stale on yours.
 - Deprecated calls: APIs deprecated at the oldest toolchain or runtime the repository supports.
 
-Split the reading by area across parallel sub-agents, then verify each claim before acting: a duplicate can be a test seam or a deliberate split, and an unused flag can be a tuning knob or an old spelling kept to fail with migration guidance.
+Where the code is too large for one reader, split the reading by area across parallel sub-agents; verify each claim before acting: a duplicate can be a test seam or a deliberate split, and an unused flag can be a tuning knob or an old spelling kept to fail with migration guidance.
 
 Delete dead private code and land simplifications in the run's PR.
 Removing or reshaping a public API or a user-visible flag, route, or field, and narrowing a feature, are the maintainer's decisions: each is a follow-up with a recommendation and how users migrate.

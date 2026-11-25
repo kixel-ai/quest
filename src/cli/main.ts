@@ -106,7 +106,7 @@ import {
 	targets,
 } from "./hooks";
 import { CHECKED_CONTEXT, USER_ASKED, questRoot } from "./rules";
-import { messageLines, messages } from "./messages";
+import { checkoutRepository, messageLines, messages } from "./messages";
 import { logWait, pullWaitKind, readWaits } from "./waits";
 import { readCalls } from "./calls";
 import { SEND_INTERVAL, background, parseInstant, reportIncident, runSender } from "./send";
@@ -1606,21 +1606,43 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"Claude Code marks as a human's; other Codex sessions, from $CODEX_HOME (or ~/.codex), count the " +
 				"content Codex marks as the user's (before 0.162, which marks none, the parts but its environment, shell commands, and " +
 				"AGENTS.md instructions), outside headless and sub-agent sessions. The repository is the " +
-				"checkout's GitHub origin, else the directory. Output goes to stdout only, except a note on stderr " +
+				"checkout's configured origin, as owner/name on GitHub or <host>/owner/name on Kixel Quest, else the directory; a removed worktree under a checkout's .worktrees/ " +
+				"or .claude/worktrees/ is named by that checkout, and one T3 Code removed by its project. A Codex session takes the origin " +
+				"Codex recorded unless that is the directory's configured origin or the URL git fetches it from, after insteadOf rewrites, and any other session keeps its directory. It prints only the repository of the checkout it runs in, " +
+				"comparing names without case: it reads every repository's sessions as --all does, which prints them all, " +
+				"and drops the other repositories' entries. Output goes to stdout only, except notes on stderr " +
 				"naming each Claude Code session whose malformed lines, such as a partial record a crashed write left, " +
-				"were skipped and how many; nothing is stored or posted. Each answer a person gave an agent's blocking question (Claude Code's AskUserQuestion, " +
+				"were skipped and how many, and counting the other repositories whose entries a scoped read dropped, and how many of them are directories no origin names; nothing is stored or posted. Each answer a person gave an agent's blocking question (Claude Code's AskUserQuestion, " +
 				"Codex's request_user_input) prints too, from the harness's own log in every session, T3 Code's " +
 				"included, with the skill the session last ran, the question, the options the agent marked " +
 				"(Recommended), and the ones picked or the words typed instead. --json prints a JSON array of " +
 				'{kind: "message", time, harness, repository, session, text} and {kind: "answer", time, harness, ' +
 				"repository, session, skill, header, question, options, recommended, picked}.\n\n" +
-				"Exits 0 when done, 2 for invalid arguments, and 1 for other failures, such as a log or T3 Code " +
-				"record in a shape quest does not know.",
+				"Exits 0 when done, 2 for invalid arguments or, without --all, a checkout whose origin is on neither forge, " +
+				"and 1 for other failures, such as a log or T3 Code record in any repository in a shape quest does not know.",
 		)
 		.option("--since <date>", "First local date to print, as YYYY-MM-DD (default: 7 days ago)", date)
+		.option("--all", "Print every repository's, not only this checkout's")
 		.option("--json", "Print a JSON array")
-		.action((options: { since?: string; json?: boolean }) => {
-			const found = messages(options.since ?? daysBefore(new Date(), 7), {
+		.action((options: { since?: string; all?: boolean; json?: boolean }) => {
+			let repository: string | null = null;
+			if (!options.all) {
+				const dir = resolve(root());
+				try {
+					repository = checkoutRepository(dir, process.env);
+				} catch (error) {
+					// A root under a regular file, ENOTDIR, names no directory either.
+					const code = (error as NodeJS.ErrnoException).code;
+					if (code === "ENOENT" || code === "ENOTDIR") throw new UsageError(`${dir} is not a directory`);
+					throw error;
+				}
+				if (repository === null)
+					throw new UsageError(
+						"this checkout's origin names no repository on GitHub or Kixel Quest; pass --all for every repository's",
+					);
+			}
+			const query = { since: options.since ?? daysBefore(new Date(), 7), repository };
+			const found = messages(query, {
 				env: process.env,
 				home: homedir(),
 				warn,
@@ -2081,7 +2103,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		.command("audit")
 		.summary("Print a shipped audit's definition, or list the audits with no name")
 		.description(
-			"Print a shipped audit's definition, or list the audits with no name.\n\n" +
+			"Print a shipped audit's definition, or list the audits with no name, each with the title its stub takes, size included.\n\n" +
 				"A quest whose ## Audit section names an audit runs it, and the pinned binary decides what the audit checks. " +
 				"It prints what to look for and what each finding becomes, then how the run plans the next one. " +
 				"`quest init` plants a stub for each audit no quest names, unless the root quest/README.md lists it under " +
@@ -2090,7 +2112,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		.argument("[name]", "Audit to print")
 		.action((name: string | undefined) => {
 			if (name === undefined) {
-				for (const a of AUDITS) print(`${a.name} - ${a.title.replace(/^\[\w+\] /, "")}`);
+				for (const a of AUDITS) print(`${a.name} - ${a.title}`);
 				return;
 			}
 			const text = audit(name);

@@ -116,13 +116,15 @@ export type RemoteHost =
  * `insteadOf` rewrites make, so a rewrite to the other forge's mirror never moves its writes there; null for neither.
  */
 export function remoteHost(remote: Remote, kixel: ((url: string) => Repository | null) | null): RemoteHost | null {
-	const at = (url: string): RemoteHost | null => {
-		const hosted = kixel?.(url) ?? null;
-		if (hosted !== null) return { forge: "kixel", repository: hosted };
-		const repository = githubRepository(url);
-		return repository === null ? null : { forge: "github", url, repository };
-	};
-	return at(remote.configured.fetch) ?? at(remote.used().fetch);
+	return urlHost(remote.configured.fetch, kixel) ?? urlHost(remote.used().fetch, kixel);
+}
+
+/** The forge and repository one URL names, Kixel Quest's as `kixel` reads it, or null for neither. */
+export function urlHost(url: string, kixel: ((url: string) => Repository | null) | null): RemoteHost | null {
+	const hosted = kixel?.(url) ?? null;
+	if (hosted !== null) return { forge: "kixel", repository: hosted };
+	const repository = githubRepository(url);
+	return repository === null ? null : { forge: "github", url, repository };
 }
 
 /**

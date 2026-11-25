@@ -186,12 +186,13 @@ Quest ships a pack of audits every repository runs once per milestone:
 
 ```console
 $ quest audit
-tree - Audit the quest tree
-deps - Audit dependencies
-code - Audit the code
-cost - Audit build and CI cost
-docs - Audit the docs
-tests - Audit test coverage
+tree - [M] Audit the quest tree
+deps - [M] Audit dependencies
+code - [L] Audit the code
+cost - [L] Audit build and CI cost
+docs - [M] Audit the docs
+tests - [M] Audit test coverage
+instructions - [XL] Audit agent instructions
 ```
 
 `tree` finds quests that disagree, conflict, sit in the wrong milestone, or
@@ -199,8 +200,10 @@ plan stale work; `deps` reviews new releases, upstream health, held-back
 majors, and dependencies worth dropping; `code` deletes dead code, simplifies
 overbuilt code, and prunes stale lint suppressions; `cost` weighs each CI job,
 gate step, test, build second, and artifact byte against what it earns; `docs`
-checks claims, examples, links, and exports against the code; and `tests`
-finds untested behavior and tests CI never runs. `quest audit <name>` prints
+checks claims, examples, links, and exports against the code; `tests`
+finds untested behavior and tests CI never runs; and `instructions` cuts,
+consolidates, and rewrites the files agents load against each harness's and
+model's official guidance and how agents followed them. `quest audit <name>` prints
 what one checks, what each finding becomes, and how its run plans the next
 one.
 
@@ -227,7 +230,7 @@ Run the `deps` audit: `quest audit deps` prints what it checks, what each findin
 after the lowest one with work left, requiring it, and creates that milestone
 when missing; with no work left, the stubs are ready at once. It never edits a
 stub afterwards. The run's PR deletes the stub and creates the next one a
-milestone later, scheduled a week out, so improving a definition reaches every
+milestone later, titled and sized as `quest audit` lists it, scheduled a week out, so improving a definition reaches every
 repository on its next run. To opt out, list the audit in the root
 `quest/README.md`:
 
@@ -2262,7 +2265,12 @@ session's next stop labels the steps still unlabeled.
 
 `quest messages` prints the messages a person typed to agents on this host
 since `--since` (a local `YYYY-MM-DD`, by default 7 days ago), oldest first,
-for a periodic audit of what agents keep getting wrong:
+for a periodic audit of what agents keep getting wrong. It reads every
+repository's sessions and prints only the entries of the checkout it runs in;
+`--all` prints every repository's. Outside a checkout whose origin is on GitHub
+or Kixel Quest it exits 2 and asks for `--all`. It notes on stderr how many
+other repositories it dropped entries of, and how many of those are directories
+no origin names, since they may hold this repository's sessions:
 
 ```console
 $ quest messages --since 2026-11-10
@@ -2270,8 +2278,14 @@ $ quest messages --since 2026-11-10
   quest-run
 ```
 
-Each message shows its time, harness, repository (the checkout's GitHub
-`origin`, else its directory), and session, then its text. It also prints each
+Each message shows its time, harness, repository (the checkout's `origin` on
+GitHub as `owner/name`, or on Kixel Quest as `<host>/owner/name`, compared
+without case, else its
+directory; a removed worktree under a checkout's `.worktrees/` or
+`.claude/worktrees/` takes that checkout's, one T3 Code removed takes its
+project's; a Codex session takes the origin Codex recorded unless that is
+the directory's configured origin or the URL git fetches it from, after
+`insteadOf` rewrites, and any other keeps its directory), and session, then its text. It also prints each
 answer a person gave an agent's blocking question, such as Claude Code's
 `AskUserQuestion` or Codex's `request_user_input`, marked `answer` with the
 skill the session last ran, then the question, the options the agent marked
@@ -2288,8 +2302,9 @@ and nowhere else. Other Claude Code sessions count the turns Claude Code marks
 as a human's, with its reminders dropped and a slash command spelled as typed;
 other Codex sessions count the content Codex marks as the user's (before 0.162,
 which marks none, the parts but its environment, shell commands, and AGENTS.md instructions),
-outside headless (`codex exec`) and sub-agent sessions. A log or record in a shape it
-does not know fails the command rather than being skipped. Output goes to
+outside headless (`codex exec`) and sub-agent sessions. A log or record in a
+shape it does not know, in any repository, fails the command rather than being
+skipped. Output goes to
 stdout only; nothing is stored or posted.
 
 ## Headless agents
