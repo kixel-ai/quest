@@ -1,5 +1,14 @@
 import { execFileSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+	chmodSync,
+	existsSync,
+	mkdirSync,
+	readdirSync,
+	readFileSync,
+	rmSync,
+	symlinkSync,
+	writeFileSync,
+} from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { afterEach, expect, test, vi } from "vitest";
 
@@ -1483,7 +1492,7 @@ fakes("each round rewrites the Review section of the branch's open PR, keeping t
 			"--json",
 		);
 		expect(second.code).toBe(0);
-		expect(JSON.parse(second.stdout).record).toEqual({ url: "https://github.com/acme/widget/pull/7" });
+		expect(JSON.parse(second.stdout).record).toEqual({ url: "https://github.com/acme/widget/pull/7", number: 7 });
 		const record = pull.body.split("## Review\r\n\n")[1]!.split("\n\n## Models")[0];
 		expect(record).toContain(`- Head: ${git(s.repo, "rev-parse", "HEAD").slice(0, 12)},`);
 		expect(record).toContain("- Session: `thread-1`, round 2\n");
@@ -2018,6 +2027,47 @@ fakes("a second reviewer with open findings settles them on a head below high, e
 	expect(named.code, named.stderr).toBe(0);
 	expect(named.stdout).toContain("\nreviewer codex gpt-6.2-sol xhigh\n");
 	expect(seconds(named.stdout)).toEqual(["reviewer claude claude-opus-5-5 high second"]);
+});
+
+fakes("each session a round starts is queued with the PR its record went to, or none", async () => {
+	const s = setup();
+	moveBase(s.repo, (dir) => write(dir, "RISK.md", riskFile([])));
+	write(s.repo, "AGENTS.md", `HEAD-ROOT rule\n${REFERENCE_LINE}\n`);
+	git(s.repo, "commit", "-qam", "use Quest");
+	const pulls: { number: number; body: string | null }[] = [];
+	onGitHub(s.repo, pulls);
+	const state = tempDir();
+	const config = tempDir();
+	vi.stubEnv("XDG_STATE_HOME", state);
+	vi.stubEnv("XDG_CONFIG_HOME", config);
+	vi.stubEnv("QUEST_KIXEL_URL", "https://kixel.example");
+	vi.stubEnv("QUEST_FORGE", "github");
+	mkdirSync(join(config, "quest"));
+	writeFileSync(join(config, "quest", "records.json"), JSON.stringify({ "https://kixel.example": "secret" }));
+	mkdirSync(join(state, "quest", "records"), { recursive: true });
+	writeFileSync(join(state, "quest", "records", "sender.pid"), String(process.pid));
+	const pending = join(state, "quest", "records", "pending");
+	const queued = () =>
+		new Set(
+			readdirSync(pending).map(
+				(name) =>
+					(JSON.parse(readFileSync(join(pending, name), "utf8")) as { reviewed: { pull: number | null } })
+						.reviewed.pull,
+			),
+		);
+	vi.stubEnv("FAKE_REPLY", JSON.stringify({ score: 10, rationale: "Lands as is.", findings: [] }));
+	try {
+		expect((await quest("--root", s.repo, "review")).code).toBe(0);
+		expect(queued()).toEqual(new Set([null]));
+		rmSync(pending, { recursive: true });
+		pulls.push({ number: 8, body: null });
+		write(s.repo, "src/lib.ts", "export const x = 3;\n");
+		git(s.repo, "commit", "-qam", "another constant");
+		expect((await quest("--root", s.repo, "review", "--new")).code).toBe(0);
+		expect(queued()).toEqual(new Set([8]));
+	} finally {
+		vi.unstubAllGlobals();
+	}
 });
 
 fakes(

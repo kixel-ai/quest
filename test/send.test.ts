@@ -232,18 +232,21 @@ test("the sender posts each queued session with its sub-agents, from its transcr
 	expect(pending(env)).toEqual([]);
 });
 
-test("a session `quest review` queued is sent on the PR it reviewed, as the role it played", async () => {
+test("a session `quest review` queued is sent on the PR it recorded on, as the role it played", async () => {
 	const env = home();
 	const root = checkout();
 	const start = Date.parse("2026-11-06T10:00:00Z");
-	const reviewed = (session: string, branch: string, role: "classifying" | "reviewing") =>
-		queue({ harness: "claude", session, cwd: root, start, branch, role }, env);
-	reviewed("rev", "quest/m0/a", "reviewing");
+	const reviewed = (session: string, pull: number | null, branch: string, role: "classifying" | "reviewing") =>
+		queue({ harness: "claude", session, cwd: root, start, pull, branch, role }, env);
+	// A round that recorded on no PR, as one whose PR had not opened, pins its branch alone.
+	reviewed("rev", null, "quest/m0/a", "reviewing");
 	queue({ ...stopped(root), session: "impl" }, env);
 	// A fork's PR heads a repository other than the checkout's origin.
-	reviewed("cls", "fix/y", "classifying");
+	reviewed("cls", 8, "fix/y", "classifying");
 	// Reviewed before its PR opens.
-	reviewed("early", "feature/z", "reviewing");
+	reviewed("early", null, "feature/z", "reviewing");
+	// Its round skipped the only PR on its branch, a stranger fork's whose head the checkout lacks.
+	reviewed("skipped", null, "patch-1", "reviewing");
 	// The runner's review checkout names its own branch, and a detached one names none. A sub-agent anywhere in the
 	// same checkout follows its parent onto the fork's PR.
 	const sessions = [
@@ -255,6 +258,7 @@ test("a session `quest review` queued is sent on the PR it reviewed, as the role
 		// One whose checkout's own branch heads another PR, as under `quest review --branch`, still follows the review.
 		session("aside", "quest/m0/a", { parent: "cls", cwd: root }),
 		session("early", "kix-review/2"),
+		session("skipped", "kix-review/3"),
 		// An implementer's sub-agent in another checkout keeps out of the fork's PR.
 		session("impl", "fix/y", { repositories: ["ann/proj"], cwd: "/fork" }),
 		session("away", "x", { branches: [], parent: "impl", cwd: "/up" }),
@@ -265,7 +269,11 @@ test("a session `quest review` queued is sent on the PR it reviewed, as the role
 		head: { ref: "fix/y", repo: { full_name: "ann/proj" } },
 		body: "## Review\n\n- Classified: medium by Claude Code, session `rev`\n",
 	};
-	const { deps, uploads } = sender(env, 200, sessions, () => {}, [fork]);
+	const stranger = {
+		...opened(9, "patch-1", "2026-11-06T11:30:00Z"),
+		head: { ref: "patch-1", repo: { full_name: "eve/proj" } },
+	};
+	const { deps, uploads } = sender(env, 200, sessions, () => {}, [fork, stranger]);
 	await sendPass(deps);
 	// No PR body names the classifier, as for one whose reply was unusable.
 	expect(parseUpload(uploads[0]!.body).records.map((r) => [r.session, r.pulls, r.role, r.branch])).toEqual([
@@ -276,11 +284,12 @@ test("a session `quest review` queued is sent on the PR it reviewed, as the role
 		["deeper", [8], "classifying", "fix/y"],
 		["aside", [8], "classifying", "fix/y"],
 		["early", [], "reviewing", "feature/z"],
+		["skipped", [], "reviewing", "patch-1"],
 		["impl", [8], "implementing", "fix/y"],
 		["away", [], "implementing", null],
 	]);
-	// It waits for a PR on the branch it reviewed, not its checkout's.
-	expect(remembered(env)).toEqual(["early"]);
+	// Each waits for a PR on the branch it reviewed, not its checkout's.
+	expect(remembered(env)).toEqual(["early", "skipped"]);
 });
 
 test("a session that recorded a transferred repository's former name is sent on the PR its branch heads now", async () => {

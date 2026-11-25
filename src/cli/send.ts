@@ -54,8 +54,8 @@ export interface Pending {
 	origin: string;
 	prefix: string;
 	/**
-	 * For a session `quest review` started, the PR branch it reviewed and the role it played there, which the sender
-	 * takes over what it infers from the session's checkout and the PR's `## Review` record.
+	 * For a session `quest review` started, the PR it recorded on, the branch it reviewed, and the role it played
+	 * there, which the sender takes over what it infers from the session's checkout and the PR's `## Review` record.
 	 */
 	reviewed?: Reviewed;
 	/**
@@ -106,7 +106,7 @@ function transcriptStart(path: string): number | null {
 
 /**
  * A session to queue: a stop hook's input, as Claude Code and Codex send it, which names its transcript, or a session
- * `quest review` started, which knows its own first instant, epoch ms, and the branch and role it reviewed in.
+ * `quest review` started, which knows its own first instant, epoch ms, and the PR, branch, and role it reviewed in.
  */
 export type Stopped = { harness: string; session: string; cwd: string } & (
 	{ transcript: string } | ({ start: number } & Reviewed)
@@ -153,7 +153,7 @@ export function queue(stopped: Stopped, env: NodeJS.ProcessEnv = process.env): Q
 	let reviewed: Reviewed | undefined;
 	if ("start" in stopped) {
 		start = stopped.start;
-		reviewed = { branch: stopped.branch, role: stopped.role };
+		reviewed = { pull: stopped.pull, branch: stopped.branch, role: stopped.role };
 	} else {
 		const first = transcriptStart(stopped.transcript);
 		if (first === null) throw new Error(`${stopped.transcript} records no instant, so its session cannot be read`);
@@ -472,7 +472,12 @@ async function sendTo(
 			const pins: Pins = new Map(
 				group.flatMap((q) =>
 					q.pending.reviewed
-						? [[`${q.pending.harness}\0${q.pending.session}`, q.pending.reviewed] as const]
+						? [
+								[
+									`${q.pending.harness}\0${q.pending.session}`,
+									{ ...q.pending.reviewed, origin: q.pending.origin },
+								] as const,
+							]
 						: [],
 				),
 			);
@@ -867,10 +872,7 @@ async function resendsDue(
 			const waiting = await Promise.all(
 				kept.waiting.map(async (reached) => ({
 					...reached,
-					repositories:
-						reached.repositories === null
-							? null
-							: [...new Set(await Promise.all(reached.repositories.map(current)))],
+					repositories: [...new Set(await Promise.all(reached.repositories.map(current)))],
 				})),
 			);
 			if (waiting.some(heads)) due.resend.push(kept.pending);
@@ -891,8 +893,8 @@ function readRemembered(path: string): Remembered | null {
 				(each) =>
 					typeof each?.name === "string" &&
 					typeof each.first === "number" &&
-					(each.repositories === null ||
-						(Array.isArray(each.repositories) && each.repositories.every((r) => typeof r === "string"))),
+					Array.isArray(each.repositories) &&
+					each.repositories.every((r) => typeof r === "string"),
 			)
 			? (value as Remembered)
 			: null;

@@ -2199,9 +2199,11 @@ No hook runs in a reviewer, so `quest review` queues each Claude Code and Codex 
 the same way, its classifier's and each reviewer's, once the round's record names them, so reviewer spend reaches Kixel Quest
 beside the writer's. A round that reuses its sessions runs no turn and queues nothing; one that resumes a
 session queues it again, and its record replaces the earlier copy. A failure to queue is said on stderr and never fails the round.
-Each carries the branch the round reviewed and its role, classifier or reviewer, which the sender takes over what it
-infers, so a session from the runner's review checkout or a detached one is sent on that branch's PR, a fork's included,
-as is a sub-agent it starts anywhere in that checkout, and a classifier whose reply was unusable is still counted as one.
+Each carries the PR the round recorded on, the branch it reviewed, and its role, classifier or reviewer, which the
+sender takes over what it infers, so a session from the runner's review checkout or a detached one is sent on that PR, a
+fork's included, as is a sub-agent it starts anywhere in that checkout, and a classifier whose reply was unusable is still
+counted as one. A round that recorded on no PR is sent on a PR its branch heads in the checkout's own repository, never
+on a stranger fork's of the same name.
 
 Kixel Quest refuses a whole upload naming a repository it does not index or
 the sender cannot read, so the sender asks `GET /forge` which repositories it

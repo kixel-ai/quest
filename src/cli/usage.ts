@@ -681,14 +681,11 @@ function byBranch(pulls: Pull[]): Map<string, Pull[]> {
 	return branches;
 }
 
-/**
- * A branch a session reached at `first`, epoch ms, in one of `repositories`, or in any head repository of the base's
- * PRs when null, as matching it to a PR needs.
- */
+/** A branch a session reached at `first`, epoch ms, in one of `repositories`, as matching it to a PR needs. */
 export interface Reached {
 	name: string;
 	first: number;
-	repositories: string[] | null;
+	repositories: string[];
 }
 
 /**
@@ -701,7 +698,7 @@ function headed(branches: Map<string, Pull[]>, reached: Reached): Pull | null {
 		(each) =>
 			(each.closed === null || each.closed >= reached.first) &&
 			each.repository !== null &&
-			(reached.repositories === null || reached.repositories.includes(each.repository)),
+			reached.repositories.includes(each.repository),
 	);
 	if (new Set(open.map((each) => each.repository)).size > 1) return null;
 	return open[0] ?? null;
@@ -713,32 +710,38 @@ export function heading(pulls: Pull[]): (reached: Reached) => boolean {
 	return (reached) => headed(branches, reached) !== null;
 }
 
-/** The PR branch and role `quest review` gave a session it started. */
+/** The PR `quest review` recorded a session it started on, by number, or null when it recorded on none; its branch; and its role. */
 export interface Reviewed {
+	pull: number | null;
 	branch: string;
 	role: "classifying" | "reviewing";
 }
 
-/** The sessions `quest review` started, by `harness\0id`. */
-export type Pins = Map<string, Reviewed>;
+/** The sessions `quest review` started, by `harness\0id`, with the repository of the checkout that queued each. */
+export type Pins = Map<string, Reviewed & { origin: string }>;
+
+const pinOf = (session: Session, pins: Pins | undefined) =>
+	session.id === null ? undefined : pins?.get(`${session.harness}\0${session.id}`);
 
 /**
- * The branches a session reached, latest first, as matching it to a PR tries them: its pinned branch, the PR branch
- * `quest review` named, so in any head repository, a fork's included; then each its transcript named, which count
- * only where its repository is known, since another repository may use the same branch name.
+ * The branches a session reached, latest first, as matching it to a PR tries them: for a review that recorded on no
+ * PR, its pinned branch in its checkout's repository, so a PR opening on it later counts but a stranger fork's of the
+ * same name, which the review skipped, does not; then each its transcript named, which count only where its
+ * repository is known, since another repository may use the same branch name.
  */
 function reaches(session: Session, known: string[] | null, pins: Pins | undefined): Reached[] {
-	const pin = session.id === null ? undefined : pins?.get(`${session.harness}\0${session.id}`);
-	const pinned: Reached[] = pin ? [{ name: pin.branch, first: session.start, repositories: null }] : [];
+	const pin = pinOf(session, pins);
+	const pinned: Reached[] =
+		pin && pin.pull === null ? [{ name: pin.branch, first: session.start, repositories: [pin.origin] }] : [];
 	if (known === null) return pinned;
 	const seen = [...session.branches].sort((a, b) => b.last - a.last);
 	return [...pinned, ...seen.map((b) => ({ name: b.name, first: b.first, repositories: known }))];
 }
 
 /**
- * The PR each session's own branch heads: the one {@link headed} finds for the first branch {@link reaches} gives
- * that heads one. `evidence` holds every exported copy, folded ones included, since a dropped copy may be the only one
- * naming its directory's repository.
+ * The PR each session's own branch heads: for a review, the PR it recorded on; else the one {@link headed} finds for
+ * the first branch {@link reaches} gives that heads one. `evidence` holds every exported copy, folded ones included,
+ * since a dropped copy may be the only one naming its directory's repository.
  */
 function attribute(
 	sessions: Session[],
@@ -749,7 +752,13 @@ function attribute(
 	const branches = byBranch(pulls);
 	const own = new Map<Session, Pull>();
 	const owned = owners(evidence);
-	for (const session of sessions)
+	for (const session of sessions) {
+		const number = pinOf(session, pins)?.pull ?? null;
+		const recorded = number === null ? undefined : pulls.find((each) => each.number === number);
+		if (recorded) {
+			own.set(session, recorded);
+			continue;
+		}
 		for (const reached of reaches(session, owned(session), pins)) {
 			const found = headed(branches, reached);
 			if (found) {
@@ -757,19 +766,21 @@ function attribute(
 				break;
 			}
 		}
+	}
 	return { own, known: owned };
 }
 
 /**
  * Each of `sessions` whose latest branch, its pinned one first, heads no PR among `pulls`, by the rule
- * {@link attribute} uses, with that branch, so a PR that opens on it later can be noticed. A session whose repository
- * is unknown and that has no pin, or that named no branch, has none to wait for.
+ * {@link attribute} uses, with that branch, so a PR that opens on it later can be noticed. A review that recorded on a
+ * PR, a session whose repository is unknown and that has no pin, or one that named no branch has none to wait for.
  */
 export function unheaded(sessions: Session[], evidence: Session[], pulls: Pull[], pins?: Pins): Map<Session, Reached> {
 	const branches = byBranch(pulls);
 	const owned = owners(evidence);
 	const waiting = new Map<Session, Reached>();
 	for (const session of sessions) {
+		if ((pinOf(session, pins)?.pull ?? null) !== null) continue;
 		const reached = reaches(session, owned(session), pins)[0];
 		if (reached !== undefined && headed(branches, reached) === null) waiting.set(session, reached);
 	}
