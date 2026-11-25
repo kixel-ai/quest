@@ -2344,7 +2344,8 @@ export async function classify(input: Classifying): Promise<{ key: string; value
 	const { root, baseSha, change, changed } = input;
 	// One lookup for the blob and its text, read here rather than saved, so the record names the file a reused tier
 	// was set against.
-	const riskFile = git(root, ["ls-tree", "--object-only", baseSha, "--", RISK_FILE]) || null;
+	// Plain `ls-tree` output, `<mode> <type> <object>\t<path>`, since Git before 2.36 has no `--object-only`.
+	const riskFile = git(root, ["ls-tree", baseSha, "--", RISK_FILE]).split(/\s/)[2] ?? null;
 	const text = riskFile === null ? null : git(root, ["cat-file", "blob", riskFile]);
 	// The paths too, since they set the tier and the offered classes along with the risk file.
 	const key = digest(JSON.stringify([change.mergeBase, change.head, text, changed]));
