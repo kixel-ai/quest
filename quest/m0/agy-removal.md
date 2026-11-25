@@ -25,11 +25,11 @@ authorizes the edits this needs in `assets/AGENTS.md` and `assets/audits/`.
   and help text.
 - The README's Antigravity sections, `just review-sandbox -t agy`, and agy's
   cases in `test/` and `test/live/review-sandbox.test.ts`.
-- [Classifier attributes](/quest/m0/classifier-attributes.md) and
-  [review hidden diff](/quest/m0/review-hidden-diff.md) name agy's diffs; drop
-  those parts from whichever of them is still in the tree.
-  [kixel-ai/quest#885](https://github.com/kixel-ai/quest/pull/885) implements
-  both, so land after it or merge its changes.
+- [Review hidden diff](/quest/m0/review-hidden-diff.md) names agy's diffs; drop
+  those parts. [kixel-ai/quest#885](https://github.com/kixel-ai/quest/pull/885)
+  fixes the classifier's attributes for Claude and Codex only, so agy's
+  classifier turn reads no scratch file for a diff past the prompt; land after
+  it or merge its changes.
 
 A records or review-record field agy used goes away with no migration, as
 AGENTS.md allows while nothing is in production.

@@ -92,7 +92,10 @@ const fs = require("node:fs");${LOG}
 const argv = process.argv.slice(2);
 const stdin = fs.readFileSync(0, "utf8");
 const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => /^(CLAUDE|CODEX|ANTHROPIC|FAKE_HOST|PATH$)/.test(k)));
-logged({ argv, stdin, env, cwd: process.cwd() });
+// The directory --add-dir lets it read, as it stood.
+const extra = argv.includes("--add-dir") ? argv[argv.indexOf("--add-dir") + 1] : undefined;
+const readable = extra && Object.fromEntries(fs.readdirSync(extra).map((name) => [name, fs.readFileSync(require("node:path").join(extra, name), "utf8")]));
+logged({ argv, stdin, env, cwd: process.cwd(), readable });
 // FAKE_FAILS limits the FAKE_* failures to the harnesses and models it lists.
 const model = argv.includes("--model") ? argv[argv.indexOf("--model") + 1] : argv.includes("-m") ? argv[argv.indexOf("-m") + 1] : undefined;
 const only = process.env.FAKE_FAILS?.split(",");
@@ -349,6 +352,8 @@ export interface Call {
 	cwd: string;
 	/** The files of an Antigravity turn's directory, beside and in its working directory, as it ran. */
 	workspace?: Record<string, string> | null;
+	/** The files of the directory a Claude Code turn was let read beside the checkout, as they stood. */
+	readable?: Record<string, string> | undefined;
 }
 
 /** Credentials and routes the running session may hold, cleared so each test sets its own. */

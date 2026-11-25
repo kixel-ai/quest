@@ -1413,7 +1413,7 @@ agyFakes("agy is refused where a directory leading to its workspace matches name
 	expect(s.calls().filter((call) => call.argv[0] !== "models")).toEqual([]);
 });
 
-agyFakes("agy is refused with a Git older than 2.41, which has no --attr-source", async () => {
+fakes("a review is a usage error with a Git older than 2.41, which has no --attr-source", async () => {
 	const s = setup("CLAUDECODE");
 	const real = execFileSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).trim();
 	write(
@@ -1422,11 +1422,11 @@ agyFakes("agy is refused with a Git older than 2.41, which has no --attr-source"
 		`#!/bin/sh\nif [ "$1" = version ]; then echo "git version 2.40.1"; exit 0; fi\nexec "${real}" "$@"\n`,
 	);
 	chmodSync(join(s.bin, "git"), 0o755);
-	const result = await quest("--root", s.repo, "review", ...AGY);
-	expect(result.code, result.stderr).toBe(3);
-	expect(result.stderr).toContain("agy needs Git 2.41 or later");
+	const result = await quest("--root", s.repo, "review");
+	expect(result.code, result.stderr).toBe(2);
+	expect(result.stderr).toContain("quest review needs Git 2.41 or later");
 	expect(result.stderr).toContain("git version 2.40.1 is installed");
-	expect(s.calls().filter((call) => call.argv[0] !== "models")).toEqual([]);
+	expect(s.calls()).toEqual([]);
 });
 
 agyFakes("agy's status check failing other than on its login fails as it is, rather than as logged out", async () => {
@@ -1993,6 +1993,60 @@ fakes(
 			"R100\tsrc/lib.ts\tdocs/lib.md",
 		);
 		expect((await offered()).names).toEqual(["any", null]);
+	},
+	20_000,
+);
+
+fakes(
+	"the classifier sees every hunk, whatever the head's attributes and bytes say",
+	async () => {
+		const s = setup();
+		moveBase(s.repo, (dir) => write(dir, "RISK.md", riskFile([])));
+		vi.stubEnv("FAKE_RISK", JSON.stringify({ tier: "medium", reason: "It changes the output." }));
+		vi.stubEnv("FAKE_REPLY", JSON.stringify({ score: 10, rationale: "Lands as is.", findings: [] }));
+		// A head that marks its source binary.
+		write(s.repo, "src/lib.ts", "export const x = 3;\n");
+		write(s.repo, ".gitattributes", "src/lib.ts -diff\n");
+		git(s.repo, "add", ".");
+		git(s.repo, "commit", "-qm", "hide the hunks");
+		const first = await quest("--root", s.repo, "review");
+		expect(first.code, first.stderr).toBe(0);
+		const [call] = classifying(s.calls());
+		expect(call!.stdin).toContain("-export const x = 1;\n+export const x = 3;");
+		expect(call!.stdin).not.toContain("Binary files");
+		// Bytes that are not UTF-8, before any NUL byte is in the diff, would decode to far more characters, so they go down the file path too.
+		writeFileSync(join(s.repo, "src/bin.ts"), Buffer.alloc(150_000, 0xff));
+		git(s.repo, "add", ".");
+		git(s.repo, "commit", "-qm", "plant invalid UTF-8");
+		expect((await quest("--root", s.repo, "review")).code).toBe(0);
+		const bin = classifying(s.calls()).at(-1)!;
+		expect(bin.stdin).not.toContain("\uFFFD");
+		expect(bin.stdin).toContain("or holds binary data");
+		// A NUL byte planted in another file, which Git calls binary itself, or a real binary keeps its bytes out of the
+		// prompt, which names the file of the whole diff instead.
+		write(s.repo, "src/nul.ts", "export const y = 1;\0\n");
+		git(s.repo, "add", ".");
+		git(s.repo, "commit", "-qm", "plant a NUL byte");
+		expect((await quest("--root", s.repo, "review")).code).toBe(0);
+		const nul = classifying(s.calls()).at(-1)!;
+		expect(nul.stdin).not.toContain("\0");
+		expect(nul.stdin).toContain("or holds binary data");
+		expect(Object.values(nul.readable!)[0]).toContain("+export const y = 1;\0");
+		// Past the budget, the prompt holds the stat and names a file of the attribute-free diff, which the turn may read.
+		write(s.repo, "src/big.ts", `${"export const z = 1;\n".repeat(11_000)}`);
+		git(s.repo, "add", ".");
+		git(s.repo, "commit", "-qm", "grow past the budget");
+		expect((await quest("--root", s.repo, "review")).code).toBe(0);
+		const big = classifying(s.calls()).at(-1)!;
+		expect(big.stdin).not.toContain("<diff>\n\n+");
+		const dir = big.argv[big.argv.indexOf("--add-dir") + 1]!;
+		const [name, patch] = Object.entries(big.readable!)[0]!;
+		expect(big.stdin).toContain(`\`${join(dir, name)}\`, which holds`);
+		expect(patch).toContain("+export const x = 3;");
+		expect(patch).toContain("+export const y = 1;\0");
+		expect(patch).toContain("+export const z = 1;");
+		// The scratch directory is gone once the classifier has answered.
+		expect(existsSync(dir)).toBe(false);
 	},
 	20_000,
 );
