@@ -1676,31 +1676,20 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 	};
 	program
 		.command("review")
-		.summary("Have a model other than the latest writer review the committed branch, read-only")
+		.summary("Have a model no weaker than the latest writer review the committed branch, read-only")
 		.description(
-			"Review the checkout's committed branch against its base with a reviewer its size picks, never the " +
-				`model that changed it last. Each size, and the high list a high head uses, ranks its reviewers (harness, model, effort): ${reviewers}. The ` +
+			"Review the checkout's committed branch against its base with a reviewer its size picks, never one " +
+				`weaker than the model that changed it last, which may review its own work. Each size, and the high list a high head uses, ranks its reviewers (harness, model, effort): ${reviewers}. The ` +
 				"first whose model is not avoided reviews. One that cannot run, as its CLI or provider reports before any " +
 				"finding is saved, passes the round to the next whose model is not avoided: a CLI that is not installed, " +
 				"logged out, or has its login rejected, or sent to a gateway with no credential, passes over every model of that CLI, and a model at its usage limit " +
 				"only itself; the run's report and record name each it passed over and why. A reviewer --harness, --model, " +
-				"or --effort names never passes the round on. Beside the reviewer, on the same head in its own session, runs the shadow, " +
-				"which follows the round to the reviewer it passes to: " +
-				"the pick's model one effort (low, medium, high, xhigh) above it for an S or M PR, below it for an L or XL " +
-				"PR, and none for an XS PR or a Fable pick, skipped when no such effort is on that ladder, so each effort step can be " +
-				"compared with its neighbor. The shadow runs on a " +
-				"branch's first run of the pick, then only while it has findings to settle or once the pick changed so it is " +
-				"no longer that step away; its findings are numbered and settled like any reviewer's, its session carries " +
-				"over to the new shadow, and a pick with no shadow seats the old one as it ran while it still has " +
-				"findings, unless its model is avoided or cannot run, when it seats one at the pick's own effort. " +
-				"--exclude-model names each model to avoid, with every model weaker than it; without it, the " +
-				"latest writer is avoided, with every model weaker than it (Sonnet than any other, Sol than Fable and Astra), " +
+				"or --effort names never passes the round on. " +
+				"--exclude-model names each model to avoid, with every model weaker than it; without it, every model " +
+				"weaker than the latest writer is avoided (Sonnet than any other, Sol than Fable and Astra), " +
 				"so a reviewer is never weaker than the writer: the model the last Implementer line names in the `## Models` record of the body of the branch's open PR. " +
-				"When it names none or an `unknown` model, " +
-				"it is any model of the harness running this command, usually the session that just pushed, detected from the " +
-				"variables Claude Code, Codex, and Antigravity each set, so Codex reviews from Claude Code and Claude Code from Codex, and with no model known no weaker one is avoided; with --harness it is " +
-				"none. " +
-				"--harness names the only reviewer instead of the pick and the shadow, at the model and effort of its first entry whose model is not avoided, and --model and " +
+				"When it names none or an `unknown` model, none is avoided. " +
+				"--harness names the only reviewer instead of the pick and the second reviewer, at the model and effort of its first entry whose model is not avoided, and --model and " +
 				"--effort override that reviewer's, or without --harness, the size pick's; a --model the list names, in any spelling such as openai/gpt-6.2-astra, runs on its own entry's harness and effort, passed to the CLI as given, and one it does not at --harness's first entry; a repository whose AGENTS.md names other reviewers " +
 				"passes them. A --harness run keeps the other reviewers' sessions for the next run of the pick, and refuses while one has findings to settle, as a run of the pick does while a reviewer only --harness runs has some. When the latest writer changes the size's pick to one with no session on the branch, its first session settles the open findings of the reviewer it replaces. The reviewers run at once, and the first to fail stops the others and fails the " +
 				"run, saving no round. The " +
@@ -1786,7 +1775,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"every changed path, either side of a rename: each path must match one pattern whole, so a directory " +
 				"needs a trailing / or /**, and a change that touches no path falls in no class. " +
 				"The tier scales the review: a low head with no finding to settle runs no reviewer unless --harness, " +
-				"--model, or --effort names one, and a high head runs no shadow but gets a second reviewer: the first of the " +
+				"--model, or --effort names one, and a high head gets a second reviewer: the first of the " +
 				"high list from a vendor other than the pick's that can run, in its own session, which reviews " +
 				"every head while the tier is high and settles its findings after. A head the classifier or the " +
 				"maintainer's override holds high also takes its pick from that list, whatever the PR's size; a " +
@@ -1800,7 +1789,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"an overridden line with the tier the maintainer overrode, " +
 				"how it was set (model, paths, or default), and reason, a class line naming the class, and for a model a classifier line (harness, model, " +
 				"effort, session) and its usage line, a skipped line (harness, model, effort, reason) for each reviewer passed over, then for each reviewer its harness, model, and " +
-				"effort, followed by shadow for the shadow or second for the second reviewer, session, round, an " +
+				"effort, followed by second for the second reviewer, session, round, an " +
 				"unchanged line for a repeated round, or an accepted line for a round --accept repeats, a usage line per turn (input tokens, the " +
 				"part read from the prompt cache, and output), a score from 0 to 10 for how ready the head is to land with " +
 				"its one-sentence rationale, a raised line with the tier and reason when it raised the classifier's, the finding count, each finding by its number, then the last round's findings with " +
@@ -1812,7 +1801,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"After each round, it rewrites the `## Review` section of the branch's open PR into the base, the one from the repository the base's remote pushes to, else the only one from another repository whose pushed head `HEAD` contains, as the " +
 				"user the GitHub token names, keeping the rest of the body, and prints `record <url>`: the reviewed " +
 				"head, named in full only once no reviewer reports a finding, the base, the head's risk tier and reason, " +
-				"an `- Overridden:` line, the classifier's tier and who set it, a `- Class:` line, a `- Local review: none` line for a low head no reviewer ran on, a `- Skipped:` line for each reviewer passed over, and each reviewer, its Reviewer line ending in `, shadow` for the shadow or `, second` for the second reviewer, its " +
+				"an `- Overridden:` line, the classifier's tier and who set it, a `- Class:` line, a `- Local review: none` line for a low head no reviewer ran on, a `- Skipped:` line for each reviewer passed over, and each reviewer, its Reviewer line ending in `, second` for the second reviewer, its " +
 				"session and round, score, the tier it raised the risk to and why, its tally of findings across the branch's rounds, and each finding with its disposition. " +
 				"On GitHub it then sets the `quest review` commit status on the head, on the same token, so push the head first: success once no finding is open, else failure, " +
 				"its description the head's risk tier and class and whether a local reviewer ran, its target the diff from the head's merge base with the PR's base, which `quest status` counts only from a user who can push. " +
@@ -1836,7 +1825,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		.addOption(
 			new Option(
 				"--harness <name>",
-				"The only reviewer to run, instead of the pick and the shadow or second reviewer",
+				"The only reviewer to run, instead of the pick and the second reviewer",
 			).choices(REVIEW_HARNESSES),
 		)
 		.option("--model <model>", "Model the pick, or --harness's reviewer, runs instead")
@@ -1847,7 +1836,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		)
 		.option(
 			"--exclude-model <model>",
-			"A model never picked to review it, instead of the PR's latest writer; repeat for each",
+			"A model never picked to review it, with every model weaker than it, in place of avoiding models weaker than the PR's latest writer; repeat for each",
 			(value: string, previous: string[] = []) => [...previous, value],
 		)
 		.addOption(

@@ -6,7 +6,7 @@
 and three on high, each from a different vendor, each drawn from the
 round's [reviewer rung](/quest/m0/reviewer-rungs.md), or the rungs outward
 from the size's when it is short of vendors that can run, with Gemini through
-`agy` among the vendors and never the writer's model. Low-tier heads get a
+`agy` among the vendors, the writer's model among them. Low-tier heads get a
 local review for the first time. Once these seats find what Pullfrog finds
 behind them, per dollar, Pullfrog and its required-approval ruleset retire.
 
@@ -38,10 +38,11 @@ Decided 2026-11-22 (maintainer, `/quest-plan` follow-up of
   this quest).
 - What sets each seat's model? The round's rung, as
   [reviewer rungs](/quest/m0/reviewer-rungs.md) draws it: each seat takes a
-  model from it that the PR has not had yet, never the writer's, on a
-  vendor no other seat that round has. An XL head that is high tier gets
-  three vendors, such as Astra, Gemini, and a Claude model other than the
-  writer's. Reviewer rungs places Neon only on the M and L rungs, so at XS,
+  model from it that the PR has not had yet, which may be the writer's, on a
+  vendor no other seat that round has, as
+  [reviewer rungs](/quest/m0/reviewer-rungs.md) amended 2026-11-25. An XL
+  head that is high tier gets three vendors, such as Astra, Gemini, and a
+  Claude model. Reviewer rungs places Neon only on the M and L rungs, so at XS,
   S, and XL the Gemini seat normally fills from the nearest rung outward, as
   the Guidance recommends.
 - ✅ No seat is ever weaker than the latest writer, at every size and tier
@@ -64,7 +65,7 @@ Guidance:
 - Each seat is a reviewer `quest review` already runs, so a seat that
   cannot run passes to another vendor on the round's rung. Recommended:
   when the drawn rung has too few vendors that can run, such as when
-  Gemini is out or the rung's only Claude model wrote the head, fill the
+  Gemini is out, fill the
   missing seats from the size's rung, then each rung outward from it in
   turn. The round is an outage once a seat its tier needs finds no
   distinct vendor on any rung, which includes every vendor being out.

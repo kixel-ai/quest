@@ -72,11 +72,11 @@ Readout, the agent's choices for the implementer to revisit:
   maintainer with its tally. End the writer A/B by deleting its arms from
   `src/cli/models.ts`, with `quest models --arm`, the `arm` field of
   `quest unblocked --json`, and the arm notes in the README, guide, and
-  `/quest-run` and `/quest-iterate`. [Reviewer rungs](/quest/m0/reviewer-rungs.md)
-  ends the shadow reviewer (maintainer, 2026-11-23, rejecting keeping L's
-  shadow until its 116 first rounds), so read the shadow pairs gathered
-  until it lands, and after it compare reviewer models and efforts from
-  the rungs' draws: findings by severity, fixed against refuted, and later
+  `/quest-run` and `/quest-iterate`. The shadow reviewer
+  stopped running on 2026-11-25 (maintainer, rejecting keeping L's shadow
+  until its 116 first rounds), so read the shadow pairs gathered before
+  then, and once [reviewer rungs](/quest/m0/reviewer-rungs.md) lands compare
+  reviewer models and efforts from the rungs' draws: findings by severity, fixed against refuted, and later
   `## Caused by` escapes, per `quest usage`'s reviewer rows. Recommend
   moving a model up, down, or off its rung with its tally.
 - Carry the tallies into [the model check](/quest/m1/model-check.md)'s

@@ -44,11 +44,11 @@ function code(text: string): string {
 const capitalized = (word: string) => word[0]!.toUpperCase() + word.slice(1);
 
 /**
- * A block's Reviewer line, ending in `, shadow` for the shadow, the size's pick one effort away, or `, second` for the
+ * A block's Reviewer line, ending in `, second` for the
  * second reviewer a high-risk head gets.
  */
-const reviewerLine = (seat: Pick<Tally, "reviewer" | "model" | "effort" | "shadow" | "second">) =>
-	`- Reviewer: ${HARNESSES[seat.reviewer]}, ${seat.model}, ${seat.effort} effort${seat.shadow ? ", shadow" : seat.second ? ", second" : ""}`;
+const reviewerLine = (seat: Pick<Tally, "reviewer" | "model" | "effort" | "second">) =>
+	`- Reviewer: ${HARNESSES[seat.reviewer]}, ${seat.model}, ${seat.effort} effort${seat.second ? ", second" : ""}`;
 
 /** A tally's counts, as the record's `Rounds:` line and `quest usage` write them. */
 export interface Counts {

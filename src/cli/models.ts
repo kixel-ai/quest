@@ -28,8 +28,7 @@ const fable = (effort: string): Model => ({ harness: "claude", model: "claude-fa
 /**
  * Each size's writers, ranked: a spawn starts the quest on the first that can
  * run, falling through only while nothing is written, since the model that
- * writes a PR runs all its iterates. Only Claude writes, so every review
- * crosses vendor or model; a quest whose writers are all at their usage limit
+ * writes a PR runs all its iterates. Only Claude writes; a quest whose writers are all at their usage limit
  * waits for one rather than starting on another vendor. XS runs Sonnet rather
  * than the cheaper Haiku, whose surcharge past 100k input tokens leads users
  * to cap its compaction window there, barely above an agent's fixed load of
@@ -51,7 +50,7 @@ export type Listing = Size | "high";
 
 /**
  * The writers each model is weaker than, so it never reviews their work: Sonnet is weaker than every other model,
- * and never reviews its own work, so it reviews nothing, and Sol is weaker than the frontier models.
+ * and Sol is weaker than the frontier models. A model may review its own work, in a session of its own.
  */
 const WEAKER_THAN: ReadonlyMap<string, readonly string[]> = new Map([
 	["gpt-6.2-sol", ["claude-fable-5-2", "gpt-6.2-astra"]],
@@ -64,29 +63,30 @@ export const weaker = (reviewer: string, writer: string): boolean =>
 	reviewer !== writer && (reviewer === "claude-sonnet-5-5" || (WEAKER_THAN.get(reviewer)?.includes(writer) ?? false));
 
 /**
- * Whether an entry may not review what model `writer` wrote: it runs the writer's model or a {@link weaker} one.
- * `writer` is a listed model's ID, so callers pass a record's or flag's spelling through `canonicalModel` first.
+ * Whether an entry runs model `model` or a {@link weaker} one, as `--exclude-model` avoids. `model` is a listed
+ * model's ID, so callers pass a record's or flag's spelling through `canonicalModel` first.
  */
 export const unfit =
-	(writer: string) =>
+	(model: string) =>
 	(entry: ReviewModel): boolean =>
-		entry.model === writer || weaker(entry.model, writer);
+		entry.model === model || weaker(entry.model, model);
 
 /**
- * Each list's reviewers, ranked: the first that is neither the latest writer's model nor {@link weaker} than it
- * reviews the PR, so below XL Opus reviews what Fable wrote, and one that cannot run passes the review to the next. Now that
- * Sonnet reviews nothing, another Codex model and then Fable close each size's list, so Opus's work still has a reviewer
- * while Sol, or all of Codex, is out. A high head reviews from `high`, whatever its size: the pick, then a second
- * reviewer from the other vendor, so Sol and Fable review Opus's work, Opus and Astra Fable's. XL starts on Astra,
- * the vendor's frontier model, at high rather than xhigh.
+ * Each list's reviewers, ranked: the first not {@link weaker} than the latest writer's model reviews the PR, which
+ * may be the writer's own model, and one that cannot run passes the review to the next. Opus never runs below the
+ * effort Opus writes the size at, its writer A/B arm's included, since it may review its own work. Another Codex model and then Fable close each size's list,
+ * so a PR still has a reviewer while Sol, or all of Codex, is out. A high head reviews
+ * from `high`, whatever its size: the pick, then a second reviewer from the other vendor, so Sol and Opus review
+ * Opus's work, Opus and Astra Fable's. XL starts on Astra, the vendor's frontier model, at high rather than xhigh. Fable
+ * never reviews above high, since its usage limit is the XL writers', and xhigh costs it far more than Opus xhigh.
  */
 export const REVIEWERS: Record<Listing, readonly ReviewModel[]> = {
-	XS: [sol("medium"), opus("low"), astra("medium"), fable("medium")],
-	S: [sol("medium"), opus("low"), astra("medium"), fable("medium")],
-	M: [sol("high"), opus("medium"), astra("high"), fable("high")],
-	L: [sol("xhigh"), opus("high"), astra("xhigh"), fable("xhigh")],
-	XL: [astra("high"), opus("xhigh"), sol("xhigh"), fable("xhigh")],
-	high: [sol("xhigh"), opus("xhigh"), fable("xhigh"), astra("xhigh")],
+	XS: [sol("medium"), opus("medium"), astra("medium"), fable("medium")],
+	S: [sol("medium"), opus("medium"), astra("medium"), fable("medium")],
+	M: [sol("high"), opus("high"), astra("high"), fable("high")],
+	L: [sol("xhigh"), opus("high"), astra("xhigh"), fable("high")],
+	XL: [astra("high"), opus("xhigh"), sol("xhigh"), fable("high")],
+	high: [sol("xhigh"), opus("xhigh"), fable("high"), astra("xhigh")],
 };
 
 /** One side of the writer A/B: A runs the size's own first writer, B the alternative. */

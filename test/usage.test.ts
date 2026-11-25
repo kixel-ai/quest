@@ -248,10 +248,10 @@ describe("PR records", () => {
 		unchanged: false,
 	};
 
-	// The shadow: the pick one effort lower, in its own session.
+	// The second reviewer, in its own session.
 	const second: Round = {
 		...round,
-		shadow: true,
+		second: true,
 		effort: "medium",
 		session: "thread-2",
 		round: 1,
@@ -289,7 +289,7 @@ describe("PR records", () => {
 	};
 	const tallies = [
 		{ ...tally("codex", 3, { high: 1, medium: 1, low: 2 }, 2, 1), first: { high: 1, medium: 0, low: 1 } },
-		{ ...tally("codex", 1, { high: 0, medium: 0, low: 0 }, 0, 0), shadow: true as const },
+		{ ...tally("codex", 1, { high: 0, medium: 0, low: 0 }, 0, 0), second: true as const },
 		// A left-out reviewer still names its session, so `quest usage` counts that session as reviewing.
 		{ ...tally("claude", 2, { high: 2, medium: 0, low: 0 }, 1, 0), session: CLAUDE },
 	];
@@ -335,8 +335,8 @@ describe("PR records", () => {
 				harness: "Codex",
 				model: "gpt-6.2-sol",
 				effort: "medium",
-				shadow: true,
-				second: false,
+				shadow: false,
+				second: true,
 				session: "thread-2",
 				round: 1,
 				score: 10,
