@@ -1400,7 +1400,7 @@ agyFakes("agy is refused where a directory leading to its workspace matches name
 	expect(s.calls()).toEqual([]);
 });
 
-agyFakes("agy is refused with a Git older than 2.41, which has no --attr-source", async () => {
+fakes("a review is a usage error with a Git older than 2.41, which has no --attr-source", async () => {
 	const s = setup("CLAUDECODE");
 	const real = execFileSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).trim();
 	write(
@@ -1409,11 +1409,11 @@ agyFakes("agy is refused with a Git older than 2.41, which has no --attr-source"
 		`#!/bin/sh\nif [ "$1" = version ]; then echo "git version 2.40.1"; exit 0; fi\nexec "${real}" "$@"\n`,
 	);
 	chmodSync(join(s.bin, "git"), 0o755);
-	const result = await quest("--root", s.repo, "review", ...AGY);
-	expect(result.code, result.stderr).toBe(3);
-	expect(result.stderr).toContain("agy needs Git 2.41 or later");
+	const result = await quest("--root", s.repo, "review");
+	expect(result.code, result.stderr).toBe(2);
+	expect(result.stderr).toContain("quest review needs Git 2.41 or later");
 	expect(result.stderr).toContain("git version 2.40.1 is installed");
-	expect(s.calls().filter((call) => call.argv[0] !== "models")).toEqual([]);
+	expect(s.calls()).toEqual([]);
 });
 
 agyFakes("agy's status check failing other than on its login fails as it is, rather than as logged out", async () => {
@@ -1984,6 +1984,44 @@ fakes(
 	20_000,
 );
 
+fakes(
+	"the classifier sees every hunk, whatever the head's attributes and bytes say",
+	async () => {
+		const s = setup();
+		moveBase(s.repo, (dir) => write(dir, "RISK.md", riskFile([])));
+		vi.stubEnv("FAKE_RISK", JSON.stringify({ tier: "medium", reason: "It changes the output." }));
+		vi.stubEnv("FAKE_REPLY", JSON.stringify({ score: 10, rationale: "Lands as is.", findings: [] }));
+		// A head that marks its source binary, and plants a NUL byte in another file, which Git calls binary itself.
+		write(s.repo, "src/lib.ts", "export const x = 3;\n");
+		write(s.repo, "src/nul.ts", "export const y = 1;\0\n");
+		write(s.repo, ".gitattributes", "src/lib.ts -diff\n");
+		git(s.repo, "add", ".");
+		git(s.repo, "commit", "-qm", "hide the hunks");
+		const first = await quest("--root", s.repo, "review");
+		expect(first.code, first.stderr).toBe(0);
+		const [call] = classifying(s.calls());
+		expect(call!.stdin).toContain("-export const x = 1;\n+export const x = 3;");
+		expect(call!.stdin).toContain("+export const y = 1;\0");
+		expect(call!.stdin).not.toContain("Binary files");
+		// Past the budget, the prompt holds the stat and names a file of the attribute-free diff, which the turn may read.
+		write(s.repo, "src/big.ts", `${"export const z = 1;\n".repeat(11_000)}`);
+		git(s.repo, "add", ".");
+		git(s.repo, "commit", "-qm", "grow past the budget");
+		expect((await quest("--root", s.repo, "review")).code).toBe(0);
+		const big = classifying(s.calls()).at(-1)!;
+		expect(big.stdin).not.toContain("<diff>\n\n+");
+		const dir = big.argv[big.argv.indexOf("--add-dir") + 1]!;
+		const [name, patch] = Object.entries(big.readable!)[0]!;
+		expect(big.stdin).toContain(`\`${join(dir, name)}\`, which holds`);
+		expect(patch).toContain("+export const x = 3;");
+		expect(patch).toContain("+export const y = 1;\0");
+		expect(patch).toContain("+export const z = 1;");
+		// The scratch directory is gone once the classifier has answered.
+		expect(existsSync(dir)).toBe(false);
+	},
+	20_000,
+);
+
 fakes("a submodule update the local git config hides still counts as a changed path", async () => {
 	const s = setup();
 	moveBase(s.repo, (dir) => write(dir, "RISK.md", riskFile(["- `vendor/` - vendored code ships as is"])));
@@ -2059,6 +2097,34 @@ agyFakes("with only Antigravity installed, Gemini Flash classifies, reading the 
 	// The question carries the patch, so no head is exported.
 	expect(Object.keys(call.workspace!).filter((name) => name.startsWith("head/") || name === "files.json")).toEqual([]);
 });
+
+agyFakes(
+	"a diff past the prompt is read by an agy classifier from its workspace, not the scratch file Claude reads",
+	async () => {
+		const s = setup();
+		moveBase(s.repo, (dir) => write(dir, "RISK.md", riskFile([])));
+		const only = join(s.bin, "..", "agy-only");
+		mkdirSync(only);
+		symlinkSync(execFileSync("which", ["git"], { encoding: "utf8" }).trim(), join(only, "git"));
+		symlinkSync(join(s.bin, "agy"), join(only, "agy"));
+		vi.stubEnv("PATH", only);
+		write(s.repo, "src/big.ts", `${"export const z = 1;\n".repeat(11_000)}`);
+		git(s.repo, "add", ".");
+		git(s.repo, "commit", "-qm", "grow past the budget");
+		const result = await quest("--root", s.repo, "review", ...AGY);
+		expect(result.code, result.stderr).toBe(0);
+		expect(result.stdout).toContain("classifier agy gemini-3.8-flash low conversation-ask\n");
+		const call = s.calls().find((each) => each.argv.includes("gemini-3.8-flash"))!;
+		expect(call.argv).not.toContain("--conversation");
+		expect(JSON.parse(readFileSync(call.argv[call.argv.indexOf("--json-schema") + 1]!, "utf8")).required).toEqual([
+			"tier",
+			"reason",
+		]);
+		expect(call.workspace!["diff-1.diff"]).toContain("+export const z = 1;");
+		expect(call.stdin).toContain(`${dirname(call.cwd)}/diff-1.diff\`, which holds`);
+		expect(call.stdin).not.toContain("classify-");
+	},
+);
 
 agyFakes(
 	"a classifier whose turn fails on its login or usage limit, or replies unusably, passes the turn to the next",

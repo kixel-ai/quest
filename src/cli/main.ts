@@ -1672,7 +1672,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		.description(
 			"Review the checkout's committed branch against its base with a reviewer its size picks, never one " +
 				`weaker than the model that changed it last, which may review its own work. Each size ranks its two reviewers (harness, model, effort): ${reviewers}. The ` +
-				"first whose model is not avoided reviews. One that cannot run, as its CLI or provider reports before any " +
+				"first whose model is not avoided reviews. A Git older than 2.41, which has no --attr-source to keep the head's .gitattributes from hiding its hunks, is a usage error, except under --accept. One that cannot run, as its CLI or provider reports before any " +
 				"finding is saved, passes the round to the next whose model is not avoided: a CLI that is not installed, " +
 				"logged out, or has its login rejected, or sent to a gateway with no credential, passes over every model of that CLI, and a model at its usage limit " +
 				"only itself; the run's report and record name each it passed over and why. A reviewer --harness, --model, " +
@@ -1751,7 +1751,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"its target, beside the directory agy runs in, files.json listing them as a JSON array, and the diff of each range it reviews, " +
 				"both ignoring the head's .gitattributes. agy compares its read rules case-sensitively, so quest refuses to " +
 				"run it where a directory leading to its agent directory matches names case-insensitively, as on macOS's " +
-				"default volume, and on a Git older than 2.41, which has no --attr-source. The user's skills' text still reaches it, and their MCP servers start, with no tool it can call. A " +
+				"default volume. The user's skills' text still reaches it, and their MCP servers start, with no tool it can call. A " +
 				"RESOURCE_EXHAUSTED quota error is its usage limit.\n\n" +
 				"Before the reviewers run, the head gets a risk tier, low, medium, or high, from its change alone, never " +
 				"from who wrote it: who is hurt if it is wrong, and whether anything catches it first. A changed path, " +

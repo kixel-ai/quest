@@ -20,8 +20,8 @@ export. Reviewable. Fix or refute each, citing it:
   key under a `gemini` model provider. Strip `GOOGLE_API_KEY` too.
 - [Isolate diff attributes as well as export attributes](https://github.com/kixel-ai/quest/pull/838#discussion_r4676849093):
   the diffs still read the user's `.git/info/attributes`, global, and system
-  attributes. Coordinate with [classifier attributes](/quest/m0/classifier-attributes.md),
-  which passes `--text` and `--attr-source` to the classifier's diffs.
+  attributes. The classifier's diffs
+  already pass `--text` and `--attr-source`, as agy's do.
 - [Strip the actual export directory from finding paths](https://github.com/kixel-ai/quest/pull/838#discussion_r4676849082).
 - [Make the tracked-file list unambiguous](https://github.com/kixel-ai/quest/pull/838#discussion_r4676849089).
 - [Re-check the previous head after `prepare`, before the resume range is built](https://github.com/kixel-ai/quest/pull/838#discussion_r4676849111).
