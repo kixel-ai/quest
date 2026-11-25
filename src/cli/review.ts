@@ -193,6 +193,8 @@ export interface Round {
 	score: number;
 	/** One sentence on why. */
 	rationale: string;
+	/** The approach the reviewer would build instead, and why, or null when it found none better. */
+	recommendation: string | null;
 	/** The tier this reviewer judged the head, when riskier than the classifier's. */
 	raised?: Assessment;
 	findings: Finding[];
@@ -203,7 +205,7 @@ export interface Round {
 }
 
 /** A reply's verdict on the reviewed head; `earlier` settles the last round's findings by their number. */
-export type Verdict = Pick<Round, "score" | "rationale" | "findings"> & {
+export type Verdict = Pick<Round, "score" | "rationale" | "recommendation" | "findings"> & {
 	/** The reviewer's own tier for the head, which raises the classifier's when riskier. */
 	risk: Assessment;
 	earlier: { finding: number; disposition: Settled["disposition"]; reason: string }[];
@@ -256,10 +258,11 @@ const ASSESSMENT = {
 const FINDINGS = {
 	type: "object",
 	additionalProperties: false,
-	required: ["score", "rationale", "risk", "findings"],
+	required: ["score", "rationale", "recommendation", "risk", "findings"],
 	properties: {
 		score: { type: "integer", minimum: 0, maximum: 10 },
 		rationale: { type: "string" },
+		recommendation: { type: ["string", "null"] },
 		risk: ASSESSMENT,
 		findings: {
 			type: "array",
@@ -1690,6 +1693,10 @@ export function verdict(reply: { structured?: unknown; text?: string }, earlier:
 	if (typeof fields!.rationale !== "string" || fields!.rationale.trim() === "") {
 		throw new Error("the reviewer's reply has no rationale for its score");
 	}
+	const recommendation = fields!.recommendation;
+	if (!(recommendation === null || (typeof recommendation === "string" && recommendation.trim() !== ""))) {
+		throw new Error("the reviewer's reply has no recommendation, null or text");
+	}
 	const risk = assessment(fields!.risk, "the reviewer's reply");
 	const found = list.map((item, index) => {
 		const finding = record(item);
@@ -1740,7 +1747,14 @@ export function verdict(reply: { structured?: unknown; text?: string }, earlier:
 	if (open > found.length) {
 		throw new Error(`the reviewer's reply keeps ${open} earlier finding(s) open but reports ${found.length}`);
 	}
-	return { score: score as number, rationale: fields!.rationale, risk, findings: found, earlier: settled };
+	return {
+		score: score as number,
+		rationale: fields!.rationale,
+		recommendation,
+		risk,
+		findings: found,
+		earlier: settled,
+	};
 }
 
 /** A schema reply's value: what the CLI parsed, else its text as JSON. */
@@ -1878,7 +1892,9 @@ const SEVERITY =
 const REPORT =
 	`${SCALE} ${SEVERITY} Name each finding's file by its repository-relative path and its line at that head, or null ` +
 	"when no single line fits. Its body gives the concrete scenario: the input or state, and the wrong result. Report " +
-	"an empty list when nothing holds.";
+	"an empty list when nothing holds. Report as `recommendation` the approach you would build instead, if any, in a " +
+	"few sentences: the design, what it drops or simplifies, and why it holds up better long-term; it informs the " +
+	"author's choice without blocking the head, so it is not a finding. Report null when you found none better.";
 
 /** The base's REVIEW.md, if it has one. */
 export interface Rules {
@@ -3256,7 +3272,14 @@ async function reviewWith(shared: Shared, seat: Seat, responses: string | undefi
 		reply = await turn(cli, reviewer.resume(context, session, prompt), root, context.model);
 	}
 	if (reported(reply.usage)) usage.push({ turn: "findings", ...reply.usage });
-	const { score, rationale, risk, findings: found, earlier: answers } = verdict(reply, earlier.length, first);
+	const {
+		score,
+		rationale,
+		recommendation,
+		risk,
+		findings: found,
+		earlier: answers,
+	} = verdict(reply, earlier.length, first);
 
 	const rounds = [
 		...(resume ? stored!.rounds : []),
@@ -3278,6 +3301,7 @@ async function reviewWith(shared: Shared, seat: Seat, responses: string | undefi
 		usage,
 		score,
 		rationale,
+		recommendation,
 		...(riskier(risk.tier, shared.classified.tier) && { raised: risk }),
 		findings: found,
 		earlier:
@@ -3377,6 +3401,7 @@ export function roundLines({ rounds, risk, skipped, head, base, sized, accepted 
 					: []),
 			...round.usage.map((u) => `usage ${u.turn} input ${u.input} cached ${u.cached} output ${u.output}`),
 			`score ${round.score} ${flat(round.rationale)}`,
+			...(round.recommendation === null ? [] : [`recommendation ${flat(round.recommendation)}`]),
 			...(round.raised ? [`raised ${round.raised.tier} ${flat(round.raised.reason)}`] : []),
 			`findings ${round.findings.length}`,
 		);

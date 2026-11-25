@@ -56,6 +56,7 @@ try {
 	const parsed = JSON.parse(reply);
 	if (parsed && typeof parsed === "object" && !("earlier" in parsed)) reply = JSON.stringify({ ...parsed, earlier });
 	if (parsed && typeof parsed === "object" && !("risk" in parsed)) reply = JSON.stringify({ ...JSON.parse(reply), risk });
+	if (parsed && typeof parsed === "object" && !("recommendation" in parsed)) reply = JSON.stringify({ ...JSON.parse(reply), recommendation: null });
 } catch {}
 `;
 

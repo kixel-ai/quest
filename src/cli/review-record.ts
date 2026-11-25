@@ -122,6 +122,7 @@ export function reviewRecord({ rounds, tallies, risk, skipped, head, base, accep
 			reviewerLine(round),
 			`- Session: ${code(round.session)}, round ${round.round}`,
 			`- Score: ${round.score}/10, ${code(round.rationale)}`,
+			...(round.recommendation === null ? [] : [`- Recommendation: ${code(round.recommendation)}`]),
 			...(round.raised ? [`- Raised the risk to ${round.raised.tier}: ${code(round.raised.reason)}`] : []),
 		);
 		const tally = tallies.find((each) => sameSeat(each, round));

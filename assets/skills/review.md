@@ -50,7 +50,7 @@ Once the reset passes or the login is restored, the item has cleared: whoever fi
 
 Push any commit not yet pushed, resolve each `duplicate` line `quest status <pr>` then prints as the guide's Creation describes, then mark the PR ready for review: with `quest ready <pr> <token>`, which also drops its `## Waiting` section, or with `gh pr ready <pr>` for a draft you reviewed without a hold.
 
-Summarize the review, with its last round's score and rationale, and CI from `quest status <pr>`.
+Summarize the review, with its last round's score and rationale, any reviewer's recommended approach with your take on it, and CI from `quest status <pr>`.
 Name any decisions the review raised without answering them, then ask the user for the pick with `/quest-merge`'s options.
 Recommend `/quest-merge` when the PR is landable as it defines, or will be once fixed with no decision left for the user, such as failing checks or unaddressed automated review findings, since `/quest-merge` runs `/quest-iterate` first; recommend `/quest-iterate` when the review raised significant issues or decisions.
 

@@ -1648,7 +1648,9 @@ head is to land and one sentence on why: 10 lands as is, 7 to 9 lands after the
 findings are fixed, 4 to 6 needs rework, and 0 to 3 is the wrong approach. A
 head with no findings can still score below 10. A reply without a valid score
 fails like any malformed reply. Each finding is high, medium, or low severity;
-low is anything minor, such as naming or wording; every open finding holds the head until a round settles it or the maintainer accepts it. The score informs; the findings
+low is anything minor, such as naming or wording; every open finding holds the head until a round settles it or the maintainer accepts it. A reviewer that would
+build the change another way reports that approach as its recommendation, which
+informs the author's choice but holds nothing. The score informs; the findings
 and their refutations still decide when the loop ends. Later rounds take
 `--responses`, the author's free-text fixes and refutations, which a round that
 reported findings requires. A later round resumes the session and checks only
@@ -1776,7 +1778,7 @@ prints `record <url>`. The record
 names the reviewed head and the base's short SHA, the head's risk tier and who
 classified it, then for each reviewer its
 harness, model, and effort, its Reviewer line ending in `, shadow` for the
-shadow or `, second` for the second reviewer, the session and round, the score and rationale, the tier it raised the
+shadow or `, second` for the second reviewer, the session and round, the score and rationale, the approach it recommends instead, if any, the tier it raised the
 risk to and why, its tally, each finding with
 its location, and the last round's findings with their dispositions. The
 tally, as `- Rounds: 3; first round 2 (medium 2); findings 4 (high 1, medium 3): fixed 3, refuted 1, open 0`,
