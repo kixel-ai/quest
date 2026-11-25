@@ -27,6 +27,7 @@ A PR that adds follow-ups also needs the pick round's answers recorded before qu
 
 A review counts for the head its `## Review` record names: a local `quest review` round.
 Read `quest status <pr>`'s `review-record` line rather than comparing diffs yourself: `current` or `diff-identical` (the head's diff from the base is unchanged since the reviewed head) counts.
+A record whose `Risk file` line is not the base's `RISK.md` blob at its tip (after `git fetch <remote> <base>`, `git rev-parse --short=12 FETCH_HEAD:RISK.md`, `none` where absent) counts for no head, the one it names included, until a new `quest review`: its tier decided how much review the head got. `quest status` reads it as `stale`, with a warning on GitHub that the record covers the head no longer, so check the line yourself where it prints none.
 Otherwise, the changes since the reviewed head need no new review only when they are conflict-free merges from the base branch, a reviewer's suggested patch applied unchanged, a land fixer's recorded mechanical fix, pushed by its bot, that changes no behavior, or the pick round's answers recorded in the PR's follow-ups.
 `quest status` counts a record only through the passing `quest review` commit status a maintainer's round set on the head it names, so a contributor's head needs a maintainer's local review; the repository's review policy may require more.
 An online reviewer's approval never stands in for that record.
