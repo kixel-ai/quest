@@ -378,7 +378,7 @@ function attempt(
 		harness,
 		program: find(agent ?? "codex"),
 		named: model,
-		stdin: together,
+		stdin: args ? together : (data) => data,
 		env: {
 			...base,
 			OPENAI_BASE_URL: process.env.OPENAI_BASE_URL,
@@ -395,6 +395,14 @@ function attempt(
 			"--dangerously-bypass-approvals-and-sandbox",
 			"-c",
 			"project_doc_max_bytes=0",
+			// The checkout's skills and the user's connected apps stay out, and the rules arrive apart from the
+			// PR-controlled failure log on stdin, as the reviewer's do.
+			"-c",
+			"skills.include_instructions=false",
+			"-c",
+			"features.apps=false",
+			"-c",
+			`developer_instructions=${JSON.stringify(prompt)}`,
 			"-c",
 			'model_provider="quest-fixer"',
 			"-c",

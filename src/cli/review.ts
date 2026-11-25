@@ -1298,7 +1298,7 @@ export function agyTurn(context: Context, prompt: string, flags: string[]): Turn
 }
 
 /**
- * Google's Antigravity CLI, which only reviews. It runs on the user's own login and configuration directory, where
+ * Google's Antigravity CLI, which also writes. It runs on the user's own login and configuration directory, where
  * it keeps its login when no keyring holds it, as over ssh; the reviewer agent keeps the user's customizations out,
  * except their skills' text and their MCP servers' processes, whose tools it cannot call. Its status check lists the
  * account's models, which fails while it is logged out, and over the network otherwise. It ignores GEMINI_API_KEY and

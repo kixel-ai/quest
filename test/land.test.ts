@@ -1670,6 +1670,9 @@ ${requeueScript}
 		const codex = readFileSync(join(rec, "codex.argv"), "utf8").split("\n");
 		expect(codex[codex.indexOf("--model") + 1]).toBe("gpt-6.2-sol");
 		expect(codex).toContain("--json");
+		// The checkout's skills and the user's apps stay out, and the rules are not on stdin beside the failure log.
+		expect(codex).toEqual(expect.arrayContaining(["skills.include_instructions=false", "features.apps=false"]));
+		expect(codex.some((arg) => arg.startsWith("developer_instructions="))).toBe(true);
 
 		// A Claude Code the wrapper gave no proxy is passed over the same way, and a Codex that is logged out ends the round.
 		rmSync(join(rec, "ran.txt"));
