@@ -470,15 +470,11 @@ async function sendTo(
 			}
 			// Pinned under the origin's current name, so a repository renamed since the review still matches its PR.
 			const here = await current(origin);
-			// A session queued twice, as a resumed reviewer is, names the same branch and role each time, but only a
-			// round after its PR opened names the PR, which a pending file read later must not drop.
-			const pins: Pins = new Map();
-			for (const q of group) {
-				const reviewed = q.pending.reviewed;
-				const pin = `${q.pending.harness}\0${q.pending.session}`;
-				if (reviewed && (reviewed.pull !== null || !pins.has(pin)))
-					pins.set(pin, { ...reviewed, origin: here });
-			}
+			const pins: Pins = new Map(
+				[...bySession(group)].flatMap(([name, pending]) =>
+					pending.reviewed ? [[name, { ...pending.reviewed, origin: here }] as const] : [],
+				),
+			);
 			const repositories = new Set([here, key(repository)]);
 			// A sub-agent stops without the stop hook naming it, so each queued session brings its own, routed as its
 			// own checkout routes it, found from the nearest folder still there: a checkout must be a queued one's, or
@@ -781,6 +777,23 @@ const rememberedPath = (env: NodeJS.ProcessEnv, id: string, pending: Pending) =>
  * `buildRecords` passes PRs between parent and sub-agent, so a PR opening on a sub-agent's branch changes its parent's
  * record too.
  */
+const recorded = (pending: Pending | undefined) => (pending?.reviewed?.pull ?? null) !== null;
+
+/**
+ * Each queued session's pending file, by `harness\0session`. A session that stopped twice is queued twice and either
+ * copy stands for it, except that a resumed reviewer's copy naming the PR its round recorded on outlasts one from a
+ * round before that PR opened, whichever is read last.
+ */
+function bySession(group: { pending: Pending }[]): Map<string, Pending> {
+	const sessions = new Map<string, Pending>();
+	for (const { pending } of group) {
+		const name = `${pending.harness}\0${pending.session}`;
+		if (recorded(sessions.get(name)) && !recorded(pending)) continue;
+		sessions.set(name, pending);
+	}
+	return sessions;
+}
+
 function remember(
 	env: NodeJS.ProcessEnv,
 	id: string,
@@ -799,8 +812,7 @@ function remember(
 		const parent = `${s.harness}\0${s.parent}`;
 		children.set(parent, [...(children.get(parent) ?? []), s]);
 	}
-	// A session that stopped twice is queued twice; its latest stop stands for it.
-	const roots = new Map(sent.group.map((q) => [`${q.pending.harness}\0${q.pending.session}`, q.pending]));
+	const roots = bySession(sent.group);
 	for (const [name, pending] of roots) {
 		const root = sent.byId.get(name);
 		if (root === undefined || !sent.emit.has(root)) continue;

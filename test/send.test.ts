@@ -6,7 +6,15 @@ import { expect, test } from "vitest";
 
 import { REFERENCE_LINE, parseUpload } from "../src/core";
 import { hook } from "../src/cli/hooks";
-import { type SendDependencies, parseInstant, queue, reportIncident, runSender, sendPass } from "../src/cli/send";
+import {
+	type Pending,
+	type SendDependencies,
+	parseInstant,
+	queue,
+	reportIncident,
+	runSender,
+	sendPass,
+} from "../src/cli/send";
 import { tokensPath } from "../src/cli/tokens";
 import type { Session } from "../src/cli/usage";
 import { tempDir } from "./fixture";
@@ -262,6 +270,8 @@ test("a session `quest review` queued is sent on the PR it recorded on, as the r
 		session("deeper", "x", { branches: [], parent: "sub", cwd: `${root}/src` }),
 		// One whose checkout's own branch heads another PR, as under `quest review --branch`, still follows the review.
 		session("aside", "quest/m0/a", { parent: "cls", cwd: root }),
+		// One in another checkout on a branch no PR heads yet keeps its parent, and the PR its parent recorded on, waiting.
+		session("later", "wip/q", { parent: "cls", repositories: ["acme/proj"], cwd: "/other" }),
 		session("early", "kix-review/2"),
 		session("skipped", "kix-review/3"),
 		session("elsewhere", "kix-review/4"),
@@ -289,6 +299,7 @@ test("a session `quest review` queued is sent on the PR it recorded on, as the r
 		["deep", [8], "classifying", "fix/y"],
 		["deeper", [8], "classifying", "fix/y"],
 		["aside", [8], "classifying", "fix/y"],
+		["later", [], "classifying", "wip/q"],
 		["early", [], "reviewing", "feature/z"],
 		["skipped", [], "reviewing", "patch-1"],
 		["elsewhere", [], "reviewing", "quest/m0/a"],
@@ -296,7 +307,15 @@ test("a session `quest review` queued is sent on the PR it recorded on, as the r
 		["away", [], "implementing", null],
 	]);
 	// Each waits for a PR on the branch it reviewed, not its checkout's.
-	expect(remembered(env)).toEqual(["early", "skipped"]);
+	expect(remembered(env)).toEqual(["cls", "early", "skipped"]);
+	// The classifier is remembered with the copy naming its PR, so a resend still credits it.
+	const dir = join(env.XDG_STATE_HOME!, "quest", "records", "remembered");
+	const pins = readdirSync(dir).flatMap((group) =>
+		readdirSync(join(dir, group)).map(
+			(name) => (JSON.parse(readFileSync(join(dir, group, name), "utf8")) as { pending: Pending }).pending,
+		),
+	);
+	expect(pins.find((p) => p.session === "cls")?.reviewed?.pull).toBe("https://github.com/acme/proj/pull/8");
 });
 
 test("a session that recorded a transferred repository's former name is sent on the PR its branch heads now", async () => {
