@@ -137,7 +137,7 @@ Record a wait there, not in a draft PR holding only evidence or steps for a pers
 Unlike a blocked quest it stays ready, so it resurfaces whenever ready work is triaged instead of stalling in the backlog.
 `quest waiting` lists every waiting item, the maintainer's first, ranked by what each unblocks, and `/quest-run` walks the maintainer through them.
 
-A PR that launches something new for users to try, such as a site, demo, or feature, adds a follow-up quest for the maintainer to try and promote it, its `Maintainer:` item saying where to find it.
+A PR that launches something new for users to try, such as a site, demo, or feature, adds a follow-up quest for the maintainer to try and promote it, its `Maintainer (action):` item saying where to find it.
 
 ## Execution
 
@@ -248,6 +248,7 @@ Do not use asynchronous question tools.
 
 A dialog for a decision, plan, or follow-up offers concrete choices and keeps one option for "Explain it first", which walks the user through the problem, current behavior, and each choice's trade-offs, then asks again without it.
 A `Waiting` decision is asked as its choices and an action as a step only the user can take.
+Write a `Waiting` decision as a `Maintainer:` item holding the question, with its choices in a nested list, one bullet each written `label` or `label - description`, and exactly one label ending in `(Recommended)`; write a step only the maintainer can take as `Maintainer (action):`, or `Maintainer (PC):` when only at one of their computers.
 A dialog for a step only the user can take offers, in this order: the agent taking it, such as by driving the browser, when it plausibly can; "Done / I'll do it now"; "Not at my PC (defer)", which keeps the wait and skips it for the session; and "Drop the wait", which a tool holding fewer options leaves to the user's typed answer.
 
 If no blocking tool is available, or it returns without an answer, put the question and numbered choices in your final reply and end the turn.

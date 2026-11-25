@@ -186,6 +186,17 @@ test("a draft's item that names no party stays prose, warning that a choice list
 	]);
 });
 
+test("only an item's opening names its party, never a nested choice", () => {
+	const body = "## Waiting\n\n- Which API?\n  - v1: stable (Recommended)\n  - v2: faster\n";
+	expect(handBackWaits(body)).toEqual([
+		{ line: 3, party: "Maintainer", kind: "prose", text: "Which API? v1: stable (Recommended) v2: faster" },
+	]);
+	expect(handBackProblems(body)).toEqual([
+		{ line: 4, message: "a choice list needs 'Maintainer:' before its question to become a decision" },
+	]);
+	expect(check(tree({ "a.md": `\n${body}` }), () => true).map((f) => f.line)).toEqual([9]);
+});
+
 test("check rejects a malformed choice list by line", () => {
 	const docs = tree({
 		"a.md":
@@ -224,9 +235,14 @@ test("a draft's malformed choice list reads as prose, even under an action, with
 	expect(handBackWaits(unknown)).toEqual([
 		{ line: 3, party: "Maintainer", kind: "prose", text: "Maintainer (local): which runner? A (Recommended) B" },
 	]);
-	expect(handBackProblems(unknown)).toEqual([
-		{ line: 4, message: "a choice list belongs only under a plain 'Maintainer:' decision" },
+	// An unknown qualifier warns once, as quest check fails it once, with or without a choice list.
+	const message = "'Maintainer (local)' qualifies the maintainer with neither '(action)' nor '(PC)'";
+	expect(handBackProblems(unknown)).toEqual([{ line: 3, message }]);
+	const login = "## Waiting\n\n- Maintainer (local): log in to codex.\n";
+	expect(handBackWaits(login)).toEqual([
+		{ line: 3, party: "Maintainer", kind: "prose", text: "Maintainer (local): log in to codex." },
 	]);
+	expect(handBackProblems(login)).toEqual([{ line: 3, message }]);
 	const body = "Work.\n\n## Waiting\n\n- Maintainer: pick one.\n  - Foo (Recommended)\n  - Bar (Recommended)\n";
 	expect(handBackWaits(body)).toEqual([
 		{ line: 5, party: "Maintainer", kind: "prose", text: "pick one. Foo (Recommended) Bar (Recommended)" },

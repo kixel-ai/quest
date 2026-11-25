@@ -66,7 +66,7 @@ export interface ReadWait {
 
 // A party is a short label before the first colon: `Maintainer`, `moq-dev/moq`,
 // `Akamai sales`. A longer run reads as a sentence that happens to hold a colon.
-const PARTY = /^([^:\s][^:]{0,39}):\s+(\S[\s\S]*)$/;
+const PARTY = /^([^:\s][^:]{0,39}):(?:\s+(\S[\s\S]*))?$/;
 
 // The maintainer with a qualifier; only `(action)` and `(PC)` are ones, so a typo such as
 // `(local)` fails `quest check` instead of reading as an outside party.
@@ -140,28 +140,53 @@ function misplaced(lists: NestedList[]): WaitProblem[] {
 	}));
 }
 
-/** Problems for a draft's item that names no party: its choice lists need `Maintainer:` to become a decision. */
-export function partylessProblems(parts: Part[]): WaitProblem[] {
-	return markedLists(parts, false).map((list) => ({
-		line: list.line,
-		message: `a choice list needs '${MAINTAINER}:' before its question to become a decision`,
-	}));
+/**
+ * Read one quest's `## Waiting` item: its party, and the kind of answer it
+ * needs, or `null` when it does not open with its party. An item with a
+ * malformed choice list reads as prose beside its problems.
+ */
+export function readWait(entry: Pick<Entry, "line" | "parts">): ReadWait {
+	return read(entry, false);
 }
 
 /**
- * Read one `## Waiting` item: its party, and the kind of answer it needs. An
- * item with a malformed choice list reads as prose beside its problems.
+ * Read one item of a draft's hand-back, which `quest check` never sees: an
+ * item that names no party, or an unknown qualifier, is the maintainer's
+ * prose, beside a problem when the writer evidently meant otherwise.
  */
-export function readWait(entry: Pick<Entry, "line" | "parts">): ReadWait {
-	const match = PARTY.exec(render(entry.parts));
-	if (!match) return { wait: null, problems: [] };
+export function readDraftWait(entry: Pick<Entry, "line" | "parts">): { wait: Wait; problems: WaitProblem[] } {
+	const { wait, problems } = read(entry, true);
+	return {
+		wait: wait ?? { line: entry.line, party: MAINTAINER, kind: "prose", text: render(entry.parts) },
+		problems,
+	};
+}
+
+function read(entry: Pick<Entry, "line" | "parts">, draft: boolean): ReadWait {
+	const [lead, ...rest] = entry.parts;
+	// Only the item's own opening names its party, so a nested `label: description` choice never does.
+	const match = typeof lead === "string" ? PARTY.exec(lead.replace(/\s+/g, " ").trim()) : null;
+	const text = render([match?.[2] ?? "", ...rest]);
+	if (!match || text === "") {
+		// A marked list under an item without a party may be a checklist, so it stays prose until `Maintainer:` opens it.
+		const problems = markedLists(entry.parts, false).map((list) => ({
+			line: list.line,
+			message: `a choice list needs '${MAINTAINER}:' before its question to become a decision`,
+		}));
+		return { wait: null, problems: draft ? problems : [] };
+	}
 	const party = match[1].trim();
 	const qualified = QUALIFIED.exec(party);
 	const qualifier = qualified?.[1].trim().toLowerCase();
-	if (qualifier !== undefined && qualifier !== "pc" && qualifier !== "action")
-		return { wait: null, problems: misplaced(markedLists(entry.parts, false)) };
+	if (qualifier !== undefined && qualifier !== "pc" && qualifier !== "action") {
+		const problem = {
+			line: entry.line,
+			message: `'${party}' qualifies the maintainer with neither '(action)' nor '(PC)'`,
+		};
+		return { wait: null, problems: draft ? [problem] : [] };
+	}
 	const plain = qualified === null && party.toLowerCase() === MAINTAINER.toLowerCase();
-	const base = { line: entry.line, party: qualified ? MAINTAINER : party, text: match[2] };
+	const base = { line: entry.line, party: qualified ? MAINTAINER : party, text };
 	const fallback: Wait =
 		qualifier === undefined ? { ...base, kind: "prose" } : { ...base, kind: "action", pc: qualifier === "pc" };
 	// A malformed choice list is an unsettled question, never a step to mark done.
@@ -179,13 +204,13 @@ export function readWait(entry: Pick<Entry, "line" | "parts">): ReadWait {
 			message: "a decision holds one choice list; split the others into items of their own",
 		});
 	if (problems.length > 0) return { wait: broken, problems };
-	const question = PARTY.exec(render(entry.parts.filter((part) => part !== list)));
-	if (!question)
+	const question = render([match[2] ?? "", ...rest.filter((part) => part !== list)]);
+	if (question === "")
 		return {
 			wait: broken,
 			problems: [{ line: entry.line, message: "a decision needs its question before its choices" }],
 		};
-	return { wait: { ...base, kind: "decision", text: question[2], choices }, problems: [] };
+	return { wait: { ...base, kind: "decision", text: question, choices }, problems: [] };
 }
 
 /** `doc`'s waits, in source order; an item without a party is left to `quest check`. */

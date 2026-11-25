@@ -5,7 +5,7 @@
 import type { RootContent } from "mdast";
 
 import { itemParts, markdown, rendered } from "./doc";
-import { MAINTAINER, type Wait, type WaitProblem, partylessProblems, readWait } from "./waiting";
+import { MAINTAINER, type Wait, type WaitProblem, readDraftWait } from "./waiting";
 
 // The heading that hands a draft back to the maintainer.
 const HAND_BACK = /^waiting$/i;
@@ -69,16 +69,7 @@ function handBackItems(body: string): HandBackItem[] {
 				// GitHub renders a leading `[ ]` or `[x]` as a task-list checkbox, so the item's text follows it.
 				const parts = itemParts(item);
 				if (typeof parts[0] === "string") parts[0] = parts[0].replace(TASK, "");
-				const line = item.position?.start.line ?? 1;
-				const read = readWait({ line, parts });
-				if (read.wait !== null) return { wait: read.wait, problems: read.problems };
-				const text = collapse(rendered(item)).replace(TASK, "");
-				const prose: Wait = { line, party: MAINTAINER, kind: "prose", text };
-				// A choice list under an unknown qualifier, such as `Maintainer (local):`, stays prose with a warning.
-				if (read.problems.length > 0) return { wait: prose, problems: read.problems };
-				// An item that names no party is the maintainer's prose; a marked list there may be a checklist,
-				// so it becomes a decision only once the writer adds `Maintainer:`, and until then it warns.
-				return { wait: prose, problems: partylessProblems(parts) };
+				return readDraftWait({ line: item.position?.start.line ?? 1, parts });
 			});
 		if (items.length === 0)
 			items.push({
