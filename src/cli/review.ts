@@ -10,23 +10,14 @@
 // refuted with evidence does not recur.
 import { execFile, spawn, spawnSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import {
-	existsSync,
-	lstatSync,
-	mkdirSync,
-	mkdtempSync,
-	readdirSync,
-	readFileSync,
-	realpathSync,
-	rmSync,
-	writeFileSync,
-} from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, statSync, rmSync } from "node:fs";
 import { dirname, join, posix } from "node:path";
 import { promisify } from "node:util";
 
 import {
 	type Class,
 	heldHigh,
+	highHits,
 	RISK_FILE,
 	SIZES,
 	type Size,
@@ -35,26 +26,16 @@ import {
 	branchQuest,
 	classesFor,
 	codeSpan,
-	matches,
 	parse,
 	parseRiskFile,
 	size as questSize,
 	riskier,
 } from "../core";
-import {
-	LINE_LIMIT,
-	LOGINS,
-	REVIEW_HARNESSES,
-	type ReviewHarness,
-	agentDirectory,
-	boundedLines,
-	privateDirectory,
-	strippedEnvironment,
-} from "./agent";
+import { LINE_LIMIT, LOGINS, HARNESSES, type HarnessName, boundedLines, strippedEnvironment } from "./agent";
 import { REVIEW } from "./context";
-import { GitError, discoveryEnv, git } from "./git";
-import { AGY_LIMIT, LIMIT, agyReset, codexReset } from "./limit";
-import { CLASSIFIERS, DEFAULT_SIZE, REVIEWERS, type ReviewModel, unfit, weaker } from "./models";
+import { discoveryEnv, git } from "./git";
+import { LIMIT, codexReset } from "./limit";
+import { CLASSIFIERS, DEFAULT_SIZE, REVIEWERS, type Model, unfit, weaker } from "./models";
 import { programEnvironment, requireProgram } from "./program";
 import { canonicalModel, type recorded, sameModel } from "./models-record";
 import { save } from "./worktree";
@@ -84,7 +65,7 @@ export class ReviewerUnavailableError extends Error {
 	second = false;
 
 	constructor(
-		readonly harness: ReviewHarness,
+		readonly harness: HarnessName,
 		readonly reason: string,
 		message: string,
 	) {
@@ -95,7 +76,7 @@ export class ReviewerUnavailableError extends Error {
 /** The reviewer's account hit its usage limit on `model`, which resets at `until` (epoch milliseconds) if the CLI named it. */
 export class ReviewLimitError extends ReviewerUnavailableError {
 	constructor(
-		harness: ReviewHarness,
+		harness: HarnessName,
 		readonly until: number | null,
 		readonly model: string,
 	) {
@@ -105,7 +86,7 @@ export class ReviewLimitError extends ReviewerUnavailableError {
 }
 
 /** A reviewer the size ranks that a run passed over, since it could not run, and why. */
-export interface Skip extends ReviewModel {
+export interface Skip extends Model {
 	reason: string;
 }
 
@@ -169,7 +150,7 @@ export interface Usage {
 
 /** One reviewer's finished round, as `quest review` prints it. */
 export interface Round {
-	reviewer: ReviewHarness;
+	reviewer: HarnessName;
 	/** The round is the second reviewer's, from a vendor other than the pick's, which a high-risk head gets too. */
 	second?: true;
 	model: string;
@@ -215,7 +196,7 @@ export interface Assessment {
 
 /** How the head's tier was set before review: by a model, by a path held high, or by default with no risk file. */
 export type Classification =
-	| { kind: "model"; harness: ReviewHarness; model: string; effort: string; session: string }
+	| { kind: "model"; harness: HarnessName; model: string; effort: string; session: string }
 	| { kind: "paths" }
 	| { kind: "default" };
 
@@ -305,7 +286,7 @@ export const schema = (earlier: number) =>
 
 /** What picks a round's reviewer from its size's list. */
 export interface Choice {
-	harness?: ReviewHarness;
+	harness?: HarnessName;
 	model?: string;
 	effort?: string;
 	/** The models never to pick, with every model weaker than them; without any, those weaker than the latest writer's. */
@@ -317,10 +298,10 @@ export interface Choice {
  * writer, the model of the last Implementer line in the PR's `## Models` record (`latest`). The writer's own model
  * may review, in a session of its own. With no writer known, nothing is avoided.
  */
-export function authored(choice: Choice, latest?: string): (entry: ReviewModel) => boolean {
+export function authored(choice: Choice, latest?: string): (entry: Model) => boolean {
 	// Another spelling of a model, such as `openai/gpt-6.2-sol` from a flag, a record, or a saved session, is that
 	// model; the CLI still gets the spelling given, which a gateway may need.
-	const as = (entry: ReviewModel): ReviewModel => ({ ...entry, model: canonicalModel(entry.model) });
+	const as = (entry: Model): Model => ({ ...entry, model: canonicalModel(entry.model) });
 	const exclude = (choice.exclude ?? []).map((model) => unfit(canonicalModel(model)));
 	if (exclude.length > 0) return (entry) => exclude.some((each) => each(as(entry)));
 	if (latest === undefined || latest === "unknown") return () => false;
@@ -336,7 +317,7 @@ export function authored(choice: Choice, latest?: string): (entry: ReviewModel) 
  * runs at `--harness`'s first entry. An override never brings back an
  * avoided model.
  */
-export function pickReviewer(size: Size, choice: Choice, avoided: (entry: ReviewModel) => boolean): ReviewModel {
+export function pickReviewer(size: Size, choice: Choice, avoided: (entry: Model) => boolean): Model {
 	const list = REVIEWERS[size];
 	const ours = list.filter((e) => choice.harness === undefined || e.harness === choice.harness);
 	const named = choice.model === undefined ? undefined : ours.find((e) => sameModel(e.model, choice.model!));
@@ -361,7 +342,7 @@ export function pickReviewer(size: Size, choice: Choice, avoided: (entry: Review
 }
 
 /** The reviewers that may take a high head's second seat beside `pick`, ranked: its size's from another vendor. */
-export const secondsTo = (size: Size, pick: ReviewModel, avoided: (entry: ReviewModel) => boolean): ReviewModel[] =>
+export const secondsTo = (size: Size, pick: Model, avoided: (entry: Model) => boolean): Model[] =>
 	REVIEWERS[size].filter((each) => !avoided(each) && each.harness !== pick.harness);
 
 /**
@@ -369,7 +350,7 @@ export const secondsTo = (size: Size, pick: ReviewModel, avoided: (entry: Review
  * model is not avoided, or only the one `--harness`, `--model`, or `--effort` names, so a run that names its
  * reviewer never measures another.
  */
-export function rankedReviewers(size: Size, choice: Choice, avoided: (entry: ReviewModel) => boolean): ReviewModel[] {
+export function rankedReviewers(size: Size, choice: Choice, avoided: (entry: Model) => boolean): Model[] {
 	const first = pickReviewer(size, choice, avoided);
 	if (choice.harness !== undefined || choice.model !== undefined || choice.effort !== undefined) return [first];
 	return REVIEWERS[size].filter((entry) => !avoided(entry));
@@ -409,7 +390,7 @@ export type ReviewOptions = BaseOptions & {
 	/** The checkout to review. */
 	root: string;
 	/** The reviewer; defaults to the first of its list whose model is not weaker than the latest writer's. */
-	harness?: ReviewHarness;
+	harness?: HarnessName;
 	model?: string;
 	effort?: string;
 	/** The models never to pick, with every model weaker than them; without any, those weaker than the latest writer's. */
@@ -434,6 +415,11 @@ export type ReviewOptions = BaseOptions & {
 	signal?: AbortSignal;
 	/** The maintainer's tier for the branch and their reason, which holds until its change grows riskier. */
 	override?: Assessment;
+	/**
+	 * The round is a PR's own build judging itself, which records nothing, so its sessions and findings
+	 * are kept apart from those a recorded round resumes.
+	 */
+	own?: boolean;
 	/** The maintainer's reason for accepting the findings the last rounds of the head left open, running no reviewer. */
 	accept?: string;
 };
@@ -445,13 +431,24 @@ export interface ReviewDependencies {
 	 * it, as in the runner, only the options pick the reviewer.
 	 */
 	models?: (root: string, base: string, branch: string) => Promise<PullModels | null>;
+	/**
+	 * Queues a session for the record sender, as the stop hook does an interactive one, since no hook runs in a
+	 * reviewer. It says for itself anything the person must hear, and must not throw, so a round never fails on it.
+	 */
+	queue(session: Started): void;
 }
 
-export const processDependencies = (): ReviewDependencies => ({ env: process.env });
+/** A session `quest review` started, for the record sender: its checkout, and its first instant, epoch ms. */
+export interface Started {
+	harness: string;
+	session: string;
+	cwd: string;
+	start: number;
+}
 
 /** One reviewer's findings across every round on a branch, which a `--new` session continues. */
 export interface Tally {
-	reviewer: ReviewHarness;
+	reviewer: HarnessName;
 	/** The second reviewer's tally, kept apart from the pick's. */
 	second?: true;
 	/** Its latest round's model, effort, and session, which the record names even once a run leaves it out. */
@@ -508,10 +505,12 @@ interface State {
 
 /** One reviewer's session on a branch. */
 interface Session {
-	reviewer: ReviewHarness;
+	reviewer: HarnessName;
 	/** The second reviewer's session; the branch keeps at most one. */
 	second?: true;
 	session: string;
+	/** The instant, epoch ms, before its first turn, so the record sender reads all of it. */
+	started: number;
 	/** Each round's head, the merge base its change started from, and its findings. */
 	rounds: { head: string; mergeBase: string; findings: Finding[] }[];
 	/** The session's last round, which a round on the same head with nothing to settle repeats. */
@@ -533,10 +532,6 @@ export interface Context {
 	mergeBase: string;
 	/** The checkout at the reviewed head. */
 	root: string;
-	/** The reviewed head, whose tracked files a reviewer with no shell reads from an export; none for a question. */
-	head?: string;
-	/** Each `git diff` range the prompt names, as it names it, which a reviewer with no shell is handed as a file. */
-	ranges: string[];
 	/** The base's agent instructions, given in place of the checkout's. */
 	instructions: string;
 	model: string;
@@ -551,17 +546,14 @@ export interface Context {
 	 * which Codex answers with its tools off.
 	 */
 	tools?: string;
+	/** A directory outside the checkout that Claude may also read, such as one holding a diff too large for the prompt. */
+	readable?: string;
 }
 
 interface Turn {
 	argv: string[];
 	stdin: string;
 	env: NodeJS.ProcessEnv;
-	/**
-	 * A private directory outside any repository, removed once the turn ends, and the directory in it the turn runs in
-	 * instead of the checkout.
-	 */
-	workspace?: { dir: string; cwd: string };
 }
 
 interface Reply {
@@ -587,15 +579,6 @@ interface Reader {
 interface Reviewer {
 	/** Exits non-zero when the CLI is logged out. */
 	status: string[];
-	/** Whether the status check runs in an empty workspace, as a CLI that loads the checkout's configuration needs. */
-	isolated?: true;
-	/**
-	 * Whether the status check asks the service, so a failure is a missing login only when its output matches
-	 * `unauthorized`, and any other, as of the network, fails as it is.
-	 */
-	remoteStatus?: true;
-	/** Throws when this host cannot run the CLI as quest confines it, given the status check's empty workspace. */
-	supported?(workspace: string): void;
 	/** How the user logs in. */
 	login: string;
 	/** The variable naming the configuration directory, and so the stored login, the status check reads, if any. */
@@ -753,9 +736,12 @@ const claude: Reviewer = {
 	reader() {
 		let result: Record<string, unknown> | undefined;
 		let limited: { until: number | null } | undefined;
+		// The stream names the session before the turn finishes, so a cancelled turn still reports it.
+		let session: string | undefined;
 		return {
 			line(line) {
 				const value = json(line);
+				session ??= text(value?.session_id);
 				if (value?.type === "result") result = value;
 				if (value?.type === "rate_limit_event") {
 					const info = record(value.rate_limit_info);
@@ -774,7 +760,7 @@ const claude: Reviewer = {
 					const epoch = /\|(\d{10})\b/.exec(error)?.[1];
 					limited = { until: epoch ? Number(epoch) * 1000 : null };
 				}
-				if (result === undefined) return { error: "claude printed no result", limited };
+				if (result === undefined) return { session, error: "claude printed no result", limited };
 				const usage = record(result.usage) ?? {};
 				let input = count(usage.input_tokens) + count(usage.cache_read_input_tokens);
 				input += count(usage.cache_creation_input_tokens);
@@ -823,6 +809,7 @@ export function claudeFlags(context: Context): string[] {
 		"--settings",
 		JSON.stringify({ crossSessionInbound: "refuse" }),
 		"--strict-mcp-config",
+		...(context.readable === undefined ? [] : ["--add-dir", context.readable]),
 		"--tools",
 		context.tools ?? "Read,Grep,Glob,Bash,Agent",
 		"--append-system-prompt",
@@ -984,392 +971,24 @@ export function codexFlags(context: Context): string[] {
 	];
 }
 
-/** The agent every Antigravity turn runs as, which its workspace defines. */
-const AGY_AGENT = "quest-reviewer";
-
-/** The settings file in a turn's directory, which holds its deny rules. */
-const AGY_SETTINGS = "settings.json";
-
-/** The head's export in a turn's directory, should an agy reviewer name a finding's file by its absolute path. */
-const IN_EXPORT = /^\/.*?\/review-[^/]+\/head\//;
-
 /** The empty tree in `root`'s object format, whose attributes are none. */
 const emptyTree = (root: string) => git(root, ["hash-object", "-t", "tree", "--stdin"], "");
 
 /**
- * Where, under the home directory, CLIs and tools keep a login or key, denied even before one exists: the rules hold
- * only what a turn's start lists, so a sign-in while the turn runs, as to Codex, would otherwise be readable where
- * the turn's directory lies under the home directory, as when TMPDIR does.
+ * Refuse a Git older than 2.41, whose missing `--attr-source` would let a head's `.gitattributes` hide its hunks from
+ * the classifier.
  */
-const HOME_CREDENTIALS = [
-	".aws",
-	".azure",
-	".claude",
-	".claude.json",
-	".codex",
-	".config",
-	".docker",
-	".gemini",
-	".git-credentials",
-	".gnupg",
-	".kube",
-	".local",
-	".netrc",
-	".npmrc",
-	".ssh",
-	"Library",
-];
-
-/**
- * Every path beside the directories leading to `root`, so a path outside it lies under one, since it parts from
- * them in some directory those lead through, and each of `later`, paths that may appear while a turn runs, that leads
- * to `root` and lies outside it. `root` is resolved.
- */
-export function beside(root: string, later: string[] = []): string[] {
-	const through: string[] = [];
-	for (let up = dirname(root); !through.includes(up); up = dirname(up)) through.push(up);
-	const outside = (path: string) => !through.includes(path) && path !== root && !path.startsWith(`${root}/`);
-	const listed = through.flatMap((dir) => {
-		const names = entries(dir);
-		caseSensitive(dir, names);
-		return names.map((name) => join(dir, name));
-	});
-	return [...new Set([...listed, ...later].filter(outside))].sort();
-}
-
-/** `name` with each letter's case swapped, as `Users` to `uSERS`. */
-const swapped = (name: string) =>
-	[...name].map((c) => (c === c.toUpperCase() ? c.toLowerCase() : c.toUpperCase())).join("");
-
-/**
- * Refuse a directory whose names match case-insensitively, as on macOS's default volume: agy compares its read rules
- * with a path's case as written, so a read of `/USERS/...` passes a rule naming `/Users`. One of `names` shows it, by
- * reaching the same entry with its case swapped.
- */
-function caseSensitive(dir: string, names: string[]): void {
-	// The first name still there, since another run's directory can go between the listing and the check.
-	for (const name of [...names].sort().filter((each) => swapped(each) !== each)) {
-		const entry = lstatSync(join(dir, name), { throwIfNoEntry: false });
-		if (entry === undefined) continue;
-		const variant = lstatSync(join(dir, swapped(name)), { throwIfNoEntry: false });
-		if (variant === undefined || variant.ino !== entry.ino || variant.dev !== entry.dev) return;
-		throw new ReviewerUnavailableError(
-			"agy",
-			"not supported",
-			`agy cannot be kept to its workspace, since ${dir} matches names case-insensitively and agy matches its ` +
-				"read rules case-sensitively; review with agy only where every directory leading to quest's agent directory is case-sensitive, as on Linux",
-		);
-	}
-}
-
-/** Refuse a Git older than 2.41, whose missing `--attr-source` keeps the head's attributes out of agy's export and diffs. */
-function attrSource(): void {
+function requireAttrSource(): void {
 	const printed = spawnSync("git", ["version"], { encoding: "utf8" }).stdout?.trim() ?? "";
 	const [major, minor] = (/(\d+)\.(\d+)/.exec(printed) ?? []).slice(1).map(Number);
 	// A Git that prints no version fails on the first command that needs it.
 	if (major === undefined || minor === undefined || major > 2 || (major === 2 && minor >= 41)) return;
-	throw new ReviewerUnavailableError(
-		"agy",
-		"not supported",
-		`agy needs Git 2.41 or later, whose --attr-source keeps the head's .gitattributes out of what agy reads; ${printed} is installed`,
+	throw new ReviewInputError(
+		`quest review needs Git 2.41 or later, whose --attr-source keeps the head's .gitattributes from hiding its hunks from the classifier; ${printed} is installed`,
 	);
 }
 
-/** The names in `dir`, which must be listed, since a path in it that no rule names could be read. */
-function entries(dir: string): string[] {
-	try {
-		return readdirSync(dir);
-	} catch (error) {
-		throw new ReviewInputError(
-			`the reviewer's reads cannot be kept to its workspace, since ${dir} cannot be listed ` +
-				`(${(error as Error).message}); set XDG_RUNTIME_DIR, or TMPDIR without it, to a directory whose every parent you can list`,
-		);
-	}
-}
-
-/**
- * Deny rules, which hold in every mode, past `--dangerously-skip-permissions`, and over any allow rule: no command,
- * write, web request, or MCP call runs, should a release hand the reviewer agent a tool beyond its list, and no read
- * leaves the turn's directory `dir`, since a hostile change could ask the reviewer to quote a credential, such as
- * another CLI's login or a file the checkout ignores, in a finding. Antigravity has no rule that allows only some
- * paths, so each read rule denies a path beside `dir`'s parents, which it matches by whole components against the path
- * a read resolves to past symlinks and `..`.
- */
-function agySettings(dir: string, env: NodeJS.ProcessEnv): string {
-	const home = env.HOME && existsSync(env.HOME) ? realpathSync(env.HOME) : undefined;
-	// The rules name what lies beside the turn's directory, which no finding should quote.
-	return JSON.stringify({
-		permissions: {
-			deny: [
-				"command(*)",
-				"write_file(*)",
-				"read_url(*)",
-				"execute_url(*)",
-				"download_url(*)",
-				"mcp(*)",
-				...[
-					join(dir, AGY_SETTINGS),
-					...beside(dir, home ? HOME_CREDENTIALS.map((name) => join(home, name)) : []),
-				].map((path) => `read_file(${path})`),
-			],
-		},
-	});
-}
-
-/**
- * Write the tracked files of `head` in the checkout at `root` to `into` exactly as committed. A scratch Git directory
- * beside it borrows the checkout's objects and reads no configuration or attributes: the head's `.gitattributes`
- * could otherwise run a filter driver or hide a file, as an archive leaves out what it marks `export-ignore`, and the
- * user's could run one the head's own attributes turn off. The checkout's own index stays untouched. A symlink becomes
- * a file holding its target, so no read follows one.
- */
-function exportHead(root: string, head: string, into: string): void {
-	// The scratch directory has no refs, so the head is named by its commit.
-	const commit = git(root, ["rev-parse", "--verify", `${head}^{commit}`]);
-	const objects = join(git(root, ["rev-parse", "--path-format=absolute", "--git-common-dir"]), "objects");
-	const format = git(root, ["rev-parse", "--show-object-format"]);
-	const empty = emptyTree(root);
-	// A partial clone may lack some of the head's objects, which the scratch directory has no remote to fetch, so the
-	// checkout fetches them first, in one batch, as a diff from the empty tree does.
-	const listed = git(root, ["rev-list", "--objects", "--missing=print", "--no-walk", commit]);
-	if (listed.split("\n").some((line) => line.startsWith("?")))
-		git(root, ["diff", "--no-ext-diff", "--no-textconv", "--numstat", empty, commit]);
-	const scratch = `${into}.git`;
-	mkdirSync(join(scratch, "objects", "info"), { recursive: true, mode: 0o700 });
-	mkdirSync(join(scratch, "refs"), { mode: 0o700 });
-	writeFileSync(join(scratch, "HEAD"), "ref: refs/heads/export\n");
-	writeFileSync(join(scratch, "objects", "info", "alternates"), `${objects}\n`);
-	if (format !== "sha1")
-		writeFileSync(
-			join(scratch, "config"),
-			`[core]\n\trepositoryformatversion = 1\n[extensions]\n\tobjectFormat = ${format}\n`,
-		);
-	// None of the caller's Git variables, such as GIT_CONFIG_PARAMETERS, carries configuration in.
-	const env = {
-		...Object.fromEntries(Object.entries(process.env).filter(([name]) => !name.startsWith("GIT_"))),
-		GIT_DIR: scratch,
-		GIT_INDEX_FILE: join(scratch, "index"),
-		GIT_CONFIG_NOSYSTEM: "1",
-		GIT_CONFIG_GLOBAL: "/dev/null",
-		GIT_ATTR_NOSYSTEM: "1",
-		GIT_TERMINAL_PROMPT: "0",
-	};
-	const run = (command: string, args: string[]) => {
-		const result = spawnSync("git", args, {
-			cwd: dirname(into),
-			encoding: "utf8",
-			env,
-			maxBuffer: 1 << 30,
-			stdio: ["ignore", "pipe", "pipe"],
-		});
-		if (result.error) throw result.error;
-		if (result.status !== 0) throw new GitError(command, result.status, result.stdout, result.stderr);
-	};
-	try {
-		run("read-tree", ["read-tree", commit]);
-		run("checkout-index", [
-			"-c",
-			"core.symlinks=false",
-			// Git reads the user's own attributes file even with no configuration, so none is named.
-			"-c",
-			"core.attributesFile=/dev/null",
-			`--attr-source=${empty}`,
-			"checkout-index",
-			"--all",
-			`--prefix=${into}/`,
-		]);
-	} finally {
-		rmSync(scratch, { recursive: true, force: true });
-	}
-}
-
-/** What an Antigravity review turn asks for, which has no built-in review command to run. */
-const AGY_REVIEW =
-	"Review the change for what it breaks: bugs, security holes, cases it misses, and dependents it leaves behind. " +
-	"Report each problem with its file and line, the scenario that triggers it, and the wrong result.";
-
-/**
- * The reviewer agent: its tool list replaces every tool Antigravity offers, and it inherits none of the user's hooks,
- * rules, plugins, or MCP servers. Its body is the system prompt. Antigravity 1.5.14 hands an agent no search or
- * directory tool, so `view_file` is all it reads with; `finish` returns a `--json-schema` reply.
- */
-function agyAgent(context: Context): string {
-	return [
-		"---",
-		`name: ${AGY_AGENT}`,
-		"description: Reviews a change by reading its files.",
-		"tools:",
-		"  - view_file",
-		"  - finish",
-		"mainAgent: true",
-		"subagent: false",
-		"inheritMcp: false",
-		"inheritCustomizations: false",
-		"---",
-		"",
-		context.instructions,
-		"",
-	].join("\n");
-}
-
-/**
- * One Antigravity turn, run from a workspace of its own outside the checkout, whose agent configuration Antigravity
- * would otherwise load, and whose files its permission checks would refuse to read without approval, which print mode
- * cannot give, so permissions are skipped and the agent's tool list and `agySettings` bound it. With no shell, the
- * turn's directory holds what `git` would show: an export of the reviewed head beside the workspace, so no
- * configuration it plants lies under the workspace, its file list, and the diff of each range the prompt names,
- * each named by absolute path, since a resumed conversation still sees the earlier turn's directory, now removed. The
- * prompt arrives on stdin, since an argument holds no more than 128 KiB on Linux.
- */
-export function agyTurn(context: Context, prompt: string, flags: string[]): Turn {
-	const files: Record<string, string> = { [`workspace/.agents/agents/${AGY_AGENT}.md`]: agyAgent(context) };
-	// Unquoted, since the reviewer reads each path as written, and the diffs with no attributes, so the head can mark
-	// none of its own hunks binary.
-	if (context.head !== undefined)
-		files["files.txt"] = git(context.root, [
-			"-c",
-			"core.quotePath=false",
-			"ls-tree",
-			"-r",
-			"--name-only",
-			"--full-tree",
-			context.head,
-		]);
-	const empty = context.ranges.length > 0 ? emptyTree(context.root) : "";
-	for (const [index, range] of context.ranges.entries())
-		files[`diff-${index + 1}.diff`] = git(context.root, [
-			"-c",
-			"core.quotePath=false",
-			`--attr-source=${empty}`,
-			"diff",
-			"--no-ext-diff",
-			"--no-textconv",
-			"--no-color",
-			...range.split(" "),
-		]);
-	// Created last, since a turn that is never run leaves its directory behind.
-	const dir = workspace(files, context.env);
-	// A file, since the rules can outgrow the 128 KiB an argument holds on Linux, as beside a crowded /tmp.
-	const settings = join(dir, AGY_SETTINGS);
-	try {
-		// The rules first, since they refuse a host agy cannot be confined on before any export.
-		writeFileSync(settings, agySettings(dir, context.env), { mode: 0o600 });
-		if (context.head !== undefined) exportHead(context.root, context.head, join(dir, "head"));
-	} catch (error) {
-		rmSync(dir, { recursive: true, force: true });
-		throw error;
-	}
-	const head =
-		context.head === undefined
-			? ""
-			: ` The reviewed head's tracked files are in \`${dir}/head\`, which \`${dir}/files.txt\` lists: read them ` +
-				"by absolute path, and name each file by its path inside that directory.";
-	const content =
-		`You have no shell, so run no command.${head}` +
-		context.ranges
-			.map((range, index) => ` \`${dir}/diff-${index + 1}.diff\` holds \`git diff ${range}\`.`)
-			.join("") +
-		`\n\n${prompt}`;
-	return {
-		argv: [
-			"agy",
-			"-p",
-			"",
-			"--input-format",
-			"stream-json",
-			"--output-format",
-			"stream-json",
-			"--model",
-			context.model,
-			"--effort",
-			context.effort,
-			"--agent",
-			AGY_AGENT,
-			"--dangerously-skip-permissions",
-			"--disable-slash-commands",
-			"--settings",
-			settings,
-			...flags,
-		],
-		stdin: `${JSON.stringify({ event: "user", message: { role: "user", content } })}\n`,
-		env: {},
-		workspace: { dir, cwd: join(dir, "workspace") },
-	};
-}
-
-/**
- * Google's Antigravity CLI, which only reviews. It runs on the user's own login and configuration directory, where
- * it keeps its login when no keyring holds it, as over ssh; the reviewer agent keeps the user's customizations out,
- * except their skills' text and their MCP servers' processes, whose tools it cannot call. Its status check lists the
- * account's models, which fails while it is logged out, and over the network otherwise. It ignores GEMINI_API_KEY and
- * GOOGLE_API_KEY in favor of the login, so no credential is added.
- */
-const agy: Reviewer = {
-	status: ["agy", "models"],
-	isolated: true,
-	remoteStatus: true,
-	// The volume first, which the user cannot change, then Git, which they can.
-	supported: (dir) => {
-		beside(dir);
-		attrSource();
-	},
-	login: "agy",
-	credentials: [],
-	routeCredentials: [],
-	connection: [],
-	routes: () => [],
-	// Such as "authentication failed or timed out", once a sign-in it cannot open times out.
-	unauthorized: /authentication failed or timed out|not logged into Antigravity|Please sign in/,
-	review: (context, _session, prompt) => agyTurn(context, `${AGY_REVIEW}\n\n${prompt}`, []),
-	resume: (context, session, prompt) =>
-		agyTurn(context, prompt, ["--conversation", session, "--json-schema", context.schemaFile]),
-	ask: (context, _session, prompt) => agyTurn(context, prompt, ["--json-schema", context.schemaFile]),
-	// The conversation is named first, each model step that finishes reports its usage, and the last line holds the
-	// result and any denied action, which ends a print-mode turn early as though it succeeded. The result's usage sums
-	// the whole conversation, every earlier turn's included, so the turn's own is its steps'.
-	reader() {
-		let session: string | undefined;
-		let result: Record<string, unknown> | undefined;
-		const steps = new Map<unknown, Record<string, unknown>>();
-		return {
-			line(line) {
-				const event = json(line);
-				if (event?.event === "init") session = text(event.conversation_id) ?? session;
-				if (event?.event === "result") result = record(event.result);
-				const step = record(event?.step_update);
-				const usage = record(step?.usage);
-				if (usage !== undefined) steps.set(step!.step_index, usage);
-			},
-			reply(code, stderr) {
-				const limit = (failure: string) =>
-					AGY_LIMIT.test(failure) ? { until: agyReset(failure, new Date()) } : undefined;
-				if (result === undefined) return { error: "agy printed no result", limited: limit(stderr) };
-				const denied = (Array.isArray(result.denied_actions) ? result.denied_actions : []).map(
-					(action) => text(record(action)?.action) ?? "an action",
-				);
-				const error =
-					result.status !== "SUCCESS"
-						? text(result.error) || `agy reported ${String(result.status)}`
-						: denied.length > 0
-							? `agy denied ${names(denied)}, which ended the turn`
-							: undefined;
-				const sum = (key: string) => [...steps.values()].reduce((total, usage) => total + count(usage[key]), 0);
-				const cached = sum("cache_read_tokens");
-				return {
-					session: text(result.conversation_id) || session,
-					text: text(result.response),
-					structured: result.structured_output,
-					// Its input tokens leave out the cached ones; its output tokens include thinking.
-					usage: { input: sum("input_tokens") + cached, cached, output: sum("output_tokens") },
-					error,
-					limited: error === undefined && code === 0 ? undefined : limit(`${error ?? ""}\n${stderr}`),
-				};
-			},
-		};
-	},
-};
-
-const CLIS: Record<ReviewHarness, Reviewer> = { claude, codex, agy };
+const CLIS: Record<HarnessName, Reviewer> = { claude, codex };
 
 /** Codex's review turn reports all zeros, which is no measurement. */
 const reported = (usage: Omit<Usage, "turn"> | undefined): usage is Omit<Usage, "turn"> =>
@@ -1383,7 +1002,7 @@ function installed(harness: string, env: NodeJS.ProcessEnv): string {
 	try {
 		return requireProgram(harness, env);
 	} catch (error) {
-		throw new ReviewerUnavailableError(harness as ReviewHarness, "not installed", (error as Error).message);
+		throw new ReviewerUnavailableError(harness as HarnessName, "not installed", (error as Error).message);
 	}
 }
 
@@ -1447,7 +1066,7 @@ function run(
 			reject(
 				error.code === "ENOENT"
 					? new ReviewerUnavailableError(
-							argv[0] as ReviewHarness,
+							argv[0] as HarnessName,
 							"not installed",
 							`${argv[0]} is not installed`,
 						)
@@ -1467,13 +1086,15 @@ const ABORT_GRACE_MS = 10_000;
 
 /** The reviewer CLI with the environment it runs in and the error for a login the API rejects. */
 interface Cli {
-	harness: ReviewHarness;
+	harness: HarnessName;
 	reviewer: Reviewer;
 	env: NodeJS.ProcessEnv;
 	/** Thrown when a turn fails on authentication, as a logged-out status check fails. */
 	unauthorized: string;
 	/** Stops the review's CLI turns. */
 	signal?: AbortSignal;
+	/** The session a failed or cancelled turn had already opened, which spent tokens before it ended. */
+	failed?: string;
 }
 
 const names = (list: string[]) => list.join(" and ");
@@ -1485,31 +1106,6 @@ function profile(reviewer: Reviewer, env: NodeJS.ProcessEnv): string {
 	return dir
 		? ` to the profile ${reviewer.profile}=${dir}`
 		: ` to its default profile (${reviewer.profile} is unset)`;
-}
-
-/**
- * A new private directory holding `files`, for a CLI to run in: under the user's agent directory, which no other user
- * can write, and outside any repository, since Antigravity loads the agent configuration of every directory from its
- * working directory, symlinks resolved, up to the one holding `.git`.
- */
-function workspace(files: Record<string, string>, env: NodeJS.ProcessEnv): string {
-	const dir = realpathSync(mkdtempSync(join(privateDirectory(agentDirectory(env)), "review-")));
-	try {
-		for (let up = dir; up !== dirname(up); up = dirname(up))
-			if (existsSync(join(up, ".git")))
-				throw new ReviewInputError(
-					`the reviewer's workspace ${dir} lies in the repository at ${up}, whose agent configuration the ` +
-						"reviewer would load; set XDG_RUNTIME_DIR, or TMPDIR without it, to a directory outside any repository",
-				);
-		for (const [path, content] of Object.entries(files)) {
-			mkdirSync(dirname(join(dir, path)), { recursive: true, mode: 0o700 });
-			writeFileSync(join(dir, path), content, { mode: 0o600 });
-		}
-	} catch (error) {
-		rmSync(dir, { recursive: true, force: true });
-		throw error;
-	}
-	return dir;
 }
 
 /** The variables among `names` that `env` sets, with their values. */
@@ -1529,7 +1125,7 @@ const pick = (env: NodeJS.ProcessEnv, names: string[]) =>
  * gateway, which then judges the credential on the first turn.
  */
 async function prepare(
-	harness: ReviewHarness,
+	harness: HarnessName,
 	cwd: string,
 	userEnv: NodeJS.ProcessEnv,
 	signal?: AbortSignal,
@@ -1545,29 +1141,8 @@ async function prepare(
 	const through = routes.length > 0 ? ` through ${names(routes)}` : "";
 	const host = managed ? ", ignoring the host-managed provider's route" : "";
 	const loggedOut = `${harness} is not logged in${profile(reviewer, env)}${through}${host}; run \`${reviewer.login}\``;
-	const loggedIn = async (env: NodeJS.ProcessEnv) => {
-		// A CLI that is not installed passes the round on before its workspace can fail the run.
-		if (reviewer.isolated) installed(reviewer.status[0]!, env);
-		const dir = reviewer.isolated ? workspace({}, env) : cwd;
-		let printed = "";
-		const reader: Reader = {
-			line: (line) => {
-				printed = `${printed}${line}\n`.slice(-TAIL);
-			},
-			reply: () => ({}),
-		};
-		try {
-			// A host that cannot run the CLI is that, whatever its login.
-			reviewer.supported?.(dir);
-			const { code, stderr } = await run(reviewer.status, dir, env, "", reader, signal);
-			const output = `${printed}${stderr}`.trim();
-			if (code !== 0 && reviewer.remoteStatus && !reviewer.unauthorized.test(output))
-				throw new Error(`\`${reviewer.status.join(" ")}\` failed: ${output || `exit ${code}`}`);
-			return code === 0;
-		} finally {
-			if (dir !== cwd) rmSync(dir, { recursive: true, force: true });
-		}
-	};
+	const loggedIn = async (env: NodeJS.ProcessEnv) =>
+		(await run(reviewer.status, cwd, env, "", undefined, signal)).code === 0;
 	const credentials = [...reviewer.credentials, ...(routes.length > 0 ? reviewer.routeCredentials : [])].filter(
 		(name) => set(env[name]),
 	);
@@ -1595,7 +1170,7 @@ async function prepare(
 
 /** The environment `quest review` runs `harness`'s CLI in, for a caller that runs it with the same login. */
 export async function reviewerEnvironment(
-	harness: ReviewHarness,
+	harness: HarnessName,
 	cwd: string,
 	env: NodeJS.ProcessEnv,
 ): Promise<NodeJS.ProcessEnv> {
@@ -1614,26 +1189,36 @@ async function turn(cli: Cli, call: Turn, cwd: string, model: string): Promise<R
 	const reader = cli.reviewer.reader();
 	let ran: { code: number; stderr: string };
 	try {
-		const at = call.workspace?.cwd ?? cwd;
-		ran = await run(call.argv, at, { ...cli.env, ...call.env }, call.stdin, reader, cli.signal);
-	} finally {
-		if (call.workspace) rmSync(call.workspace.dir, { recursive: true, force: true });
+		ran = await run(call.argv, cwd, { ...cli.env, ...call.env }, call.stdin, reader, cli.signal);
+	} catch (error) {
+		// A sibling's failure cancelled this turn, which may have spent tokens in the session it had opened.
+		if (cli.signal?.aborted) cli.failed = reader.reply(1, "").session;
+		throw error;
 	}
 	const { code, stderr } = ran;
 	const reply = reader.reply(code, stderr);
 	if (code !== 0 || reply.error !== undefined) {
-		// A login can expire or be revoked while the status check still passes. A CLI may report it
-		// only on stderr, behind a reader's fallback error such as "claude printed no result".
-		if (reply.status === 401 || cli.reviewer.unauthorized.test(`${reply.error ?? ""}\n${stderr}`)) {
-			throw new ReviewerUnavailableError(cli.harness, "login rejected", cli.unauthorized);
-		}
-		if (reply.limited) throw new ReviewLimitError(cli.harness, reply.limited.until, model);
-		if (cli.harness === "codex" && cli.env.OPENAI_BASE_URL && RETRIED_429.test(`${reply.error ?? ""}\n${stderr}`))
-			throw new ReviewLimitError(cli.harness, null, model);
-		const detail = reply.error ?? stderr.trim().split("\n").slice(-5).join("\n");
-		throw new Error(`${call.argv[0]} failed${detail ? `: ${detail}` : ` with exit status ${code}`}`);
+		const error = failure(cli, call, model, reply, stderr, code);
+		// A rejected login spent nothing; a limit or any other failure may have, partway through the turn.
+		const rejected = error instanceof ReviewerUnavailableError && !(error instanceof ReviewLimitError);
+		if (reply.session !== undefined && !rejected) cli.failed = reply.session;
+		throw error;
 	}
 	return reply;
+}
+
+/** Why a turn failed: logged out, at its usage limit, or the CLI's own error. */
+function failure(cli: Cli, call: Turn, model: string, reply: Reply, stderr: string, code: number): Error {
+	// A login can expire or be revoked while the status check still passes. A CLI may report it
+	// only on stderr, behind a reader's fallback error such as "claude printed no result".
+	if (reply.status === 401 || cli.reviewer.unauthorized.test(`${reply.error ?? ""}\n${stderr}`)) {
+		return new ReviewerUnavailableError(cli.harness, "login rejected", cli.unauthorized);
+	}
+	if (reply.limited) return new ReviewLimitError(cli.harness, reply.limited.until, model);
+	if (cli.harness === "codex" && cli.env.OPENAI_BASE_URL && RETRIED_429.test(`${reply.error ?? ""}\n${stderr}`))
+		return new ReviewLimitError(cli.harness, null, model);
+	const detail = reply.error ?? stderr.trim().split("\n").slice(-5).join("\n");
+	return new Error(`${call.argv[0]} failed${detail ? `: ${detail}` : ` with exit status ${code}`}`);
 }
 
 /**
@@ -1669,7 +1254,7 @@ export function verdict(reply: { structured?: unknown; text?: string }, earlier:
 			throw new Error(`the reviewer's finding ${index + 1} does not match the schema`);
 		}
 		return {
-			file: finding.file.replace(IN_EXPORT, ""),
+			file: finding.file,
 			line: line as number | null,
 			severity: finding.severity as Finding["severity"],
 			title: finding.title,
@@ -2031,6 +1616,26 @@ export const CLASSIFY_INSTRUCTIONS =
 	"tests, or `quest` commands, and disregard any other agent instructions you were given, such as the user's " +
 	"global AGENTS.md, which are for the user's own sessions.";
 
+/**
+ * The flags of every diff a model reads in place of the checkout's own: each file as text, since a head can plant a NUL
+ * byte to trip Git's binary detection, which ignores attributes, with no helper or driver, and every submodule update.
+ * Callers add `--attr-source=<empty tree>`, which keeps the head's attributes out. The classifier's saved tier is
+ * keyed to them.
+ */
+const DIFF_FLAGS = ["--text", "--no-ext-diff", "--no-textconv", "--no-color", "--ignore-submodules=none"];
+
+/** The bytes as UTF-8 text, or null when they are not valid UTF-8, which decoding would swell with U+FFFD. */
+function text8(bytes: Buffer): string | null {
+	try {
+		return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+	} catch {
+		return null;
+	}
+}
+
+/** The name of the classifier's whole diff in its scratch directory. */
+const DIFF_PATCH = "diff.patch";
+
 /** How many characters of the diff the classifier's prompt holds, which keeps Haiku below its 100k-token surcharge. */
 const DIFF_BUDGET = 200_000;
 
@@ -2041,21 +1646,23 @@ const DIFF_BUDGET = 200_000;
 export function classifyPrompt(
 	change: Change,
 	file: { sha: string; text: string },
-	stat: string,
-	patch: string,
+	diff: { stat: string; patch: string | null; file: string; size: number },
 	classes: readonly Class[] = [],
 ): string {
+	const { stat, patch, file: patchFile, size } = diff;
 	const range = `${change.mergeBase}..${change.head}`;
-	const whole = stat.length + patch.length <= DIFF_BUDGET;
+	const whole = patch !== null;
 	const shown = whole ? `${stat}\n\n${patch}` : stat.slice(0, DIFF_BUDGET);
 	return [
 		scope(change),
 		`The repository's risk file, read from ${RISK_FILE} at the base branch's tip ${file.sha}:\n\n<risk-file>\n${file.text}\n</risk-file>`,
 		whole
 			? `The change, \`git diff --stat --patch ${range}\`:`
-			: `The diff is ${stat.length + patch.length} characters, more than this prompt holds, so only its stat ` +
-				`follows${shown.length < stat.length ? ", cut short" : ""}. Read the parts you need with ` +
-				`\`git diff --ignore-submodules=none ${range} -- <path>\`.`,
+			: `The diff is ${stat.length + size} bytes or holds binary data, which this prompt does not hold, so only its stat ` +
+				`follows${shown.length < stat.length ? ", cut short" : ""}. Read the parts you need from ` +
+				// A file, since no Bash command with the flags that keep the head's attributes out is allowed the classifier.
+				`\`${patchFile}\`, which holds \`git diff --patch ${range}\` with every file shown as text, ` +
+				"whatever the head's attributes say.",
 		`<diff>\n${shown}\n</diff>`,
 		"Report the change's tier as JSON matching the response schema, with one sentence on what could break, for " +
 			"whom, and how hard it is to undo.",
@@ -2107,9 +1714,12 @@ async function remoteGit(root: string, args: string[]): Promise<string> {
 
 /**
  * Fetch `base`, or origin's default branch, into its remote-tracking ref in
- * `root`, which may be a bare clone, and return it as `<remote>/<branch>`.
+ * `root`, which may be a bare clone, and return it as `<remote>/<branch>` with the commit the fetch returned.
+ * Another writer of the tracking ref, such as a concurrent fetch or a daemon that keeps it at a track's tip, can
+ * move it before a later read, so the same fetch also writes a ref private to this process and the commit is read
+ * from that one.
  */
-export async function fetchBase(root: string, base?: string): Promise<string> {
+export async function fetchBase(root: string, base?: string): Promise<{ ref: string; sha: string }> {
 	let ref = base;
 	if (ref === undefined) {
 		const line = (await remoteGit(root, ["ls-remote", "--symref", "origin", "HEAD"])).split("\n")[0] ?? "";
@@ -2118,14 +1728,27 @@ export async function fetchBase(root: string, base?: string): Promise<string> {
 		ref = `origin/${match[1]}`;
 	}
 	const { remote, branch } = parseBase(root, ref);
-	await remoteGit(root, [
-		"fetch",
-		"--quiet",
-		"--no-tags",
-		remote,
-		`+refs/heads/${branch}:refs/remotes/${remote}/${branch}`,
-	]);
-	return ref;
+	const pinned = `refs/quest/base/${process.pid}`;
+	// A fetch that fails on the tracking ref can still have written the private one, so cleanup covers the fetch.
+	try {
+		await remoteGit(root, [
+			"fetch",
+			"--quiet",
+			"--no-tags",
+			remote,
+			`+refs/heads/${branch}:refs/remotes/${remote}/${branch}`,
+			`+refs/heads/${branch}:${pinned}`,
+		]);
+		return { ref, sha: git(root, ["rev-parse", "--verify", `${pinned}^{commit}`]) };
+	} finally {
+		git(root, ["update-ref", "-d", pinned]);
+	}
+}
+
+/** The commit of `base`'s remote-tracking ref in `root`. */
+function trackedBase(root: string, base: string): string {
+	const { remote, branch } = parseBase(root, base);
+	return git(root, ["rev-parse", "--verify", `refs/remotes/${remote}/${branch}^{commit}`]);
 }
 
 const digest = (value: string) => createHash("sha256").update(value).digest("hex").slice(0, 16);
@@ -2142,8 +1765,8 @@ function saveSchema(dir: string, schema: object): string {
 }
 
 /** Where a branch's review session is kept, under the clone's common Git directory `common`. */
-export function sessionFile(common: string, branch: string): string {
-	return join(common, "quest", "review", `${digest(branch)}.json`);
+export function sessionFile(common: string, branch: string, own = false): string {
+	return join(common, "quest", "review", `${digest(own ? `own:${branch}` : branch)}.json`);
 }
 
 function load(path: string): unknown {
@@ -2158,7 +1781,7 @@ function load(path: string): unknown {
 }
 
 /** A reviewer's seat on a branch: its harness, and whether it is the second reviewer. */
-export type SeatId = { reviewer: ReviewHarness; second?: true };
+export type SeatId = { reviewer: HarnessName; second?: true };
 const seatKey = (seat: SeatId) => `${seat.reviewer}${seat.second ? " second" : ""}`;
 /** Whether two reviewers hold the same seat: the same harness and role. */
 export const sameSeat = (a: SeatId, b: SeatId) => seatKey(a) === seatKey(b);
@@ -2196,6 +1819,7 @@ export function parseState(value: unknown): State {
 				(session.second === undefined || session.second === true) &&
 				state.tallies!.some((tally) => sameSeat(tally, session)) &&
 				typeof session.session === "string" &&
+				typeof session.started === "number" &&
 				Array.isArray(session.rounds) &&
 				session.rounds.length > 0 &&
 				session.rounds.every((round) => Array.isArray(round?.findings)) &&
@@ -2229,7 +1853,7 @@ export function parseState(value: unknown): State {
  * Whether quest still runs `seat`'s reviewer. A retired one has no CLI to resume its session or settle its findings,
  * so its session is dropped, open findings included, and the routed reviewer reviews the whole branch.
  */
-const runs = (seat: { reviewer: string }) => (REVIEW_HARNESSES as readonly string[]).includes(seat.reviewer);
+const runs = (seat: { reviewer: string }) => (HARNESSES as readonly string[]).includes(seat.reviewer);
 
 /**
  * The branch whose session a round continues: `name`, checked as a branch
@@ -2326,6 +1950,8 @@ interface Classifying {
 	changed: string[];
 	dir: string;
 	env: NodeJS.ProcessEnv;
+	/** Queues the classifier's session for the record sender. */
+	queued: ReviewDependencies["queue"];
 	signal?: AbortSignal;
 	saved?: State["classified"];
 	/** Refuse rather than run a classifier when no saved classification fits, as accepting reviewed rounds does. */
@@ -2342,22 +1968,20 @@ export async function classify(input: Classifying): Promise<{ key: string; value
 	const { root, baseSha, change, changed } = input;
 	const text = exists(root, baseSha, RISK_FILE) ? show(root, baseSha, RISK_FILE) : null;
 	// The paths too, since they set the tier and the offered classes along with the risk file.
-	const key = digest(JSON.stringify([change.mergeBase, change.head, text, changed]));
+	// And the diff's form, so a tier set from a diff the head's attributes could shape is set again.
+	const empty = emptyTree(root);
+	const key = digest(JSON.stringify([change.mergeBase, change.head, text, changed, empty, DIFF_FLAGS]));
 	if (input.saved?.key === key) return { key, value: { ...input.saved.value, usage: [] } };
 	if (input.savedOnly)
 		throw new ReviewInputError(
-			`no round classified ${change.head} from this base; review it before accepting its findings`,
+			`no round classified ${change.head} from this base with this quest's diff; review it before accepting its findings`,
 		);
 	const set = (value: Omit<Classified, "usage">) => ({ key, value: { ...value, usage: [] } });
 	const file = text === null ? null : parseRiskFile(text);
 	if (file !== null && file.problems.length > 0)
 		throw new ReviewInputError(`the base's ${RISK_FILE} cannot be read: ${file.problems.join("; ")}`);
 	const range = `${change.mergeBase}..${change.head}`;
-	const held = heldHigh(file);
-	const hits = changed.flatMap((path) => {
-		const rule = held.find((each) => matches(each.pattern, path));
-		return rule === undefined ? [] : [{ path, rule }];
-	});
+	const hits = highHits(heldHigh(file), changed);
 	if (hits.length > 0) {
 		const { path, rule } = hits[0]!;
 		const more = hits.length > 1 ? `, as are ${hits.length - 1} more of its paths` : "";
@@ -2372,22 +1996,46 @@ export async function classify(input: Classifying): Promise<{ key: string; value
 	const offered = classesFor(file!.classes, changed);
 	const classes = offered.map((each) => each.name);
 
-	const diff = (args: string[]) =>
-		git(root, ["diff", "--no-ext-diff", "--no-textconv", "--no-color", "--ignore-submodules=none", ...args, range]);
-	const prompt = classifyPrompt(change, { sha: baseSha, text }, diff(["--stat=160"]), diff(["--patch"]), offered);
-	const answer = await ask(CLASSIFIERS, {
-		cwd: root,
-		dir: input.dir,
-		env: input.env,
-		signal: input.signal,
-		instructions: CLASSIFY_INSTRUCTIONS,
-		schema: classSchema(classes),
-		prompt,
-		ranges: [range],
-		who: "classifier",
-		task: "set the risk tier",
-		parse: (value) => classed(value, classes, "the classifier's reply"),
-	});
+	// With no attributes and every file as text, so the head can hide none of its hunks by marking them binary.
+	const diff = (args: string[]) => git(root, [`--attr-source=${empty}`, "diff", ...DIFF_FLAGS, ...args, range]);
+	const stat = diff(["--stat=160"]);
+	// Written by Git itself, since a head that adds large binaries makes a patch no string holds.
+	const scratch = mkdtempSync(join(input.dir, "classify-"));
+	const start = Date.now();
+	// Every model that replied spent tokens, whether or not its reply was the one used.
+	const spent: Answer<unknown>["spent"] = [];
+	const queueSpent = () => {
+		for (const { entry, session } of spent)
+			if (session !== undefined) input.queued({ harness: entry.harness, session, cwd: root, start });
+	};
+	let answer;
+	try {
+		const patchFile = join(scratch, DIFF_PATCH);
+		diff(["--patch", `--output=${patchFile}`]);
+		const size = statSync(patchFile).size;
+		// A NUL byte or bytes that are not UTF-8 mean a binary, whose raw bytes tokenize, or decode to U+FFFD, far past
+		// their length, so it goes down the file path too.
+		const bytes = stat.length + size <= DIFF_BUDGET ? readFileSync(patchFile) : null;
+		const patch = bytes && !bytes.includes(0) ? text8(bytes) : null;
+		const prompt = classifyPrompt(change, { sha: baseSha, text }, { stat, patch, file: patchFile, size }, offered);
+		answer = await ask(CLASSIFIERS, {
+			spent,
+			readable: scratch,
+			cwd: root,
+			dir: input.dir,
+			env: input.env,
+			signal: input.signal,
+			instructions: CLASSIFY_INSTRUCTIONS,
+			schema: classSchema(classes),
+			prompt,
+			who: "classifier",
+			task: "set the risk tier",
+			parse: (value) => classed(value, classes, "the classifier's reply"),
+		});
+	} finally {
+		rmSync(scratch, { recursive: true, force: true });
+		queueSpent();
+	}
 	const { tier, reason } = answer.value;
 	return {
 		key,
@@ -2413,11 +2061,13 @@ export interface Question<T = unknown> {
 	prompt: string;
 	/** The tools Claude may call; a reviewer's by default. */
 	tools?: string;
-	/** Each `git diff` range the prompt names, as it names it. */
-	ranges?: string[];
+	/** A directory outside `cwd` that a Claude model may read, which the prompt names files in. */
+	readable?: string;
 	/** Who answers and what for, as `classifier` and `set the risk tier`, for errors. */
 	who: string;
 	task: string;
+	/** Filled with each turn's spend as it ends, so a caller still counts it when the question throws. */
+	spent?: Answer<unknown>["spent"];
 	/** The reply's value, throwing when it is unusable, which passes the question to the next model. */
 	parse(value: unknown): T;
 }
@@ -2427,36 +2077,37 @@ export interface Question<T = unknown> {
  * turn that replied, unusable ones first, so a caller can count what the question cost.
  */
 export interface Answer<T = unknown> {
-	entry: ReviewModel;
+	entry: Model;
 	session: string;
 	value: T;
 	usage: Omit<Usage, "turn"> | null;
-	spent: { entry: ReviewModel; usage: Omit<Usage, "turn"> | null }[];
+	spent: { entry: Model; usage: Omit<Usage, "turn"> | null; session?: string }[];
 }
 
 /**
  * Ask the first of `entries` that can run: one that is logged out, has its login rejected, or hit its usage limit
  * passes the question to the next, since each answers the same prompt.
  */
-export async function ask<T>(entries: readonly ReviewModel[], question: Question<T>): Promise<Answer<T>> {
+export async function ask<T>(entries: readonly Model[], question: Question<T>): Promise<Answer<T>> {
 	const schemaFile = saveSchema(question.dir, question.schema);
 	const failures: (ReviewInputError | ReviewerUnavailableError)[] = [];
-	const spent: Answer<T>["spent"] = [];
+	const spent = question.spent ?? [];
 	for (const entry of entries) {
 		let reply: Reply;
+		let cli: Cli | undefined;
 		try {
-			const cli = await prepare(entry.harness, question.cwd, question.env, question.signal);
+			cli = await prepare(entry.harness, question.cwd, question.env, question.signal);
 			const context: Context = {
 				// A question reviews no range.
 				mergeBase: "",
 				root: question.cwd,
-				ranges: question.ranges ?? [],
 				instructions: question.instructions,
 				model: entry.model,
 				effort: entry.effort,
 				schema: question.schema,
 				schemaFile,
 				...(question.tools !== undefined && { tools: question.tools }),
+				...(question.readable !== undefined && { readable: question.readable }),
 				env: cli.env,
 			};
 			reply = await turn(
@@ -2466,12 +2117,14 @@ export async function ask<T>(entries: readonly ReviewModel[], question: Question
 				entry.model,
 			);
 		} catch (error) {
+			// A turn that failed after opening its session still spent tokens there.
+			if (cli?.failed !== undefined) spent.push({ entry, usage: null, session: cli.failed });
 			if (!(error instanceof ReviewerUnavailableError)) throw error;
 			failures.push(error);
 			continue;
 		}
 		const usage = reported(reply.usage) ? reply.usage : null;
-		spent.push({ entry, usage });
+		spent.push({ entry, usage, ...(reply.session !== undefined && { session: reply.session }) });
 		// A model that answered with no session, or unusably, passes the question on like one that could not run.
 		let value: T;
 		try {
@@ -2499,11 +2152,7 @@ function unanswered(
 	// A CLI the user never installed, or one this host cannot run, is no reason the question went unanswered, so only
 	// the rest count.
 	const blocking = failures.filter(
-		(each) =>
-			!(
-				each instanceof ReviewerUnavailableError &&
-				(each.reason === "not installed" || each.reason === "not supported")
-			),
+		(each) => !(each instanceof ReviewerUnavailableError && each.reason === "not installed"),
 	);
 	// Every model at its limit replied to nothing, so nothing was spent.
 	if (limits.length > 0 && limits.length === blocking.length)
@@ -2547,12 +2196,16 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 		);
 	}
 
+	// Accepting reads no diff, so it needs no such Git.
+	if (options.accept === undefined) requireAttrSource();
+
 	// The reviewer's sandbox has no network, so the base is fetched first, and the size is read from it.
-	const baseRef = options.fetched ? options.base : await fetchBase(root, options.base);
-	const { remote, branch: baseBranch } = parseBase(root, baseRef);
+	// A fetched base's commit is the one the fetch returned; a caller's own fetch left only the tracking ref.
+	const { ref: baseRef, sha: baseSha } = options.fetched
+		? { ref: options.base, sha: trackedBase(root, options.base) }
+		: await fetchBase(root, options.base);
+	const { branch: baseBranch } = parseBase(root, baseRef);
 	const branch = sessionBranch(root, options.branch, baseBranch);
-	const tracking = `refs/remotes/${remote}/${baseBranch}`;
-	const baseSha = git(root, ["rev-parse", "--verify", `${tracking}^{commit}`]);
 	// The PR's own record names its size and implementers, so the author passes neither as a flag.
 	const needed = options.size === undefined || (options.exclude ?? []).length === 0;
 	const record = needed ? await deps.models?.(root, baseRef, branch) : undefined;
@@ -2563,7 +2216,11 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 	// A named reviewer runs alone, as for a repository whose instructions name its own.
 	const auto = options.harness === undefined;
 
-	const statePath = sessionFile(git(root, ["rev-parse", "--path-format=absolute", "--git-common-dir"]), branch);
+	const statePath = sessionFile(
+		git(root, ["rev-parse", "--path-format=absolute", "--git-common-dir"]),
+		branch,
+		options.own,
+	);
 	const dir = dirname(statePath);
 	mkdirSync(dir, { recursive: true });
 	const saved = savedState(statePath, options.fresh);
@@ -2578,7 +2235,7 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 	}
 	const sessions = all.filter(runs);
 	// A login or a missing CLI rules out its harness's every model; a usage limit only the model that hit it.
-	const down = new Map<ReviewHarness, ReviewerUnavailableError>();
+	const down = new Map<HarnessName, ReviewerUnavailableError>();
 	// Models passed over this run, which no later seat falls to.
 	// Keyed by canonical ID, so a saved session's other spelling of a model is the same model.
 	const passedOver = new Map<string, ReviewerUnavailableError>();
@@ -2587,7 +2244,7 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 		has: (model: string) => passedOver.has(canonicalModel(model)),
 		get: (model: string) => passedOver.get(canonicalModel(model)),
 	};
-	const plan = (routed: ReviewModel, second: ReviewModel | null = null) =>
+	const plan = (routed: Model, second: Model | null = null) =>
 		seatsFor({
 			routed,
 			second,
@@ -2628,6 +2285,7 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 		instructions: digest(JSON.stringify(files)),
 		rules: digest(JSON.stringify([REVIEW, rules?.text ?? null])),
 	};
+	const queued: ReviewDependencies["queue"] = (session) => deps.queue(session);
 	// The tier picks how much review a change needs, so it is set before any reviewer runs.
 	const classified = await classify({
 		root,
@@ -2636,6 +2294,7 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 		changed,
 		dir,
 		env: deps.env,
+		queued,
 		signal: options.signal,
 		saved: options.fresh ? undefined : saved?.classified,
 		...(options.accept !== undefined && { savedOnly: true as const }),
@@ -2653,6 +2312,7 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 		past: saved?.history ?? [],
 		dir,
 		env: deps.env,
+		queued,
 	};
 	const before = settle(classified.value);
 	const override = options.override === undefined ? saved?.override : { ...options.override, from: before.tier };
@@ -2727,7 +2387,7 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 	// The second reviewer: the first of the size's list from a vendor other than the pick's that can run. A list with
 	// no such model, as when every other one is avoided, cannot review a high head; one whose others cannot run is
 	// out. It comes from the whole list, since --model or --effort narrows only the pick.
-	const secondTo = (routed: ReviewModel): ReviewModel => {
+	const secondTo = (routed: Model): Model => {
 		const others = secondsTo(sized.size, routed, avoided);
 		if (others.length === 0)
 			throw new ReviewInputError(
@@ -2743,7 +2403,7 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 	// else another, whose new session settles them by number as a replaced pick's does.
 	const seconded = sessions.find((session) => session.second);
 	const unsettledSecond = auto && seconded !== undefined && seconded.rounds.at(-1)!.findings.length > 0;
-	const secondFor = (routed: ReviewModel): ReviewModel | null => {
+	const secondFor = (routed: Model): Model | null => {
 		if (!high && !unsettledSecond) return null;
 		if (!high) {
 			const own = secondsTo(sized.size, routed, avoided).find(
@@ -2827,9 +2487,9 @@ function remembered(past: Past[], rounds: Round[]): Past[] {
 
 /** What picks a run's seats: the routed reviewer and the second, whether the size picked them, and the branch's sessions. */
 interface Seating {
-	routed: ReviewModel;
+	routed: Model;
 	/** The second reviewer a high-risk head gets, or null. */
-	second: ReviewModel | null;
+	second: Model | null;
 	auto: boolean;
 	sessions: Session[];
 	/** Each session's first finding number, as the last run printed them. */
@@ -3015,6 +2675,7 @@ interface Shared {
 	/** The directory holding the branch's sessions and the reply schemas. */
 	dir: string;
 	env: NodeJS.ProcessEnv;
+	queued: ReviewDependencies["queue"];
 	signal: AbortSignal;
 }
 
@@ -3023,7 +2684,7 @@ interface Shared {
  * or the replaced reviewer's, whose findings its new session settles.
  */
 interface Seat {
-	reviewer: ReviewModel;
+	reviewer: Model;
 	second?: true;
 	session?: Session;
 	first: number;
@@ -3076,9 +2737,6 @@ async function reviewWith(shared: Shared, seat: Seat, responses: string | undefi
 	const context: Context = {
 		mergeBase: change.mergeBase,
 		root,
-		// As the prompts name them: the change, and for a later round what changed since the last.
-		head: change.head,
-		ranges: [`${change.mergeBase}..${change.head}`, ...(resume ? [`${previous!.head} ${change.head}`] : [])],
 		instructions: instructionsPrompt(shared.base.sha, shared.files),
 		model: picked.model,
 		effort: picked.effort,
@@ -3088,27 +2746,41 @@ async function reviewWith(shared: Shared, seat: Seat, responses: string | undefi
 	};
 
 	const usage: Usage[] = [];
-	let session: string;
+	// A session's record is sent whatever its turns end in, since each spent tokens.
+	const started = resume ? stored!.started : Date.now();
+	let session: string | undefined = resume ? stored!.session : undefined;
 	let reply: Reply;
-	if (!resume) {
-		const opened = await open(cli, context, root, {
-			review: reviewPrompt(change, rules, earlier, answered, first, shared.past),
-			report: reportPrompt(change.head, earlier, first),
-		});
-		({ session, reply } = opened);
-		usage.push(...opened.usage);
-	} else {
-		session = stored!.session;
-		const prompt = laterPrompt({
-			...change,
-			previous: previous!.head,
-			earlier,
-			first,
-			responses: answered,
-			past: shared.past,
-		});
-		reply = await turn(cli, reviewer.resume(context, session, prompt), root, context.model);
+	try {
+		if (!resume) {
+			const prompts = {
+				review: reviewPrompt(change, rules, earlier, answered, first, shared.past),
+				report: reportPrompt(change.head, earlier, first),
+			};
+			const opened = await turn(cli, reviewer.review(context, randomUUID(), prompts.review), root, context.model);
+			if (opened.session === undefined) throw new Error(`${cli.harness} did not report its session`);
+			session = opened.session;
+			if (reported(opened.usage)) usage.push({ turn: "review", ...opened.usage });
+			reply = await turn(cli, reviewer.resume(context, session, prompts.report), root, context.model);
+		} else {
+			const prompt = laterPrompt({
+				...change,
+				previous: previous!.head,
+				earlier,
+				first,
+				responses: answered,
+				past: shared.past,
+			});
+			reply = await turn(cli, reviewer.resume(context, session!, prompt), root, context.model);
+		}
+	} catch (error) {
+		// A first turn that failed or was cancelled after its session opened still spent tokens.
+		session ??= cli.failed;
+		throw error;
+	} finally {
+		if (session !== undefined) shared.queued({ harness, session, cwd: root, start: started });
 	}
+	// Either turn that failed threw, so a session is open here.
+	const sessionId = session!;
 	if (reported(reply.usage)) usage.push({ turn: "findings", ...reply.usage });
 	const { score, rationale, recommendation, findings: all, earlier: answers } = verdict(reply, earlier.length, first);
 	// Only what the reviewer rated above low holds the head, and is numbered, answered, and settled next round.
@@ -3127,7 +2799,7 @@ async function reviewWith(shared: Shared, seat: Seat, responses: string | undefi
 		branch: shared.branch,
 		size: shared.sized.size,
 		sizeFrom: shared.sized.from,
-		session,
+		session: sessionId,
 		round: rounds.length,
 		base: shared.base,
 		head: change.head,
@@ -3158,28 +2830,13 @@ async function reviewWith(shared: Shared, seat: Seat, responses: string | undefi
 		session: {
 			reviewer: harness,
 			...(second && { second }),
-			session,
+			session: sessionId,
+			started,
 			rounds,
 			last: round,
 			given,
 		},
 	};
-}
-
-/** A new session's two turns: the CLI's own review, then the report of it in the schema, with the review turn's usage. */
-async function open(
-	cli: Cli,
-	context: Context,
-	root: string,
-	prompts: { review: string; report: string },
-): Promise<{ session: string; reply: Reply; usage: Usage[] }> {
-	const opened = await turn(cli, cli.reviewer.review(context, randomUUID(), prompts.review), root, context.model);
-	if (opened.session === undefined) throw new Error(`${cli.harness} did not report its session`);
-	const session = opened.session;
-	// The report turn reads nothing, so it gets no export of the head.
-	const { head: _, ...reporting } = context;
-	const reply = await turn(cli, cli.reviewer.resume(reporting, session, prompts.report), root, context.model);
-	return { session, reply, usage: reported(opened.usage) ? [{ turn: "review", ...opened.usage }] : [] };
 }
 
 /**

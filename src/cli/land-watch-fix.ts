@@ -14,6 +14,7 @@ import {
 } from "../github/client";
 import { type Queued, lacksApproval, queueHead } from "../github/merge";
 import { UNREFUSED } from "./hold";
+import { unreviewedHigh } from "../github/review-trust";
 import { type Carried, describe, readSignals } from "../github/signals";
 import { baseRemote, enqueue, type Entry, type LandMethod, mergeBase, type RemoteRead } from "./land";
 import { resolutionSection, type Resolution } from "./land-apply";
@@ -25,6 +26,7 @@ import {
 	comment,
 	conflictFailure,
 	FixerRefusal,
+	ReviewRefusal,
 	SignalRefusal,
 	handbackLog,
 	fixerMarkdown,
@@ -112,6 +114,8 @@ interface WatchJob extends Process {
 	handback?: string;
 	/** A finding or decision on the head handed it back, so its marker says `unanswered_signal`. */
 	signaled?: boolean;
+	/** The head is high and no `quest review` status covers it, so its marker says `unreviewed` and the handback asks for a review round. */
+	unreviewed?: boolean;
 	/** A validated fix whose push GitHub refused, handed back for `quest land apply`. */
 	resolution?: Resolution;
 	/** Passes that failed to collect it, so one that keeps failing is set aside rather than holding a fixer slot. */
@@ -685,9 +689,7 @@ async function collect(
 	if (!handback && result && result.action !== "handback") {
 		try {
 			if (result.action === "fixed") {
-				// Until the head is pushed, every pass checks it again against the review record that pass read, so a
-				// restart never pushes a fix checked under an older record.
-				if (!ours) {
+				if (job.published === undefined) {
 					if (job.merged) {
 						if (entry.repository !== job.repository && !entry.maintainerCanModify)
 							throw new FixerRefusal("fork does not allow maintainer edits");
@@ -703,7 +705,6 @@ async function collect(
 							context.read,
 							entry.head,
 							deps.warn,
-							typeof pull.body === "string" ? pull.body : "",
 						);
 					job.published = head;
 					save(path, job);
@@ -736,6 +737,7 @@ async function collect(
 			handback = failure.message;
 			if (failure.resolution) job.resolution = failure.resolution;
 			if (failure instanceof SignalRefusal) job.signaled = true;
+			if (failure instanceof ReviewRefusal) job.unreviewed = true;
 		}
 	}
 
@@ -765,7 +767,9 @@ async function collect(
 					// "Repair", since `fixerText` breaks up "fix" as a closing keyword.
 					handback === job.error && job.wrapperError
 						? "repair the land fixer's wrapper on the watcher's host, then pick it again."
-						: "run /quest-iterate before picking it again."
+						: job.unreviewed
+							? "run /quest-review on its head before picking it again."
+							: "run /quest-iterate before picking it again."
 				}`
 			: result?.action === "handback"
 				? `${clip(result.diagnosis, 200, ".")} Recommendation: ${clip(result.recommendation, 200)}`
@@ -773,7 +777,7 @@ async function collect(
 		`handback ${name}`,
 		attribution,
 		handbackLog(job.log, !handback && result?.action === "handback" ? result.log : undefined),
-		job.signaled ? "unanswered_signal" : job.reason,
+		job.signaled ? "unanswered_signal" : job.unreviewed ? "unreviewed" : job.reason,
 		(room) => {
 			const output = job.output ? outputSection(job.output, room) : "";
 			return output + (job.resolution ? resolutionSection(number, job.resolution, room - output.length) : "");
@@ -788,7 +792,8 @@ async function collect(
  * auto-merge pinned to it. A PR queued or armed at it since the queue dropped it, at `dropped`, needs
  * no enqueue: a restart finds its own request, and a workflow may pick the fixer's push first. A
  * refusal, or a PR retargeted from `base`, hands the PR back; a hold leaves it to the session that holds it. A signal
- * on `head` or on the `carried` pick it replaces, queued or not, takes it out of the queue and hands it back.
+ * on `head` or on the `carried` pick it replaces, or a high head no `quest review` status covers, queued or not, takes
+ * it out of the queue and hands it back.
  */
 async function requeue(
 	github: GitHub,
@@ -812,7 +817,22 @@ async function requeue(
 		await readSignals(github, { owner: owner!, repo: repo! }, [number], carried && new Map([[number, carried]]))
 	).get(number)!;
 	if (held.head !== head) throw new FixerRefusal("head moved before it was re-enqueued");
-	if (held.signals.length > 0) {
+	const unreviewed =
+		held.signals.length > 0
+			? null
+			: await unreviewedHigh(
+					github,
+					{ owner: owner!, repo: repo!, number, base },
+					head,
+					typeof pull.body === "string" ? pull.body : "",
+				);
+	if (held.signals.length > 0 || unreviewed !== null) {
+		// A workflow may have queued the head while the checks above ran, so act on the PR as it is now.
+		pull = await readPull(github, id);
+		if (string(pull.headRefOid) !== head) throw new FixerRefusal("head moved before it was re-enqueued");
+		// A pick on another base since is a maintainer's, judged by that base's rules, so leave it.
+		if (pull.state !== "OPEN" || string(pull.baseRefName) !== base)
+			throw new FixerRefusal(`retargeted from ${base}, or closed, before it was re-enqueued`);
 		if (pull.mergeQueueEntry != null) {
 			await github.graphql("mutation($id: ID!) { dequeuePullRequest(input: { id: $id }) { clientMutationId } }", {
 				id,
@@ -825,6 +845,7 @@ async function requeue(
 				"mutation($id: ID!) { disablePullRequestAutoMerge(input: { pullRequestId: $id }) { clientMutationId } }",
 				{ id },
 			);
+		if (unreviewed !== null) throw new ReviewRefusal(`its head ${unreviewed}`);
 		throw new SignalRefusal(`its head is held by ${describe(held.signals)}`);
 	}
 	if (!queued(pull, dropped)) {

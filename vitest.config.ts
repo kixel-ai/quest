@@ -27,8 +27,10 @@ export default defineConfig({
 		// Git for Windows maps "/dev/null" to its null device but rejects os.devNull's "\\.\nul".
 		// An agent session's ID would log the gates tests run as that session's waits (src/cli/waits.ts).
 		// The developer's own records.json would send reads to Kixel Quest where it serves this repository.
+		// An exported QUEST_FORGE=github would skip the Kixel Quest fakes the forge tests serve.
 		env: {
 			GIT_CONFIG_GLOBAL: "/dev/null",
+			QUEST_FORGE: "",
 			CLAUDE_CODE_SESSION_ID: "",
 			CODEX_THREAD_ID: "",
 			XDG_CONFIG_HOME: "/nonexistent/quest-test-config",

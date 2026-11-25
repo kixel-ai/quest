@@ -7,6 +7,7 @@ import {
 	readFileSync,
 	readdirSync,
 	realpathSync,
+	renameSync,
 	rmSync,
 	symlinkSync,
 	writeFileSync,
@@ -267,9 +268,6 @@ test("the agent environment holds no session credentials or harness state", () =
 		CODEX_SANDBOX: "seatbelt",
 		CODEX_HOME: "/home/me/.codex",
 		CLAUDE_CONFIG_DIR: "/home/me/.claude-work",
-		ANTIGRAVITY_LS_ADDRESS: "127.0.0.1:1",
-		ANTIGRAVITY_CSRF_TOKEN: "t",
-		AGY_LLM_GATEWAY_URL: "https://gateway",
 	});
 	expect(env).toEqual({
 		PATH: "/bin",
@@ -635,11 +633,32 @@ test("the agent CLI is found on PATH, never in the worktree it runs in", async (
 
 test("a missing agent CLI fails before any agent state is written", async () => {
 	const s = setup();
+	const admit = vi.spyOn(admission, "admit");
 	vi.stubEnv("PATH", join(s.runtime, "empty"));
 	const result = await quest("agent", "start", ...launch("claude"), s.worktree, "go");
 	expect(result.code).toBe(1);
 	expect(result.stderr).toContain("claude is not installed");
 	expect(existsSync(join(s.runtime, "quest", "agent"))).toBe(false);
+	// It fails at once instead of queueing for a host slot.
+	expect(admit).not.toHaveBeenCalled();
+});
+
+posix("a launcher replaced during the admission wait runs as the new target", async () => {
+	const s = setup();
+	const bin = join(s.runtime, "..", "bin");
+	const marker = join(s.runtime, "..", "replacement.log");
+	// `claude` on PATH is a symlink to the current version, as a package manager installs it.
+	const v1 = join(bin, "claude-v1");
+	renameSync(join(bin, "claude"), v1);
+	symlinkSync(v1, join(bin, "claude"));
+	vi.spyOn(admission, "admit").mockImplementation(async () => {
+		fake(bin, "claude-next", `require("node:fs").writeFileSync(${JSON.stringify(marker)}, "v2");\n${FAKES.claude}`);
+		renameSync(join(bin, "claude-next"), join(bin, "claude"));
+		rmSync(v1);
+	});
+	const result = await quest("agent", "start", ...launch("claude"), s.worktree, "go");
+	expect(result.code).toBe(0);
+	expect(readFileSync(marker, "utf8")).toBe("v2");
 });
 
 test("launch settings reach the agent unchanged, whatever characters they hold", async () => {

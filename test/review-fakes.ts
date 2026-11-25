@@ -1,7 +1,6 @@
 // The fake Codex and Claude Code CLIs and the fixture clone the review tests run them in.
 import { execFileSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { chmodSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test, vi } from "vitest";
 
@@ -10,12 +9,6 @@ import { tempDir } from "./fixture";
 
 /** The fake CLIs are shebang scripts found on a POSIX PATH, which Windows cannot run. */
 export const fakes = test.skipIf(process.platform === "win32");
-
-/** Whether the temporary directory matches names case-insensitively, as macOS's default volume does. */
-export const caseInsensitive = existsSync(realpathSync(tmpdir()).toUpperCase());
-
-/** A fake-CLI test that runs agy, which quest refuses where names match case-insensitively. */
-export const agyFakes = test.skipIf(process.platform === "win32" || caseInsensitive);
 
 export const FINDING = {
 	file: "src/lib.ts",
@@ -76,15 +69,16 @@ const logged = (call) => {
  * CODEX_ACCESS_TOKEN but not CODEX_API_KEY. FAKE_REJECTED has the API
  * reject the login in each turn with the real CLI's error, in the style it
  * names. FAKE_LIMITED fails a turn on the account's usage limit with the real
- * CLI's error, naming its reset unless set to `unknown`; for agy, `stderr`
- * reports success but exits 1 with the error only on stderr, and
- * FAKE_EMPTY_ERROR fails its first turn with an empty error. FAKE_CLASSIFY fails
+ * CLI's error, naming its reset unless set to `unknown`. FAKE_CLASSIFY fails
  * the classifier's turn of each `<harness>-rejected` or `<harness>-limited` it
  * lists, the same way. FAKE_FAILS limits FAKE_LOGGED_OUT, FAKE_REJECTED, and
  * FAKE_LIMITED to the harnesses and models it lists, comma-separated, so one
  * reviewer fails while the next runs. FAKE_QUOTED fails Claude Code's findings
  * turn with a reply that only quotes a limit's message. FAKE_REPLY replaces the
- * findings reply.
+ * findings reply. FAKE_HANG_CLAUDE, a FIFO's path, hangs Claude Code's review turn until it is stopped, as a seat still
+ * running when another's failure cancels it, after signalling on the FIFO, which Codex's limit waits to read before
+ * failing, so the limit never lands before that turn starts. FAKE_HANG_CODEX, a FIFO's path, does the same to Codex's, after it opened its thread and
+ * signalled on the FIFO, which Claude Code's limit waits to read before failing, so the limit never lands first.
  */
 export const FAKES: Record<string, string> = {
 	claude: `
@@ -92,7 +86,10 @@ const fs = require("node:fs");${LOG}
 const argv = process.argv.slice(2);
 const stdin = fs.readFileSync(0, "utf8");
 const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => /^(CLAUDE|CODEX|ANTHROPIC|FAKE_HOST|PATH$)/.test(k)));
-logged({ argv, stdin, env, cwd: process.cwd() });
+// The directory --add-dir lets it read, as it stood.
+const extra = argv.includes("--add-dir") ? argv[argv.indexOf("--add-dir") + 1] : undefined;
+const readable = extra && Object.fromEntries(fs.readdirSync(extra).map((name) => [name, fs.readFileSync(require("node:path").join(extra, name), "utf8")]));
+logged({ argv, stdin, env, cwd: process.cwd(), readable });
 // FAKE_FAILS limits the FAKE_* failures to the harnesses and models it lists.
 const model = argv.includes("--model") ? argv[argv.indexOf("--model") + 1] : argv.includes("-m") ? argv[argv.indexOf("-m") + 1] : undefined;
 const only = process.env.FAKE_FAILS?.split(",");
@@ -102,6 +99,11 @@ const provider = Object.entries(process.env).some(([k, v]) => k.startsWith("CLAU
 const loggedIn = !fake("FAKE_LOGGED_OUT") || credential || provider;
 if (argv[0] === "auth") process.exit(loggedIn ? 0 : 1);
 const at = (flag) => argv[argv.indexOf(flag) + 1];
+if (process.env.FAKE_HANG_CLAUDE && argv.includes("--session-id") && !argv.includes("--json-schema")) {
+	fs.writeFileSync(process.env.FAKE_HANG_CLAUDE, "");
+	setInterval(() => {}, 1000);
+	return;
+}
 const result = (fields) => console.log(JSON.stringify({ type: "result", is_error: false, ...fields }));
 const rejected = fake("FAKE_REJECTED") ?? (loggedIn ? undefined : "status");
 if (rejected) {
@@ -122,6 +124,8 @@ if (process.env.FAKE_QUOTED && argv.includes("--resume")) {
 }
 // The limit hits the findings turn, after the review turn passed.
 if (fake("FAKE_LIMITED") && argv.includes("--resume")) {
+	// A read of the FIFO blocks until Codex's thread is open, with nothing to poll.
+	if (process.env.FAKE_HANG_CODEX) fs.readFileSync(process.env.FAKE_HANG_CODEX);
 	if (fake("FAKE_LIMITED") !== "unknown") {
 		console.log(JSON.stringify({ type: "rate_limit_event", rate_limit_info: { status: "rejected", resetsAt: 1900000000 } }));
 	}
@@ -188,6 +192,12 @@ if (process.env.FAKE_HANG && !fs.existsSync(process.env.FAKE_HANG)) {
 	return;
 }
 const event = (value) => console.log(JSON.stringify(value));
+if (process.env.FAKE_HANG_CODEX) {
+	event({ type: "thread.started", thread_id: "thread-1" });
+	fs.writeFileSync(process.env.FAKE_HANG_CODEX, "");
+	setInterval(() => {}, 1000);
+	return;
+}
 const loggedIn = !fake("FAKE_LOGGED_OUT") || process.env.CODEX_API_KEY || process.env.CODEX_ACCESS_TOKEN;
 const rejected = fake("FAKE_REJECTED") ?? (loggedIn ? undefined : "turn");
 if (rejected === "turn") {
@@ -202,6 +212,8 @@ if (rejected) {
 	process.exit(1);
 }
 if (fake("FAKE_LIMITED")) {
+	// A read of the FIFO blocks until Claude's review turn is running, with nothing to poll.
+	if (process.env.FAKE_HANG_CLAUDE) fs.readFileSync(process.env.FAKE_HANG_CLAUDE);
 	const message = fake("FAKE_LIMITED") === "retried"
 		? "exceeded retry limit, last status: 429 Too Many Requests"
 		: fake("FAKE_LIMITED") === "unknown"
@@ -240,89 +252,6 @@ if (argv[1] === "review") {
 	event({ type: "turn.completed", usage: { input_tokens: 100, cached_input_tokens: 80, output_tokens: 7 } });
 }
 `,
-	// Antigravity's print mode: the prompt is one stream-json line on stdin, and the turn's directory is logged as it stood,
-	// since quest removes it after the turn. FAKE_DENIED ends a turn on a denied command, as print mode does.
-	agy: `
-const fs = require("node:fs");
-const path = require("node:path");${LOG}
-const argv = process.argv.slice(2);
-const raw = fs.readFileSync(0, "utf8");
-const stdin = raw ? JSON.parse(raw).message.content : "";
-const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => /^(CLAUDE|CODEX|ANTHROPIC|ANTIGRAVITY|AGY|FAKE_HOST|PATH$)/.test(k)));
-const walk = (dir) => fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) =>
-	entry.isDirectory() ? walk(path.join(dir, entry.name)).map((name) => entry.name + "/" + name) : [entry.name]);
-// A turn runs in its directory's workspace, so the whole directory, its export included, is logged.
-const workspace = argv[0] === "models" ? null : Object.fromEntries(walk("..").map((name) => [name, fs.readFileSync(path.join("..", name), "utf8")]));
-logged({ argv, stdin, env, cwd: process.cwd(), workspace });
-const model = argv.includes("--model") ? argv[argv.indexOf("--model") + 1] : undefined;
-const only = process.env.FAKE_FAILS?.split(",");
-const fake = (name) => (!only || only.includes("agy") || only.includes(model) ? process.env[name] : undefined);
-if (argv[0] === "models") {
-	console.log("Fetching available models...");
-	if (fake("FAKE_LOGGED_OUT")) {
-		console.log("Error: Please sign in to view available models. Launch the CLI without arguments to sign in.");
-		process.exit(1);
-	}
-	if (fake("FAKE_OFFLINE")) {
-		console.log("Error: dial tcp: lookup cloudcode-pa.googleapis.com: no such host");
-		process.exit(1);
-	}
-	console.log("gemini-4-neon-xhigh\\tGemini 4 Neon (XHigh)");
-	process.exit(0);
-}
-const at = (flag) => (argv.includes(flag) ? argv[argv.indexOf(flag) + 1] : undefined);
-const conversation = at("--conversation") ?? "conversation-" + (at("--json-schema") ? "ask" : "1");
-const event = (value) => console.log(JSON.stringify(value));
-// Each step reports its own usage; the result's sums the conversation, a resumed one's earlier turns included.
-const result = (fields, ...steps) => {
-	const usage = { input_tokens: at("--conversation") ? 1000 : 0, output_tokens: 0, thinking_tokens: 0, cache_read_tokens: 0 };
-	for (const [index, step] of steps.entries()) {
-		event({ event: "step_update", step_update: { conversation_id: conversation, step_index: index + 1, state: "ACTIVE", step_type: "agent_response" } });
-		event({ event: "step_update", step_update: { conversation_id: conversation, step_index: index + 1, state: "DONE", step_type: "agent_response", usage: step } });
-		for (const key of Object.keys(usage)) usage[key] += step[key];
-	}
-	event({ event: "result", result: { conversation_id: conversation, status: "SUCCESS", response: "", num_turns: 1, usage, ...fields } });
-};
-const tokens = (input_tokens, output_tokens, thinking_tokens, cache_read_tokens) => ({ input_tokens, output_tokens, thinking_tokens, cache_read_tokens });
-const fail = (error) => {
-	result({ status: "ERROR", error });
-	console.error("error: " + error);
-	process.exit(1);
-};
-const QUOTA = (reset) => "Error 429, Message: Quota exhausted for gemini-4-neon., Status: RESOURCE_EXHAUSTED, Details: [map[@type:type.googleapis.com/google.rpc.ErrorInfo domain:cloudcode-pa.googleapis.com metadata:map[" + reset + "] reason:QUOTA_EXHAUSTED]]";
-event({ event: "init", conversation_id: conversation, init: { model, cwd: process.cwd(), tools: [], permission_mode: "always-proceed" } });
-if (fake("FAKE_REJECTED")) fail("authentication failed or timed out");
-const failing = (process.env.FAKE_CLASSIFY ?? "").split(",");
-if (at("--json-schema") && !at("--conversation")) {
-	if (failing.includes("agy-rejected")) fail("authentication failed or timed out");
-	if (failing.includes("agy-limited")) fail(QUOTA("quotaResetTimeStamp:2030-03-17T17:46:40Z"));
-	const reply = failing.includes("agy-unusable") ? JSON.stringify({ tier: "huge", reason: "x" }) : ${RISK_REPLY};
-	result({ response: reply + "\\n", structured_output: JSON.parse(reply) }, tokens(40, 3, 1, 0));
-} else if (!at("--conversation")) {
-	if (process.env.FAKE_EMPTY_ERROR) {
-		result({ status: "ERROR", error: "" });
-		console.error("error: something broke");
-		process.exit(1);
-	}
-	if (process.env.FAKE_DENIED) {
-		result({ denied_actions: [{ action: "command", display_name: "Bash" }] });
-		process.exit(0);
-	}
-	result({ response: "Found an off-by-one.\\n" }, tokens(60, 30, 25, 10), tokens(30, 20, 15, 0));
-} else {
-	if (fake("FAKE_LIMITED") === "stderr") {
-		result({});
-		console.error("error: " + QUOTA("quotaResetTimeStamp:2030-03-17T17:46:40Z"));
-		process.exit(1);
-	}
-	if (fake("FAKE_LIMITED")) fail(QUOTA(fake("FAKE_LIMITED") === "unknown" ? "" : "quotaResetDelay:3600s quotaResetTimeStamp:2030-03-17T17:46:40Z"));
-	${REPLY}
-	result(
-		{ response: reply + "\\n", structured_output: process.env.FAKE_REPLY ? undefined : JSON.parse(reply) },
-		tokens(20, 7, 2, 80),
-	);
-}
-`,
 };
 
 export const git = (dir: string, ...args: string[]) =>
@@ -347,8 +276,8 @@ export interface Call {
 	stdin: string;
 	env: Record<string, string>;
 	cwd: string;
-	/** The files of an Antigravity turn's directory, beside and in its working directory, as it ran. */
-	workspace?: Record<string, string> | null;
+	/** The files of the directory a Claude Code turn was let read beside the checkout, as they stood. */
+	readable?: Record<string, string> | undefined;
 }
 
 /** Credentials and routes the running session may hold, cleared so each test sets its own. */
@@ -410,7 +339,6 @@ export function setup(host: "CLAUDECODE" | "CODEX_THREAD_ID" | null = "CLAUDECOD
 		...HOST_CREDENTIALS,
 		"CLAUDECODE",
 		"CODEX_THREAD_ID",
-		"ANTIGRAVITY_CONVERSATION_ID",
 		"CLAUDE_CONFIG_DIR",
 		"CODEX_HOME",
 		"OPENAI_BASE_URL",
@@ -425,7 +353,6 @@ export function setup(host: "CLAUDECODE" | "CODEX_THREAD_ID" | null = "CLAUDECOD
 		"FAKE_HANG",
 		"FAKE_DISPOSITION",
 		"FAKE_RISK",
-		"FAKE_DENIED",
 		"FAKE_CLASSIFY",
 	]) {
 		vi.stubEnv(name, undefined);
@@ -452,7 +379,13 @@ export function effortOf(call: Call): string | null {
 /** The turns at `effort`, so two seats on the same CLI read apart. */
 export const at = (calls: Call[], effort: string) => calls.filter((call) => effortOf(call) === effort);
 
-export async function quest(...args: string[]): Promise<{ code: number; stdout: string; stderr: string }> {
+export const quest = (...args: string[]) => questFrom(undefined, ...args);
+
+/** Run the CLI as the quest executing from `entry`, as `bin.ts` reports it. */
+export async function questFrom(
+	entry: string[] | undefined,
+	...args: string[]
+): Promise<{ code: number; stdout: string; stderr: string }> {
 	let stdout = "";
 	let stderr = "";
 	const out: Output = {
@@ -462,6 +395,7 @@ export async function quest(...args: string[]): Promise<{ code: number; stdout: 
 		stderr: (text) => {
 			stderr += text;
 		},
+		entry,
 	};
 	const code = await main(args, out);
 	return { code, stdout, stderr };

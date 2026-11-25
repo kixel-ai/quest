@@ -1,6 +1,6 @@
 // `quest land watch` against a fake of the GitHub records it reads: merge queue events and `merge_group` builds.
 
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { setTimeout as pause } from "node:timers/promises";
@@ -202,6 +202,16 @@ function deps(world: World): GitHubDependencies {
 				if (query.includes("viewer")) return Response.json({ data: { viewer: { login: `${APP}[bot]` } } });
 				if (query.includes("defaultBranchRef"))
 					return Response.json({ data: { repository: { defaultBranchRef: { name: "main" } } } });
+				if (query.includes("query ReviewTiers"))
+					return Response.json({
+						data: {
+							repository: {
+								pullRequest: {
+									commits: { pageInfo: { hasPreviousPage: false, startCursor: null }, nodes: [] },
+								},
+							},
+						},
+					});
 				const pullOf = () => world.pulls.find((item) => `PR_${item.number}` === variables.id)!;
 				const aliases = [...query.matchAll(/\bp(\d+): pullRequest\(number: \d+\)/g)].map((m) => Number(m[1]));
 				if (aliases.length) {
@@ -403,6 +413,26 @@ function deps(world: World): GitHubDependencies {
 						.filter((item) => `upstream:${branchOf(item)}` === head && (item.state ?? "OPEN") === "OPEN")
 						.map((item) => ({ number: item.number, node_id: `PR_${item.number}` })),
 				);
+			}
+			// The base's RISK.md and a PR's files, from the upstream repository when the world has one.
+			if (path === "/repos/upstream/project/contents/RISK.md") {
+				const ref = url.searchParams.get("ref") ?? "main";
+				const risk =
+					world.origin && spawnSync("git", ["show", `refs/heads/${ref}:RISK.md`], { cwd: world.origin });
+				return risk && risk.status === 0 ? new Response(risk.stdout) : new Response("{}", { status: 404 });
+			}
+			const compared = /^\/repos\/upstream\/project\/compare\/([^/]+)\.\.\.(\w+)$/.exec(path);
+			if (compared) {
+				const [, base, head] = compared;
+				const from = world.origin ? git(world.origin, "merge-base", `refs/heads/${base}`, head!) : GROUP;
+				const changed = world.origin
+					? git(world.origin, "diff", "--name-only", "--no-renames", from, head!)
+					: "";
+				const files = changed
+					.split("\n")
+					.filter(Boolean)
+					.map((filename) => ({ filename }));
+				return Response.json({ merge_base_commit: { sha: from }, files });
 			}
 			const pullPath = /^\/repos\/upstream\/project\/pulls\/(\d+)$/.exec(path);
 			if (pullPath) {
@@ -1584,11 +1614,21 @@ describe.skipIf(process.platform === "win32")("the watcher's land fixer", () => 
 		expect(parseResolution(handback)).toMatchObject({ head, base: head });
 	});
 
-	test("any fix to a PR whose review record rates it high, or is malformed, is handed back unpushed", async () => {
+	test("a fixed high head is pushed but waits for a review: by its record, a malformed one, or a high path", async () => {
 		const record = (risk: string) =>
 			`## Review\n\n- Head: abcdef012345\n- Risk:${risk}\n- Classified: medium by the always-high paths\n`;
-		for (const body of [record(" high, `it changes the sandbox`"), record("dire")]) {
+		const cases = [
+			{
+				body: record(" high, `it changes the sandbox`"),
+				file: "fixed.txt",
+				why: "its review record rates it high",
+			},
+			{ body: record("dire"), file: "fixed.txt", why: "Review record's risk is malformed: dire" },
+			{ body: "", file: "high.txt", why: "it changes high.txt, which is always high: every agent loads it" },
+		];
+		for (const { body, file, why } of cases) {
 			const { repo, state, fix, context } = setup();
+			repo.advance({ "RISK.md": "# Risk\n\n## High\n\n- `high.txt` - every agent loads it\n" });
 			const base = repo.main();
 			const head = repo.pull(5, { "feature.txt": "new\n" });
 			const pull: Pull = {
@@ -1602,44 +1642,20 @@ describe.skipIf(process.platform === "win32")("the watcher's land fixer", () => 
 			};
 			const github = { ...world([pull], [failedRun(5, at(3), base)]), origin: repo.origin };
 			github.now = Date.parse(at(6));
-			fix.round(5, fixScript("fixed.txt"));
+			fix.round(5, fixScript(file));
 			await watchPass(REPOSITORY, { state }, deps(github), context);
 			await exited(state);
 			github.now = Date.parse(at(10));
 			expect(await watchPass(REPOSITORY, { state }, deps(github), context)).toEqual(["handback 5"]);
-			expect(git(repo.origin, "rev-parse", "refs/heads/branch-5")).toBe(head);
-			expect(github.comments[5].at(-1)!.body).toContain("off-limits fixer edit");
+			const fixed = git(repo.origin, "rev-parse", "refs/heads/branch-5");
+			expect(fixed).not.toBe(head);
+			expect(github.mutations).toEqual([]);
+			const handback = github.comments[5].at(-1)!.body;
+			expect(handback).toContain(`its head ${fixed} is high, since `);
+			expect(handback).toContain(`${why}, and no quest review status covers it.`);
+			expect(handback).toContain("Recommendation: run /quest-review on its head before picking it again.");
+			expect(handback).toContain("<!-- quest land: unreviewed -->");
 		}
-	});
-
-	test("a fix the watcher crashed before pushing is checked again against the review record read then", async () => {
-		const { repo, state, fix, context } = setup();
-		const base = repo.main();
-		const head = repo.pull(5, { "feature.txt": "new\n" });
-		const pull: Pull = {
-			number: 5,
-			head,
-			enqueues: [{ createdAt: at(1), actor: "maintainer" }],
-			removals: [
-				{ id: "R1", createdAt: at(5), reason: "failed_checks", actor: "github-merge-queue", before: head },
-			],
-		};
-		const github = { ...world([pull], [failedRun(5, at(3), base)]), origin: repo.origin };
-		github.now = Date.parse(at(6));
-		fix.round(5, fixScript("fixed.txt"));
-		await watchPass(REPOSITORY, { state }, deps(github), context);
-		await exited(state);
-		// The job as a watcher leaves it when it dies between validating the fix against an unrated PR and pushing it.
-		const [name] = readdirSync(state).filter((file) => /^watch-job-.*\.json$/.test(file));
-		const job = JSON.parse(readFileSync(join(state, name), "utf8"));
-		const [result] = JSON.parse(readFileSync(join(job.checkout, "quest-land-result.json"), "utf8"));
-		git(context.root, "fetch", "--quiet", job.checkout, result.head);
-		writeFileSync(join(state, name), JSON.stringify({ ...job, result, published: result.head }));
-		pull.body = "## Review\n\n- Head: abcdef012345\n- Risk: high, `it changes the sandbox`\n";
-		github.now = Date.parse(at(10));
-		expect(await watchPass(REPOSITORY, { state }, deps(github), context)).toEqual(["handback 5"]);
-		expect(git(repo.origin, "rev-parse", "refs/heads/branch-5")).toBe(head);
-		expect(github.comments[5].at(-1)!.body).toContain("off-limits fixer edit");
 	});
 
 	test("a quest-file conflict is merged with the quest driver, and a code conflict goes to the fixer", async () => {

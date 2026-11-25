@@ -35,10 +35,6 @@ import { Worktrees, save } from "./worktree";
 export const HARNESSES = ["claude", "codex"] as const;
 export type HarnessName = (typeof HARNESSES)[number];
 
-/** The CLIs `quest review` runs: every agent harness, and Google's Antigravity CLI, `agy`, which only reviews. */
-export const REVIEW_HARNESSES = [...HARNESSES, "agy"] as const;
-export type ReviewHarness = (typeof REVIEW_HARNESSES)[number];
-
 /** Everything a launch names on its command line. */
 export interface Launch {
 	harness: HarnessName;
@@ -247,17 +243,13 @@ export class AgentInputError extends Error {}
  * A launch from inside a `quest gate` command does not admit the agent's own
  * expensive commands or give them a land check's priority, so the gate's marks
  * are dropped too, with the mbx priority a priority gate sets. Each CLI keeps the
- * user's configuration directory. An Antigravity session hands its commands its
- * language server's address and token, which would put a launched `agy` in that
- * session, and `AGY_` variables route `agy` to a gateway or another account.
+ * user's configuration directory.
  */
 const STRIPPED = [
 	/^CLAUDE(?!_CONFIG_DIR$)/,
 	/^ANTHROPIC/,
 	/^CODEX_(?!HOME$)/,
 	/^OPENAI_API_KEY$/,
-	/^ANTIGRAVITY_/,
-	/^AGY_/,
 	/^OP_/,
 	/^QUEST_GATE_(ADMITTED|PRIORITY)$/,
 ];
@@ -511,13 +503,16 @@ export async function runAgent(
 	const harness = HARNESS[launch.harness];
 	const id = session ?? randomUUID();
 	const [name, ...args] = session === undefined ? harness.start(launch, id) : harness.resume(launch, id);
-	// The CLI is found on PATH, never in the worktree.
-	const program = requireProgram(name, deps.env);
-	const command = checkouts ? undefined : programCommand(program, args, deps.env);
+	// The CLI is found on PATH, never in the worktree. A missing one fails here, before the wait.
+	requireProgram(name, deps.env);
 	const dir = spawnDirectory(deps.base, worktree);
 	// Waited out before the worktree is claimed, so a queued launch holds nothing.
 	const refused = await admitAgent(deps, process.pid);
 	if (refused !== undefined) return refused;
+	// Found again once admitted: `which` returns the file PATH named, which a launcher update during a long wait
+	// may have replaced.
+	const program = requireProgram(name, deps.env);
+	const command = checkouts ? undefined : programCommand(program, args, deps.env);
 
 	const reader = harness.reader();
 	// Claude Code takes the id this command assigns; Codex announces its own.

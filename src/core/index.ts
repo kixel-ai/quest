@@ -7,7 +7,10 @@
 
 export {
 	type Doc,
+	type Bullet,
 	type Entry,
+	type NestedList,
+	type Part,
 	type Heading,
 	type Link,
 	type Position,
@@ -35,7 +38,7 @@ export {
 	size,
 } from "./doc";
 export { AUDIT, AUDITS, type Audit, SKIPPED, auditOf, covered, skippedOf } from "./audit";
-export { type ClosedPull, handBackWaits, handedBack, landed, withoutHandBack } from "./claim";
+export { type ClosedPull, handBackProblems, handBackWaits, handedBack, landed, withoutHandBack } from "./claim";
 export { REVIEW_MARK, reviewSection } from "./review";
 export {
 	ALWAYS_HIGH,
@@ -51,6 +54,7 @@ export {
 	TIERS,
 	type Tier,
 	heldHigh,
+	highHits,
 	matches,
 	parseRiskFile,
 	patternError,
@@ -60,7 +64,7 @@ export {
 export { type Missed, type Moved, type Source, move, promote, relocate, remove } from "./edit";
 export { comparePaths, normalize } from "./path";
 export { type Blocker, blockers, label, lookup, parked, ready, renderBlocker } from "./ready";
-export { type Finding, ROOT, check, formatFinding } from "./rules";
+export { type CheckOptions, type Finding, ROOT, check, formatFinding } from "./rules";
 export {
 	type Draft,
 	type RankedQuest,
@@ -70,7 +74,21 @@ export {
 	unblocked,
 	waiting,
 } from "./unblocked";
-export { MAINTAINER, WAITING, type Wait, onMaintainer, parseWait, waits } from "./waiting";
+export {
+	type Action,
+	type Choice,
+	type Decision,
+	MAINTAINER,
+	type Prose,
+	type ReadWait,
+	WAITING,
+	type Wait,
+	type WaitProblem,
+	onMaintainer,
+	readWait,
+	waitLine,
+	waits,
+} from "./waiting";
 export {
 	ATTRIBUTES_LINE,
 	type Checkout,

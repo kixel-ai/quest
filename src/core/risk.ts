@@ -34,6 +34,14 @@ export const ALWAYS_HIGH: readonly HighPath[] = [
 /** The paths a base with risk file `file`, or none, holds high: {@link ALWAYS_HIGH} and its `## High` list. */
 export const heldHigh = (file: RiskFile | null): HighPath[] => [...ALWAYS_HIGH, ...(file?.high ?? [])];
 
+/** Each of `paths` a pattern in `held` matches, with the first such pattern, in `paths`' order. */
+export function highHits(held: readonly HighPath[], paths: readonly string[]): { path: string; rule: HighPath }[] {
+	return paths.flatMap((path) => {
+		const rule = held.find((each) => matches(each.pattern, path));
+		return rule === undefined ? [] : [{ path, rule }];
+	});
+}
+
 /**
  * Why `pattern` is not a path pattern, or null when it is one: a path from the repository root, `/`-separated,
  * where `*` matches within one segment, `?` one character of it, and a whole `**` segment any number of segments.
