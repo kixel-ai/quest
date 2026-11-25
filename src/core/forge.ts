@@ -133,7 +133,7 @@ export interface Status {
 	checks: { state: string | null; passed: number; failing: Check[]; pending: Check[] };
 	/** Each reviewer's latest submitted review, oldest first. */
 	reviews: Review[];
-	/** The design checkpoints online reviewers put on the head. */
+	/** The online reviewers whose rounds on the head have reached the point where the user decides. */
 	checkpoints: { reviewer: string; round: number; url: string }[];
 	/**
 	 * Null when the `## Review` section holds no record `quest review` wrote or names no full SHA, or no writer's passing `quest review` status attests it.

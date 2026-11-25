@@ -136,7 +136,7 @@ export interface Finding {
 	line: number | null;
 	severity: (typeof SEVERITIES)[number];
 	title: string;
-	/** The concrete scenario: the input or state, and the wrong result. */
+	/** The concrete scenario, the input or state and the wrong result, then the recommended fix. */
 	body: string;
 }
 
@@ -360,7 +360,6 @@ export function pickReviewer(size: Size, choice: Choice, avoided: (entry: Review
 	return picked;
 }
 
-/** The list that reviews a head of `tier` on a PR of `size`: `high` for a high head, whatever its size. */
 /** The reviewers that may take a high head's second seat beside `pick`, ranked: its size's from another vendor. */
 export const secondsTo = (size: Size, pick: ReviewModel, avoided: (entry: ReviewModel) => boolean): ReviewModel[] =>
 	REVIEWERS[size].filter((each) => !avoided(each) && each.harness !== pick.harness);
@@ -1699,9 +1698,11 @@ export function verdict(reply: { structured?: unknown; text?: string }, earlier:
 		throw new Error(`the reviewer's reply does not settle each of the last round's ${earlier} finding(s) once`);
 	}
 	// A finding still open is one this round reports again; one left out of `findings` would read as clean.
+	// A note holds nothing, so it cannot stand for one either.
 	const open = settled.filter((answer) => answer.disposition === "open").length;
-	if (open > found.length) {
-		throw new Error(`the reviewer's reply keeps ${open} earlier finding(s) open but reports ${found.length}`);
+	const holding = found.filter((finding) => finding.severity !== "low").length;
+	if (open > holding) {
+		throw new Error(`the reviewer's reply keeps ${open} earlier finding(s) open but reports ${holding} above low`);
 	}
 	return {
 		score: score as number,
@@ -1878,8 +1879,8 @@ function pastParts(past: Past[]): string[] {
 /** How a round settles the last round's findings, `where`: in the review's text, or in the reply's `earlier`. */
 const settling = (where: string) =>
 	`Settle each ${where} by its number: \`fixed\` when the head fixes it, \`refuted\` when the author's ` +
-	"refutation holds, or `open` when it still holds, reporting it as a finding again. Give each a one-sentence " +
-	"reason citing the fix, the refutation's evidence, or why it still holds.";
+	"refutation holds or you would now rate it low, or `open` when it still holds, reporting it as a finding again " +
+	"above low. Give each a one-sentence reason citing the fix, the refutation's evidence, or why it still holds.";
 
 /** The author's responses to the last round's findings, and how a refutation stands. */
 function responseParts(responses: string | undefined): string[] {
@@ -2529,7 +2530,7 @@ export function overridden(risk: Risk, override: Override | undefined): Risk {
  * reviewer, unless the options name the reviewer; once none is left, the run fails as an outage.
  *
  * The head's tier scales the review: a low head with nothing left to settle gets no local review, and a high one
- * takes its pick from the high list and a second reviewer from another vendor on it.
+ * gets a second reviewer from another vendor on its size's list.
  */
 export async function review(options: ReviewOptions, deps: ReviewDependencies): Promise<Reviewed> {
 	// Native Windows installs the reviewer CLIs as batch shims, which `run` cannot start without a shell.
@@ -2664,7 +2665,7 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 		history,
 		classified: { key: classified.key, value },
 		// A riskier change than the one the maintainer judged ends their override, unless it is riskier only up to the
-		// override's own tier, which agrees with it: ending it then would move a high head's pick off the high list.
+		// override's own tier, which agrees with it.
 		...(override !== undefined &&
 			!(
 				riskier(risk.overridden ?? risk.tier, override.from) && (risk.overridden ?? risk.tier) !== override.tier

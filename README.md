@@ -583,7 +583,7 @@ comes last, and a missing value prints as `-`:
 | `url`, `state`, `draft`, `head` | The PR URL; `open`, `closed`, or `merged`; `true` or `false`; the head SHA. |
 | `mergeable`, `merge-state`, `review-decision` | GitHub's values, lowercased. |
 | `review-record` | Whether the PR body's [`## Review` record](#review-locally) still covers the head, and the head it names last: `current` when it is the head, `diff-identical` when `git diff <base>...<head>` prints the same as for it, `stale` otherwise, or `unknown` when GitHub cannot compare them, such as a diff too large; then `local-review`, or `no-local-review` for a low head no local reviewer ran on, as the status below attests; `-` when the section holds no record `quest review` wrote or it names no full SHA, or, with a warning saying why, when no passing [`quest review` commit status](#review-locally) attests it: the latest one on the head it names must be `success`, set by a user with write access to the base repository, its target the diff from the head's merge base with the PR's base, and its description must name the record's risk tier and class. So a record a contributor or a bot wrote, or edited to name another head, base, or tier, counts for nothing. Reading the setter's permission takes a token that can push to the repository; any other sees every record as untrusted. |
-| `risk` | The record's [risk tier](#risk-tiers), `low`, `medium`, or `high`; the same state as `review-record` for the head it names; the tier its classifier set before any reviewer raised it; and the reason. `-` when the record names none or does not count, and `- malformed -` with why when its risk lines do not parse, which `quest merge` refuses. |
+| `risk` | The record's [risk tier](#risk-tiers), `low`, `medium`, or `high`; the same state as `review-record` for the head it names; the tier its classifier set; and the reason. `-` when the record names none or does not count, and `- malformed -` with why when its risk lines do not parse, which `quest merge` refuses. |
 | `class` | The `## Automatic` class of the base's `RISK.md` the record's classifier found the change in, or `-`. |
 | `auto-merge` | Method, who enabled it, when, and the head it was enabled on. |
 | `merge-queue` | Queue state, position, and when it was enqueued. |
@@ -591,7 +591,7 @@ comes last, and a missing value prints as `-`:
 | `checks` | `failure` if any check fails, else `pending` if any is pending or a requirement is unreported, else `success`, and `passed=`, `failing=`, `pending=` counts, all from the checks that count; `-` when the head has no checks and the base requires none. |
 | `check` | `failing` or `pending`, `required` or `optional`, the result, details URL, and name. A required check or required workflow nothing reports yet prints as `pending required expected -` with its name, followed by `(from app <id>)` when the requirement names an app, or the workflow's repository and path, as `owner/name:path`. |
 | `review` | `current` or `stale` against the head, state, reviewer, time, and URL of each reviewer's latest review. |
-| `checkpoint` | Each bot reviewer that approves or requests changes, such as one whose approval the base requires, its round, and its review's URL, when that review is of the head and its latest verdict there, ignoring plain comments, is neither an approval nor a dismissal, at the end of its third, sixth, ... round: [`/quest-review`'s design checkpoint](#review-locally) for an online reviewer. A round is one commit it reviewed; a dismissed review counts as one that approves or requests changes. Only printed when due. |
+| `checkpoint` | Each bot reviewer that approves or requests changes, such as one whose approval the base requires, its round, and its review's URL, when that review is of the head and its latest verdict there, ignoring plain comments, is neither an approval nor a dismissal, at the end of its third, sixth, ... round, where [`/quest-review` stops for the user's decision](#review-locally). A round is one commit it reviewed; a dismissed review counts as one that approves or requests changes. Only printed when due. |
 | `reacted:<content>` | Actor, time, and the PR or review reacted to, as `quest wait` names reactions. |
 | `thread` | Node ID, `current` or `outdated`, last commenter, latest comment URL, and `path:line` of each unresolved thread. |
 | `signal` | `finding` or `decision`, its URL, who posted it, and its text, for each [signal](#signals-that-hold-a-head) holding the head. |
@@ -1457,16 +1457,16 @@ as the agent.
 
 `quest` ranks the harnesses, models, and efforts that write work of each size,
 the same for every repository unless its `AGENTS.md` names others. Only
-Claude Code writes, and a quest whose writers are all at their usage limit
-waits for one:
+Claude Code writes, and a quest whose writer is at its usage limit waits for
+it:
 
-| Size | Writer | Fallback |
-|---|---|---|
-| XS | Claude Code `claude-sonnet-5-5` high | none |
-| S | Claude Code `claude-opus-5-5` medium | none |
-| M | Claude Code `claude-opus-5-5` high | none |
-| L | Claude Code `claude-opus-5-5` high | none |
-| XL | Claude Code `claude-fable-5-2` high | Claude Code `claude-opus-5-5` xhigh |
+| Size | Writer |
+|---|---|
+| XS | Claude Code `claude-sonnet-5-5` high |
+| S | Claude Code `claude-opus-5-5` medium |
+| M | Claude Code `claude-opus-5-5` high |
+| L | Claude Code `claude-opus-5-5` high |
+| XL | Claude Code `claude-opus-5-5` xhigh |
 
 `quest unblocked --json` lists each ready quest's ranked `models`: its size's
 list, or the next size's while a `Maintainer:` item under its `## Waiting`
@@ -1476,18 +1476,16 @@ to the next only while nothing is written: when the CLI is missing or logged
 out, or the agent stops at its usage limit with nothing beyond the claim
 commit. Once a model writes, the PR is its own.
 
-While the writer A/B runs, XS, S, and L quests split 50/50 between two
-arms, to measure where published guidance disagrees: arm A runs the table's
-writer, and arm B runs Claude Code `claude-opus-5-5` medium for XS,
-`claude-sonnet-5-5` high for S, and `claude-fable-5-2` medium for L, falling
-to the table's writer when Fable hits its usage limit. A hash of the quest's
-path picks the arm, so a restart or respawn keeps it; `quest unblocked --json`
-names it as `arm`, `A` or `B`, and puts its entry first in `models`. M and XL
-run no arm, nor does a quest with a `Maintainer:` decision open, which runs
-the next size's list, so an arm always runs at its PR's size; their `arm` is
-`null`. The agent that runs that entry ends its `Implementer:` line with the
-arm, as `Implementer: Claude Code, claude-fable-5-2, medium effort (arm B)`; a fallback
-names none, so its PR counts in neither arm.
+While the writer A/B runs, XS and S quests split 50/50 between two arms, to
+measure where published guidance disagrees: arm A runs the table's writer,
+and arm B runs Claude Code `claude-opus-5-5` medium for XS and
+`claude-sonnet-5-5` high for S. A hash of the quest's path picks the arm, so
+a restart or respawn keeps it; `quest unblocked --json` names it as `arm`, `A`
+or `B`, and puts its entry first in `models`. M, L, and XL run no arm, nor
+does a quest with a `Maintainer:` decision open, which runs the next size's
+list, so an arm always runs at its PR's size; their `arm` is `null`. The
+agent that runs that entry ends its `Implementer:` line with the arm, as
+`Implementer: Claude Code, claude-sonnet-5-5, high effort (arm B)`.
 
 A `/quest-iterate` stays on the PR's writer, the model its `## Models`
 record's first `Implementer:` line names, so the other model can always
@@ -1507,7 +1505,7 @@ claude	claude-opus-5-5	medium
 nearest size that lists it, the larger on a tie. A model no list names, such
 as Codex's, is an error, and the coordinator then starts the iterate on its
 size's first entry that can run. An iterate on a PR whose first
-`Implementer:` line names an arm runs that arm's entry at the PR's size instead, as `quest models L --arm B`
+`Implementer:` line names an arm runs that arm's entry at the PR's size instead, as `quest models S --arm B`
 prints, and records it as `(iterate, XS, arm B)`. For an arm its size no
 longer runs, which `--arm` refuses, it runs the model and effort that line
 records. `--json` prints an array of `{harness, model, effort}` objects. The
@@ -1520,30 +1518,26 @@ whole branch at the PR's size.
 
 `quest review` has a model no weaker than the latest writer review the checkout's
 committed and pushed branch before it is marked ready for review, at an effort set by the PR's
-size. Each size ranks its reviewers, the same for every repository:
+size. Each size has two reviewers, the same for every repository:
 
-| PR size | Reviewer | When the reviewer is weaker than its writer | Then, while those are out |
-|---|---|---|---|
-| XS | Codex `gpt-6.2-sol` medium | Claude Code `claude-opus-5-5` medium | Codex `gpt-6.2-astra` medium, then Claude Code `claude-fable-5-2` medium |
-| S | Codex `gpt-6.2-sol` medium | Claude Code `claude-opus-5-5` medium | Codex `gpt-6.2-astra` medium, then Claude Code `claude-fable-5-2` medium |
-| M, or none | Codex `gpt-6.2-sol` high | Claude Code `claude-opus-5-5` high | Codex `gpt-6.2-astra` high, then Claude Code `claude-fable-5-2` high |
-| L | Codex `gpt-6.2-sol` xhigh | Claude Code `claude-opus-5-5` high | Codex `gpt-6.2-astra` xhigh, then Claude Code `claude-fable-5-2` high |
-| XL | Codex `gpt-6.2-astra` high | Claude Code `claude-opus-5-5` xhigh | Codex `gpt-6.2-sol` xhigh, then Claude Code `claude-fable-5-2` high |
+| PR size | Reviewer | When Sol is out or weaker than the writer, and a high head's second |
+|---|---|---|
+| XS | Codex `gpt-6.2-sol` low | Claude Code `claude-opus-5-5` medium |
+| S | Codex `gpt-6.2-sol` medium | Claude Code `claude-opus-5-5` medium |
+| M, or none | Codex `gpt-6.2-sol` high | Claude Code `claude-opus-5-5` high |
+| L | Codex `gpt-6.2-sol` xhigh | Claude Code `claude-opus-5-5` high |
+| XL | Codex `gpt-6.2-sol` xhigh | Claude Code `claude-opus-5-5` xhigh |
 
-Sol is weaker than Fable and Astra, so Opus reviews what either wrote below XL.
 A model may review its own work, in a session of its own, so the writer's model
-is never skipped for that alone. The rest of the row follows in order while
-those before it are out, Opus never below the size's writer effort. The lists
-never run Fable above high: its usage limit is the XL writers', and its xhigh
-costs far more than Opus xhigh.
+is never skipped for that alone, and Opus reviews at the effort it writes the
+size at.
 
 The reviewers run at once;
 the first to fail, such as on a usage limit, stops the others, and the round
 saves none.
 
 A reviewer that cannot run passes the round to the next eligible one, so
-Opus reviews what Opus changed last while Sol is out, at no lower effort than
-its writer, and Fable only once Opus is out too. That is a failure the CLI or provider reports before any finding is
+Opus reviews while Sol is out. That is a failure the CLI or provider reports before any finding is
 saved, never text in the diff or a reply: a CLI that is not installed, logged
 out, or has its login rejected, or sent to a gateway with no credential,
 passes over every model of that CLI, and a
@@ -1573,7 +1567,7 @@ none is avoided, so the never-weaker rule needs the record. `--harness` names th
 the pick and the second reviewer, at the model and effort of its first entry whose model is not avoided, and
 `--model` and `--effort` override the size pick's or that reviewer's, as a
 repository whose `AGENTS.md` names other reviewers needs; a `--model` the list
-names, in any spelling such as `openai/gpt-6.2-astra`, runs on its own entry's
+names, in any spelling such as `openai/gpt-6.2-sol`, runs on its own entry's
 harness and effort, passed to the CLI as given, and one it does not at
 `--harness`'s first entry. `--exclude-model`, records, and `quest usage` match
 a listed model by any spelling too. A `--harness` run keeps the other
@@ -1627,15 +1621,24 @@ the diff for the dependents left on the old one. None returns a JSON schema
 itself, so the round resumes that session for one turn that reads nothing and
 reports the review in one schema, with a score from 0 to 10 for how ready the
 head is to land and one sentence on why: 10 lands as is, 7 to 9 lands after the
-findings are fixed, 4 to 6 needs rework, and 0 to 3 is the wrong approach. A
-head with no findings can still score below 10. A reply without a valid score
-fails like any malformed reply. Each finding is high, medium, or low severity;
-low is anything minor, such as naming or wording; every open finding holds the head until a round settles it or the maintainer accepts it. A reviewer that would
+findings are fixed, 4 to 6 needs rework, and 0 to 3 is the wrong approach.
+Notes never lower the score. A reply without a valid score fails like any
+malformed reply. Each finding is high, medium, or low severity, and its body
+ends with the fix the reviewer recommends. A high or medium finding holds the
+head until a round settles it or the maintainer accepts it. A low one is a
+note, printed and recorded for the author to take or leave, never numbered,
+answered, or carried to a later round, so a round with only notes passes the
+head. A reviewer that would
 build the change another way reports that approach as its recommendation, which
 informs the author's choice but holds nothing. The score informs; the findings
 and their refutations still decide when the loop ends. Later rounds take
 `--responses`, the author's free-text fixes and refutations, which a round that
-reported findings requires. A later round resumes the session and checks only
+reported findings requires. From a reviewer's third round on, a round that
+still reports findings prints `next decide`: the author stops, and the user
+picks fixing them as recommended, accepting them, or dropping the PR. Every
+prompt lists the findings the branch settled without a fix, those refuted and
+those the maintainer accepted, with their reasons, so no reviewer reports them
+again; `--new` keeps that list. A later round resumes the session and checks only
 what changed since the last round's head and its findings when nothing but the
 head changed: the same model, effort, and base, a merge base the last round's
 covers, as when the base moved on, the same applicable `AGENTS.md`,
@@ -1741,9 +1744,9 @@ reason, then `classified` with the classifier's tier, how it was set (`model`,
 harness, model, effort, and session, and its `usage` line; then for each reviewer its
 harness, model, and effort, session, round,
 an `unchanged` line for a repeated round, or an `accepted` line for a round `--accept` repeats, a `usage` line per turn (input tokens, the part read from the prompt cache, and output),
-the score, a `raised` line with the tier and reason when it raised the classifier's, the
+the score, a `recommendation` line when the reviewer would build it another way, the
 finding count, then each finding as its number, severity, `path:line`, and title over its
-indented body, then `earlier` with the last round's head and its findings, each
+indented body, then `notes` and each note as `- path:line title` over its body, then `earlier` with the last round's head and its findings, each
 as its number, disposition, severity, `path:line`, and title over its reason; last
 come a `record` line and a `next` line. `--json` prints one object with
 `rounds`, one per reviewer, `tallies`, every reviewer's findings across the
@@ -1759,9 +1762,8 @@ maintainer's checkout of a contributor's fork PR. It
 prints `record <url>`. The record
 names the reviewed head and the base's short SHA, the head's risk tier and who
 classified it, then for each reviewer its
-harness, model, and effort, its Reviewer line ending in `, second` for the second reviewer, the session and round, the score and rationale, the approach it recommends instead, if any, the tier it raised the
-risk to and why, its tally, each finding with
-its location, and the last round's findings with their dispositions. The
+harness, model, and effort, its Reviewer line ending in `, second` for the second reviewer, the session and round, the score and rationale, the approach it recommends instead, if any, its tally, each finding with
+its location, its notes under `- Notes, the author's to take or leave:`, and the last round's findings with their dispositions. The
 tally, as `- Rounds: 3; first round 2 (medium 2); findings 4 (high 1, medium 3): fixed 3, refuted 1, open 0`,
 counts the reviewer's rounds on the branch, its first round's findings as that
 round graded them, and each finding it raised once,
@@ -1801,8 +1803,7 @@ failures. The only eligible reviewer's usage limit prints one line,
 `error: <harness> hit its usage limit; resets <time>`, where `<time>` is the
 reset as an ISO 8601 UTC timestamp, or `unknown` when the CLI named none; with
 several, it prints `error: no eligible <list> reviewer could run: <model>
-<effort> (<error>), ...`, where `<list>` is the PR's size, or `high` for a high
-head's list.
+<effort> (<error>), ...`, where `<list>` is the PR's size.
 Through a gateway that pools accounts, such as CLIProxyAPI, the limit is the
 pool's: Claude Code shows its "All credentials for model ... are cooling down",
 and Codex, sent to `OPENAI_BASE_URL`, gives up on the gateway's 429 after its
@@ -1811,9 +1812,9 @@ own retries, which also counts as the limit there.
 
 ### Risk tiers
 
-Each head also gets a risk tier, `low`, `medium`, or `high`: what could break,
-for whom, and how hard it is to undo, set from the change and never from who
-wrote it. The tier scales the PR's review and approval, never its CI: every
+Each head also gets a risk tier, `low`, `medium`, or `high`: its blast radius,
+who is hurt if the change is wrong and whether anything catches it first, set
+from the change and never from who wrote it. Reviewers never judge it. The tier scales the PR's review and approval, never its CI: every
 tier runs the checks its diff reaches, and the next commit's CI or the nightly
 run catches what those miss.
 
@@ -1821,14 +1822,14 @@ run catches what those miss.
 |---|---|---|
 | Low | None, unless `--harness`, `--model`, or `--effort` names one | Its own, once its class is in `RISK.md`'s `## Automatic` list; else the maintainer's pick |
 | Medium | The size's pick | The maintainer's pick |
-| High | A second reviewer from another vendor on the high list; the pick comes from that list too when the classifier or an override set the tier | The maintainer's pick, with the full brief |
+| High | Both of the size's reviewers | The maintainer's pick, with the full brief |
 
 `/quest-run` carries the picks.
 
 A change is `high`, with no model, when a changed path on either side of a
-rename matches a pattern held high: `RISK.md` itself, everything under
-`.github/workflows/` and `.github/actions/`, and each pattern in the `## High`
-list of the base's `RISK.md`, at the repository's root:
+rename matches a pattern held high: `RISK.md` itself, and each pattern in the
+`## High` list of the base's `RISK.md`, at the repository's root, which is
+where a repository whose workflows ship to users lists them:
 
 ````markdown
 # Risk
@@ -1877,52 +1878,37 @@ run, the review fails on the limit that resets first if every one whose CLI is
 installed hit its own, and otherwise as a usage error naming why each failed. A diff past 200,000 characters gives it only the
 stat, and it reads the parts it needs. The tier is kept with the reviewers'
 sessions, so a later round on the same head and base `RISK.md` reuses it, and
-`--new` classifies again. Each reviewer judges the tier too, told the
-classified one, and can only raise it: the head's tier is the riskiest, with
-the reason of the first to judge it so. The record names it after the base:
+`--new` classifies again. The record names it after the base:
 
 ```markdown
-- Risk: high, `It changes the record format quest status parses.`
+- Risk: medium, `It changes the record format quest status parses.`
 - Classified: medium by Claude Code, claude-haiku-5-5, low effort, session `5b0e6c1a-27d4-4f8e-9a51-3c2d7e8f9b10`
 ```
 
 `Classified:` names `the always-high paths` or `default` when no model set the
-tier, and a reviewer that raised it adds `- Raised the risk to high: <reason>`
-to its block. A `- Class:` line follows when the classifier named a class.
+tier. A `- Class:` line follows when the classifier named a class.
 
 A low head with no finding left to settle runs no local reviewer, unless
 `--harness`, `--model`, or `--effort` names one: the record names the head in
 full, adds `- Local review: none, since the head is low risk`, and `next done`
-says so. A high head gets a
-second reviewer: the first of the `high` list (Codex `gpt-6.2-sol` xhigh,
-Claude Code `claude-opus-5-5` xhigh, Claude Code `claude-fable-5-2` high,
-Codex `gpt-6.2-astra` xhigh) from a vendor other than the pick's that can
-run, so Sol and Opus review Opus's work, and Opus and Astra Fable's. It is marked `second`, in a session of its own that
-reviews every head while the tier is high and settles its findings after. A
-head the classifier or `--override` holds high also takes its pick from that
-list, whatever the PR's size; a reviewer's raise changes only the second
-reviewer, so the pick, and its session, stay the same on the head, unless that
-raise ends an override, as below. `--model`
-and `--effort` change only the pick, so the second reviewer still runs; the
-one reviewer `--harness` names runs alone, at its entry in the pick's list,
-with none. A round that raises the tier to high saves its rounds and runs the
-second reviewer at once; when that review
-fails, as when none can run, it prints those rounds before the error, so their
-findings can be answered. When every model of the other vendor is avoided, as
-by `--exclude-model`, the run fails as a usage error; when they cannot run, as an outage.
+says so. A high head gets a second reviewer: its size's entry from the other
+vendor, so Sol and Opus both review it. It is marked `second`, in a session
+of its own that reviews every head while the tier is high and settles its
+findings after. `--model` and `--effort` change only the pick, so the second
+reviewer still runs; the one reviewer `--harness` names runs alone. When the
+other vendor's model is avoided, as by `--exclude-model`, the run fails as a
+usage error; when it cannot run, as an outage.
 
 `--override <tier> --reason <text>` records the maintainer's tier for the
 branch in place of the reviewed one, as `- Risk: <tier>, <reason>` and
 `- Overridden: from <tier> by the maintainer`. It holds across heads until
 the reviewed tier grows riskier than the one overridden, other than to the
 override's own tier, which agrees with it, and `quest usage`
-counts overrides as a reading of the tier's accuracy. So a raise to medium on
-a head overridden from low to high ends the override, and the next run on that
-head picks from the PR's size list again.
+counts overrides as a reading of the tier's accuracy.
 
 `--accept <reason>` records the maintainer's acceptance of the findings the
 head's last rounds left open, as when they side with the author against a
-reviewer that keeps a finding, or pick merge as is at a design checkpoint. It
+reviewer that keeps a finding, or at a `next decide`. It
 runs no reviewer and no classifier: it repeats each reviewer's last round of
 the same head, base, and merge base, adds `- Accepted by the maintainer:
 <reason>`, lists their findings as accepted, which `quest usage` counts as

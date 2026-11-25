@@ -68,17 +68,16 @@ export const unfit =
 /**
  * Each size's two reviewers, one per vendor: Sol reviews a medium head alone, Opus takes its place when Sol cannot
  * run or is {@link weaker} than the latest writer, and a high head gets both. Opus reviews at the effort it writes
- * the size at, since it may review its own work, but never above high: the effort is also Claude Code's
- * `/code-review` level, and xhigh there asks for many findings, some uncertain, from a fan of sub-agents, which
- * measured at ten times Sol xhigh's cost per PR for half its high findings. No list names Fable or Astra, for
- * which no review showed a finding the two here missed.
+ * the size at, since it may review its own work. No list names Fable, whose xhigh reviews measured at ten times
+ * Sol xhigh's cost per PR for half its high findings, or Astra, which no review showed finding what these two
+ * missed.
  */
 export const REVIEWERS: Record<Size, readonly ReviewModel[]> = {
 	XS: [sol("low"), opus("medium")],
 	S: [sol("medium"), opus("medium")],
 	M: [sol("high"), opus("high")],
 	L: [sol("xhigh"), opus("high")],
-	XL: [sol("xhigh"), opus("high")],
+	XL: [sol("xhigh"), opus("xhigh")],
 };
 
 /** One side of the writer A/B: A runs the size's own first writer, B the alternative. */
