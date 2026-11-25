@@ -132,7 +132,7 @@ $ quest --root examples/export unblocked
 1	quest/m0/export.md
 
 $ quest --root examples/export unblocked --json --limit 1
-[{"path":"quest/m0/export.md","dependents":1,"hosts":[],"arm":"B","models":[{"harness":"claude","model":"claude-sonnet-5-5","effort":"high"},{"harness":"claude","model":"claude-opus-5-5","effort":"medium"}]}]
+[{"path":"quest/m0/export.md","dependents":1,"hosts":[],"arm":"B","models":[{"harness":"claude","model":"claude-sonnet-5-5","effort":"high"},{"harness":"claude","model":"claude-opus-5-5","effort":"medium"},{"harness":"codex","model":"gpt-6.2-sol","effort":"medium"},{"harness":"agy","model":"gemini-4-neon","effort":"medium"}]}]
 ```
 
 Each plain output line contains the count, a tab, and the path. On a terminal,
@@ -888,7 +888,7 @@ its PR still waits as the queue dropped it:
   conflicts as its log. The log ends with the PR's own checks on the dropped
   head: each check's result, whether it is required, and its URL, then the
   last 20,000 characters of each failing GitHub Actions job's log. At most `--fixer-jobs` (2) run at once; the rest wait
-  for a slot. `--fixer-effort` (medium) sets the fixer's Claude Code
+  for a slot. `--fixer-effort` (medium) sets the fixer's
   effort, passed to the wrapper in `QUEST_LAND_FIXER_EFFORT`,
   which `quest land fix --effort` reads by default. Each `--fixer-tag`
   pattern, such as `deploy-*`, fetches the matching tags from GitHub into
@@ -985,13 +985,16 @@ The wrapper starts an ephemeral container and runs `quest land fix <log> <prs...
 there, exposing that repository read/write and the log read-only at the given paths.
 It supplies a fresh HOME, `ANTHROPIC_BASE_URL` (the proxy's Anthropic Messages
 endpoint, without `/v1`) and `ANTHROPIC_API_KEY` (the gate's proxy client key).
+When Claude Code cannot run, it may also supply `OPENAI_BASE_URL` (the
+OpenAI-compatible Responses endpoint, including `/v1`) and `OPENAI_API_KEY` for
+Codex, and an Antigravity login in HOME for Gemini's `agy`.
 The daemon never supplies these or any Git/GitHub credential, and the wrapper
 must keep every other credential out of the container. Its network must reach the
 model proxy and, so the fixer can run the repository's checks on its fix, the
 package registries and `github.com`/`codeload.github.com` that the repository's
 dependencies come from.
 The prompt allows only those dependency fetches: no GitHub API, no push, no other
-host. The Claude login stays on the proxy.
+host. The Claude and Codex logins stay on the proxy.
 The wrapper waits for the payload, returns its exit status, and tears down its
 container on exit or SIGTERM. A fixer gets 60 minutes from its start. A wrapper
 that queues for a shared launcher prints `quest land fixer: admitted <unix-seconds>`
@@ -1008,9 +1011,14 @@ the wrapper instead of running `/quest-iterate`, as it does when the wrapper is
 missing, not executable, or fails to launch. The line stays beside the log as
 `<job>.error`. On timeout the daemon sends SIGTERM, allows at
 least 10 seconds for container cleanup, then sends SIGKILL on a later collection. The payload defaults
-to `claude -p` in bare mode, loading no user or checkout configuration, hooks,
-skills, or MCP servers, and limited to the shell and file tools; `--agent <executable>` and repeatable `--agent-arg <argument>`
-replace it for another CLI. It writes `<cwd>/quest-land-result.json`: an array of
+to the first of `claude -p` in bare mode (loading no user or checkout configuration, hooks,
+skills, or MCP servers, and limited to the shell and file tools), then `codex exec` on the proxy, then `agy -p`
+(`claude-opus-5-5`, `gpt-6.2-sol`, `gemini-4-neon`, each at `--effort`) that can run: one whose CLI is missing, whose
+variables the wrapper left out, or that is logged out or at its usage limit passes the fix to the next, and
+the error names why each could not run when none can. `agy` runs in an empty directory outside the checkout,
+since it loads the agent configuration of where it runs, and is told where the repository root is. Any other
+failure ends the round. `--agent <executable>` and repeatable `--agent-arg <argument>`
+run one Claude Code entry in their place, at that executable or with those arguments. It writes `<cwd>/quest-land-result.json`: an array of
 `{number, action:"requeue", reason}`, `{number, action:"fixed", head, reason}`, or
 `{number, action:"handback", diagnosis, recommendation}`, with no extra fields
 beyond an optional `comment`, an optional `blame: true` on a PR that caused the failure (a blamed PR is
@@ -1018,7 +1026,7 @@ fixed or handed back), and on a handback an optional `log: [first, last]` citing
 failure log's lines, which its comment quotes.
 The payload adds `agent`, `model`, and `effort` metadata to each result: the
 model Claude Code's `init` event names, else the `--model <id>` it was given,
-else `unknown`.
+else `unknown`; `--model` replaces the first entry's model.
 Reasons and diagnoses are single lines. Fixed heads must be committed on `pr-<n>`.
 A `comment` is Markdown of at most 4000 characters that the fixer wants on its PR.
 The fixer holds no GitHub credential, since PR code it builds can read the
@@ -1456,17 +1464,17 @@ as the agent.
 ## Route work by size
 
 `quest` ranks the harnesses, models, and efforts that write work of each size,
-the same for every repository unless its `AGENTS.md` names others. Only
-Claude Code writes, and a quest whose writer is at its usage limit waits for
-it:
+the same for every repository unless its `AGENTS.md` names others. Claude
+Code writes first; when it cannot run, Codex does, then Antigravity's Gemini,
+each at the same effort:
 
-| Size | Writer |
-|---|---|
-| XS | Claude Code `claude-sonnet-5-5` high |
-| S | Claude Code `claude-opus-5-5` medium |
-| M | Claude Code `claude-opus-5-5` high |
-| L | Claude Code `claude-opus-5-5` high |
-| XL | Claude Code `claude-opus-5-5` xhigh |
+| Size | Writer | Then Codex | Then Gemini (`agy`) |
+|---|---|---|---|
+| XS | Claude Code `claude-sonnet-5-5` high | `gpt-6.2-sol` low | `gemini-4-neon` low |
+| S | Claude Code `claude-opus-5-5` medium | `gpt-6.2-sol` medium | `gemini-4-neon` medium |
+| M | Claude Code `claude-opus-5-5` high | `gpt-6.2-sol` high | `gemini-4-neon` high |
+| L | Claude Code `claude-opus-5-5` high | `gpt-6.2-sol` xhigh | `gemini-4-neon` xhigh |
+| XL | Claude Code `claude-opus-5-5` xhigh | `gpt-6.2-sol` xhigh | `gemini-4-neon` xhigh |
 
 `quest unblocked --json` lists each ready quest's ranked `models`: its size's
 list, or the next size's while a `Maintainer:` item under its `## Waiting`
@@ -1496,6 +1504,8 @@ XS, and `quest models` prints the entry to run:
 ```console
 $ quest models XS
 claude	claude-sonnet-5-5	high
+codex	gpt-6.2-sol	low
+agy	gemini-4-neon	low
 
 $ quest models XS --writer claude-opus-5-5
 claude	claude-opus-5-5	medium
@@ -1503,7 +1513,7 @@ claude	claude-opus-5-5	medium
 
 `--writer` prints the size's entry for that model, or else its entry at the
 nearest size that lists it, the larger on a tie. A model no list names, such
-as Codex's, is an error, and the coordinator then starts the iterate on its
+as `unknown` or a retired one, is an error, and the coordinator then starts the iterate on its
 size's first entry that can run. An iterate on a PR whose first
 `Implementer:` line names an arm runs that arm's entry at the PR's size instead, as `quest models S --arm B`
 prints, and records it as `(iterate, XS, arm B)`. For an arm its size no
@@ -1697,8 +1707,8 @@ change cannot instruct its own reviewer. Quest's shared review rules always come
 stance; the base's `REVIEW.md` is optional, adds repo-specific rules, and takes
 precedence where they conflict.
 
-`--harness agy` reviews with Google's Antigravity CLI, `agy`, which only
-reviews: name its
+`--harness agy` reviews with Google's Antigravity CLI, `agy`, which also
+writes: name its
 model and effort, as `--model gemini-4-neon --effort xhigh`. It runs `agy -p`
 on your own Antigravity login, wherever `agy` keeps it: the OS keyring, or over
 ssh its configuration directory, `~/.gemini/antigravity-cli`. Run `agy` to sign
@@ -2346,7 +2356,8 @@ with the user's environment minus the coordinating session's harness variables
 and credentials (keeping `CLAUDE_CONFIG_DIR` and `CODEX_HOME`), secret-manager
 tokens, and any `quest gate` admission or priority, so it uses the CLI's stored
 login rather than the session's. `--permission-mode` is Claude Code's
-permission mode, or Codex's sandbox mode; the agent cannot prompt. Each
+permission mode, or Codex's sandbox mode, which `agy` ignores since it skips its
+permission prompts; the agent cannot prompt. Each
 repository's running agents are recorded in a user-only directory under
 `$XDG_RUNTIME_DIR` (or the temporary directory), which `quest agent stop --all`
 deletes after stopping them.

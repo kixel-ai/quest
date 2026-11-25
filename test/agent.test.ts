@@ -40,7 +40,7 @@ const windows = process.platform === "win32";
 const posix = test.skipIf(windows);
 
 /** The variables a fake agent CLI logs, so a test can compare the environment it was launched with. */
-const LOGGED = /^(CLAUDE|ANTHROPIC|QUEST|OP_|CODEX)/;
+const LOGGED = /^(CLAUDE|ANTHROPIC|QUEST|OP_|CODEX|AGY|ANTIGRAVITY)/;
 
 /**
  * Fake agent CLIs. Each logs its argv, stdin, and the variables it was given,
@@ -120,6 +120,27 @@ if (process.env.FAKE_MODE === "reconnect") event({ type: "error", message: "Reco
 event({ type: "item.completed", item: { id: "item_0", type: "agent_message", text: "first" } });
 event({ type: "item.completed", item: { id: "item_1", type: "agent_message", text: "final reply" } });
 event({ type: "turn.completed", usage: { input_tokens: 1, output_tokens: 1 } });
+`,
+	agy: `
+const fs = require("node:fs");
+const argv = process.argv.slice(2);
+const stdin = fs.readFileSync(0, "utf8");
+const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => ${LOGGED}.test(k)));
+fs.appendFileSync(process.env.FAKE_LOG, JSON.stringify({ argv, stdin, env, cwd: process.cwd() }) + "\\n");
+const event = (value) => console.log(JSON.stringify(value));
+const resume = argv.includes("--conversation");
+const conversation = resume ? argv[argv.indexOf("--conversation") + 1] : "conversation-1";
+event({ event: "init", conversation_id: conversation });
+const result = (fields) => event({ event: "result", result: { conversation_id: conversation, ...fields } });
+if (process.env.FAKE_MODE === "limited") {
+	result({ status: "ERROR", error: "Error 429, Message: Quota exhausted., Status: RESOURCE_EXHAUSTED, Details: [reason:QUOTA_EXHAUSTED]" });
+	process.exit(1);
+}
+if (process.env.FAKE_MODE === "logged-out") {
+	result({ status: "ERROR", error: "authentication failed or timed out" });
+	process.exit(1);
+}
+result({ status: "SUCCESS", response: "final reply" });
 `,
 };
 
@@ -424,6 +445,54 @@ test("a logged-out claude exits 4 and names its login command", async () => {
 	expect(result.code).toBe(4);
 	expect(result.stdout).toMatch(/^session \S+\noutcome logged-out\n\nNot logged in · Please run \/login\n$/);
 	expect(result.stderr).toBe("quest: claude is logged out; run `claude auth login`\n");
+});
+
+test("agy writes on its own login: the prompt is a stream-json user event, and its conversation resumes", async () => {
+	const s = setup();
+	const started = await quest("agent", "start", ...launch("agy"), s.worktree, "/quest-start quest/m0/a.md");
+	expect(started).toEqual({
+		code: 0,
+		stdout: "session conversation-1\noutcome finished\n\nfinal reply\n",
+		stderr: "",
+	});
+	const [call] = s.calls();
+	expect(call.argv).toEqual([
+		"-p",
+		"",
+		"--input-format",
+		"stream-json",
+		"--output-format",
+		"stream-json",
+		"--model",
+		"opus",
+		"--effort",
+		"high",
+		"--dangerously-skip-permissions",
+	]);
+	expect(JSON.parse(call.stdin as string)).toEqual({
+		event: "user",
+		message: { role: "user", content: "/quest-start quest/m0/a.md" },
+	});
+	expect(call.env).toEqual({
+		CODEX_HOME: process.env.CODEX_HOME,
+		QUEST_WORKTREE_HOME: process.env.QUEST_WORKTREE_HOME,
+	});
+	const resumed = await quest("agent", "resume", ...launch("agy"), s.worktree, "conversation-1", "go on");
+	expect(resumed.code).toBe(0);
+	expect(s.calls()[1].argv).toEqual([...(call.argv as string[]), "--conversation", "conversation-1"]);
+});
+
+test("agy at its quota exits 3, and logged out exits 4 naming its login command", async () => {
+	const s = setup();
+	vi.stubEnv("FAKE_MODE", "limited");
+	const limited = await quest("agent", "start", ...launch("agy"), s.worktree, "go");
+	expect(limited.code).toBe(3);
+	expect(limited.stdout).toContain("outcome limited\n");
+	vi.stubEnv("FAKE_MODE", "logged-out");
+	const out = await quest("agent", "start", ...launch("agy"), s.worktree, "go");
+	expect(out.code).toBe(4);
+	expect(out.stdout).toContain("outcome logged-out\n");
+	expect(out.stderr).toBe("quest: agy is logged out; run `agy`\n");
 });
 
 posix("codex runs on its own login and reports its thread, last message, limit, and logout", async () => {

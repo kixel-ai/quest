@@ -36,8 +36,7 @@ import {
 import {
 	AgentInputError,
 	HARNESSES,
-	REVIEW_HARNESSES,
-	type ReviewHarness,
+	type HarnessName,
 	type Launch,
 	admitAgent,
 	processDependencies,
@@ -820,14 +819,14 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 	landCommand
 		.command("fix")
 		.description(
-			"Run a mechanical agent fix inside the credential-free fixer container; write quest-land-result.json, whose optional comments the daemon posts. Runs Claude Code with no user or project configuration; model endpoint and client key: ANTHROPIC_BASE_URL and ANTHROPIC_API_KEY.",
+			"Run a mechanical agent fix inside the credential-free fixer container; write quest-land-result.json, whose optional comments the daemon posts. Runs the first of Claude Code with no user or project configuration (model endpoint and client key: ANTHROPIC_BASE_URL and ANTHROPIC_API_KEY), then Codex (OPENAI_BASE_URL and OPENAI_API_KEY), then Antigravity's agy (the login in HOME) that can run: one whose CLI is missing, whose variables the wrapper left out, or that is logged out or at its usage limit passes the fix to the next.",
 		)
 		.argument("<log>", "Full failure log exposed by the wrapper")
 		.argument("<prs...>", "PR numbers with pr-<n> branches")
-		.option("--agent <executable>", "Agent executable", "claude")
+		.option("--agent <executable>", "Run this executable as Claude Code, alone, instead of the fixers in order")
 		.option(
 			"--model <id>",
-			"Agent model, passed to default Claude Code; the result records the model its output names, else this",
+			"Model of the first fixer, or of the Claude Code --agent runs; the result records the model its output names, else this",
 		)
 		.option(
 			"--agent-arg <argument>",
@@ -1292,7 +1291,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 			.requiredOption("--effort <level>", "Reasoning effort the agent runs at, never max", effortLevel)
 			.requiredOption(
 				"--permission-mode <mode>",
-				"Claude Code's --permission-mode, or Codex's sandbox mode; the agent cannot prompt",
+				"Claude Code's --permission-mode, or Codex's sandbox mode, which agy ignores, since it skips its permission prompts; the agent cannot prompt",
 			);
 	type LaunchOptions = Omit<Launch, "worktree">;
 	const launch = (worktree: string, prompt: string, session: string | undefined, options: LaunchOptions) => {
@@ -1817,7 +1816,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 			new Option(
 				"--harness <name>",
 				"The only reviewer to run, instead of the pick and the second reviewer",
-			).choices(REVIEW_HARNESSES),
+			).choices(HARNESSES),
 		)
 		.option("--model <model>", "Model the pick, or --harness's reviewer, runs instead")
 		.option(
@@ -1860,7 +1859,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				branch?: string;
 				override?: Tier;
 				reason?: string;
-				harness?: ReviewHarness;
+				harness?: HarnessName;
 				model?: string;
 				effort?: string;
 				excludeModel?: string[];

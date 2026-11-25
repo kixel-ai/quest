@@ -4,30 +4,29 @@
 // (quest/m1/model-check.md) audits these lists each milestone.
 import { createHash } from "node:crypto";
 import { type Doc, SIZES, type Size, onMaintainer, size, waits } from "../core";
-import type { HarnessName, ReviewHarness } from "./agent";
+import type { HarnessName } from "./agent";
 
 /** One harness running one model at one effort. */
-export interface Model<H extends ReviewHarness = HarnessName> {
-	harness: H;
+export interface Model {
+	harness: HarnessName;
 	model: string;
 	effort: string;
 }
-
-/** A model `quest review` runs, on any CLI it reviews with. */
-export type ReviewModel = Model<ReviewHarness>;
 
 /** The size of a PR with neither a quest nor `--size`. */
 export const DEFAULT_SIZE: Size = "M";
 
 const sol = (effort: string): Model => ({ harness: "codex", model: "gpt-6.2-sol", effort });
+const neon = (effort: string): Model => ({ harness: "agy", model: "gemini-4-neon", effort });
 const opus = (effort: string): Model => ({ harness: "claude", model: "claude-opus-5-5", effort });
 const sonnet = (effort: string): Model => ({ harness: "claude", model: "claude-sonnet-5-5", effort });
 
 /**
  * Each size's writers, ranked: a spawn starts the quest on the first that can
  * run, falling through only while nothing is written, since the model that
- * writes a PR runs all its iterates. Only Claude writes; a quest whose writers are all at their usage limit
- * waits for one rather than starting on another vendor. XS runs Sonnet rather
+ * writes a PR runs all its iterates. Claude comes first, then Codex's Sol, then Gemini's Neon at the
+ * same effort, so a quest starts on the next vendor instead of waiting for Claude's reset;
+ * a review of what Sol or Neon wrote still crosses to another model. XS runs Sonnet rather
  * than the cheaper Haiku, whose surcharge past 100k input tokens leads users
  * to cap its compaction window there, barely above an agent's fixed load of
  * prompt, context, and skill. No size runs Opus at low, which misses too much.
@@ -35,12 +34,23 @@ const sonnet = (effort: string): Model => ({ harness: "claude", model: "claude-s
  * and draws on a limit a subscription caps at half the weekly one.
  */
 export const WRITERS: Record<Size, readonly Model[]> = {
-	XS: [sonnet("high")],
-	S: [opus("medium")],
-	M: [opus("high")],
-	L: [opus("high")],
-	XL: [opus("xhigh")],
+	XS: [sonnet("high"), sol("low"), neon("low")],
+	S: [opus("medium"), sol("medium"), neon("medium")],
+	M: [opus("high"), sol("high"), neon("high")],
+	L: [opus("high"), sol("xhigh"), neon("xhigh")],
+	XL: [opus("xhigh"), sol("xhigh"), neon("xhigh")],
 };
+
+/**
+ * The land fixer's harnesses and models, ranked: the first that can run fixes, past any whose CLI is missing,
+ * whose wrapper supplied no credentials, or that is logged out or at its usage limit. Its effort is the
+ * daemon's `--fixer-effort`, the same for each.
+ */
+export const FIXERS: readonly Pick<Model, "harness" | "model">[] = [
+	{ harness: "claude", model: "claude-opus-5-5" },
+	{ harness: "codex", model: "gpt-6.2-sol" },
+	{ harness: "agy", model: "gemini-4-neon" },
+];
 
 /**
  * Whether model `reviewer` is too weak to review what model `writer` wrote: only Sonnet is, of any other model's
@@ -55,7 +65,7 @@ export const weaker = (reviewer: string, writer: string): boolean =>
  */
 export const unfit =
 	(model: string) =>
-	(entry: ReviewModel): boolean =>
+	(entry: Model): boolean =>
 		entry.model === model || weaker(entry.model, model);
 
 /**
@@ -65,7 +75,7 @@ export const unfit =
  * Sol xhigh's cost per PR for half its high findings, or Astra, which no review showed finding what these two
  * missed.
  */
-export const REVIEWERS: Record<Size, readonly ReviewModel[]> = {
+export const REVIEWERS: Record<Size, readonly Model[]> = {
 	XS: [sol("low"), opus("medium")],
 	S: [sol("medium"), opus("medium")],
 	M: [sol("high"), opus("high")],
@@ -85,7 +95,7 @@ export const ARM_NAMES: readonly Arm[] = ["A", "B"];
  * which it costs five times as much. Gemini Flash, Antigravity's cheapest,
  * comes last, so a contributor whose only plan is Google's can still classify.
  */
-export const CLASSIFIERS: readonly ReviewModel[] = [
+export const CLASSIFIERS: readonly Model[] = [
 	{ harness: "claude", model: "claude-haiku-5-5", effort: "low" },
 	sol("low"),
 	{ harness: "agy", model: "gemini-3.8-flash", effort: "low" },

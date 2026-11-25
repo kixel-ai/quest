@@ -1633,6 +1633,64 @@ ${requeueScript}
 				"fix effort must be one of",
 			);
 	});
+	test("falls from Claude Code to Codex to Antigravity when the one before cannot run", async () => {
+		const dir = fixRepository();
+		const log = join(dir, "failure.log");
+		writeFileSync(log, "failed check");
+		const bin = join(tempDir(), "bin");
+		mkdirSync(bin);
+		// Each fake records that it ran, then ends as the mode of its name says.
+		const fake = (name: string, body: string) =>
+			writeFileSync(
+				join(bin, name),
+				`#!/bin/sh\nset -eu\necho ${name} >> '${dir}/ran.txt'\ncat > '${dir}/${name}.stdin'\nprintf '%s\\n' "$@" > '${dir}/${name}.argv'\npwd > '${dir}/${name}.cwd'\ncd '${dir}'\n${body}\n`,
+				{ mode: 0o755 },
+			);
+		const limited = `echo "You've hit your usage limit" >&2\nexit 1`;
+		fake("claude", limited);
+		fake("codex", limited);
+		fake("agy", requeueScript);
+		vi.stubEnv("PATH", `${bin}:${process.env.PATH}`);
+		vi.stubEnv("ANTHROPIC_BASE_URL", "http://proxy.test");
+		vi.stubEnv("ANTHROPIC_API_KEY", "proxy-client");
+		vi.stubEnv("OPENAI_BASE_URL", "http://proxy.test/v1");
+		vi.stubEnv("OPENAI_API_KEY", "proxy-client");
+		const ran = () => readFileSync(join(dir, "ran.txt"), "utf8").trim().split("\n");
+		const result = () => parseFixResult(readFileSync(join(dir, "quest-land-result.json"), "utf8"), [1], [])[0];
+
+		await fix(dir, log, [1], undefined, undefined, undefined, "high");
+		expect(ran()).toEqual(["claude", "codex", "agy"]);
+		expect(result()).toMatchObject({ agent: "agy", model: "gemini-4-neon", effort: "high" });
+		// Codex ran Sol through the proxy, and Antigravity ran outside the checkout, whose files it would load.
+		const codex = readFileSync(join(dir, "codex.argv"), "utf8").split("\n");
+		expect(codex[codex.indexOf("--model") + 1]).toBe("gpt-6.2-sol");
+		expect(readFileSync(join(dir, "agy.cwd"), "utf8").trim()).not.toBe(dir);
+		expect(readFileSync(join(dir, "claude.cwd"), "utf8").trim()).toBe(dir);
+		expect(JSON.parse(readFileSync(join(dir, "agy.stdin"), "utf8")).message.content).toContain(
+			`The repository root is ${dir}`,
+		);
+
+		// A Claude Code the wrapper gave no proxy, and a Codex that is logged out, are passed over the same way.
+		rmSync(join(dir, "ran.txt"));
+		vi.stubEnv("ANTHROPIC_API_KEY", undefined);
+		fake("codex", `echo "unexpected status 401 Unauthorized" >&2\nexit 1`);
+		await fix(dir, log, [1]);
+		expect(ran()).toEqual(["codex", "agy"]);
+
+		// A failure that is no limit or login ends the round, rather than run the next fixer on its work.
+		rmSync(join(dir, "ran.txt"));
+		fake("codex", "echo boom >&2\nexit 1");
+		await expect(fix(dir, log, [1])).rejects.toThrow("fixer agent exited 1");
+		expect(ran()).toEqual(["codex"]);
+
+		// With every fixer out, the error names why each could not run.
+		fake("codex", limited);
+		fake("agy", `echo "authentication failed or timed out" >&2\nexit 1`);
+		await expect(fix(dir, log, [1])).rejects.toThrow(
+			"no fixer could run: fix needs ANTHROPIC_BASE_URL and ANTHROPIC_API_KEY from the container wrapper; " +
+				"codex is at its usage limit; agy is logged out or its login was rejected",
+		);
+	});
 	test("refuses to start an agent without a supplied PR's branch", async () => {
 		const dir = fixRepository();
 		const log = join(dir, "failure.log");

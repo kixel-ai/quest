@@ -44,8 +44,8 @@ import {
 import {
 	LINE_LIMIT,
 	LOGINS,
-	REVIEW_HARNESSES,
-	type ReviewHarness,
+	HARNESSES,
+	type HarnessName,
 	agentDirectory,
 	boundedLines,
 	privateDirectory,
@@ -54,7 +54,7 @@ import {
 import { REVIEW } from "./context";
 import { GitError, discoveryEnv, git } from "./git";
 import { AGY_LIMIT, LIMIT, agyReset, codexReset } from "./limit";
-import { CLASSIFIERS, DEFAULT_SIZE, REVIEWERS, type ReviewModel, unfit, weaker } from "./models";
+import { CLASSIFIERS, DEFAULT_SIZE, REVIEWERS, type Model, unfit, weaker } from "./models";
 import { programEnvironment, requireProgram } from "./program";
 import { canonicalModel, type recorded, sameModel } from "./models-record";
 import { save } from "./worktree";
@@ -84,7 +84,7 @@ export class ReviewerUnavailableError extends Error {
 	second = false;
 
 	constructor(
-		readonly harness: ReviewHarness,
+		readonly harness: HarnessName,
 		readonly reason: string,
 		message: string,
 	) {
@@ -95,7 +95,7 @@ export class ReviewerUnavailableError extends Error {
 /** The reviewer's account hit its usage limit on `model`, which resets at `until` (epoch milliseconds) if the CLI named it. */
 export class ReviewLimitError extends ReviewerUnavailableError {
 	constructor(
-		harness: ReviewHarness,
+		harness: HarnessName,
 		readonly until: number | null,
 		readonly model: string,
 	) {
@@ -105,7 +105,7 @@ export class ReviewLimitError extends ReviewerUnavailableError {
 }
 
 /** A reviewer the size ranks that a run passed over, since it could not run, and why. */
-export interface Skip extends ReviewModel {
+export interface Skip extends Model {
 	reason: string;
 }
 
@@ -169,7 +169,7 @@ export interface Usage {
 
 /** One reviewer's finished round, as `quest review` prints it. */
 export interface Round {
-	reviewer: ReviewHarness;
+	reviewer: HarnessName;
 	/** The round is the second reviewer's, from a vendor other than the pick's, which a high-risk head gets too. */
 	second?: true;
 	model: string;
@@ -215,7 +215,7 @@ export interface Assessment {
 
 /** How the head's tier was set before review: by a model, by a path held high, or by default with no risk file. */
 export type Classification =
-	| { kind: "model"; harness: ReviewHarness; model: string; effort: string; session: string }
+	| { kind: "model"; harness: HarnessName; model: string; effort: string; session: string }
 	| { kind: "paths" }
 	| { kind: "default" };
 
@@ -305,7 +305,7 @@ export const schema = (earlier: number) =>
 
 /** What picks a round's reviewer from its size's list. */
 export interface Choice {
-	harness?: ReviewHarness;
+	harness?: HarnessName;
 	model?: string;
 	effort?: string;
 	/** The models never to pick, with every model weaker than them; without any, those weaker than the latest writer's. */
@@ -317,10 +317,10 @@ export interface Choice {
  * writer, the model of the last Implementer line in the PR's `## Models` record (`latest`). The writer's own model
  * may review, in a session of its own. With no writer known, nothing is avoided.
  */
-export function authored(choice: Choice, latest?: string): (entry: ReviewModel) => boolean {
+export function authored(choice: Choice, latest?: string): (entry: Model) => boolean {
 	// Another spelling of a model, such as `openai/gpt-6.2-sol` from a flag, a record, or a saved session, is that
 	// model; the CLI still gets the spelling given, which a gateway may need.
-	const as = (entry: ReviewModel): ReviewModel => ({ ...entry, model: canonicalModel(entry.model) });
+	const as = (entry: Model): Model => ({ ...entry, model: canonicalModel(entry.model) });
 	const exclude = (choice.exclude ?? []).map((model) => unfit(canonicalModel(model)));
 	if (exclude.length > 0) return (entry) => exclude.some((each) => each(as(entry)));
 	if (latest === undefined || latest === "unknown") return () => false;
@@ -336,7 +336,7 @@ export function authored(choice: Choice, latest?: string): (entry: ReviewModel) 
  * runs at `--harness`'s first entry. An override never brings back an
  * avoided model.
  */
-export function pickReviewer(size: Size, choice: Choice, avoided: (entry: ReviewModel) => boolean): ReviewModel {
+export function pickReviewer(size: Size, choice: Choice, avoided: (entry: Model) => boolean): Model {
 	const list = REVIEWERS[size];
 	const ours = list.filter((e) => choice.harness === undefined || e.harness === choice.harness);
 	const named = choice.model === undefined ? undefined : ours.find((e) => sameModel(e.model, choice.model!));
@@ -361,7 +361,7 @@ export function pickReviewer(size: Size, choice: Choice, avoided: (entry: Review
 }
 
 /** The reviewers that may take a high head's second seat beside `pick`, ranked: its size's from another vendor. */
-export const secondsTo = (size: Size, pick: ReviewModel, avoided: (entry: ReviewModel) => boolean): ReviewModel[] =>
+export const secondsTo = (size: Size, pick: Model, avoided: (entry: Model) => boolean): Model[] =>
 	REVIEWERS[size].filter((each) => !avoided(each) && each.harness !== pick.harness);
 
 /**
@@ -369,7 +369,7 @@ export const secondsTo = (size: Size, pick: ReviewModel, avoided: (entry: Review
  * model is not avoided, or only the one `--harness`, `--model`, or `--effort` names, so a run that names its
  * reviewer never measures another.
  */
-export function rankedReviewers(size: Size, choice: Choice, avoided: (entry: ReviewModel) => boolean): ReviewModel[] {
+export function rankedReviewers(size: Size, choice: Choice, avoided: (entry: Model) => boolean): Model[] {
 	const first = pickReviewer(size, choice, avoided);
 	if (choice.harness !== undefined || choice.model !== undefined || choice.effort !== undefined) return [first];
 	return REVIEWERS[size].filter((entry) => !avoided(entry));
@@ -409,7 +409,7 @@ export type ReviewOptions = BaseOptions & {
 	/** The checkout to review. */
 	root: string;
 	/** The reviewer; defaults to the first of its list whose model is not weaker than the latest writer's. */
-	harness?: ReviewHarness;
+	harness?: HarnessName;
 	model?: string;
 	effort?: string;
 	/** The models never to pick, with every model weaker than them; without any, those weaker than the latest writer's. */
@@ -451,7 +451,7 @@ export const processDependencies = (): ReviewDependencies => ({ env: process.env
 
 /** One reviewer's findings across every round on a branch, which a `--new` session continues. */
 export interface Tally {
-	reviewer: ReviewHarness;
+	reviewer: HarnessName;
 	/** The second reviewer's tally, kept apart from the pick's. */
 	second?: true;
 	/** Its latest round's model, effort, and session, which the record names even once a run leaves it out. */
@@ -508,7 +508,7 @@ interface State {
 
 /** One reviewer's session on a branch. */
 interface Session {
-	reviewer: ReviewHarness;
+	reviewer: HarnessName;
 	/** The second reviewer's session; the branch keeps at most one. */
 	second?: true;
 	session: string;
@@ -1318,8 +1318,7 @@ const agy: Reviewer = {
 	routeCredentials: [],
 	connection: [],
 	routes: () => [],
-	// Such as "authentication failed or timed out", once a sign-in it cannot open times out.
-	unauthorized: /authentication failed or timed out|not logged into Antigravity|Please sign in/,
+	unauthorized: LOGINS.agy.unauthorized,
 	review: (context, _session, prompt) => agyTurn(context, `${AGY_REVIEW}\n\n${prompt}`, []),
 	resume: (context, session, prompt) =>
 		agyTurn(context, prompt, ["--conversation", session, "--json-schema", context.schemaFile]),
@@ -1369,7 +1368,7 @@ const agy: Reviewer = {
 	},
 };
 
-const CLIS: Record<ReviewHarness, Reviewer> = { claude, codex, agy };
+const CLIS: Record<HarnessName, Reviewer> = { claude, codex, agy };
 
 /** Codex's review turn reports all zeros, which is no measurement. */
 const reported = (usage: Omit<Usage, "turn"> | undefined): usage is Omit<Usage, "turn"> =>
@@ -1383,7 +1382,7 @@ function installed(harness: string, env: NodeJS.ProcessEnv): string {
 	try {
 		return requireProgram(harness, env);
 	} catch (error) {
-		throw new ReviewerUnavailableError(harness as ReviewHarness, "not installed", (error as Error).message);
+		throw new ReviewerUnavailableError(harness as HarnessName, "not installed", (error as Error).message);
 	}
 }
 
@@ -1447,7 +1446,7 @@ function run(
 			reject(
 				error.code === "ENOENT"
 					? new ReviewerUnavailableError(
-							argv[0] as ReviewHarness,
+							argv[0] as HarnessName,
 							"not installed",
 							`${argv[0]} is not installed`,
 						)
@@ -1467,7 +1466,7 @@ const ABORT_GRACE_MS = 10_000;
 
 /** The reviewer CLI with the environment it runs in and the error for a login the API rejects. */
 interface Cli {
-	harness: ReviewHarness;
+	harness: HarnessName;
 	reviewer: Reviewer;
 	env: NodeJS.ProcessEnv;
 	/** Thrown when a turn fails on authentication, as a logged-out status check fails. */
@@ -1529,7 +1528,7 @@ const pick = (env: NodeJS.ProcessEnv, names: string[]) =>
  * gateway, which then judges the credential on the first turn.
  */
 async function prepare(
-	harness: ReviewHarness,
+	harness: HarnessName,
 	cwd: string,
 	userEnv: NodeJS.ProcessEnv,
 	signal?: AbortSignal,
@@ -1595,7 +1594,7 @@ async function prepare(
 
 /** The environment `quest review` runs `harness`'s CLI in, for a caller that runs it with the same login. */
 export async function reviewerEnvironment(
-	harness: ReviewHarness,
+	harness: HarnessName,
 	cwd: string,
 	env: NodeJS.ProcessEnv,
 ): Promise<NodeJS.ProcessEnv> {
@@ -2158,7 +2157,7 @@ function load(path: string): unknown {
 }
 
 /** A reviewer's seat on a branch: its harness, and whether it is the second reviewer. */
-export type SeatId = { reviewer: ReviewHarness; second?: true };
+export type SeatId = { reviewer: HarnessName; second?: true };
 const seatKey = (seat: SeatId) => `${seat.reviewer}${seat.second ? " second" : ""}`;
 /** Whether two reviewers hold the same seat: the same harness and role. */
 export const sameSeat = (a: SeatId, b: SeatId) => seatKey(a) === seatKey(b);
@@ -2229,7 +2228,7 @@ export function parseState(value: unknown): State {
  * Whether quest still runs `seat`'s reviewer. A retired one has no CLI to resume its session or settle its findings,
  * so its session is dropped, open findings included, and the routed reviewer reviews the whole branch.
  */
-const runs = (seat: { reviewer: string }) => (REVIEW_HARNESSES as readonly string[]).includes(seat.reviewer);
+const runs = (seat: { reviewer: string }) => (HARNESSES as readonly string[]).includes(seat.reviewer);
 
 /**
  * The branch whose session a round continues: `name`, checked as a branch
@@ -2427,18 +2426,18 @@ export interface Question<T = unknown> {
  * turn that replied, unusable ones first, so a caller can count what the question cost.
  */
 export interface Answer<T = unknown> {
-	entry: ReviewModel;
+	entry: Model;
 	session: string;
 	value: T;
 	usage: Omit<Usage, "turn"> | null;
-	spent: { entry: ReviewModel; usage: Omit<Usage, "turn"> | null }[];
+	spent: { entry: Model; usage: Omit<Usage, "turn"> | null }[];
 }
 
 /**
  * Ask the first of `entries` that can run: one that is logged out, has its login rejected, or hit its usage limit
  * passes the question to the next, since each answers the same prompt.
  */
-export async function ask<T>(entries: readonly ReviewModel[], question: Question<T>): Promise<Answer<T>> {
+export async function ask<T>(entries: readonly Model[], question: Question<T>): Promise<Answer<T>> {
 	const schemaFile = saveSchema(question.dir, question.schema);
 	const failures: (ReviewInputError | ReviewerUnavailableError)[] = [];
 	const spent: Answer<T>["spent"] = [];
@@ -2578,7 +2577,7 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 	}
 	const sessions = all.filter(runs);
 	// A login or a missing CLI rules out its harness's every model; a usage limit only the model that hit it.
-	const down = new Map<ReviewHarness, ReviewerUnavailableError>();
+	const down = new Map<HarnessName, ReviewerUnavailableError>();
 	// Models passed over this run, which no later seat falls to.
 	// Keyed by canonical ID, so a saved session's other spelling of a model is the same model.
 	const passedOver = new Map<string, ReviewerUnavailableError>();
@@ -2587,7 +2586,7 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 		has: (model: string) => passedOver.has(canonicalModel(model)),
 		get: (model: string) => passedOver.get(canonicalModel(model)),
 	};
-	const plan = (routed: ReviewModel, second: ReviewModel | null = null) =>
+	const plan = (routed: Model, second: Model | null = null) =>
 		seatsFor({
 			routed,
 			second,
@@ -2727,7 +2726,7 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 	// The second reviewer: the first of the size's list from a vendor other than the pick's that can run. A list with
 	// no such model, as when every other one is avoided, cannot review a high head; one whose others cannot run is
 	// out. It comes from the whole list, since --model or --effort narrows only the pick.
-	const secondTo = (routed: ReviewModel): ReviewModel => {
+	const secondTo = (routed: Model): Model => {
 		const others = secondsTo(sized.size, routed, avoided);
 		if (others.length === 0)
 			throw new ReviewInputError(
@@ -2743,7 +2742,7 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 	// else another, whose new session settles them by number as a replaced pick's does.
 	const seconded = sessions.find((session) => session.second);
 	const unsettledSecond = auto && seconded !== undefined && seconded.rounds.at(-1)!.findings.length > 0;
-	const secondFor = (routed: ReviewModel): ReviewModel | null => {
+	const secondFor = (routed: Model): Model | null => {
 		if (!high && !unsettledSecond) return null;
 		if (!high) {
 			const own = secondsTo(sized.size, routed, avoided).find(
@@ -2827,9 +2826,9 @@ function remembered(past: Past[], rounds: Round[]): Past[] {
 
 /** What picks a run's seats: the routed reviewer and the second, whether the size picked them, and the branch's sessions. */
 interface Seating {
-	routed: ReviewModel;
+	routed: Model;
 	/** The second reviewer a high-risk head gets, or null. */
-	second: ReviewModel | null;
+	second: Model | null;
 	auto: boolean;
 	sessions: Session[];
 	/** Each session's first finding number, as the last run printed them. */
@@ -3023,7 +3022,7 @@ interface Shared {
  * or the replaced reviewer's, whose findings its new session settles.
  */
 interface Seat {
-	reviewer: ReviewModel;
+	reviewer: Model;
 	second?: true;
 	session?: Session;
 	first: number;

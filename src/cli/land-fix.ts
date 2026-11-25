@@ -1,11 +1,25 @@
 // Untrusted agent side. The host wrapper supplies only a model endpoint and its client key; the agent holds no
 // GitHub credential, and the daemon posts the comments it writes into its result.
 import { spawn, spawnSync } from "node:child_process";
-import { constants, closeSync, existsSync, fstatSync, openSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+	constants,
+	closeSync,
+	existsSync,
+	fstatSync,
+	mkdtempSync,
+	openSync,
+	readFileSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { StringDecoder } from "node:string_decoder";
 import prompt from "../../assets/land-fix.md";
+import { type HarnessName, LOGINS } from "./agent";
 import { discoveryEnv } from "./git";
+import { AGY_LIMIT, LIMIT } from "./limit";
+import { FIXERS, type Model } from "./models";
 import { programEnvironment, requireProgram } from "./program";
 
 export class FixerAgentError extends Error {
@@ -263,7 +277,7 @@ export function parseFixResult(text: string, numbers: number[], known: KnownFlak
 	return value as FixResult[];
 }
 
-/** The efforts the fixer may run Claude Code at: every one but `max`, which no quest agent runs. */
+/** The efforts the fixer may run at: every one but `max`, which no quest agent runs. */
 export const EFFORTS = ["low", "medium", "high", "xhigh"];
 /**
  * The variable a daemon sets for its fixer wrapper to pass on as `quest land fix --effort`, since the
@@ -271,11 +285,242 @@ export const EFFORTS = ["low", "medium", "high", "xhigh"];
  */
 export const EFFORT_VARIABLE = "QUEST_LAND_FIXER_EFFORT";
 
+/** A fixer that cannot run, as its CLI's missing, its wrapper's credentials, its login, or its usage limit make it. */
+class Unavailable extends Error {}
+
+/** How much of an agent's output is kept to tell a spent limit or a rejected login from another failure. */
+const TAIL = 64 * 1024;
+
+/** One run of one agent: its program, arguments, environment, and the text on its stdin. */
+interface Attempt {
+	harness: HarnessName;
+	program: string;
+	argv: string[];
+	env: NodeJS.ProcessEnv;
+	/** The prompt and data as the CLI reads them on stdin. */
+	stdin: (data: string) => string;
+	/** The directory it runs in. */
+	cwd: string;
+	/** The model its command line names, if any. */
+	named?: string;
+}
+
+/**
+ * The agent's own command. Custom `args` replace the arguments, which then read the prompt on stdin, and a custom
+ * `agent` replaces the executable of its harness. Throws `Unavailable` where the wrapper supplied no credential
+ * the harness needs, or its CLI is not on PATH.
+ */
+function attempt(
+	harness: HarnessName,
+	model: string | undefined,
+	effort: string,
+	root: string,
+	agent: string | undefined,
+	args: string[] | undefined,
+): Attempt {
+	// The agent runs in the PRs' checkout, so neither it nor its commands are found there: a name is
+	// looked up in PATH's absolute directories, and a path is resolved here rather than in the checkout.
+	const find = (name: string) => {
+		try {
+			return name.includes("/") ? resolve(name) : requireProgram(name, process.env);
+		} catch (error) {
+			throw new Unavailable((error as Error).message);
+		}
+	};
+	const base: NodeJS.ProcessEnv = {
+		...programEnvironment({ PATH: process.env.PATH }),
+		HOME: process.env.HOME,
+		LANG: "C.UTF-8",
+		GIT_CONFIG_GLOBAL: "/dev/null",
+		GIT_CONFIG_NOSYSTEM: "1",
+		GIT_TERMINAL_PROMPT: "0",
+	};
+	// A replaced command has no system prompt of its own, so it reads the prompt first.
+	const together = (data: string) => `${prompt}\n\n${data}`;
+	if (harness === "claude") {
+		if (!args && (!process.env.ANTHROPIC_BASE_URL || !process.env.ANTHROPIC_API_KEY))
+			throw new Unavailable("fix needs ANTHROPIC_BASE_URL and ANTHROPIC_API_KEY from the container wrapper");
+		const program = find(agent ?? "claude");
+		return {
+			harness,
+			program,
+			cwd: root,
+			named: model,
+			stdin: args ? together : (data) => data,
+			env: {
+				...base,
+				// The proxy's client key is the only credential, sent as an API key: --bare never reads a stored login.
+				ANTHROPIC_BASE_URL: process.env.ANTHROPIC_BASE_URL,
+				ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
+				// The container reaches only the proxy and the dependency hosts, so no telemetry or update checks.
+				CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
+				// The wrapper's container is the sandbox; without this Claude Code refuses to skip permissions as root.
+				IS_SANDBOX: "1",
+			},
+			// --bare and no setting sources load no CLAUDE.md, hook, plugin, or settings from HOME or the checkout,
+			// --strict-mcp-config no MCP server, and the disabled built-in no AGENTS.md, so the base's tree reaches
+			// the agent only as files it reads. The prompt goes in the system prompt, above the data in rank.
+			argv: args ?? [
+				"-p",
+				"--bare",
+				"--setting-sources",
+				"",
+				"--settings",
+				JSON.stringify({ enabledPlugins: { [AGENTS_PLUGIN]: false } }),
+				"--append-system-prompt",
+				prompt,
+				"--strict-mcp-config",
+				"--disable-slash-commands",
+				"--no-session-persistence",
+				"--dangerously-skip-permissions",
+				"--tools",
+				"Bash,Read,Edit,Write,Glob,Grep",
+				// Only the stream names the model before the agent's own output.
+				"--output-format",
+				"stream-json",
+				"--verbose",
+				"--effort",
+				effort,
+				...(model ? ["--model", model] : []),
+			],
+		};
+	}
+	if (harness === "codex") {
+		if (!args && (!process.env.OPENAI_BASE_URL || !process.env.OPENAI_API_KEY))
+			throw new Unavailable(
+				"fix needs OPENAI_BASE_URL and OPENAI_API_KEY from the container wrapper to run codex",
+			);
+		return {
+			harness,
+			program: find(agent ?? "codex"),
+			cwd: root,
+			named: model,
+			stdin: together,
+			env: {
+				...base,
+				OPENAI_BASE_URL: process.env.OPENAI_BASE_URL,
+				OPENAI_API_KEY: process.env.OPENAI_API_KEY,
+				CODEX_API_KEY: process.env.OPENAI_API_KEY,
+			},
+			argv: args ?? [
+				"exec",
+				"--ephemeral",
+				"--ignore-user-config",
+				"--ignore-rules",
+				"--dangerously-bypass-approvals-and-sandbox",
+				"-c",
+				"project_doc_max_bytes=0",
+				"-c",
+				'model_provider="quest-fixer"',
+				"-c",
+				'model_providers.quest-fixer.name="Host model proxy"',
+				"-c",
+				`model_providers.quest-fixer.base_url=${JSON.stringify(process.env.OPENAI_BASE_URL)}`,
+				"-c",
+				'model_providers.quest-fixer.env_key="OPENAI_API_KEY"',
+				"-c",
+				'model_providers.quest-fixer.wire_api="responses"',
+				// Without this, Codex runs the proxy's model with no reasoning at all ("reasoning effort: none").
+				"-c",
+				`model_reasoning_effort=${JSON.stringify(effort)}`,
+				...(model ? ["--model", model] : []),
+				"-",
+			],
+		};
+	}
+	// agy runs on its own login, which the wrapper may expose in the container's HOME. It loads the agent
+	// configuration of the directory it runs in and each above it, so it runs in an empty one beside the checkout,
+	// which its prompt names, rather than in the PRs' code.
+	return {
+		harness,
+		program: find(agent ?? "agy"),
+		cwd: mkdtempSync(join(tmpdir(), "quest-fixer-")),
+		named: model,
+		stdin: (data) =>
+			`${JSON.stringify({
+				event: "user",
+				message: {
+					role: "user",
+					content: `${together(data)}\nThe repository root is ${root}: run every command there, and write ${FIX_RESULT} there.\n`,
+				},
+			})}\n`,
+		env: base,
+		argv: args ?? [
+			"-p",
+			"",
+			"--input-format",
+			"stream-json",
+			"--output-format",
+			"stream-json",
+			"--dangerously-skip-permissions",
+			"--effort",
+			effort,
+			...(model ? ["--model", model] : []),
+		],
+	};
+}
+
+/** Run `agent` to its end, failing `Unavailable` when its output shows a spent limit or a rejected login. */
+async function run(agent: Attempt, data: string): Promise<Init> {
+	const init = new Init();
+	let output = "";
+	try {
+		await new Promise<void>((done, reject) => {
+			// Relay the agent's output through pipes of its own rather than letting it inherit ours. Once Bun writes
+			// to a pipe it marks that pipe non-blocking, and an inheriting child shares the flag: an agent then fails
+			// with EAGAIN as soon as one command's output outruns the host's reader.
+			const child = spawn(agent.program, agent.argv, {
+				cwd: agent.cwd,
+				env: agent.env,
+				stdio: ["pipe", "pipe", "pipe"],
+			});
+			const keep = (chunk: Buffer) => {
+				output = (output + chunk.toString("utf8")).slice(-TAIL);
+			};
+			child.stdout.pipe(process.stdout, { end: false });
+			child.stderr.pipe(process.stderr, { end: false });
+			child.stderr.on("data", keep);
+			let refused: Error | undefined;
+			child.stdout.on("data", (chunk: Buffer) => {
+				keep(chunk);
+				if (agent.harness !== "claude") return;
+				init.read(chunk);
+				// Fail loud rather than let a renamed or re-enabled built-in feed the agent the checkout's instructions.
+				if (!refused && init.plugins.some((plugin) => /agents-md/i.test(plugin))) {
+					refused = new Error("fixer agent loaded a plugin that injects the checkout's AGENTS.md");
+					child.kill("SIGTERM");
+				}
+			});
+			child.once("error", reject);
+			child.stdin.on("error", () => {});
+			child.stdin.end(agent.stdin(data));
+			child.once("close", (code) =>
+				refused ? reject(refused) : code === 0 ? done() : reject(new FixerAgentError(code ?? 1)),
+			);
+		});
+	} catch (error) {
+		if (!(error instanceof FixerAgentError)) throw error;
+		const login = LOGINS[agent.harness].unauthorized.test(output);
+		if (login || LIMIT.test(output) || (agent.harness === "agy" && AGY_LIMIT.test(output)))
+			throw new Unavailable(
+				`${agent.harness} ${login ? "is logged out or its login was rejected" : "is at its usage limit"}`,
+			);
+		throw error;
+	}
+	return init;
+}
+
+/**
+ * Run the fixer: the first of `FIXERS` that can run, each at the daemon's `effort`, so a fixer whose CLI is
+ * missing, whose wrapper supplied no credentials, or that is logged out or at its usage limit passes the round to
+ * the next. `agent` or `args` run one Claude Code entry instead, at `agent`'s path or with `args` replacing its
+ * arguments, as `--agent` and `--agent-arg` do; `model` replaces the model of the first entry or that one.
+ */
 export async function fix(
 	root: string,
 	log: string,
 	numbers: number[],
-	agent = "claude",
+	agent?: string,
 	args?: string[],
 	model?: string,
 	effort = "medium",
@@ -287,8 +532,6 @@ export async function fix(
 		new Set(numbers).size !== numbers.length
 	)
 		throw new Error("fix needs one or more distinct positive PR numbers");
-	if (!args && (!process.env.ANTHROPIC_BASE_URL || !process.env.ANTHROPIC_API_KEY))
-		throw new Error("fix needs ANTHROPIC_BASE_URL and ANTHROPIC_API_KEY from the container wrapper");
 	readFileSync(log); // Fail before starting an agent when the wrapper did not expose the log.
 	const flaky = knownFlaky(root);
 	// The daemon pinned each PR's head on its pr-<n> branch; name it so the agent need not look it up.
@@ -302,88 +545,41 @@ export async function fix(
 		if (!/^[a-f0-9]{40,64}$/.test(head)) throw new Error(`fix needs a ${ref} branch`);
 		return `- #${number}: branch ${ref} at ${head}`;
 	});
-	// The agent runs in the PRs' checkout, so neither it nor its commands are found there: a name is
-	// looked up in PATH's absolute directories, and a path is resolved here rather than in the checkout.
-	const program = agent.includes("/") ? resolve(agent) : requireProgram(agent, process.env);
-	rmSync(join(root, FIX_RESULT), { force: true });
-	const env: NodeJS.ProcessEnv = {
-		...programEnvironment({ PATH: process.env.PATH }),
-		HOME: process.env.HOME,
-		LANG: "C.UTF-8",
-		// The proxy's client key is the only credential, sent as an API key: --bare never reads a stored login.
-		ANTHROPIC_BASE_URL: process.env.ANTHROPIC_BASE_URL,
-		ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
-		// The container reaches only the proxy and the dependency hosts, so no telemetry or update checks.
-		CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
-		// The wrapper's container is the sandbox; without this Claude Code refuses to skip permissions as root.
-		IS_SANDBOX: "1",
-		GIT_CONFIG_GLOBAL: "/dev/null",
-		GIT_CONFIG_NOSYSTEM: "1",
-		GIT_TERMINAL_PROMPT: "0",
-	};
-	// --bare and no setting sources load no CLAUDE.md, hook, plugin, or settings from HOME or the checkout,
-	// --strict-mcp-config no MCP server, and the disabled built-in no AGENTS.md, so the base's tree reaches
-	// the agent only as files it reads. The prompt goes in the system prompt, above the data in rank.
-	const argv = args ?? [
-		"-p",
-		"--bare",
-		"--setting-sources",
-		"",
-		"--settings",
-		JSON.stringify({ enabledPlugins: { [AGENTS_PLUGIN]: false } }),
-		"--append-system-prompt",
-		prompt,
-		"--strict-mcp-config",
-		"--disable-slash-commands",
-		"--no-session-persistence",
-		"--dangerously-skip-permissions",
-		"--tools",
-		"Bash,Read,Edit,Write,Glob,Grep",
-		// Only the stream names the model before the agent's own output.
-		"--output-format",
-		"stream-json",
-		"--verbose",
-		"--effort",
-		effort,
-		...(model ? ["--model", model] : []),
-	];
-	const init = new Init();
-	await new Promise<void>((done, reject) => {
-		// Relay the agent's output through pipes of its own rather than letting it inherit ours. Once Bun writes
-		// to a pipe it marks that pipe non-blocking, and an inheriting child shares the flag: an agent then fails
-		// with EAGAIN as soon as one command's output outruns the host's reader.
-		const child = spawn(program, argv, { cwd: root, env, stdio: ["pipe", "pipe", "pipe"] });
-		child.stdout.pipe(process.stdout, { end: false });
-		child.stderr.pipe(process.stderr, { end: false });
-		let refused: Error | undefined;
-		child.stdout.on("data", (chunk: Buffer) => {
-			init.read(chunk);
-			// Fail loud rather than let a renamed or re-enabled built-in feed the agent the checkout's instructions.
-			if (!refused && init.plugins.some((plugin) => /agents-md/i.test(plugin))) {
-				refused = new Error("fixer agent loaded a plugin that injects the checkout's AGENTS.md");
-				child.kill("SIGTERM");
-			}
-		});
-		child.once("error", reject);
-		child.stdin.on("error", () => {});
-		const data = `Failure log: ${JSON.stringify(log)}\nPRs:\n${prs.join("\n")}\n${flaky.length ? `Known flaky tests: ${JSON.stringify(flaky)}\n` : ""}`;
-		// A replaced command has no system prompt of its own, so it reads the prompt first.
-		child.stdin.end(args ? `${prompt}\n\n${data}` : data);
-		child.once("close", (code) =>
-			refused ? reject(refused) : code === 0 ? done() : reject(new FixerAgentError(code ?? 1)),
-		);
-	});
-	const results = parseFixResult(readFixResult(root), numbers, flaky);
-	const index = argv.findIndex((arg) => arg === "-m" || arg === "--model");
-	const named = index >= 0 ? argv[index + 1] : argv.find((arg) => arg.startsWith("--model="))?.slice(8);
-	const identity = {
-		agent: basename(agent),
-		// The init event names the model an alias such as `opus` resolved to.
-		model: init.model ?? named ?? "unknown",
-		// Replaced arguments may run the agent at any effort.
-		effort: args ? "unknown" : effort,
-	};
-	const result = JSON.stringify(results.map((item) => ({ ...item, ...identity })));
-	parseFixResult(result, numbers, flaky);
-	writeFileSync(join(root, FIX_RESULT), result);
+	const data = `Failure log: ${JSON.stringify(log)}\nPRs:\n${prs.join("\n")}\n${flaky.length ? `Known flaky tests: ${JSON.stringify(flaky)}\n` : ""}`;
+	const custom = agent !== undefined || args !== undefined;
+	const entries: Pick<Model, "harness" | "model">[] = custom
+		? [{ harness: "claude", model: model as string }]
+		: FIXERS.map((entry, index) => (index === 0 && model ? { ...entry, model } : entry));
+	const skipped: string[] = [];
+	for (const entry of entries) {
+		rmSync(join(root, FIX_RESULT), { force: true });
+		let init: Init;
+		let ran: Attempt | undefined;
+		try {
+			ran = attempt(entry.harness, entry.model, effort, root, agent, args);
+			init = await run(ran, data);
+		} catch (error) {
+			if (!(error instanceof Unavailable)) throw error;
+			skipped.push(error.message);
+			continue;
+		} finally {
+			if (ran !== undefined && ran.cwd !== root) rmSync(ran.cwd, { recursive: true, force: true });
+		}
+		const results = parseFixResult(readFixResult(root), numbers, flaky);
+		const { argv, program } = ran as Attempt;
+		const index = argv.findIndex((arg) => arg === "-m" || arg === "--model");
+		const named = index >= 0 ? argv[index + 1] : argv.find((arg) => arg.startsWith("--model="))?.slice(8);
+		const identity = {
+			agent: custom ? basename(agent ?? program) : entry.harness,
+			// The init event names the model an alias such as `opus` resolved to.
+			model: init.model ?? named ?? "unknown",
+			// Replaced arguments may run the agent at any effort.
+			effort: args ? "unknown" : effort,
+		};
+		const result = JSON.stringify(results.map((item) => ({ ...item, ...identity })));
+		parseFixResult(result, numbers, flaky);
+		writeFileSync(join(root, FIX_RESULT), result);
+		return;
+	}
+	throw new Error(entries.length === 1 ? skipped[0]! : `no fixer could run: ${skipped.join("; ")}`);
 }
