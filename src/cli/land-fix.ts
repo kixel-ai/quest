@@ -471,7 +471,7 @@ async function run(agent: Attempt, data: string, root: string): Promise<Init> {
 	return init;
 }
 
-/** What the fixers share: the checkout's `HEAD`, its changes and new files (but not the result file each round rewrites), and each PR branch, which a fixer that ran may have moved. */
+/** What the fixers share: the checkout's `HEAD`, its changes and new files (but not the untracked result file each round rewrites), and each PR branch, which a fixer that ran may have moved. */
 function snapshot(root: string, refs: string[]): string {
 	const git = (...args: string[]) =>
 		spawnSync("git", args, { cwd: root, encoding: "utf8", env: discoveryEnv() }).stdout;
@@ -479,7 +479,7 @@ function snapshot(root: string, refs: string[]): string {
 		git("rev-parse", "HEAD"),
 		git("status", "--porcelain", "--untracked-files=all")
 			.split("\n")
-			.filter((line) => line.slice(3) !== FIX_RESULT)
+			.filter((line) => line !== `?? ${FIX_RESULT}`)
 			.join("\n"),
 		...refs.map((ref) => git("rev-parse", ref)),
 	].join("\n");

@@ -1719,10 +1719,22 @@ ${requeueScript}
 		);
 		expect(ran()).toEqual(["claude"]);
 		rmSync(join(dir, "new.txt"));
+		// A staged result file would ride into the next fixer's commit, so it is a change.
+		fake(
+			"claude",
+			`echo '{}' > quest-land-result.json\ngit add quest-land-result.json\n${claudeFails("You have hit your weekly limit")}`,
+		);
+		await expect(fix(dir, log, [1])).rejects.toThrow("after changing the checkout");
+		git(dir, "reset", "--quiet");
 		fake("claude", `echo '{}' > quest-land-result.json\n${claudeFails("You have hit your weekly limit")}`);
 		fake("codex", requeueScript);
 		await fix(dir, log, [1]);
-		expect(readFileSync(join(rec, "ran.txt"), "utf8").trim().split("\n")).toEqual(["claude", "claude", "codex"]);
+		expect(readFileSync(join(rec, "ran.txt"), "utf8").trim().split("\n")).toEqual([
+			"claude",
+			"claude",
+			"claude",
+			"codex",
+		]);
 	});
 	test("refuses to start an agent without a supplied PR's branch", async () => {
 		const dir = fixRepository();
