@@ -1867,9 +1867,29 @@ fakes("each round rewrites the Review section of the branch's open PR, keeping t
 		);
 		expect(refused.code).toBe(2);
 		const calls = s.calls().length;
+		// A token that cannot push records no acceptance, so the body keeps the open findings and the run fails.
+		const before = pull.body;
+		const github = globalThis.fetch;
+		vi.stubGlobal("fetch", async (input: URL, init?: RequestInit) => {
+			const path = new URL(input).pathname;
+			if (path.includes("/statuses/")) return new Response('{"message":"Not Found"}', { status: 404 });
+			const response = await github(input, init);
+			if (path !== "/repos/acme/widget") return response;
+			return new Response(
+				JSON.stringify({ ...((await response.json()) as object), permissions: { push: false } }),
+			);
+		});
+		const unpushed = await quest("--root", s.repo, "review", "--accept", "Fine.");
+		expect(unpushed.code).toBe(1);
+		expect(unpushed.stdout).toContain("\nnext stop: an acceptance counts only once a maintainer's token sets");
+		expect(pull.body).toBe(before);
+		vi.stubGlobal("fetch", github);
 		const accepted = await quest("--root", s.repo, "review", "--accept", "  It pings  no one. ");
 		expect(accepted.code, accepted.stderr).toBe(0);
 		expect(s.calls()).toHaveLength(calls);
+		expect(accepted.stdout).toContain(
+			"\naccepted round 2 of this head, for the maintainer's reason; no reviewer ran\n",
+		);
 		expect(accepted.stdout).toMatch(/\nnext done: the maintainer accepted the findings left open on this head\n$/);
 		const kept = git(s.repo, "rev-parse", "HEAD");
 		const final = pull.body.split("## Review\r\n\n")[1]!.split("\n\n## Models")[0];
@@ -3069,7 +3089,7 @@ fakes("accepting a head no round reviewed is a usage error, and runs no reviewer
 	try {
 		const result = await quest("--root", s.repo, "review", "--accept", "Fine.");
 		expect(result.code).toBe(2);
-		expect(result.stderr).toContain(`no round reviewed ${git(s.repo, "rev-parse", "HEAD")}`);
+		expect(result.stderr).toContain(`no round classified ${git(s.repo, "rev-parse", "HEAD")}`);
 		expect(s.calls().filter((call) => !call.argv.includes("claude-haiku-5-5"))).toEqual([]);
 		expect(pull.body).toBe("");
 	} finally {
@@ -3090,7 +3110,7 @@ fakes("a record GitHub refuses fails the command after printing the round", asyn
 		const result = await quest("--root", s.repo, "review");
 		expect(result.code).toBe(1);
 		expect(result.stdout).toContain("findings 1\n");
-		expect(result.stderr).toContain("the round finished, but recording it in the PR body failed: GitHub HTTP 403");
+		expect(result.stderr).toContain("the round finished, but recording it failed: GitHub HTTP 403");
 	} finally {
 		vi.unstubAllGlobals();
 	}

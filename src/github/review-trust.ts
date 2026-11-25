@@ -44,7 +44,7 @@ export interface Trusted {
 
 /**
  * `body` as `quest status` reads its `## Review` record: as written when a `quest review` status attests the head the
- * section names last, or when it names no full SHA, else without the record, with a warning saying why.
+ * section names last, else without the record, with a warning saying why unless it names no full SHA.
  */
 export async function trustedReview(
 	github: GitHubReader,
@@ -59,8 +59,8 @@ export async function trustedReview(
 			.slice(section.start, section.end)
 			.match(/\b[0-9a-f]{40}\b/g)
 			?.at(-1);
-	// A record naming no full SHA, as one with a finding open, counts for no head anyway.
-	if (!reviewed) return { body, localReview: false };
+	// A record naming no full SHA, as one with a finding open, counts for no head, so its risk and class print as none.
+	if (!reviewed) return { body: section === null ? body : "", localReview: false };
 	const attested = await attestedOutcome(github, pr, body, reviewed);
 	if (typeof attested !== "string") return { body, localReview: attested.localReview };
 	warn(`${pr.owner}/${pr.repo}#${pr.number}'s ## Review record does not count: ${attested}`);
@@ -111,7 +111,8 @@ async function attestedOutcome(
 	}
 	if (!compared.ok) return `GitHub cannot compare ${sha} with ${pr.base} (HTTP ${compared.status})`;
 	const from = string(object(object(await compared.json()).merge_base_commit).sha);
-	if (String(targetUrl).toLowerCase() !== reviewTarget(pr, from, sha))
+	// The status lives in this repository, so its target's diff binds it, whatever name the reader's remote gives it.
+	if (!String(targetUrl).toLowerCase().endsWith(`/compare/${from}...${sha}`))
 		return `the ${REVIEW_CONTEXT} status on ${sha} attests another diff than ${pr.base}'s, from ${from}: ${String(targetUrl)}`;
 	// The tier and class gate a standing pick, so the body's must be the ones attested.
 	const attested = ATTESTED.exec(typeof description === "string" ? description : "");

@@ -1632,7 +1632,7 @@ head is to land and one sentence on why: 10 lands as is, 7 to 9 lands after the
 findings are fixed, 4 to 6 needs rework, and 0 to 3 is the wrong approach. A
 head with no findings can still score below 10. A reply without a valid score
 fails like any malformed reply. Each finding is high, medium, or low severity;
-low is anything that would not block landing. The score informs; the findings
+low is anything minor, such as naming or wording; every open finding holds the head until a round settles it or the maintainer accepts it. The score informs; the findings
 and their refutations still decide when the loop ends. Later rounds take
 `--responses`, the author's free-text fixes and refutations, which a round that
 reported findings requires. A later round resumes the session and checks only
@@ -1925,12 +1925,15 @@ head picks from the PR's size list again.
 `--accept <reason>` records the maintainer's acceptance of the findings the
 head's last rounds left open, as when they side with the author against a
 reviewer that keeps a finding, or pick merge as is at a design checkpoint. It
-runs no reviewer: it repeats each reviewer's last round of the head, failing as
-a usage error when none reviewed it, adds `- Accepted by the maintainer:
-<reason>`, lists their findings as accepted, names the head in full, and sets
-the `quest review` status to `success`, described `findings accepted`. Like
-any status, it counts only from a user who can push. It takes no option that
-would run or reset a round.
+runs no reviewer and no classifier: it repeats each reviewer's last round of
+the same head, base, and merge base, adds `- Accepted by the maintainer:
+<reason>`, lists their findings as accepted, which `quest usage` counts as
+settled, names the head in full, and sets the `quest review` status to
+`success`, described `findings accepted`. It is a usage error when no round
+classified and reviewed that diff, when a high head lacks its second
+reviewer's round, or when no finding is open, and it takes no option that
+would run or reset a round. Its status goes first, so a token that cannot
+push records nothing, printing `next stop` and exiting 1.
 
 ## Audit cost and accuracy
 

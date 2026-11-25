@@ -28,13 +28,9 @@ builds the Nix package and validates the repository's quest tree.
 Use conventional commit subjects. Keep PR descriptions concise: explain the
 problem, resulting behavior, validation, and any limitations.
 
-The PR body's `## Review` record of a local `quest review` round, which
-`quest status` counts only through the passing `quest review` commit status a
-maintainer's round sets on the head it names, satisfies the
-required review `/quest-merge` describes when it names
-the exact head being landed, with no finding left unfixed or unrefuted.
-`/quest-merge`'s exemptions still apply; a hand-resolved conflict outside them
-needs a local review of the new head.
+A PR lands once a maintainer's local `quest review` passes its head, or the
+maintainer accepts its open findings with `quest review --accept`, as
+`/quest-merge` counts it.
 
 PRs land on `main` through GitHub's merge queue, one PR at a time, as squash commits.
 Queue the reviewed head with `quest merge <pr> --land <sha>` (`/quest-merge` does this).

@@ -1789,9 +1789,10 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"On GitHub it then sets the `quest review` commit status on the head, on the same token, so push the head first: success once no finding is open, else failure, " +
 				"its description the head's risk tier and class and whether a local reviewer ran, its target the diff from the head's merge base with the PR's base, which `quest status` counts only from a user who can push. " +
 				"For a token that cannot push, it sets none and prints `; status skipped: <why>` after the record's URL; a status GitHub refuses otherwise prints `; status refused: <why>` and exits 1. " +
-				"--accept <reason> runs no reviewer: it repeats each reviewer's last round of the head, failing as a usage error when none reviewed it, " +
-				"records them with `- Accepted by the maintainer: <reason>` and their findings as accepted, naming the head in full, sets the status to success " +
-				"described `findings accepted`, and prints `next done`; like any status, it counts only from a user who can push. With no " +
+				"--accept <reason> runs no reviewer or classifier: it repeats each reviewer's last round of the same head, base, and merge base, failing as a usage error " +
+				"when none classified and reviewed it, when a high head lacks its second reviewer's round, or when no finding is open; sets the status to success " +
+				"described `findings accepted`; then records the rounds with `- Accepted by the maintainer: <reason>` and their findings as accepted, naming the head " +
+				"in full, and prints `next done`. When no status is set, as for a token that cannot push, it records nothing, prints `next stop`, and exits 1. With no " +
 				"such PR, several from other repositories that `HEAD` contains, or a remote off GitHub, it prints `record skipped: <why>` and changes nothing.\n\n" +
 				"Exits 0 once the round finishes, whatever it found, 2 for invalid arguments " +
 				"or a checkout that cannot be reviewed, 3 when no eligible reviewer could run, each not installed, logged " +
@@ -1905,10 +1906,6 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				pending = run.then(
 					async (reviewed) => {
 						const { rounds, tallies, risk, skipped } = reviewed;
-						const next =
-							reviewed.accepted === undefined
-								? nextStep(rounds)
-								: "next done: the maintainer accepted the findings left open on this head";
 						// The rounds are saved in their sessions either way, so their report prints before a failed record.
 						let record: Recorded | undefined;
 						let failure: unknown;
@@ -1917,6 +1914,15 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 						} catch (error) {
 							failure = error;
 						}
+						const status = record !== undefined && "url" in record ? record.status : undefined;
+						// An acceptance is the status alone, so one no status records has not happened.
+						const accepting = reviewed.accepted !== undefined;
+						const attested = failure === undefined && record !== undefined && "url" in record && !status;
+						const next = !accepting
+							? nextStep(rounds)
+							: attested
+								? "next done: the maintainer accepted the findings left open on this head"
+								: "next stop: an acceptance counts only once a maintainer's token sets the quest review status on the pushed head";
 						if (options.json)
 							print(
 								JSON.stringify({
@@ -1924,6 +1930,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 									tallies,
 									risk,
 									skipped,
+									accepted: reviewed.accepted ?? null,
 									record: record ?? null,
 									next,
 								}),
@@ -1933,20 +1940,15 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 							if (record !== undefined)
 								print(
 									"url" in record
-										? `record ${record.url}${record.status === undefined ? "" : "skipped" in record.status ? `; status skipped: ${record.status.skipped}` : `; status refused: ${record.status.refused}`}`
+										? `record ${record.url}${status === undefined ? "" : "skipped" in status ? `; status skipped: ${status.skipped}` : `; status refused: ${status.refused}`}`
 										: `record skipped: ${record.skipped}`,
 								);
 							print(next);
 						}
 						if (failure === undefined)
-							return record !== undefined &&
-								"url" in record &&
-								record.status &&
-								"refused" in record.status
-								? 1
-								: 0;
+							return (status !== undefined && "refused" in status) || (accepting && !attested) ? 1 : 0;
 						warn(
-							`the round finished, but recording it in the PR body failed: ${failure instanceof Error ? failure.message : String(failure)}`,
+							`the round finished, but recording it failed: ${failure instanceof Error ? failure.message : String(failure)}`,
 						);
 						return 1;
 					},

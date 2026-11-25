@@ -18,10 +18,10 @@ A PR whose author lacks write access gets no local run: leave its checks to CI, 
 A check failure that reproduces unchanged in a checkout of the base branch is pre-existing rather than the PR's: record the command and both failures in the PR body's validation, go on to review and readiness, and add a follow-up for it unless an open PR already fixes it.
 Never alter the repository's harness to get a pass, such as by disabling a tool, unsetting its environment, or skipping a check, nor report an altered run as its checks.
 
-Run no new round when a review already counts for the committed head, as `/quest-merge` defines below, and leaves no finding unrefuted: go on to pushing and marking it ready.
+Run no new round when a review already counts for the committed head, as `/quest-merge` defines below, and leaves no finding unrefuted or unaccepted: go on to marking it ready.
 `quest status <pr>` reads the pushed head, so trust its `review-record` line only while its `head` line is the committed head.
 
-Otherwise, push the committed branch, since each round's status goes on the head GitHub has, then review it with `quest review --base <remote>/<base>`, in the foreground; a round takes minutes.
+Otherwise, push the committed branch, since each round's status goes on the head GitHub has, first disabling auto-merge with `gh pr merge <pr> --disable-auto` when `quest status <pr>` shows it enabled, since GitHub would land the pushed head unreviewed, then review it with `quest review --base <remote>/<base>`, in the foreground; a round takes minutes.
 It picks a reviewer other than the model that changed the branch last, at an effort the PR's size sets.
 It reads that model, and off a quest branch the size, from the PR body's `## Models` record: open the draft PR and write the record before the first round, as `Size: M` and `Implementer: Claude Code, claude-opus-5-5, high effort`.
 Pass `--exclude-model` or `--size` only for a PR whose body cannot hold the record.

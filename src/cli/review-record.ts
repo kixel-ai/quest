@@ -58,7 +58,7 @@ export interface Counts {
 	findings: Tally["findings"];
 	fixed: number;
 	refuted: number;
-	/** Open findings of a merged PR's last all-low round, which the review rule fixes or refutes before merge. */
+	/** Findings the maintainer accepted, or open ones of a merged PR's last all-low round, which the review rule once settled before merge. */
 	settled: number;
 	open: number;
 }
@@ -215,6 +215,8 @@ export function parseReview(body: string): ReviewSummary[] {
 	const all = body.slice(section.start, section.end);
 	const at = all.indexOf(MARK);
 	if (at < 0) return [];
+	// Findings the maintainer accepted are settled, not open.
+	const accepted = /^- Accepted by the maintainer: /m.test(all);
 	// Each reviewer's block starts at its Reviewer line.
 	const blocks = all
 		.slice(at)
@@ -227,7 +229,9 @@ export function parseReview(body: string): ReviewSummary[] {
 			return found;
 		};
 		const reviewer = match(/^- Reviewer: (.+?), (\S+), (\S+) effort(?:(, shadow)|(, second))?\r?$/m);
-		const tally = parseCounts(text);
+		const counts = parseCounts(text);
+		const tally =
+			accepted && counts !== null ? { ...counts, settled: counts.settled + counts.open, open: 0 } : counts;
 		// A reviewer the latest run left out has its tally, and its session with no round once tallies name it.
 		const session =
 			tally !== null && !/^- Session: /m.test(text)
@@ -239,8 +243,9 @@ export function parseReview(body: string): ReviewSummary[] {
 					);
 		const score = /^- Score: (\d+)\/10,/m.exec(text);
 		const open = { high: 0, medium: 0, low: 0 };
-		for (const [, severity] of text.matchAll(/^  - (High|Medium|Low), /gm))
-			open[severity!.toLowerCase() as keyof typeof open]++;
+		if (!accepted)
+			for (const [, severity] of text.matchAll(/^  - (High|Medium|Low), /gm))
+				open[severity!.toLowerCase() as keyof typeof open]++;
 		return {
 			harness: reviewer[1]!,
 			model: reviewer[2]!,
@@ -425,14 +430,13 @@ export async function pullModels(
 }
 
 /**
- * Record a run in the `## Review` section of its branch's open PR, and attest it with a `quest review` status on the
- * head, which `quest status` counts only when the token's user can push.
+ * Attest a run with a `quest review` status on its head, which `quest status` counts only when the token's user can
+ * push, and record it in the `## Review` section of its branch's open PR.
  */
 export async function recordRounds(root: string, reviewed: Reviewed, deps: ClaimDependencies): Promise<Recorded> {
 	const pull = await openPull(root, reviewed.base.ref, reviewed.branch, deps);
 	if ("skipped" in pull) return pull;
 	const next = withReview(pull.body, reviewRecord(reviewed));
-	if (next !== pull.body) await pull.edit(next);
 	const ok = passed(reviewed);
 	const outcome = !ok
 		? "findings open"
@@ -447,5 +451,8 @@ export async function recordRounds(root: string, reviewed: Reviewed, deps: Claim
 		state: ok ? "success" : "failure",
 		description: attestation(reviewed.risk.tier, reviewed.risk.classified.class, outcome),
 	});
+	// The status goes first, so a body edit that fails cannot leave an earlier pass standing for a failed head; an
+	// acceptance no status records is written nowhere.
+	if (next !== pull.body && !(status !== null && reviewed.accepted !== undefined)) await pull.edit(next);
 	return status === null ? { url: pull.url } : { url: pull.url, status };
 }

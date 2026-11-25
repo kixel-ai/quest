@@ -1030,9 +1030,8 @@ describe("the risk tier", () => {
 				state: "current",
 			},
 		});
-		// A record with an open finding names its head by 12 characters, and no full SHA.
-		expect((await risk(record(A.slice(0, 12)))).line).toBe("risk high current medium it rewrites the wire format");
-		expect((await risk(record(B.slice(0, 12)))).line).toBe("risk high stale medium it rewrites the wire format");
+		// A record with an open finding names its head by 12 characters, and no full SHA, so no status attests its risk.
+		expect((await risk(record(A.slice(0, 12)))).line).toBe("risk -");
 	});
 
 	test("carries to a later head as the review record does", async () => {
