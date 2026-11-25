@@ -331,7 +331,6 @@ function parse(text: string): Admission[] {
 				(entry.queued === undefined || entry.queued === true) &&
 				(entry.start === undefined || typeof entry.start === "string") &&
 				(entry.cores === undefined || (Number.isSafeInteger(entry.cores) && entry.cores >= 0)) &&
-				// Both or neither, and only a gate's own scope name, which is passed to systemctl.
 				// Only a gate scope's cgroup, which other gates read memory files from.
 				(entry.group === undefined ||
 					(typeof entry.group === "string" &&
