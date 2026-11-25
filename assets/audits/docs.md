@@ -2,6 +2,7 @@
 
 The goal is documentation that matches the code: stale claims, broken examples and links, and undocumented exports are fixed or planned.
 The scope is everything the repository documents outside `quest/`: guides, READMEs, runbooks, the docs site, code comments, snippets users copy, and doc comments on exported items.
+Files agents load as instructions, such as `AGENTS.md` and `CONTRIBUTING.md`, belong to the `instructions` audit.
 
 Look for:
 
@@ -14,5 +15,4 @@ Look for:
 Check claims about deployed systems and outside services read-only, never by deploying or changing them.
 
 Fix what is wrong in the run's PR.
-Agent instructions, such as `AGENTS.md` and `CONTRIBUTING.md`, change only on the maintainer's yes: put each proposed edit under `## Waiting`, written as `quest guide prompting` describes.
 Record the commit this run read as the next stub's baseline, so the next run starts from what changed since.

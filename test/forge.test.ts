@@ -18,6 +18,7 @@ import {
 	parseForgeAnswer,
 	parseForgeInfo,
 	parseForgeRequest,
+	REVIEW_MARK,
 } from "../src/core";
 import { type ForgeDependencies, forgeFor, KixelQuest, KixelQuestForge } from "../src/cli/forge";
 import { waitForActivity, WaitTimeout } from "../src/cli/wait";
@@ -187,7 +188,7 @@ describe("status", () => {
 			() =>
 				status.setup([
 					status.pull({
-						body: `## Review\n\n- Head: ${status.A}\n${lines}`,
+						body: `## Review\n\n${REVIEW_MARK}\n\n- Head: ${status.A}\n${lines}`,
 						checks: null,
 						reviews: status.page([]),
 						threads: status.page([]),

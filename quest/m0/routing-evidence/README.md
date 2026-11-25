@@ -186,11 +186,15 @@ three hosts' saved review rounds:
     effort, and a token and cost table. Behind local review it still
     found something on 147 of 272 high-tier and 148 of 549 medium-tier
     merged PRs, 93% of its findings accepted, most likely for its model
-    differing from the mostly-Sol pick.
-    Superseded 2026-11-24 (maintainer): Pullfrog's required approval retired
-    when its quota ran out ([kixel-ai/dotfiles#297](https://github.com/kixel-ai/dotfiles/pull/297)),
-    and [kixel-ai/quest#858](https://github.com/kixel-ai/quest/pull/858)
-    seats one, two, or three local reviewers by tier, each on its own vendor.
+    differing from the mostly-Sol pick. The gate retired first: on
+    2026-11-24 its review quota ran out, and the maintainer removed the
+    `Pullfrog approval` ruleset in
+    [kixel-ai/dotfiles#297](https://github.com/kixel-ai/dotfiles/pull/297),
+    so only a maintainer's local `quest review` record gates a merge, which
+    [kixel-ai/quest#858](https://github.com/kixel-ai/quest/pull/858) seats
+    with one, two, or three local reviewers by tier, each on its own vendor.
+    Where Pullfrog still runs, its findings are suggestions like any online
+    reviewer's.
   - Replay bench? ✅ Not yet (rejected: build it in kixel.quest now). It
     would rerun merged L and XL quests from their base with each writer,
     paired, deciding in days for about $6k a comparison what a live arm

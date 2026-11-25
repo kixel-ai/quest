@@ -25,14 +25,13 @@ import {
 	type Status,
 	type Thread,
 	REVIEW_MARK,
-	passed,
 	recordedRisk,
-	recordedRun,
 	reviewSection,
 } from "../core";
 import { readHoldStatus } from "./hold";
 import { readSignals } from "./signals";
 import { duplicateQuests } from "./duplicates";
+import { trustedReview } from "./review-trust";
 
 /**
  * One query covers the PR; each connection pages by its own cursor, and a
@@ -169,8 +168,15 @@ export async function pullRequestStatus(
 			? { checks: [], workflows: [] }
 			: (base?.needs ?? (await requiredOf(github, pr, baseRef)));
 	const status = summarize(first!, rollup, current, needs, reviewNodes, threadNodes);
-	status.reviewRecord = await reviewRecord(github, pr, first!, deps.warn);
-	status.risk = risk(typeof first!.body === "string" ? first!.body : "", head, status.reviewRecord);
+	// A record counts only where a writer's `quest review` status attests it, so no one else's edit names a reviewed head.
+	const trusted = await trustedReview(
+		github,
+		{ ...pr, base: baseRef },
+		typeof first!.body === "string" ? first!.body : "",
+		deps.warn,
+	);
+	status.reviewRecord = await reviewRecord(github, pr, { ...first!, body: trusted }, deps.warn);
+	status.risk = risk(trusted, head, status.reviewRecord);
 	if (status.autoMerge !== null) status.autoMerge.head = await enabledHead(github, first!, deps.warn);
 	const signaled = (await readSignals(github, pr, [pr.number])).get(pr.number)!;
 	if (signaled.head !== first!.headRefOid)
@@ -205,11 +211,9 @@ async function reviewRecord(
 	const section = reviewSection(body);
 	const text = section ? body.slice(section.start, section.end) : "";
 	// Only a section holding `quest review`'s record names a reviewed head, and only its last SHA, so a body naming
-	// many costs no more requests than one; and it counts only beside a run that passed: every seat its tier needs,
-	// with nothing left for another round.
+	// many costs no more requests than one.
 	const reviewed = text.includes(REVIEW_MARK) && text.match(/\b[0-9a-f]{40}\b/g)?.at(-1);
-	const run = recordedRun(body);
-	if (!reviewed || run === null || !passed(run)) return null;
+	if (!reviewed) return null;
 	const head = string(pull.headRefOid);
 	if (reviewed === head) return { state: "current", head: reviewed };
 	const base = encodeURIComponent(string(pull.baseRefName));

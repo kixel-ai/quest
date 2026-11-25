@@ -1233,7 +1233,7 @@ fakes("codex reviews read-only with the base's instructions, then reports in the
 			"  average([3]) is 0.",
 			// The fixture's origin is a local path, which can have no PR.
 			"record skipped: origin is not on GitHub or Kixel Quest",
-			"next respond: fix each finding or refute it with evidence the reviewer cannot rebut, commit, rerun the checks, then run the next round with --responses, one response per finding by its number",
+			"next respond: fix each finding or refute it with evidence the reviewer cannot rebut, commit, rerun the checks, push, then run the next round with --responses, one response per finding by its number",
 			"",
 		].join("\n"),
 	);
@@ -1842,12 +1842,20 @@ type FakePull = {
 	/** Comments on the PR, oldest first; `maintainer` can push and anyone else cannot. */
 	comments?: { login: string; body: string }[];
 };
-function onGitHub(repo: string, pulls: FakePull[], fork = false): { body: string }[] {
+function onGitHub(
+	repo: string,
+	pulls: FakePull[],
+	fork = false,
+): { body: string }[] & {
+	statuses: { sha: string; state: string; context: string; description: string; target_url: string }[];
+} {
 	const local = git(repo, "remote", "get-url", "origin");
 	git(repo, "remote", "set-url", "origin", "https://github.com/acme/widget.git");
 	git(repo, "config", `url.${local}.insteadOf`, "https://github.com/acme/widget.git");
 	const owner = fork ? "upstream" : "acme";
-	const writes: { body: string }[] = [];
+	const writes = Object.assign([] as { body: string }[], {
+		statuses: [] as { sha: string; state: string; context: string; description: string; target_url: string }[],
+	});
 	const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status });
 	const info = (login: string, parent: string | null) => ({
 		owner: { login },
@@ -1890,11 +1898,23 @@ function onGitHub(repo: string, pulls: FakePull[], fork = false): { body: string
 			pulls.find((p) => p.number === Number(patched[1]))!.body = body;
 			return json({});
 		}
-		if (patched && (init?.method ?? "GET") === "GET")
-			return json({ body: pulls.find((p) => p.number === Number(patched[1]))!.body });
+		const attested = new RegExp(`^/repos/${owner}/widget/statuses/([0-9a-f]{40})$`).exec(url.pathname);
+		if (attested && init?.method === "POST") {
+			writes.statuses.push({ sha: attested[1]!, ...JSON.parse(String(init.body)) });
+			return json({}, 201);
+		}
+		if (patched && (init?.method ?? "GET") === "GET") {
+			// The record's other PRs, listed below, hold a body of their own.
+			const found = pulls.find((p) => p.number === Number(patched[1]));
+			return json({ body: found === undefined ? "other" : found.body });
+		}
 		const commented = new RegExp(`^/repos/${owner}/widget/issues/(\\d+)/comments$`).exec(url.pathname);
 		if (commented) {
-			const pull = pulls.find((p) => p.number === Number(commented[1]))!;
+			// The record's other PRs hold no comments.
+			const pull = pulls.find((p) => p.number === Number(commented[1])) ?? {
+				number: Number(commented[1]),
+				body: "",
+			};
 			pull.comments ??= [];
 			const at = (i: number) => `https://github.com/${owner}/widget/pull/${pull.number}#issuecomment-${i}`;
 			if (init?.method === "POST") {
@@ -1946,6 +1966,16 @@ fakes("each round rewrites the Review section of the branch's open PR, keeping t
 		const head = git(s.repo, "rev-parse", "HEAD");
 		const base = git(s.repo, "rev-parse", "origin/main");
 		const classifier = classifying(s.calls())[0]!.argv.find((arg) => /^[0-9a-f-]{36}$/.test(arg));
+		// The record's head carries a status saying it has not passed, which `quest status` reads before the body.
+		expect(writes.statuses).toEqual([
+			{
+				sha: head,
+				state: "failure",
+				context: "quest review",
+				description: "Risk low: findings open",
+				target_url: `https://github.com/acme/widget/compare/${git(s.repo, "merge-base", "origin/main", head)}...${head}`,
+			},
+		]);
 		expect(pull.body).toBe(
 			[
 				// The author's lines keep their line endings.
@@ -2008,6 +2038,54 @@ fakes("each round rewrites the Review section of the branch's open PR, keeping t
 		expect(record).not.toMatch(/\b[0-9a-f]{40}\b/);
 		expect(pull.body.startsWith("Fixes averaging.\r\n\r\n## Review\r\n\nRewritten")).toBe(true);
 		expect(writes).toHaveLength(2);
+
+		// The maintainer accepts the finding the reviewer keeps: no reviewer runs, and the head passes.
+		const refused = await quest(
+			"--root",
+			s.repo,
+			"review",
+			"--accept",
+			"Kept.",
+			"--responses",
+			join(s.repo, ".tmp", "responses.md"),
+		);
+		expect(refused.code).toBe(2);
+		const calls = s.calls().length;
+		// A token that cannot push records no acceptance, so the body keeps the open findings and the run fails.
+		const before = pull.body;
+		const github = globalThis.fetch;
+		vi.stubGlobal("fetch", async (input: URL, init?: RequestInit) => {
+			const path = new URL(input).pathname;
+			if (path.includes("/statuses/")) return new Response('{"message":"Not Found"}', { status: 404 });
+			const response = await github(input, init);
+			if (path !== "/repos/acme/widget") return response;
+			return new Response(
+				JSON.stringify({ ...((await response.json()) as object), permissions: { push: false } }),
+			);
+		});
+		const unpushed = await quest("--root", s.repo, "review", "--accept", "Fine.");
+		expect(unpushed.code).toBe(1);
+		expect(unpushed.stdout).toContain("\nnext stop: an acceptance counts only once a maintainer's token sets");
+		expect(pull.body).toBe(before);
+		vi.stubGlobal("fetch", github);
+		const accepted = await quest("--root", s.repo, "review", "--accept", "  It pings  no one. ");
+		expect(accepted.code, accepted.stderr).toBe(0);
+		expect(s.calls()).toHaveLength(calls);
+		expect(accepted.stdout).toContain(
+			"\naccepted round 2 of this head, for the maintainer's reason; no reviewer ran\n",
+		);
+		expect(accepted.stdout).toMatch(/\nnext done: the maintainer accepted the findings left open on this head\n$/);
+		const kept = git(s.repo, "rev-parse", "HEAD");
+		const final = pull.body.split("## Review\r\n\n")[1]!.split("\n\n## Models")[0];
+		expect(final).toContain(`- Head: ${kept}\n`);
+		expect(final).toContain("- Accepted by the maintainer: `It pings no one.`\n");
+		expect(final).toContain("- Session: `thread-1`, round 2\n");
+		expect(final).toContain("- Findings, accepted by the maintainer:\n  - High, `src/lib.ts`:");
+		expect(writes.statuses.at(-1)).toMatchObject({
+			sha: kept,
+			state: "success",
+			description: "Risk low: findings accepted",
+		});
 	} finally {
 		vi.unstubAllGlobals();
 	}
@@ -2755,7 +2833,7 @@ agyFakes(
 			number: 7,
 			body: "Fixes averaging.\n\n## Models\n\n- Size: S\n- Implementer: Claude Code, claude-opus-5-5, high effort\n",
 		};
-		onGitHub(s.repo, [pull]);
+		const writes = onGitHub(s.repo, [pull]);
 		vi.stubEnv(
 			"FAKE_RISK",
 			JSON.stringify({ tier: "low", reason: "Only a constant changes.", class: "constants" }),
@@ -2780,6 +2858,16 @@ agyFakes(
 				"- Class: `constants`\n\n- Reviewer: Codex, gpt-6.2-sol, medium effort, light rung (size)\n",
 			);
 			expect(recordedRisk(pull.body)).toMatchObject({ tier: "low", class: "constants", overridden: null });
+			// Its status attests the tier and class the record names, which `quest status` checks the body against.
+			expect(writes.statuses).toEqual([
+				{
+					sha: head,
+					state: "success",
+					context: "quest review",
+					description: "Risk low, class constants: passed",
+					target_url: `https://github.com/acme/widget/compare/${git(s.repo, "merge-base", "origin/main", head)}...${head}`,
+				},
+			]);
 
 			// The maintainer holds it high: three reviewers of different vendors review it.
 			const high = ["--override", "high", "--reason", "It ships tonight."];
@@ -3376,6 +3464,123 @@ test("the record replaces only a top-level Review section, never an example of o
 		expect(() => withReview(open, "new")).toThrow("unclosed code fence or HTML comment");
 });
 
+fakes("a status GitHub refuses fails the run, unless the token cannot push, where it counts for nothing", async () => {
+	for (const [status, message, push, line] of [
+		[
+			422,
+			"No commit found for SHA: x",
+			true,
+			"status refused: GitHub refused the status on HEAD: No commit found for SHA: x; push it, then review it again",
+		],
+		[
+			403,
+			"Resource not accessible",
+			true,
+			"status refused: GitHub refused the status (HTTP 403: Resource not accessible); the token needs write access to acme/widget's commit statuses",
+		],
+		[
+			404,
+			"Not Found",
+			false,
+			"status skipped: you cannot push to acme/widget, so only a maintainer's round counts",
+		],
+	] as const) {
+		const s = setup();
+		const pull = { number: 9, body: "" };
+		onGitHub(s.repo, [pull]);
+		const head = git(s.repo, "rev-parse", "HEAD");
+		const fetch = globalThis.fetch;
+		vi.stubGlobal("fetch", async (input: URL, init?: RequestInit) => {
+			const path = new URL(input).pathname;
+			if (path.includes("/statuses/")) return new Response(JSON.stringify({ message }), { status });
+			const response = await fetch(input, init);
+			if (path !== "/repos/acme/widget") return response;
+			return new Response(JSON.stringify({ ...((await response.json()) as object), permissions: { push } }));
+		});
+		try {
+			const result = await quest("--root", s.repo, "review");
+			expect(result.code, result.stderr).toBe(push ? 1 : 0);
+			expect(result.stdout).toContain(
+				`\nrecord https://github.com/acme/widget/pull/9; ${line.replace("HEAD", head)}\n`,
+			);
+			expect(pull.body).toContain("## Review");
+		} finally {
+			vi.unstubAllGlobals();
+		}
+	}
+});
+
+fakes("accepting a head no round reviewed is a usage error, and runs no reviewer", async () => {
+	const s = setup();
+	const pull = { number: 9, body: "" };
+	onGitHub(s.repo, [pull]);
+	try {
+		const result = await quest("--root", s.repo, "review", "--accept", "Fine.");
+		expect(result.code).toBe(2);
+		expect(result.stderr).toContain(`no round classified ${git(s.repo, "rev-parse", "HEAD")}`);
+		expect(s.calls().filter((call) => !call.argv.includes("claude-haiku-5-5"))).toEqual([]);
+		expect(pull.body).toBe("");
+	} finally {
+		vi.unstubAllGlobals();
+	}
+});
+
+fakes("--accept refuses another base's rounds, fewer vendors than the tier seats, and nothing open", async () => {
+	const models = "## Models\n\n- Size: S\n- Implementer: Claude Code, claude-opus-5-5, high effort";
+	const s = setup();
+	const pull = { number: 7, body: models };
+	const writes = onGitHub(s.repo, [pull]);
+	try {
+		expect((await quest("--root", s.repo, "review")).code).toBe(0);
+		// The same head into another base is another diff, which no round read.
+		git(s.repo, "push", "-q", "origin", "refs/remotes/origin/main:refs/heads/release");
+		const other = await quest(
+			"--root",
+			s.repo,
+			"review",
+			"--base",
+			"origin/release",
+			// Its sizing reads no PR record, so the release PR's body is not read.
+			"--size",
+			"S",
+			"--exclude-model",
+			"claude-opus-5-5",
+			"--accept",
+			"Fine.",
+		);
+		expect(other.code, other.stderr).toBe(2);
+		expect(other.stderr).toContain("no round reviewed");
+		// A round that settles every finding leaves nothing to accept.
+		write(s.repo, ".tmp/responses.md", "1. Fixed.\n2. Fixed.\n");
+		vi.stubEnv("FAKE_DISPOSITION", "fixed");
+		vi.stubEnv("FAKE_REPLY", JSON.stringify({ score: 10, rationale: "Ready.", findings: [] }));
+		const clean = await quest("--root", s.repo, "review", "--responses", join(s.repo, ".tmp", "responses.md"));
+		expect(clean.code, clean.stderr).toBe(0);
+		const none = await quest("--root", s.repo, "review", "--accept", "Fine.");
+		expect(none.code).toBe(2);
+		expect(none.stderr).toContain("there is nothing to accept");
+		expect(writes.statuses.map((status) => status.description)).not.toContain("Risk medium: findings accepted");
+	} finally {
+		vi.unstubAllEnvs();
+		vi.unstubAllGlobals();
+	}
+
+	// A run --harness named seats one vendor, fewer than a medium head's two, so its findings are not the tier's to accept.
+	const lone = setup();
+	onGitHub(lone.repo, [{ number: 7, body: models }]);
+	try {
+		const one = await quest("--root", lone.repo, "review", "--harness", "codex");
+		expect(one.code, one.stderr).toBe(0);
+		expect(one.stdout).toContain("\nrisk medium ");
+		const accepted = await quest("--root", lone.repo, "review", "--accept", "Fine.");
+		expect(accepted.code, accepted.stderr).toBe(2);
+		expect(accepted.stderr).toContain("a medium head needs rounds from 2 vendors before its findings are accepted");
+	} finally {
+		vi.unstubAllEnvs();
+		vi.unstubAllGlobals();
+	}
+});
+
 agyFakes("a record GitHub refuses fails the command after printing the round", async () => {
 	const s = setup();
 	onGitHub(s.repo, [{ number: 9, body: "" }]);
@@ -3389,7 +3594,7 @@ agyFakes("a record GitHub refuses fails the command after printing the round", a
 		const result = await quest("--root", s.repo, "review");
 		expect(result.code).toBe(1);
 		expect(result.stdout).toContain("findings 1\n");
-		expect(result.stderr).toContain("the round finished, but recording it in the PR body failed: GitHub HTTP 403");
+		expect(result.stderr).toContain("the round finished, but recording it failed: GitHub HTTP 403");
 	} finally {
 		vi.unstubAllGlobals();
 	}
@@ -3544,16 +3749,17 @@ test("the next step stops for the design checkpoint when a reviewer's every thir
 	expect(next([round(3, 1)], 2)).toMatch(/^next respond: /);
 	expect(next([round(5, 1)], 2)).toMatch(/^next checkpoint: /);
 	expect(next([round(3, 0)])).toMatch(/^next done: /);
-	expect(next([round(3, 2, "low")])).toMatch(/^next finish: /);
-	expect(next([round(4, 1, "low")])).toMatch(/^next finish: /);
-	// Across reviewers: any finding not low needs another round, and a clean third round is no checkpoint.
+	// Low findings need a run too, since only a passing run's status lets its record count.
+	expect(next([round(3, 2, "low")])).toMatch(/^next checkpoint: /);
+	expect(next([round(4, 1, "low")])).toMatch(/^next respond: /);
+	// Across reviewers: a clean third round is no checkpoint.
 	expect(next([round(1, 1, "low"), round(1, 1)])).toMatch(/^next respond: /);
 	expect(next([round(3, 0), round(1, 1)])).toMatch(/^next respond: /);
 	expect(next([round(1, 1), round(3, 1)])).toMatch(
 		/^next checkpoint: .*best long-term approach from first principles/,
 	);
 	expect(next([round(3, 0), round(1, 0)])).toMatch(/^next done: /);
-	// A run with fewer vendors than its tier seats, as one --harness named, is never done, nor finished by low findings.
+	// A run with fewer vendors than its tier seats, as one --harness named, is never done.
 	const high = (rounds: Round[]) => nextStep({ rounds, risk: { tier: "high" } as Reviewed["risk"] });
 	expect(high([round(3, 0)])).toBe(
 		"next review: a high head needs reviewers from 3 vendors; run quest review without --harness for a review that counts",
@@ -3563,7 +3769,7 @@ test("the next step stops for the design checkpoint when a reviewer's every thir
 	);
 	expect(high([round(4, 1, "low")])).toMatch(/^next respond: /);
 	expect(high([round(4, 1, "low"), round(4, 0, "low", "claude"), round(4, 0, "low", "agy")])).toMatch(
-		/^next finish: /,
+		/^next respond: /,
 	);
 });
 

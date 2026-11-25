@@ -29,18 +29,16 @@ export const passed = (run: Run): boolean =>
 	run.tier !== null && run.open === 0 && new Set(run.vendors).size >= SEATS[run.tier];
 
 /**
- * The latest run `body`'s `## Review` record names: the reviewers whose session line names its round, and the high and
- * medium findings they left open, since the low ones a later line settles without a round, as `next finish` asks.
- * Null when the record names no run, neither a tier nor a reviewer, as a recorded skip.
+ * The latest run `body`'s `## Review` record names: the reviewers whose session line names its round, and the findings
+ * they left open, none once the maintainer accepted them. Null when the record names no run, neither a tier nor a
+ * reviewer, as a recorded skip.
  */
 export function recordedRun(body: string): Run | null {
 	const risk = recordedRisk(body);
 	const section = reviewSection(body);
 	if (section === null) return null;
-	const blocks = body
-		.slice(section.start, section.end)
-		.split(/^(?=- Reviewer: )/m)
-		.slice(1);
+	const text = body.slice(section.start, section.end);
+	const blocks = text.split(/^(?=- Reviewer: )/m).slice(1);
 	if (risk === null && blocks.length === 0) return null;
 	// Only the latest run's seats: each block's session line names its round, the branch's run.
 	const round = (block: string) => Number(/^- Session: (`+) ?.*? ?\1, round (\d+)\r?$/m.exec(block)?.[2] ?? 0);
@@ -51,7 +49,9 @@ export function recordedRun(body: string): Run | null {
 	return {
 		tier: parsed ? risk.tier : null,
 		vendors: vendors.filter((vendor) => vendor !== undefined),
-		open: ran.reduce((sum, block) => sum + (block.match(/^ {2}- (?:High|Medium), /gm)?.length ?? 0), 0),
+		open: /^- Accepted by the maintainer: /m.test(text)
+			? 0
+			: ran.reduce((sum, block) => sum + (block.match(/^ {2}- (?:High|Medium|Low), /gm)?.length ?? 0), 0),
 	};
 }
 

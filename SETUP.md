@@ -112,8 +112,8 @@ see [Claude Code checkouts](README.md#claude-code-checkouts).
 
 Read the root instructions with the new line in place:
 
-- Make sure the agents the user runs load the file holding the `Quests: ` line.
-  For example, Claude Code reads `CLAUDE.md` and may not read `AGENTS.md`.
+- Make sure the agents the user runs load the file holding the `Quests: ` line,
+  as `quest guide prompting` describes.
 - Reword the line to match the file's style if needed, keeping the `Quests: `
   prefix so `quest uninstall` can find it.
 - Point out existing rules that overlap with Quest, such as a planning doc, a

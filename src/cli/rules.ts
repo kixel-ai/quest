@@ -8,8 +8,7 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 
 import { REFERENCE_MARKER, type Repository, lines } from "../core";
-import { hostedRepository } from "./forge";
-import { readRemote, remoteHost } from "./github";
+import { originHost } from "./forge";
 import { parse } from "./shell";
 import { kixelUrl } from "./tokens";
 
@@ -260,20 +259,15 @@ function check(cwd: string, env: NodeJS.ProcessEnv): Check {
 		scratch: (path) => /^\/tmp(\/|$)/.test(path) && !`${path}/`.startsWith(`${root}/`),
 		hosted: () => {
 			if (hosted !== undefined) return hosted;
-			let origin = null;
-			try {
-				origin = readRemote(cwd, "origin");
-			} catch {
-				// Not a checkout, so gh has no repository of its own to reach either.
-			}
-			const host = origin === null ? null : remoteHost(origin, (url) => hostedRepository(kixelUrl(env), url));
+			// Outside a checkout, gh has no repository of its own to reach either.
+			const host = originHost(cwd, env);
 			return (hosted = host?.forge === "kixel" ? host.repository : null);
 		},
 	};
 }
 
 /** The checkout holding `cwd`, found without running git, or `cwd` outside any. */
-function checkoutRoot(cwd: string): string {
+export function checkoutRoot(cwd: string): string {
 	for (let dir = cwd; ; dir = dirname(dir)) {
 		if (existsSync(join(dir, ".git"))) return dir;
 		if (dirname(dir) === dir) return cwd;

@@ -542,7 +542,8 @@ const sized = (value: string | null | undefined): Size | null =>
 
 /**
  * A merged PR's reviews with its last round's open findings settled when all of them are low, since the review
- * rule fixes or refutes those before merge without another round; nothing records which, so they count as settled.
+ * rule once had those fixed or refuted before merge without another round; nothing records which, so they count as
+ * settled. Since that rule's retirement, such a PR merges only after another round or the maintainer's acceptance.
  */
 function settledOnMerge(reviews: ReviewSummary[], merged: boolean): ReviewSummary[] {
 	// A finding carried over from an earlier run is listed under the round that kept it open and counted in its

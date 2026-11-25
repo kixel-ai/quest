@@ -15,22 +15,21 @@ The head is landable when:
 
 - the PR is not a draft;
 - a review counts for it, as below;
-- every review finding posted on it, including automated reviewers' such as CodeRabbit or Codex, is fixed on the head or answered with a refutation, no decision is open, and `quest status` prints no `signal` line;
-- no check failed on it, required or not, its required checks passed, other than the gate's own `quest land` check, which never reports on a head, and it does not conflict with its base;
-- no review requests changes; an approval its base requires may still be to come, since the queue waits for it.
+- every review finding posted on it, including automated reviewers' such as CodeRabbit or Codex, is fixed on the head, answered with a refutation, or, for a local reviewer's finding, accepted by the maintainer with `quest review --accept`, no decision is open, and `quest status` prints no `signal` line;
+- no check failed on it, required or not, a failing `quest review` status included, its required checks passed, other than the gate's own `quest land` check, which never reports on a head, and it does not conflict with its base;
+- no review requests changes, other than an online reviewer's the base does not require, whose findings are all fixed or refuted with their threads resolved; an approval its base requires may still be to come, since the queue waits for it.
 
 While its required checks are only pending, report that the pick stands until they pass; do not wait for them.
-A change request that stands once its findings are fixed or refuted and their threads resolved is the user's call.
+Any other change request that stands once its findings are fixed or refuted and their threads resolved is the user's call.
 Any other head needs `/quest-iterate`: run it, saying what the head needs, such as a review, fixes, a failed check fixed or rerun, flaky ones included, or decisions, then run this skill again once it finishes; if it stops for the user instead, report that.
 Run it in this session, where its interview can ask the user; under a coordinator such as `/quest-run`, return the PR to the loop, which dispatches it in a sub-agent.
 A PR that adds follow-ups also needs the pick round's answers recorded before queueing, as the guide's Creation section describes: ask about each follow-up that round has not asked, in a question of its own, then run `/quest-iterate` with the answers unless the head already records them.
 
 A review counts for the head its `## Review` record names: a local `quest review` run that passed it, with as many vendors as its tier seats.
 Read `quest status <pr>`'s `review-record` line rather than comparing diffs yourself: `current` or `diff-identical` (the head's diff from the base is unchanged since the reviewed head) counts.
-Otherwise, the changes since the reviewed head need no new review only when they are conflict-free merges from the base branch, a reviewer's suggested patch applied unchanged, the fixes of a run that seated its tier's vendors and whose findings were all low severity, a land fixer's recorded mechanical fix that changes no behavior, or the pick round's answers recorded in the PR's follow-ups.
-The repository's review policy decides whose record counts and may require more, such as a maintainer's review.
-Where it says nothing, only a record on a PR whose author has write access counts: anyone else writes their own PR body, so their head needs a local review that rewrites the record.
-On a trivial PR that `/quest-run`'s standing pick covers, Pullfrog's approval of the head stands in for that record unless that policy requires more.
+Otherwise, the changes since the reviewed head need no new review only when they are conflict-free merges from the base branch, a reviewer's suggested patch applied unchanged, a land fixer's recorded mechanical fix, pushed by its bot, that changes no behavior, or the pick round's answers recorded in the PR's follow-ups.
+`quest status` counts a record only through the passing `quest review` commit status a maintainer's round set on the head it names, so a contributor's head needs a maintainer's local review; the repository's review policy may require more.
+An online reviewer's approval never stands in for that record.
 A later head's rise in tier ends the pick: tell the user.
 
 Queue the head with `quest merge <pr> --land <full 40-character head SHA>`, adding `--squash` or `--rebase` when the repository's root instructions name that method for the PR's base.

@@ -28,17 +28,13 @@ builds the Nix package and validates the repository's quest tree.
 Use conventional commit subjects. Keep PR descriptions concise: explain the
 problem, resulting behavior, validation, and any limitations.
 
-On a PR whose author has write access, the PR body's `## Review` record of a
-local `quest review` round satisfies the required review `/quest-merge` describes when it names
-the exact head being landed, with no finding left unfixed or unrefuted.
-`/quest-merge`'s exemptions still apply; a hand-resolved conflict outside them
-needs a local review of the new head, but not a maintainer review specifically.
-Dependabot PRs that only bump patch versions or a lockfile
-need no review.
+A PR lands once a maintainer's local `quest review` passes its head, or the
+maintainer accepts its open findings with `quest review --accept`, as
+`/quest-merge` counts it.
 
 PRs land on `main` through GitHub's merge queue, one PR at a time, as squash commits.
 Queue the reviewed head with `quest merge <pr> --land <sha>` (`/quest-merge` does this).
-The `Pullfrog approval` ruleset requires Pullfrog's approval of the head, which the queue waits for; other online reviewers are never waited for.
+No online reviewer's approval is required, and none is waited for.
 The required `Queue` check skips on pull requests; the merge group runs `just check` and `just test` on the self-hosted runner.
 That build lives in `.github/workflows/queue-build.yml`, which the merge group calls from `main`, so a PR's edit to it runs only after the PR lands.
 The host runs one `quest land watch` daemon per base, here `main`'s; it runs the Codex fixer when the queue drops a PR for a failed build or a conflict, and re-enqueues healthy heads at the back of the queue.

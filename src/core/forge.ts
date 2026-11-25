@@ -64,8 +64,8 @@ export interface Thread {
 }
 
 /**
- * The head the `## Review` section holding `quest review`'s record names last, the latest reviewed one: a round's, or a
- * line after it for low-severity fixes. `current` is the PR's head; `diff-identical` an earlier head whose diff from
+ * The head the `## Review` section holding `quest review`'s record names last, the latest reviewed one, which a
+ * `quest review` status attests. `current` is the PR's head; `diff-identical` an earlier head whose diff from
  * the base (`git diff <base>...<sha>`) matches the head's; `unknown` one the forge cannot compare, such as a diff too
  * large to render.
  */
@@ -136,14 +136,14 @@ export interface Status {
 	/** The design checkpoints online reviewers put on the head. */
 	checkpoints: { reviewer: string; round: number; url: string }[];
 	/**
-	 * Null when the `## Review` section holds no record `quest review` wrote, it names no full SHA, or the run it
-	 * records did not pass that head: short of the vendors its tier seats, or with a finding open other than a low one.
+	 * Null when the `## Review` section holds no record `quest review` wrote or names no full SHA, as for a run that did
+	 * not pass the head, or no writer's passing `quest review` status attests it.
 	 */
 	reviewRecord: ReviewRecord | null;
 	/**
 	 * The head's risk tier as the `## Review` record names it, or the riskier tier a failed run held there with its
 	 * reason and no class, and the classifier's own tier, lower when a reviewer raised it; null when the record names
-	 * none. `state` is the review record's, which a line after it carries to a
+	 * none or does not count, as for `reviewRecord`. `state` is the review record's, which a line after it carries to a
 	 * later head, else `current` when the record names the head and `stale` when not. `class` is the risk file's
 	 * `## Automatic` class the classifier found the change in, or null. A record whose risk lines do not parse is
 	 * `malformed`, with why, which `quest merge` refuses.
@@ -583,7 +583,7 @@ const status = shape<Status>({
 		}),
 	),
 	checkpoints: list(shape<Status["checkpoints"][number]>({ reviewer: string, round: count, url: string })),
-	reviewRecord: nullable(shape<ReviewRecord>({ state: oneOf(reviewStates), head: string })),
+	reviewRecord: nullable(shape<NonNullable<Status["reviewRecord"]>>({ state: oneOf(reviewStates), head: string })),
 	risk: nullable((value, at) =>
 		isRecord(value) && value.state === "malformed"
 			? shape<MalformedStatus>({ state: oneOf(["malformed"] as const), error: string })(value, at)
