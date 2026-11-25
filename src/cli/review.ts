@@ -1241,15 +1241,6 @@ export function agyTurn(context: Context, prompt: string, flags: string[]): Turn
 			context.head,
 		]);
 	const empty = context.ranges.length > 0 ? emptyTree(context.root) : "";
-	for (const [index, range] of context.ranges.entries())
-		files[`diff-${index + 1}.diff`] = git(context.root, [
-			"-c",
-			"core.quotePath=false",
-			`--attr-source=${empty}`,
-			"diff",
-			...DIFF_FLAGS,
-			...range.split(" "),
-		]);
 	// Created last, since a turn that is never run leaves its directory behind.
 	const dir = workspace(files, context.env);
 	// A file, since the rules can outgrow the 128 KiB an argument holds on Linux, as beside a crowded /tmp.
@@ -1257,6 +1248,17 @@ export function agyTurn(context: Context, prompt: string, flags: string[]): Turn
 	try {
 		// The rules first, since they refuse a host agy cannot be confined on before any export.
 		writeFileSync(settings, agySettings(dir, context.env), { mode: 0o600 });
+		// Written by Git itself, since a head that adds large binaries makes a patch no string holds.
+		for (const [index, range] of context.ranges.entries())
+			git(context.root, [
+				"-c",
+				"core.quotePath=false",
+				`--attr-source=${empty}`,
+				"diff",
+				...DIFF_FLAGS,
+				`--output=${join(dir, `diff-${index + 1}.diff`)}`,
+				...range.split(" "),
+			]);
 		if (context.head !== undefined) exportHead(context.root, context.head, join(dir, "head"));
 	} catch (error) {
 		rmSync(dir, { recursive: true, force: true });
@@ -1272,7 +1274,8 @@ export function agyTurn(context: Context, prompt: string, flags: string[]): Turn
 		context.ranges
 			.map((range, index) => ` \`${dir}/diff-${index + 1}.diff\` holds \`git diff ${range}\`.`)
 			.join("") +
-		`\n\n${prompt}`;
+		// Its workspace holds the diff, and its rules deny the classifier's scratch file the prompt names for Claude.
+		`\n\n${context.readable === undefined ? prompt : prompt.replaceAll(join(context.readable, DIFF_PATCH), `${dir}/diff-1.diff`)}`;
 	return {
 		argv: [
 			"agy",
@@ -2040,6 +2043,9 @@ export const CLASSIFY_INSTRUCTIONS =
  */
 const DIFF_FLAGS = ["--text", "--no-ext-diff", "--no-textconv", "--no-color", "--ignore-submodules=none"];
 
+/** The name of the classifier's whole diff in its scratch directory. */
+const DIFF_PATCH = "diff.patch";
+
 /** How many characters of the diff the classifier's prompt holds, which keeps Haiku below its 100k-token surcharge. */
 const DIFF_BUDGET = 200_000;
 
@@ -2392,7 +2398,7 @@ export async function classify(input: Classifying): Promise<{ key: string; value
 	const scratch = mkdtempSync(join(input.dir, "classify-"));
 	let answer;
 	try {
-		const patchFile = join(scratch, "diff.patch");
+		const patchFile = join(scratch, DIFF_PATCH);
 		diff(["--patch", `--output=${patchFile}`]);
 		const size = statSync(patchFile).size;
 		const patch = stat.length + size <= DIFF_BUDGET ? readFileSync(patchFile, "utf8") : null;

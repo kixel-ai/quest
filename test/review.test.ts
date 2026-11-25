@@ -2074,6 +2074,34 @@ agyFakes("with only Antigravity installed, Gemini Flash classifies, reading the 
 });
 
 agyFakes(
+	"a diff past the prompt is read by an agy classifier from its workspace, not the scratch file Claude reads",
+	async () => {
+		const s = setup();
+		moveBase(s.repo, (dir) => write(dir, "RISK.md", riskFile([])));
+		const only = join(s.bin, "..", "agy-only");
+		mkdirSync(only);
+		symlinkSync(execFileSync("which", ["git"], { encoding: "utf8" }).trim(), join(only, "git"));
+		symlinkSync(join(s.bin, "agy"), join(only, "agy"));
+		vi.stubEnv("PATH", only);
+		write(s.repo, "src/big.ts", `${"export const z = 1;\n".repeat(11_000)}`);
+		git(s.repo, "add", ".");
+		git(s.repo, "commit", "-qm", "grow past the budget");
+		const result = await quest("--root", s.repo, "review", ...AGY);
+		expect(result.code, result.stderr).toBe(0);
+		expect(result.stdout).toContain("classifier agy gemini-3.8-flash low conversation-ask\n");
+		const call = s.calls().find((each) => each.argv.includes("gemini-3.8-flash"))!;
+		expect(call.argv).not.toContain("--conversation");
+		expect(JSON.parse(readFileSync(call.argv[call.argv.indexOf("--json-schema") + 1]!, "utf8")).required).toEqual([
+			"tier",
+			"reason",
+		]);
+		expect(call.workspace!["diff-1.diff"]).toContain("+export const z = 1;");
+		expect(call.stdin).toContain(`${dirname(call.cwd)}/diff-1.diff\`, which holds`);
+		expect(call.stdin).not.toContain("classify-");
+	},
+);
+
+agyFakes(
 	"a classifier whose turn fails on its login or usage limit, or replies unusably, passes the turn to the next",
 	async () => {
 		const s = setup();
