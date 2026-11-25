@@ -2750,18 +2750,13 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 	// Accepting runs no reviewer: it repeats each reviewer's last round of this diff, whose open findings it accepts.
 	if (options.accept !== undefined) {
 		const last = sessions
-			.filter(
-				(session) =>
-					session.rounds.at(-1)!.mergeBase === mergeBase &&
-					session.last.base.ref === baseRef &&
-					session.given.instructions === given.instructions &&
-					session.given.rules === given.rules,
-			)
+			// The status binds the reviewed diff alone, so later edits to the base's instructions do not void it.
+			.filter((session) => session.rounds.at(-1)!.mergeBase === mergeBase && session.last.base.ref === baseRef)
 			.map((session) => session.last)
 			.filter((round) => round.head === head);
 		if (last.length === 0)
 			throw new ReviewInputError(
-				`no round reviewed ${head} against ${baseRef} from ${mergeBase} under the base's current instructions and REVIEW.md; review it before accepting its findings`,
+				`no round reviewed ${head} against ${baseRef} from ${mergeBase}; review it before accepting its findings`,
 			);
 		if (low.tier === "high" && !last.some((round) => round.second))
 			throw new ReviewInputError(

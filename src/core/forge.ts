@@ -545,7 +545,7 @@ const check = shape<Check>({ name: string, required: boolean, result: string, ur
 const reviewStates = ["current", "diff-identical", "stale", "unknown"] as const;
 const tier = oneOf<Tier>(TIERS);
 
-const statusFields = shape<Status>({
+const status = shape<Status>({
 	url: string,
 	state: oneOf(["open", "closed", "merged"]),
 	draft: boolean,
@@ -583,12 +583,7 @@ const statusFields = shape<Status>({
 	),
 	checkpoints: list(shape<Status["checkpoints"][number]>({ reviewer: string, round: count, url: string })),
 	reviewRecord: nullable(
-		// Optional only to read an older server, whose record `status` drops.
-		shape<NonNullable<Status["reviewRecord"]>>({
-			state: oneOf(reviewStates),
-			head: string,
-			localReview: maybe(boolean) as Parse<boolean>,
-		}),
+		shape<NonNullable<Status["reviewRecord"]>>({ state: oneOf(reviewStates), head: string, localReview: boolean }),
 	),
 	risk: nullable((value, at) =>
 		isRecord(value) && value.state === "malformed"
@@ -625,16 +620,6 @@ const statusFields = shape<Status>({
 	starterHold: nullable(shape<StarterHold>({ lastActive: time, age: string, url: string })),
 	duplicates: list(shape<Duplicate>({ path: string, url: string, other: string })),
 });
-/**
- * A status, as read from a server, maybe one older than this client: a record without `localReview` predates the
- * `quest review` status check, so it counts for nothing, and neither does its risk.
- */
-const status: Parse<Status> = (value, at) => {
-	const read = statusFields(value, at);
-	return read.reviewRecord !== null && read.reviewRecord.localReview === undefined
-		? { ...read, reviewRecord: null, risk: null }
-		: read;
-};
 
 const openPull = shape<OpenPull>({
 	number: count,

@@ -259,25 +259,6 @@ describe("status", () => {
 		expect(JSON.stringify(served.value)).toBe(JSON.stringify(direct.value));
 		expect([direct.asOf, served.asOf]).toEqual([null, "2026-10-07T12:10:00Z"]);
 	});
-
-	test("a server older than the review status check gives a record that counts for nothing", async () => {
-		const fixture = status.setup([
-			status.pull({
-				body: `## Review\n\n${REVIEW_MARK}\n\n- Head: ${status.A}\n- Risk: high, \`wire\`\n- Classified: medium by default`,
-				checks: null,
-				reviews: status.page([]),
-				threads: status.page([]),
-			}),
-		]);
-		const read = (await new GitHubForge(fixture.deps).status(status.pr)).value;
-		expect(read.reviewRecord).toEqual({ state: "current", head: status.A, localReview: true });
-		const { localReview: _, ...legacy } = read.reviewRecord!;
-		const parsed = parseForgeAnswer(
-			"status",
-			JSON.parse(forgeJson({ value: { ...read, reviewRecord: legacy }, asOf: null })),
-		);
-		expect(parsed.value).toEqual({ ...read, reviewRecord: null, risk: null });
-	});
 });
 
 /** A fake GitHub holding open PRs and a merged one, as the claim reads list them. */
