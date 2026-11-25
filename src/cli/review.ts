@@ -1848,7 +1848,8 @@ const SEVERITY =
 const REPORT =
 	`${SCALE} ${SEVERITY} Name each finding's file by its repository-relative path and its line at that head, or null ` +
 	"when no single line fits. Its body gives the concrete scenario, the input or state and the wrong result, then " +
-	"the fix you recommend. Report an empty list when nothing holds.";
+	"the fix you recommend. Report an empty list when nothing holds. Set `recommendation` to null unless you would " +
+	"build the change another way: then give that approach and why, never the findings' fixes again.";
 
 /** The base's REVIEW.md, if it has one. */
 export interface Rules {
