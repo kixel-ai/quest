@@ -27,7 +27,7 @@ A PR that adds follow-ups also needs the pick round's answers recorded before qu
 
 A review counts for the head its `## Review` record names: a local `quest review` run that passed it, with as many vendors as its tier seats, or a recorded skip.
 Read `quest status <pr>`'s `review-record` line rather than comparing diffs yourself: `current` or `diff-identical` (the head's diff from the base is unchanged since the reviewed head) counts.
-Otherwise, the changes since the reviewed head need no new review only when they are conflict-free merges from the base branch, a reviewer's suggested patch applied unchanged, the fixes of a round whose findings were all low severity, a land fixer's recorded mechanical fix that changes no behavior, or the pick round's answers recorded in the PR's follow-ups.
+Otherwise, the changes since the reviewed head need no new review only when they are conflict-free merges from the base branch, a reviewer's suggested patch applied unchanged, the fixes of a run that seated its tier's vendors and whose findings were all low severity, a land fixer's recorded mechanical fix that changes no behavior, or the pick round's answers recorded in the PR's follow-ups.
 The repository's review policy decides whose record counts and may require more, such as a maintainer's review.
 Where it says nothing, only a record on a PR whose author has write access counts: anyone else writes their own PR body, so their head needs a local review that rewrites the record.
 On a trivial PR that `/quest-run`'s standing pick covers, Pullfrog's approval of the head stands in for that record unless that policy requires more.

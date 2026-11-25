@@ -1,6 +1,6 @@
 // `quest review` rewrites the `## Review` section of its branch's open PR after each round, so the head
 // it reviewed counts without an agent copying the round into the body by hand.
-import { DEFAULT, PATHS, SEATS, codeSpan, passed, recordedRisk, reviewSection } from "../core";
+import { DEFAULT, PATHS, SEATS, codeSpan, passed, recordedHeld, recordedRisk, reviewSection } from "../core";
 import { DRAWN, RUNG_NAMES } from "./models";
 import { recorded } from "./models-record";
 import { type ClaimDependencies, upstream } from "./claims";
@@ -10,6 +10,7 @@ import { git } from "./git";
 import { contains } from "./land";
 import { requireRemote } from "./github";
 import {
+	type HeldRaise,
 	type PullModels,
 	type Reviewed,
 	type Risk,
@@ -404,7 +405,34 @@ export async function pullModels(
 ): Promise<PullModels | null> {
 	const pull = await openPull(root, baseRef, branch, deps);
 	if ("skipped" in pull) return null;
-	return { ...recorded(pull.body), risk: recordedRisk(pull.body) };
+	return { ...recorded(pull.body), risk: recordedRisk(pull.body), held: recordedHeld(pull.body) };
+}
+
+/**
+ * Hold `raise` in the record of the open PR from its branch: a `- Held:` line naming the head and the raised tier,
+ * which the next run on that head reads, and the head no longer named in full, so a pass at a lower tier no longer
+ * counts. The rest of the record, its reviewers' evidence, stays as it was, until a run rewrites it.
+ */
+export async function recordHeld(root: string, raise: HeldRaise, deps: ClaimDependencies): Promise<Recorded> {
+	const pull = await openPull(root, raise.base, raise.branch, deps);
+	if ("skipped" in pull) return pull;
+	const short = raise.head.slice(0, 12);
+	const line = `- Held: ${raise.tier} on ${short}, ${code(raise.reason)}`;
+	const section = reviewSection(pull.body);
+	if (section === null) {
+		await pull.edit(withReview(pull.body, line));
+		return { url: pull.url };
+	}
+	const kept = pull.body
+		.slice(section.start, section.end)
+		.split("\n")
+		.filter((each) => !each.startsWith("- Held: "))
+		.join("\n")
+		.replaceAll(raise.head, short);
+	const at = kept.search(/^- Head: /m);
+	const marked = at < 0 ? `${kept.trimEnd()}\n\n${line}\n` : `${kept.slice(0, at)}${line}\n${kept.slice(at)}`;
+	await pull.edit(`${pull.body.slice(0, section.start)}${marked}${pull.body.slice(section.end)}`);
+	return { url: pull.url };
 }
 
 /** Record a run in the `## Review` section of its branch's open PR. The edit is the token's user's, which `/quest-merge` counts only when that user wrote the PR. */

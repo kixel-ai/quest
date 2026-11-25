@@ -95,7 +95,7 @@ import {
 	nextStep,
 	roundLines,
 } from "./review";
-import { type Recorded, pullModels, recordRounds } from "./review-record";
+import { type Recorded, pullModels, recordHeld, recordRounds } from "./review-record";
 import {
 	BASH_MAX_TIMEOUT_MS,
 	CLAUDE_HOOKS,
@@ -1740,7 +1740,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"needs a trailing / or /**, and a change that touches no path falls in no class. " +
 				"The tier sets the seats, each on a vendor of its own and drawn from the run's rung as above: one on a low head, two on medium, and three on high. " +
 				"A seat the drawn rung has no vendor left for fills from the size's rung, then each rung outward, and the run is an outage only when a seat finds no vendor on any rung. " +
-				"A round that raises the tier seats the extra reviewers at once, in the same run; a run is saved whole or not at all, so one that fails there, as when no other vendor's reviewer can run, leaves the branch as it was, but for the raise, which goes to the PR's review record, the only place a head's tier lives: a record of that head at the raised tier with no run that passed it, so a retry from any clone seats as many. " +
+				"A round that raises the tier seats the extra reviewers at once, in the same run; a run is saved whole or not at all, so one that fails there, as when no other vendor's reviewer can run, leaves the branch as it was, but for the raise, which goes to the PR's review record, the only place a head's tier lives, as a `- Held: high on <head>, <reason>` line that leaves the rest of the record and no longer names the head in full, so a retry from any clone seats as many. A run reads a held raise, and a tier the record's reviewers raised, for its own head, but never the classifier's own tier, which it judges anew, and restores the maintainer's override from the record when this clone has none. " +
 				"--override and --reason record the maintainer's tier for the branch, which holds until the reviewed " +
 				"tier grows riskier than the one overridden, other than to the override's own tier.\n\n" +
 				"Prints the size and where it came from, base, and head, its risk tier and reason, the classifier's tier, " +
@@ -1850,13 +1850,18 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 						...reviewDependencies(),
 						models: (dir, base, branch) => pullModels(dir, base, branch, github),
 						// A failed run's raise goes to the PR's record, the only place a head's tier lives, which unpublishes a
-						// pass at a lower tier; failing to write it is a warning beside the run's error.
-						raised: (failed) =>
-							recordRounds(root(), failed, github).then(
-								() => undefined,
+						// pass at a lower tier; one it cannot reach is a warning beside the run's error.
+						raised: (raise) =>
+							recordHeld(root(), raise, github).then(
+								(record) => {
+									if ("skipped" in record)
+										warn(
+											`the raise to ${raise.tier} was not held, so a retry on this head starts from its classified tier: ${record.skipped}`,
+										);
+								},
 								(error: unknown) =>
 									warn(
-										`recording the raise failed: ${error instanceof Error ? error.message : String(error)}`,
+										`holding the raise to ${raise.tier} failed: ${error instanceof Error ? error.message : String(error)}`,
 									),
 							),
 					},

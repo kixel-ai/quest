@@ -909,6 +909,7 @@ describe("start on GitHub, read through the Kixel Quest serving it", () => {
 			sizes: ["S"],
 			implementers: [],
 			risk: null,
+			held: null,
 		});
 		expect(kixel.calls.map(({ call }) => call)).toEqual(["pulls"]);
 		expect(asked.filter((request) => request.startsWith("GET") && request.endsWith("/pulls"))).toEqual([]);

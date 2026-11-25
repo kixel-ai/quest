@@ -48,8 +48,12 @@ export function recordedRun(body: string): Run | null {
 	const ran = blocks.filter((block) => latest > 0 && round(block) === latest);
 	const vendors = ran.map((block) => /^- Reviewer: (.+?), \S+, \S+ effort\b/.exec(block)?.[1]);
 	const parsed = risk !== null && !("malformed" in risk) && vendors.every((vendor) => vendor !== undefined);
+	// A raise a failed run held for the record's head outranks the tier the record's run passed it at.
+	const held = recordedHeld(body);
+	const raised =
+		parsed && held !== null && risk.head.startsWith(held.head) && riskier(held.tier, risk.tier) ? held.tier : null;
 	return {
-		tier: parsed ? risk.tier : null,
+		tier: parsed ? (raised ?? risk.tier) : null,
 		vendors: vendors.filter((vendor) => vendor !== undefined),
 		open: ran.reduce((sum, block) => sum + (block.match(/^ {2}- (?:High|Medium), /gm)?.length ?? 0), 0),
 	};
@@ -307,6 +311,24 @@ export interface RecordedRisk {
 	class: string | null;
 	/** The tier before the maintainer overrode it to `tier`, or null when they did not. */
 	overridden: Tier | null;
+}
+
+/** A raise of a head's tier that a run which then failed holds in the record, until a run on that head records it. */
+export interface Held {
+	/** The head's first 12 characters. */
+	head: string;
+	tier: Tier;
+	reason: string;
+}
+
+/** The raise `body`'s `## Review` record holds for a head, as a failed run leaves it, or null without one. */
+export function recordedHeld(body: string): Held | null {
+	const section = reviewSection(body);
+	if (section === null) return null;
+	const found = /^- Held: (low|medium|high) on ([0-9a-f]{12}), (`+) ?(.*?) ?\3\r?$/m.exec(
+		body.slice(section.start, section.end),
+	);
+	return found ? { tier: found[1] as Tier, head: found[2]!, reason: found[4]! } : null;
 }
 
 /** A `## Review` record whose risk lines `quest review` did not write, and what is wrong with them. */
