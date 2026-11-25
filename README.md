@@ -1322,7 +1322,7 @@ more, instead of a budget on top of it. The peak includes file cache the command
 wrote, so a build that writes large artifacts counts at their size too.
 Windows and Linux without a systemd user manager have no scope to measure, so
 available memory less one budget per recent command decides there, with the
-load average. macOS counts reclaimable cache as used, so the gate reads no
+load average on Linux. macOS counts reclaimable cache as used, so the gate reads no
 memory there and the load average alone decides.
 
 A user's admissions on one host are recorded under
