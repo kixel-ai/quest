@@ -3,11 +3,12 @@ import { expect, test } from "vitest";
 import {
 	type Doc,
 	check,
+	handBackProblems,
 	handBackWaits,
 	handedBack,
 	onMaintainer,
 	parse,
-	parseWait,
+	readWait,
 	unblocked,
 	waiting,
 	withoutHandBack,
@@ -30,60 +31,170 @@ test("a wait opens with its party", () => {
 		"quest/m0/a.md",
 		"# [S] A\n\n## Goal\n\nA.\n\n## Waiting\n\n- Maintainer: open the account,\n  then check `GET /server`.\n- moq-dev/moq: a release carries the fix.\n- No party is named here\n- This sentence runs on far too long before it reaches a colon: so it is prose\n",
 	);
-	const [account, release, none, prose] = doc.entries.map(parseWait);
+	const [account, release, none, prose] = doc.entries.map((entry) => readWait(entry).wait);
 	expect(account).toEqual({
 		line: 9,
 		party: "Maintainer",
-		pc: false,
+		kind: "prose",
 		text: "open the account, then check GET /server.",
 	});
-	expect(release).toMatchObject({ party: "moq-dev/moq", pc: false, text: "a release carries the fix." });
+	expect(release).toMatchObject({ party: "moq-dev/moq", kind: "prose", text: "a release carries the fix." });
 	expect(none).toBeNull();
 	expect(prose).toBeNull();
 });
 
-test("Maintainer (PC) is the maintainer's step at their computer, and no other qualifier parses", () => {
+test("Maintainer (action) and (PC) are the maintainer's actions, and no other qualifier parses", () => {
 	const doc = parse(
 		"quest/m0/a.md",
 		"# [S] A\n\n## Waiting\n\n- Maintainer (PC): unlock the vault.\n- maintainer(pc): plug in the camera.\n" +
-			"- Maintainer (local): log in.\n- Maintainers: agree.\n",
+			"- Maintainer (local): log in.\n- Maintainers: agree.\n- Maintainer (Action): approve the install.\n",
 	);
-	const [vault, camera, local, plural] = doc.entries.map(parseWait);
-	expect(vault).toEqual({ line: 5, party: "Maintainer", pc: true, text: "unlock the vault." });
-	expect(camera).toMatchObject({ party: "Maintainer", pc: true });
+	const [vault, camera, local, plural, install] = doc.entries.map((entry) => readWait(entry).wait);
+	expect(vault).toEqual({ line: 5, party: "Maintainer", kind: "action", pc: true, text: "unlock the vault." });
+	expect(camera).toMatchObject({ party: "Maintainer", kind: "action", pc: true });
 	expect(local).toBeNull();
-	expect(plural).toMatchObject({ party: "Maintainers", pc: false });
+	expect(plural).toMatchObject({ party: "Maintainers", kind: "prose" });
+	expect(install).toEqual({ line: 9, party: "Maintainer", kind: "action", pc: false, text: "approve the install." });
 	expect(onMaintainer(vault!)).toBe(true);
 	expect(onMaintainer(plural!)).toBe(false);
 	expect(handBackWaits("## Waiting\n\n- Maintainer (PC): unlock.\n- Maintainer (home): log in.\n")).toEqual([
-		{ line: 3, party: "Maintainer", pc: true, text: "unlock." },
-		{ line: 4, party: "Maintainer", pc: false, text: "Maintainer (home): log in." },
+		{ line: 3, party: "Maintainer", kind: "action", pc: true, text: "unlock." },
+		{ line: 4, party: "Maintainer", kind: "prose", text: "Maintainer (home): log in." },
 	]);
 });
 
-test("waiting drops PC steps on request, and ranks by the items it keeps", () => {
+test("waiting drops PC steps on request, keeping other actions, and ranks by the items it keeps", () => {
 	const docs = tree({
 		"a.md": "\n## Waiting\n\n- Maintainer (PC): unlock the vault.\n- moq-dev/moq: a release.\n",
-		"b.md": "\n## Waiting\n\n- Maintainer: pick a name.\n- Maintainer (PC): log in.\n",
+		"b.md": "\n## Waiting\n\n- Maintainer: pick a name.\n- Maintainer (PC): log in.\n- Maintainer (action): approve.\n",
 		"c.md": "\n## Waiting\n\n- moq-dev/moq: another release.\n",
 	});
 	const shown = (options: Parameters<typeof waiting>[2]) =>
 		waiting(docs, TODAY, options).map((quest) => [quest.path, quest.waits.map((wait) => wait.text)]);
 	expect(shown({})).toEqual([
 		["quest/m0/a.md", ["unlock the vault.", "a release."]],
-		["quest/m0/b.md", ["pick a name.", "log in."]],
+		["quest/m0/b.md", ["pick a name.", "log in.", "approve."]],
 		["quest/m0/c.md", ["another release."]],
 	]);
 	// Without its PC step, a.md waits only on an outside party, so it ranks after b.md.
 	expect(shown({ pc: false })).toEqual([
-		["quest/m0/b.md", ["pick a name."]],
+		["quest/m0/b.md", ["pick a name.", "approve."]],
 		["quest/m0/a.md", ["a release."]],
 		["quest/m0/c.md", ["another release."]],
 	]);
-	expect(shown({ maintainer: true, pc: false })).toEqual([["quest/m0/b.md", ["pick a name."]]]);
+	expect(shown({ maintainer: true, pc: false })).toEqual([["quest/m0/b.md", ["pick a name.", "approve."]]]);
 	expect(shown({ maintainer: true })).toEqual([
 		["quest/m0/a.md", ["unlock the vault."]],
-		["quest/m0/b.md", ["pick a name.", "log in."]],
+		["quest/m0/b.md", ["pick a name.", "log in.", "approve."]],
+	]);
+});
+
+test("a decision is a Maintainer item with a marked choice list, from a quest and a draft alike", () => {
+	const item =
+		"- Maintainer: which runner builds the Windows suite?\n" +
+		"  - GitHub-hosted (Recommended) - no machine to keep up\n" +
+		"  - Self-hosted - free minutes, but a Windows host\n";
+	const decision = {
+		line: 5,
+		party: "Maintainer",
+		kind: "decision",
+		text: "which runner builds the Windows suite?",
+		choices: [
+			{ label: "GitHub-hosted", description: "no machine to keep up", recommended: true },
+			{ label: "Self-hosted", description: "free minutes, but a Windows host", recommended: false },
+		],
+	};
+	expect(readWait(parse("quest/m0/a.md", `# [S] A\n\n## Waiting\n\n${item}`).entries[0])).toEqual({
+		wait: decision,
+		problems: [],
+	});
+	expect(handBackWaits(`Work.\n\n## Waiting\n\n${item}`)).toEqual([decision]);
+	expect(handBackProblems(`Work.\n\n## Waiting\n\n${item}`)).toEqual([]);
+});
+
+test("a decision keeps the detail lists beside its choice list in its text", () => {
+	const doc = parse(
+		"quest/m0/a.md",
+		"# [S] A\n\n## Waiting\n\n- Maintainer: which provider?\n  - Hetzner bills monthly\n  - OVH bills hourly\n\n" +
+			"  Pick one:\n\n  - Hetzner (recommended)\n  - OVH\n",
+	);
+	expect(readWait(doc.entries[0]).wait).toEqual({
+		line: 5,
+		party: "Maintainer",
+		kind: "decision",
+		text: "which provider? Hetzner bills monthly OVH bills hourly Pick one:",
+		choices: [
+			{ label: "Hetzner", description: null, recommended: true },
+			{ label: "OVH", description: null, recommended: false },
+		],
+	});
+});
+
+test("an unmarked list, or a marker mid-sentence outside a decision, stays prose", () => {
+	const doc = parse(
+		"quest/m0/a.md",
+		"# [S] A\n\n## Waiting\n\n- Maintainer: can you check these?\n  - the DNS record\n  - the certificate\n" +
+			"- moq-dev/moq: a release ships.\n  - Review logs (recommended) before release\n  - Tag it\n" +
+			"- Maintainer (action): deploy.\n  - Back up first (recommended) to be safe\n",
+	);
+	expect(doc.entries.map((entry) => readWait(entry))).toEqual([
+		{
+			wait: { line: 5, party: "Maintainer", kind: "prose", text: "can you check these? the DNS record the certificate" },
+			problems: [],
+		},
+		{
+			wait: {
+				line: 8,
+				party: "moq-dev/moq",
+				kind: "prose",
+				text: "a release ships. Review logs (recommended) before release Tag it",
+			},
+			problems: [],
+		},
+		{
+			wait: {
+				line: 11,
+				party: "Maintainer",
+				kind: "action",
+				pc: false,
+				text: "deploy. Back up first (recommended) to be safe",
+			},
+			problems: [],
+		},
+	]);
+});
+
+test("check rejects a malformed choice list by line", () => {
+	const docs = tree({
+		"a.md":
+			"\n## Waiting\n\n" +
+			"- moq-dev/moq: which tag?\n  - v1 (Recommended)\n  - v2\n" +
+			"- Maintainer (PC): which camera?\n  - Front (Recommended)\n  - Back\n" +
+			"- Maintainer: only one?\n  - Yes (Recommended)\n" +
+			"- Maintainer: two picks?\n  - Yes (Recommended)\n  - No (Recommended)\n" +
+			"- Maintainer: misplaced?\n  - Yes - the (Recommended) one\n  - No (recommended)\n" +
+			"- Maintainer: labels?\n  - (Recommended) - empty\n  - Same\n  - same\n" +
+			"- Maintainer: two lists?\n  - A (Recommended)\n  - B\n\n  Or:\n\n  - C (Recommended)\n  - D\n",
+	});
+	expect(check(docs, () => true).map((f) => `${f.line}: ${f.message}`)).toEqual([
+		"10: '## Waiting' a choice list belongs only under a plain 'Maintainer:' decision",
+		"13: '## Waiting' a choice list belongs only under a plain 'Maintainer:' decision",
+		"16: '## Waiting' a choice list needs at least two choices",
+		"18: '## Waiting' a choice list marks exactly one choice '(Recommended)'",
+		"21: '## Waiting' '(Recommended)' must end its choice's label, as 'label (Recommended) - description'",
+		"24: '## Waiting' a choice needs a label",
+		"26: '## Waiting' choice 'same' is listed twice",
+		"33: '## Waiting' a decision holds one choice list; split the others into items of their own",
+	]);
+});
+
+test("a draft's malformed choice list reads as prose, with its problem by line", () => {
+	const body = "Work.\n\n## Waiting\n\n- Maintainer: pick one.\n  - Foo (Recommended)\n  - Bar (Recommended)\n";
+	expect(handBackWaits(body)).toEqual([
+		{ line: 5, party: "Maintainer", kind: "prose", text: "pick one. Foo (Recommended) Bar (Recommended)" },
+	]);
+	expect(handBackProblems(body)).toEqual([
+		{ line: 6, message: "a choice list marks exactly one choice '(Recommended)'" },
 	]);
 });
 
@@ -101,8 +212,8 @@ test("check rejects a wait without a party and an empty section", () => {
 		"b.md": "\n## Waiting\n",
 	});
 	expect(check(docs, () => true).map((f) => `${f.path}:${f.line}: ${f.message}`)).toEqual([
-		"quest/m0/a.md:9: '## Waiting' item must open with who acts, as 'Maintainer: ...', 'Maintainer (PC): ...' for a step only at their computer, or '<party>: ...'",
-		"quest/m0/a.md:10: '## Waiting' item must open with who acts, as 'Maintainer: ...', 'Maintainer (PC): ...' for a step only at their computer, or '<party>: ...'",
+		"quest/m0/a.md:9: '## Waiting' item must open with who acts, as 'Maintainer: ...', 'Maintainer (action): ...' for a step only they can take, 'Maintainer (PC): ...' for one only at their computer, or '<party>: ...'",
+		"quest/m0/a.md:10: '## Waiting' item must open with who acts, as 'Maintainer: ...', 'Maintainer (action): ...' for a step only they can take, 'Maintainer (PC): ...' for one only at their computer, or '<party>: ...'",
 		"quest/m0/b.md:7: '## Waiting' is empty; remove the heading with its last entry",
 	]);
 });
@@ -123,8 +234,8 @@ test("lists the maintainer's waits first, then by milestone and impact", () => {
 			dependents: 0,
 			ready: true,
 			waits: [
-				{ line: 9, party: "Maintainer", pc: false, text: "pick a provider." },
-				{ line: 10, party: "Hetzner", pc: false, text: "verify the account." },
+				{ line: 9, party: "Maintainer", kind: "prose", text: "pick a provider." },
+				{ line: 10, party: "Hetzner", kind: "prose", text: "verify the account." },
 			],
 		},
 		{
@@ -132,7 +243,7 @@ test("lists the maintainer's waits first, then by milestone and impact", () => {
 			pr: null,
 			dependents: 1,
 			ready: true,
-			waits: [{ line: 9, party: "moq-dev/moq", pc: false, text: "a release." }],
+			waits: [{ line: 9, party: "moq-dev/moq", kind: "prose", text: "a release." }],
 		},
 	]);
 });
@@ -175,11 +286,11 @@ test("a draft's hand-back items are the maintainer's unless a Waiting item names
 				"## Validation\n\n- Passes.\n\n## Waiting\n\n1. Pick foo or bar.\n",
 		),
 	).toEqual([
-		{ line: 5, party: "Codex", pc: false, text: "out of quota until 15:00 UTC." },
-		{ line: 6, party: "Maintainer", pc: false, text: "pick a name, either one." },
-		{ line: 8, party: "Maintainer", pc: false, text: "approve the account." },
-		{ line: 9, party: "moq-dev/moq", pc: false, text: "a release." },
-		{ line: 17, party: "Maintainer", pc: false, text: "Pick foo or bar." },
+		{ line: 5, party: "Codex", kind: "prose", text: "out of quota until 15:00 UTC." },
+		{ line: 6, party: "Maintainer", kind: "prose", text: "pick a name, either one." },
+		{ line: 8, party: "Maintainer", kind: "prose", text: "approve the account." },
+		{ line: 9, party: "moq-dev/moq", kind: "prose", text: "a release." },
+		{ line: 17, party: "Maintainer", kind: "prose", text: "Pick foo or bar." },
 	]);
 });
 
@@ -191,35 +302,35 @@ test("a draft's hand-back item keeps nested headings and the body's reference de
 				'- <span title="a > b">Maintainer</span>: approve.\n',
 		),
 	).toEqual([
-		{ line: 5, party: "Maintainer", pc: false, text: "choose a provider. Options Hetzner or OVH." },
-		{ line: 10, party: "Maintainer", pc: false, text: "approve the account." },
-		{ line: 11, party: "Codex", pc: false, text: "out of quota." },
-		{ line: 12, party: "Maintainer", pc: false, text: "approve." },
+		{ line: 5, party: "Maintainer", kind: "prose", text: "choose a provider. Options Hetzner or OVH." },
+		{ line: 10, party: "Maintainer", kind: "prose", text: "approve the account." },
+		{ line: 11, party: "Codex", kind: "prose", text: "out of quota." },
+		{ line: 12, party: "Maintainer", kind: "prose", text: "approve." },
 	]);
 });
 
 test("a draft's hand-back renders strikethrough and tables as GitHub does", () => {
 	expect(handBackWaits("## Waiting\n\n- ~~Maintainer~~: pick.\n- Codex: ~~soon~~ later.\n")).toEqual([
-		{ line: 3, party: "Maintainer", pc: false, text: "pick." },
-		{ line: 4, party: "Codex", pc: false, text: "soon later." },
+		{ line: 3, party: "Maintainer", kind: "prose", text: "pick." },
+		{ line: 4, party: "Codex", kind: "prose", text: "soon later." },
 	]);
 	expect(handBackWaits("## Waiting\n\n| when | check |\n| --- | --- |\n| 15:00 | quota |\n")).toEqual([
-		{ line: 1, party: "Maintainer", pc: false, text: "when check 15:00 quota" },
+		{ line: 1, party: "Maintainer", kind: "prose", text: "when check 15:00 quota" },
 	]);
 });
 
 test("a draft's hand-back without items is one maintainer item holding its prose", () => {
 	expect(handBackWaits("Work.\r\n\r\nWaiting\r\n-------\r\n\r\nPick a name\r\nfor it.\r\n")).toEqual([
-		{ line: 3, party: "Maintainer", pc: false, text: "Pick a name for it." },
+		{ line: 3, party: "Maintainer", kind: "prose", text: "Pick a name for it." },
 	]);
 	expect(handBackWaits("## Waiting\n\n<details>\n<summary>Why</summary>\nPick one.\n</details>\n")).toEqual([
-		{ line: 1, party: "Maintainer", pc: false, text: "the draft hands back without saying what it waits on" },
+		{ line: 1, party: "Maintainer", kind: "prose", text: "the draft hands back without saying what it waits on" },
 	]);
 	expect(handBackWaits("## Waiting\n\n<details>\n<summary>Why</summary>\n</details>\n\nThen merge.\n")).toEqual([
-		{ line: 1, party: "Maintainer", pc: false, text: "Then merge." },
+		{ line: 1, party: "Maintainer", kind: "prose", text: "Then merge." },
 	]);
 	expect(handBackWaits("## Waiting\n")).toEqual([
-		{ line: 1, party: "Maintainer", pc: false, text: "the draft hands back without saying what it waits on" },
+		{ line: 1, party: "Maintainer", kind: "prose", text: "the draft hands back without saying what it waits on" },
 	]);
 	expect(handBackWaits("Work.\n\n```\n## Waiting\n\n- Maintainer: pick.\n```\n")).toEqual([]);
 });

@@ -39,17 +39,23 @@ test("unblocked accepts a filesystem path", () => {
 test("waiting lists the maintainer's items first, one per line, and says drafts were skipped offline", async () => {
 	const tree = Tree.baseline()
 		.append("quest/m0/epic/one.md", "\n## Waiting\n\n- moq-dev/moq: a release carries the fix.\n")
-		.append("quest/m0/epic/two.md", "\n## Waiting\n\n- Maintainer: pick a name.\n- Maintainer (PC): log in.\n");
+		.append(
+			"quest/m0/epic/two.md",
+			"\n## Waiting\n\n- Maintainer: pick a name.\n  - Foo (Recommended) - short\n  - Bar\n" +
+				"- Maintainer (PC): log in.\n- Maintainer (action): approve the install.\n",
+		);
 	expect(await tree.exec("waiting")).toEqual({
 		code: 0,
 		stdout:
-			"0\tblocked\tquest/m0/epic/two.md\tMaintainer: pick a name.\n" +
+			"0\tblocked\tquest/m0/epic/two.md\tMaintainer: pick a name. Choices: Foo (Recommended) - short; Bar\n" +
 			"0\tblocked\tquest/m0/epic/two.md\tMaintainer (PC): log in.\n" +
+			"0\tblocked\tquest/m0/epic/two.md\tMaintainer (action): approve the install.\n" +
 			"1\tready\tquest/m0/epic/one.md\tmoq-dev/moq: a release carries the fix.\n",
 		stderr: "quest: no origin remote, so draft PRs were skipped\n",
 	});
 	expect((await tree.exec("waiting", "--maintainer", "--no-pc")).stdout).toBe(
-		"0\tblocked\tquest/m0/epic/two.md\tMaintainer: pick a name.\n",
+		"0\tblocked\tquest/m0/epic/two.md\tMaintainer: pick a name. Choices: Foo (Recommended) - short; Bar\n" +
+			"0\tblocked\tquest/m0/epic/two.md\tMaintainer (action): approve the install.\n",
 	);
 	expect(JSON.parse((await tree.exec("waiting", "--json", "--limit", "1")).stdout)).toEqual([
 		{
@@ -58,8 +64,18 @@ test("waiting lists the maintainer's items first, one per line, and says drafts 
 			dependents: 0,
 			ready: false,
 			waits: [
-				{ line: expect.any(Number), party: "Maintainer", pc: false, text: "pick a name." },
-				{ line: expect.any(Number), party: "Maintainer", pc: true, text: "log in." },
+				{
+					line: expect.any(Number),
+					party: "Maintainer",
+					kind: "decision",
+					text: "pick a name.",
+					choices: [
+						{ label: "Foo", description: "short", recommended: true },
+						{ label: "Bar", description: null, recommended: false },
+					],
+				},
+				{ line: expect.any(Number), party: "Maintainer", kind: "action", pc: true, text: "log in." },
+				{ line: expect.any(Number), party: "Maintainer", kind: "action", pc: false, text: "approve the install." },
 			],
 		},
 	]);

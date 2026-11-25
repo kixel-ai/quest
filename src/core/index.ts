@@ -35,7 +35,7 @@ export {
 	size,
 } from "./doc";
 export { AUDIT, AUDITS, type Audit, SKIPPED, auditOf, covered, skippedOf } from "./audit";
-export { type ClosedPull, handBackWaits, handedBack, landed, withoutHandBack } from "./claim";
+export { type ClosedPull, handBackProblems, handBackWaits, handedBack, landed, withoutHandBack } from "./claim";
 export { REVIEW_MARK, reviewSection } from "./review";
 export {
 	ALWAYS_HIGH,
@@ -70,7 +70,21 @@ export {
 	unblocked,
 	waiting,
 } from "./unblocked";
-export { MAINTAINER, WAITING, type Wait, onMaintainer, parseWait, waits } from "./waiting";
+export {
+	type Action,
+	type Choice,
+	type Decision,
+	MAINTAINER,
+	type Prose,
+	type ReadWait,
+	WAITING,
+	type Wait,
+	type WaitProblem,
+	onMaintainer,
+	readWait,
+	waitLine,
+	waits,
+} from "./waiting";
 export {
 	ATTRIBUTES_LINE,
 	type Checkout,

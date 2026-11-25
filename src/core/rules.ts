@@ -35,7 +35,7 @@ import {
 } from "./doc";
 import { AUDIT, AUDITS, SKIPPED, auditOf, skippedOf } from "./audit";
 import { comparePaths, join } from "./path";
-import { MAINTAINER, WAITING, parseWait } from "./waiting";
+import { MAINTAINER, WAITING, readWait } from "./waiting";
 
 /**
  * The `## ` headings a quest document may use. Readiness greps `## Required`
@@ -250,15 +250,19 @@ function headings(found: Finding[], docs: Doc[], doc: Doc) {
 	}
 
 	// `quest waiting` sorts on who acts, so an item that does not name its
-	// party would hide a decision the maintainer owes.
+	// party would hide a decision the maintainer owes, and a broken choice
+	// list would hide its buttons.
 	for (const entry of entries(doc, WAITING)) {
-		if (parseWait(entry) === null) {
+		const { wait, problems } = readWait(entry);
+		if (wait === null) {
 			found.push({
 				path: doc.path,
 				line: entry.line,
-				message: `'## ${WAITING}' item must open with who acts, as '${MAINTAINER}: ...', '${MAINTAINER} (PC): ...' for a step only at their computer, or '<party>: ...'`,
+				message: `'## ${WAITING}' item must open with who acts, as '${MAINTAINER}: ...', '${MAINTAINER} (action): ...' for a step only they can take, '${MAINTAINER} (PC): ...' for one only at their computer, or '<party>: ...'`,
 			});
 		}
+		for (const problem of problems)
+			found.push({ path: doc.path, line: problem.line, message: `'## ${WAITING}' ${problem.message}` });
 	}
 }
 
