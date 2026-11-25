@@ -1779,14 +1779,14 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"how it was set (model, paths, or default), and reason, a class line naming the class, and for a model a classifier line (harness, model, " +
 				"effort, session) and its usage line, a skipped line (harness, model, effort, reason) for each reviewer passed over, then for each reviewer its harness, model, and " +
 				"effort, followed by shadow for the shadow or second for the second reviewer, session, round, an " +
-				"unchanged line for a repeated round, a usage line per turn (input tokens, the " +
+				"unchanged line for a repeated round, or an accepted line for a round --accept repeats, a usage line per turn (input tokens, the " +
 				"part read from the prompt cache, and output), a score from 0 to 10 for how ready the head is to land with " +
 				"its one-sentence rationale, a raised line with the tier and reason when it raised the classifier's, the finding count, each finding by its number, then the last round's findings with " +
 				"their numbers and dispositions; then the `record` line below and a last `next` line naming the author's next step: " +
 				"`next checkpoint` when a reviewer's every third round reports other findings, to compare the current approach " +
-				"with the best long-term approach worked out from first principles before fixing them, `next respond` to fix or refute the findings, or `next done`, which for a low head no reviewer ran says so. A reply without a valid score " +
+				"with the best long-term approach worked out from first principles before fixing them, `next respond` to fix or refute the findings, or `next done`, which for a low head no reviewer ran says so, and for --accept `next done` or `next stop`. A reply without a valid score " +
 				"fails as any malformed reply does. --json prints " +
-				"one object: `rounds`, one per reviewer, `tallies`, every reviewer's findings across the branch's rounds, `risk`, the head's tier with its classification, `skipped`, each reviewer passed over with its reason, `record`, and `next`.\n\n" +
+				"one object: `rounds`, one per reviewer, `tallies`, every reviewer's findings across the branch's rounds, `risk`, the head's tier with its classification, `skipped`, each reviewer passed over with its reason, `accepted`, the maintainer's reason under --accept or null, `record`, and `next`.\n\n" +
 				"After each round, it rewrites the `## Review` section of the branch's open PR into the base, the one from the repository the base's remote pushes to, else the only one from another repository whose pushed head `HEAD` contains, as the " +
 				"user the GitHub token names, keeping the rest of the body, and prints `record <url>`: the reviewed " +
 				"head, named in full only once no reviewer reports a finding, the base, the head's risk tier and reason, " +

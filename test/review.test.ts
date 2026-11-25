@@ -3097,6 +3097,65 @@ fakes("accepting a head no round reviewed is a usage error, and runs no reviewer
 	}
 });
 
+fakes("--accept refuses another base's rounds, a high head without its second round, and nothing open", async () => {
+	const models = "## Models\n\n- Size: S\n- Implementer: Claude Code, claude-opus-5-5, high effort";
+	const s = setup();
+	const pull = { number: 7, body: models };
+	const writes = onGitHub(s.repo, [pull]);
+	try {
+		expect((await quest("--root", s.repo, "review")).code).toBe(0);
+		// The same head into another base is another diff, which no round read.
+		git(s.repo, "push", "-q", "origin", "refs/remotes/origin/main:refs/heads/release");
+		const other = await quest(
+			"--root",
+			s.repo,
+			"review",
+			"--base",
+			"origin/release",
+			// Its sizing reads no PR record, so the release PR's body is not read.
+			"--size",
+			"S",
+			"--exclude-model",
+			"claude-opus-5-5",
+			"--accept",
+			"Fine.",
+		);
+		expect(other.code, other.stderr).toBe(2);
+		expect(other.stderr).toContain("no round reviewed");
+		// A round that settles every finding leaves nothing to accept.
+		write(s.repo, ".tmp/responses.md", "1. Fixed.\n2. Fixed.\n");
+		vi.stubEnv("FAKE_DISPOSITION", "fixed");
+		vi.stubEnv("FAKE_REPLY", JSON.stringify({ score: 10, rationale: "Ready.", findings: [] }));
+		const clean = await quest("--root", s.repo, "review", "--responses", join(s.repo, ".tmp", "responses.md"));
+		expect(clean.code, clean.stderr).toBe(0);
+		const none = await quest("--root", s.repo, "review", "--accept", "Fine.");
+		expect(none.code).toBe(2);
+		expect(none.stderr).toContain("there is nothing to accept");
+		expect(writes.statuses.map((status) => status.description)).not.toContain("Risk medium: findings accepted");
+	} finally {
+		vi.unstubAllEnvs();
+		vi.unstubAllGlobals();
+	}
+
+	// The pick's round raises the head to high and the second reviewer is out, so only the pick reviewed it.
+	const high = setup();
+	moveBase(high.repo, (dir) => write(dir, "RISK.md", riskFile([])));
+	onGitHub(high.repo, [{ number: 7, body: models }]);
+	try {
+		vi.stubEnv("FAKE_RAISE", "high");
+		vi.stubEnv("FAKE_LIMITED", "reset");
+		vi.stubEnv("FAKE_FAILS", "claude-fable-5-2");
+		const out = await quest("--root", high.repo, "review");
+		expect(out.code, out.stderr).toBe(3);
+		const lone = await quest("--root", high.repo, "review", "--accept", "Fine.");
+		expect(lone.code, lone.stderr).toBe(2);
+		expect(lone.stderr).toContain("needs its second reviewer's round");
+	} finally {
+		vi.unstubAllEnvs();
+		vi.unstubAllGlobals();
+	}
+});
+
 fakes("a record GitHub refuses fails the command after printing the round", async () => {
 	const s = setup();
 	onGitHub(s.repo, [{ number: 9, body: "" }]);

@@ -1753,15 +1753,16 @@ reason, then `classified` with the classifier's tier, how it was set (`model`,
 `paths`, or `default`), and reason, and for a model a `classifier` line with its
 harness, model, effort, and session, and its `usage` line; then for each reviewer its
 harness, model, and effort, session, round,
-an `unchanged` line for a repeated round, a `usage` line per turn (input tokens, the part read from the prompt cache, and output),
+an `unchanged` line for a repeated round, or an `accepted` line for a round `--accept` repeats, a `usage` line per turn (input tokens, the part read from the prompt cache, and output),
 the score, a `raised` line with the tier and reason when it raised the classifier's, the
 finding count, then each finding as its number, severity, `path:line`, and title over its
 indented body, then `earlier` with the last round's head and its findings, each
 as its number, disposition, severity, `path:line`, and title over its reason; last
 come a `record` line and a `next` line. `--json` prints one object with
 `rounds`, one per reviewer, `tallies`, every reviewer's findings across the
-branch's rounds, `risk`, the head's tier with its classification, `record`,
-and `next`.
+branch's rounds, `risk`, the head's tier with its classification, `skipped`,
+`accepted`, the maintainer's reason under `--accept` or null, `record`, and
+`next`.
 
 After each round, `quest review` rewrites the `## Review` section of the open PR
 from the branch into the base, found among the upstream's PRs: the one from

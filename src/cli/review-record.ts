@@ -443,12 +443,19 @@ export async function recordRounds(root: string, reviewed: Reviewed, deps: Claim
 			: reviewed.rounds.length === 0
 				? "passed with no local reviewer"
 				: "passed";
-	const status = await pull.attest({
-		head: reviewed.head,
-		from: git(root, ["merge-base", reviewed.base.sha, reviewed.head]),
-		state: ok ? "success" : "failure",
-		description: attestation(reviewed.risk.tier, reviewed.risk.classified.class, outcome),
-	});
+	let status: Awaited<ReturnType<typeof pull.attest>>;
+	try {
+		status = await pull.attest({
+			head: reviewed.head,
+			from: git(root, ["merge-base", reviewed.base.sha, reviewed.head]),
+			state: ok ? "success" : "failure",
+			description: attestation(reviewed.risk.tier, reviewed.risk.classified.class, outcome),
+		});
+	} catch (error) {
+		// A record of open findings names no full SHA, so writing it still ends any earlier pass of this head.
+		if (!ok && next !== pull.body) await pull.edit(next);
+		throw error;
+	}
 	// The status goes first, so a body edit that fails cannot leave an earlier pass standing for a failed head; an
 	// acceptance no status records is written nowhere.
 	if (next !== pull.body && !(status !== null && reviewed.accepted !== undefined)) await pull.edit(next);

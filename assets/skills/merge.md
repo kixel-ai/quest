@@ -15,7 +15,7 @@ The head is landable when:
 
 - the PR is not a draft;
 - a review counts for it, as below;
-- every review finding posted on it, including automated reviewers' such as CodeRabbit or Codex, is fixed on the head, answered with a refutation, or accepted by the maintainer with `quest review --accept`, no decision is open, and `quest status` prints no `signal` line;
+- every review finding posted on it, including automated reviewers' such as CodeRabbit or Codex, is fixed on the head, answered with a refutation, or, for a local reviewer's finding, accepted by the maintainer with `quest review --accept`, no decision is open, and `quest status` prints no `signal` line;
 - no check failed on it, required or not, a failing `quest review` status included, its required checks passed, other than the gate's own `quest land` check, which never reports on a head, and it does not conflict with its base;
 - no review requests changes, other than an online reviewer's the base does not require, whose findings are all fixed or refuted with their threads resolved; an approval its base requires may still be to come, since the queue waits for it.
 
