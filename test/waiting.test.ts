@@ -112,6 +112,21 @@ test("a decision is a Maintainer item with a marked choice list, from a quest an
 	expect(handBackProblems(`Work.\n\n## Waiting\n\n${item}`)).toEqual([]);
 });
 
+test("a choice's label comes from its own paragraph, and nested detail joins its description", () => {
+	const doc = parse(
+		"quest/m0/a.md",
+		"# [S] A\n\n## Waiting\n\n- Maintainer: which host?\n  - Hetzner (Recommended)\n    - cheap - but EU only\n" +
+			"  - OVH - hourly\n    - more detail\n",
+	);
+	expect(readWait(doc.entries[0]).wait).toMatchObject({
+		kind: "decision",
+		choices: [
+			{ label: "Hetzner", description: "cheap - but EU only", recommended: true },
+			{ label: "OVH", description: "hourly more detail", recommended: false },
+		],
+	});
+});
+
 test("a decision keeps the detail lists beside its choice list in its text", () => {
 	const doc = parse(
 		"quest/m0/a.md",
@@ -223,11 +238,14 @@ test("check rejects a malformed choice list by line", () => {
 	]);
 });
 
-test("a draft's malformed choice list reads as prose, even under an action, with its problem by line", () => {
+test("a draft's malformed choice list reads as prose, or keeps an action's kind, with its problem by line", () => {
 	const action = "## Waiting\n\n- Maintainer (PC): which camera?\n  - Front (Recommended)\n  - Back\n";
 	expect(handBackWaits(action)).toEqual([
-		{ line: 3, party: "Maintainer", kind: "prose", text: "which camera? Front (Recommended) Back" },
+		{ line: 3, party: "Maintainer", kind: "action", pc: true, text: "which camera? Front (Recommended) Back" },
 	]);
+	// So a session away from the maintainer's computers still skips it.
+	const draft = { url: "https://github.com/o/r/pull/1", branch: "fix", body: action };
+	expect(waiting([], TODAY, { drafts: [draft], pc: false })).toEqual([]);
 	expect(handBackProblems(action)).toEqual([
 		{ line: 4, message: "a choice list belongs only under a plain 'Maintainer:' decision" },
 	]);

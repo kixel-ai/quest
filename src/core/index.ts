@@ -7,7 +7,10 @@
 
 export {
 	type Doc,
+	type Bullet,
 	type Entry,
+	type NestedList,
+	type Part,
 	type Heading,
 	type Link,
 	type Position,

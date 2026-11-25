@@ -86,6 +86,8 @@ export interface Bullet {
 	line: number;
 	/** The rendered text with whitespace collapsed, any list nested in it included. */
 	text: string;
+	/** Its own opening paragraph's text, collapsed the same way: `text` without the detail nested under it. */
+	lead: string;
 }
 
 /** One heading as the rules need to see it. */
@@ -380,6 +382,8 @@ export function itemParts(item: ListItem): Part[] {
 						bullets: child.children.map((bullet) => ({
 							line: line(bullet),
 							text: collapse(rendered(bullet)),
+							lead:
+								bullet.children[0]?.type === "paragraph" ? collapse(rendered(bullet.children[0])) : "",
 						})),
 					}
 				: collapse(rendered(child)),

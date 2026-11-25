@@ -5,7 +5,7 @@
 // `(Recommended)`, is a decision a client can render as buttons. The same
 // heading hands a draft PR back (claim.ts).
 
-import type { Doc, Entry, NestedList, Part } from "./doc";
+import type { Bullet, Doc, Entry, NestedList, Part } from "./doc";
 import { entries } from "./doc";
 
 /** The section a quest names what it waits on in. */
@@ -86,15 +86,18 @@ function render(parts: Part[]): string {
 		.trim();
 }
 
-function split(text: string): { label: string; description: string | null } {
-	const at = text.indexOf(SEPARATOR);
-	if (at < 0) return { label: text.trim(), description: null };
-	return { label: text.slice(0, at).trim(), description: text.slice(at + SEPARATOR.length).trim() || null };
+// A bullet's label and description: the label comes from its own paragraph, so a ` - ` in nested
+// detail never cuts it, and the description runs on through that detail.
+function choiceText(bullet: Bullet): { label: string; description: string | null } {
+	const at = bullet.lead.indexOf(SEPARATOR);
+	const label = at < 0 ? bullet.lead : bullet.lead.slice(0, at);
+	const description = bullet.text.slice(at < 0 ? bullet.lead.length : at + SEPARATOR.length).trim();
+	return { label: label.trim(), description: description || null };
 }
 
 // Whether a bullet's label ends with the marker, the only way an item other than a decision can mark one.
-function endsLabel(text: string): boolean {
-	return MARKED_LABEL.test(split(text).label);
+function endsLabel(bullet: Bullet): boolean {
+	return MARKED_LABEL.test(choiceText(bullet).label);
 }
 
 // A marked list's choices, or the problems that make it no choice list.
@@ -102,7 +105,7 @@ function choicesOf(list: NestedList): { choices: Choice[]; problems: WaitProblem
 	const problems: WaitProblem[] = [];
 	const seen = new Set<string>();
 	const choices = list.bullets.map((bullet): Choice => {
-		const { label: marked, description } = split(bullet.text);
+		const { label: marked, description } = choiceText(bullet);
 		const recommended = MARKED_LABEL.test(marked);
 		const label = marked.replace(MARKED_LABEL, "").trim();
 		const marks = bullet.text.split(MARKER).length - 1;
@@ -129,7 +132,7 @@ function markedLists(parts: Part[], decision: boolean): NestedList[] {
 	return parts.filter(
 		(part): part is NestedList =>
 			typeof part !== "string" &&
-			part.bullets.some((bullet) => (decision ? MARKER.test(bullet.text) : endsLabel(bullet.text))),
+			part.bullets.some((bullet) => (decision ? MARKER.test(bullet.text) : endsLabel(bullet))),
 	);
 }
 
@@ -195,7 +198,9 @@ function read(entry: Pick<Entry, "line" | "parts">, draft: boolean): ReadWait {
 	// Only a marker makes a nested list a choice list, so checklists and detail lists stay prose.
 	const marked = markedLists(entry.parts, plain);
 	if (marked.length === 0) return { wait: fallback, problems: [] };
-	if (!plain) return { wait: broken, problems: misplaced(marked) };
+	// A choice list under a qualified or outside party is misplaced, not a question: the item keeps its kind,
+	// so a `Maintainer (PC):` step stays one `--no-pc` drops.
+	if (!plain) return { wait: fallback, problems: misplaced(marked) };
 	const [list, ...extra] = marked;
 	const { choices, problems } = choicesOf(list);
 	for (const other of extra)
