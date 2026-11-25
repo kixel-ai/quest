@@ -3,7 +3,7 @@
 import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
-import { join, relative, resolve, sep } from "node:path";
+import { isAbsolute, join, relative, resolve, sep } from "node:path";
 
 import { Argument, Command, CommanderError, InvalidArgumentError, Option } from "commander";
 
@@ -1601,11 +1601,12 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"content Codex marks as the user's (before 0.162, which marks none, the parts but its environment, shell commands, and " +
 				"AGENTS.md instructions), outside headless and sub-agent sessions. The repository is the " +
 				"checkout's configured origin, as owner/name on GitHub or <host>/owner/name on Kixel Quest, else the directory; a removed worktree under a checkout's .worktrees/ " +
-				"or .claude/worktrees/ is named by that checkout, one T3 Code removed by its project, and any other by its directory. It prints only the repository of the checkout it runs in, " +
+				"or .claude/worktrees/ is named by that checkout, one T3 Code removed by its project, a Codex session's by the origin Codex " +
+				"recorded, and any other by its directory. It prints only the repository of the checkout it runs in, " +
 				"comparing names without case: it reads every repository's sessions as --all does, which prints them all, " +
 				"and drops the other repositories' entries. Output goes to stdout only, except notes on stderr " +
 				"naming each Claude Code session whose malformed lines, such as a partial record a crashed write left, " +
-				"were skipped and how many, and counting the directories no origin names whose entries a scoped read dropped; nothing is stored or posted. Each answer a person gave an agent's blocking question (Claude Code's AskUserQuestion, " +
+				"were skipped and how many, and counting the other repositories whose entries a scoped read dropped, and how many of them are directories no origin names; nothing is stored or posted. Each answer a person gave an agent's blocking question (Claude Code's AskUserQuestion, " +
 				"Codex's request_user_input) prints too, from the harness's own log in every session, T3 Code's " +
 				"included, with the skill the session last ran, the question, the options the agent marked " +
 				"(Recommended), and the ones picked or the words typed instead. --json prints a JSON array of " +
@@ -1623,8 +1624,9 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				// An unnamed origin falls back to the directory it was given; an absolute one can't collide with a
 				// named origin the way a relative `--root` such as `acme/proj` can.
 				const dir = resolve(root());
+				if (!existsSync(dir)) throw new UsageError(`${dir} does not exist`);
 				repository = repositories(process.env).name(dir);
-				if (repository === dir)
+				if (isAbsolute(repository))
 					throw new UsageError(
 						"this checkout's origin names no repository on GitHub or Kixel Quest; pass --all for every repository's",
 					);

@@ -3,10 +3,10 @@
 // drives, Claude Code's `origin` for the rest of its sessions, and Codex's content provenance for its interactive ones.
 // Answers come from each harness's own log, which keeps the question's options. Output goes to stdout only.
 import { closeSync, existsSync, openSync, readdirSync, readSync, realpathSync, statSync } from "node:fs";
-import { isAbsolute, join } from "node:path";
+import { isAbsolute, join, sep } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { hostedRepository, originHost } from "./forge";
-import { type RemoteHost, githubRepository } from "./github";
+import { type RemoteHost, urlHost } from "./github";
 import { RECOMMENDED, checkoutRoot } from "./rules";
 import { kixelUrl } from "./tokens";
 
@@ -132,7 +132,7 @@ export interface Repositories {
 export interface MessagesDependencies {
 	env: NodeJS.ProcessEnv;
 	home: string;
-	/** Told, on stderr, of each Claude Code session whose malformed lines were skipped, and of the unnamed directories left out. */
+	/** Told, on stderr, of each Claude Code session whose malformed lines were skipped, and of the repositories left out. */
 	warn?: (line: string) => void;
 }
 
@@ -177,10 +177,13 @@ const folded = (name: string) => (isAbsolute(name) ? name : name.toLowerCase());
 /**
  * Names each directory's repository by its checkout's configured `origin`, before `insteadOf` rewrites, as
  * `owner/name` on GitHub or `<host>/owner/name` on Kixel Quest, so the same name on both forges differs, else the
- * directory itself, or for a session T3 Code drives, its project's. `projects` maps each T3 Code session to its
- * project's root.
+ * directory itself, or for a session T3 Code drives in a worktree it removed, its project's. `projects` maps each T3
+ * Code session to its project.
  */
-export function repositories(env: NodeJS.ProcessEnv, projects: ReadonlyMap<string, string> = new Map()): Repositories {
+export function repositories(
+	env: NodeJS.ProcessEnv,
+	projects: ReadonlyMap<string, T3Project> = new Map(),
+): Repositories {
 	const names = new Map<string, string>();
 	const removed = new Set<string>();
 	// By checkout, so its subdirectories and removed worktrees share one lookup.
@@ -195,10 +198,10 @@ export function repositories(env: NodeJS.ProcessEnv, projects: ReadonlyMap<strin
 	const name = (dir: string): string => {
 		let found = names.get(dir);
 		if (found === undefined) {
-			const exists = existsSync(dir);
-			if (!exists) removed.add(dir);
 			// The physical directory, as git would find it: a symlink's own parents can be another checkout.
-			const checkout = exists ? checkoutRoot(realpathSync(dir)) : WORKTREE.exec(dir)?.[1];
+			const real = physical(dir);
+			if (real === null) removed.add(dir);
+			const checkout = real !== null ? checkoutRoot(real) : WORKTREE.exec(dir)?.[1];
 			let host: RemoteHost | null = null;
 			if (checkout !== undefined && existsSync(checkout)) {
 				host = hosts.get(checkout) ?? null;
@@ -216,18 +219,27 @@ export function repositories(env: NodeJS.ProcessEnv, projects: ReadonlyMap<strin
 	return {
 		name(dir, session) {
 			const found = name(dir);
-			// T3 Code removes its worktrees, which sit outside the checkout, but keeps their project. A directory that
-			// still exists is what it is, even unnamed.
+			// T3 Code removes its worktrees, which sit outside the checkout, but keeps their project and path. A directory
+			// that still exists is what it is, even unnamed, and one outside the session's worktree, such as where a
+			// person resumed it, is not the project's.
 			const project = session === undefined ? undefined : projects.get(session);
-			return isAbsolute(found) && project !== undefined && removed.has(dir) ? name(project) : found;
+			const inside = (root: string | null) => root !== null && (dir === root || dir.startsWith(`${root}${sep}`));
+			return isAbsolute(found) && project !== undefined && removed.has(dir) && inside(project.worktree)
+				? name(project.root)
+				: found;
 		},
-		origin(url) {
-			const repository = hostedRepository(kixel, url);
-			if (repository !== null) return named({ forge: "kixel", repository });
-			const github = githubRepository(url);
-			return github === null ? null : named({ forge: "github", url, repository: github });
-		},
+		origin: (url) => named(urlHost(url, (each) => hostedRepository(kixel, each))),
 	};
+}
+
+/** The physical path of `dir`, or null when it does not exist, as when its worktree is removed while being read. */
+function physical(dir: string): string | null {
+	try {
+		return realpathSync(dir);
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+		throw error;
+	}
 }
 
 /** Files under `dir` with `.jsonl` names written since `since`, recursively; a log untouched since holds nothing newer. */
@@ -647,27 +659,43 @@ export function readT3Messages(path: string, since: number, repositories: Reposi
 	}
 }
 
+/** The T3 Code project a session ran in: its root, and the worktree T3 Code made for the session, if any. */
+export interface T3Project {
+	root: string;
+	worktree: string | null;
+}
+
 /**
- * The root of the project each session T3 Code ever drove belongs to, by the harness's own session ID, since a person
+ * The project each session T3 Code ever drove belongs to, by the harness's own session ID, since a person
  * can resume one outside T3 Code long after its last run there. A provider row SQLite cannot read maps nothing;
  * `readT3Messages` fails on one whose messages it reads.
  */
-export function readT3Projects(path: string): Map<string, string> {
+export function readT3Projects(path: string): Map<string, T3Project> {
 	const db = new DatabaseSync(path, { readOnly: true });
 	try {
 		const rows = db
 			.prepare(
 				`SELECT DISTINCT CASE WHEN json_valid(pt.payload_json)
 						THEN json_extract(pt.payload_json, '$.nativeThreadRef.nativeId') END AS session,
-					p.workspace_root AS root
+					p.workspace_root AS root,
+					CASE WHEN json_valid(t.payload_json) THEN json_extract(t.payload_json, '$.worktreePath') END AS worktree
 				FROM orchestration_v2_projection_runs r
 				JOIN orchestration_v2_projection_provider_threads pt ON pt.provider_thread_id = r.provider_thread_id
 				JOIN orchestration_v2_projection_threads t ON t.thread_id = r.thread_id
 				JOIN projection_projects p ON p.project_id = t.project_id`,
 			)
-			.all() as { session: unknown; root: string }[];
+			.all() as { session: unknown; root: string; worktree: unknown }[];
 		return new Map(
-			rows.flatMap((row) => (typeof row.session === "string" ? [[row.session, row.root] as const] : [])),
+			rows.flatMap((row) =>
+				typeof row.session === "string"
+					? [
+							[
+								row.session,
+								{ root: row.root, worktree: typeof row.worktree === "string" ? row.worktree : null },
+							],
+						]
+					: [],
+			),
 		);
 	} finally {
 		db.close();
@@ -692,10 +720,9 @@ export function messages(query: MessagesQuery, deps: MessagesDependencies): Entr
 	for (const [session, path] of claudeLogs(deps)) {
 		if (statSync(path).mtimeMs < from) continue;
 		let skipped = 0;
-		const entries = readClaudeMessages(path, session, from, scope, () => skipped++);
-		found.push(...entries);
-		// A scoped read leaves out the note on a session it prints nothing of, since the note names its log.
-		if (skipped && (wanted === null || entries.some(keep)))
+		found.push(...readClaudeMessages(path, session, from, scope, () => skipped++));
+		// The note names a log, never its messages, so a scoped read gives it as an unscoped one does.
+		if (skipped)
 			deps.warn?.(`skipped ${skipped} malformed line${skipped === 1 ? "" : "s"} in session ${session} (${path})`);
 	}
 	const codex = deps.env.CODEX_HOME || join(deps.home, ".codex");
@@ -711,14 +738,14 @@ export function messages(query: MessagesQuery, deps: MessagesDependencies): Entr
 		found.push(...readCodexMessages(path, from, scope));
 	}
 	if (existsSync(t3)) found.push(...readT3Messages(state, from, scope));
-	// A directory no origin names can hold this repository's sessions, so the count is reported, never the names.
-	const unnamed = new Set(
-		found.filter((entry) => !keep(entry) && isAbsolute(entry.repository)).map((e) => e.repository),
-	);
-	if (unnamed.size)
+	// The others are counted, never named; a directory no origin names can hold this repository's sessions.
+	const others = new Set(found.filter((entry) => !keep(entry)).map((entry) => entry.repository));
+	if (others.size) {
+		const unnamed = [...others].filter((name) => isAbsolute(name)).length;
 		deps.warn?.(
-			`left out the entries of ${unnamed.size} director${unnamed.size === 1 ? "y" : "ies"} no GitHub or Kixel Quest origin names; --all prints them`,
+			`printed ${query.repository}'s entries only, leaving out ${others.size} other ${others.size === 1 ? "repository's" : "repositories'"}, ${unnamed} of them ${unnamed === 1 ? "a directory" : "directories"} no GitHub or Kixel Quest origin names`,
 		);
+	}
 	return found.filter(keep).sort((a, b) => a.time.localeCompare(b.time));
 }
 

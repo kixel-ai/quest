@@ -1,4 +1,3 @@
-import { execFileSync } from "node:child_process";
 import { mkdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -15,11 +14,18 @@ import {
 	readT3Messages,
 	repositories,
 } from "../src/cli/messages";
-import { run, tempDir } from "./fixture";
+import { configure, initRepository, run, tempDir } from "./fixture";
 
 const SESSION = "0d8d9084-40a0-48e2-921b-8ba0d67baa2f";
 const THREAD = "01a1b8e8-8fca-7793-99d1-062f41f8a7b0";
 const SINCE = Date.parse("2026-11-01T00:00:00");
+
+/** A checkout at `dir` whose origin is `url`, with any other settings, made without spawning git. */
+const checkout = (dir: string, url: string, settings: Record<string, string> = {}): string => {
+	initRepository(dir);
+	configure(dir, { "remote.origin.url": url, ...settings });
+	return dir;
+};
 
 const lines = (...records: unknown[]) => `${records.map((r) => JSON.stringify(r)).join("\n")}\n`;
 /** Names a directory as itself and an origin URL as `quest messages` does. */
@@ -56,22 +62,32 @@ const codexTurn = (timestamp: string, parts: [string, string][]) => ({
 	},
 });
 
-/** A T3 Code state holding the given user messages, each in a Claude Code run of a project at `root`. */
-function t3State(path: string, root: string, rows: { id: string; at: string; payload: object }[]): void {
+/**
+ * A T3 Code state holding the given user messages, each in a Claude Code run of a project at `root`, in a worktree at
+ * `worktree` if given.
+ */
+function t3State(
+	path: string,
+	root: string,
+	rows: { id: string; at: string; payload: object }[],
+	worktree?: string,
+): void {
 	const db = new DatabaseSync(path);
 	db.exec(`
 		CREATE TABLE orchestration_v2_projection_messages (message_id TEXT, thread_id TEXT, run_id TEXT, role TEXT, created_at TEXT, payload_json TEXT);
-		CREATE TABLE orchestration_v2_projection_runs (run_id TEXT, thread_id TEXT, provider_thread_id TEXT, completed_at TEXT);
+		CREATE TABLE orchestration_v2_projection_runs (run_id TEXT, thread_id TEXT, provider_thread_id TEXT);
 		CREATE TABLE orchestration_v2_projection_provider_threads (provider_thread_id TEXT, payload_json TEXT);
-		CREATE TABLE orchestration_v2_projection_threads (thread_id TEXT, project_id TEXT);
+		CREATE TABLE orchestration_v2_projection_threads (thread_id TEXT, project_id TEXT, payload_json TEXT);
 		CREATE TABLE projection_projects (project_id TEXT, workspace_root TEXT);
-		INSERT INTO orchestration_v2_projection_runs VALUES ('run', 'thread', 'pt', NULL);
-		INSERT INTO orchestration_v2_projection_threads VALUES ('thread', 'project');
+		INSERT INTO orchestration_v2_projection_runs VALUES ('run', 'thread', 'pt');
 	`);
 	db.prepare("INSERT INTO orchestration_v2_projection_provider_threads VALUES ('pt', ?)").run(
 		JSON.stringify({ driver: "claudeAgent", nativeThreadRef: { driver: "claudeAgent", nativeId: SESSION } }),
 	);
 	db.prepare("INSERT INTO projection_projects VALUES ('project', ?)").run(root);
+	db.prepare("INSERT INTO orchestration_v2_projection_threads VALUES ('thread', 'project', ?)").run(
+		JSON.stringify(worktree === undefined ? {} : { worktreePath: worktree }),
+	);
 	const insert = db.prepare(
 		"INSERT INTO orchestration_v2_projection_messages VALUES (?, 'thread', 'run', 'user', ?, ?)",
 	);
@@ -618,12 +634,9 @@ describe("readT3Messages", () => {
 describe("messages", () => {
 	test("gathers every source once, oldest first, naming each checkout's GitHub origin, one repository's on request", () => {
 		const home = tempDir();
-		const checkout = join(home, "proj");
-		mkdirSync(checkout);
-		execFileSync("git", ["init", "-q", checkout]);
-		execFileSync("git", ["-C", checkout, "remote", "add", "origin", "https://github.com/acme/proj.git"]);
+		const proj = checkout(join(home, "proj"), "https://github.com/acme/proj.git");
 		const log = lines(
-			turn("2026-11-06T09:00:00Z", "<system-reminder>r</system-reminder>\nplan it", { cwd: checkout }),
+			turn("2026-11-06T09:00:00Z", "<system-reminder>r</system-reminder>\nplan it", { cwd: proj }),
 			turn("2026-11-06T09:01:00Z", "brief", { origin: undefined, entrypoint: "sdk-cli" }),
 			turn("2026-11-06T09:02:00Z", "relay", { entrypoint: "t3-code" }),
 			turn("2026-11-06T09:03:00Z", "skill body", { isMeta: true }),
@@ -639,7 +652,7 @@ describe("messages", () => {
 			writeFileSync(join(home, ".codex", dir, `rollout-2026-11-06T10-00-00-${THREAD}.jsonl`), rollout);
 		}
 		mkdirSync(join(home, ".t3", "userdata"), { recursive: true });
-		t3State(join(home, ".t3", "userdata", "statev2.sqlite"), checkout, [
+		t3State(join(home, ".t3", "userdata", "statev2.sqlite"), proj, [
 			{
 				id: "a",
 				at: "2026-11-06T10:00:00.000Z",
@@ -688,19 +701,16 @@ describe("messages", () => {
 
 	test("names a removed worktree by its checkout, and counts the unnamed directories it drops", () => {
 		const home = tempDir();
-		const checkout = join(home, "proj");
-		mkdirSync(checkout);
-		execFileSync("git", ["init", "-q", checkout]);
-		execFileSync("git", ["-C", checkout, "remote", "add", "origin", "https://github.com/acme/proj.git"]);
+		const proj = checkout(join(home, "proj"), "https://github.com/acme/proj.git");
 		mkdirSync(join(home, ".claude", "projects", "p"), { recursive: true });
 		writeFileSync(
 			join(home, ".claude", "projects", "p", `${SESSION}.jsonl`),
 			lines(
 				turn("2026-11-06T09:00:00Z", "from a worktree", {
-					cwd: join(checkout, ".claude", "worktrees", "gone"),
+					cwd: join(proj, ".claude", "worktrees", "gone"),
 				}),
 				turn("2026-11-06T09:01:00Z", "from a quest worktree", {
-					cwd: join(checkout, ".worktrees", "x", "src"),
+					cwd: join(proj, ".worktrees", "x", "src"),
 				}),
 				turn("2026-11-06T09:02:00Z", "elsewhere", { cwd: join(home, "gone", "sub") }),
 			),
@@ -710,7 +720,7 @@ describe("messages", () => {
 			join(home, ".codex", "sessions", `rollout-2026-11-06T10-00-00-${THREAD}.jsonl`),
 			lines(codexMeta({ cwd: "/other" }), codexTurn("2026-11-06T11:00:00Z", [["x", "user"]])),
 		);
-		// A session that prints nothing gets no note on its malformed line, which would name its log.
+		// The malformed line's note names the log, never a message, so a scoped read gives it too.
 		writeFileSync(
 			join(home, ".claude", "projects", "p", "other.jsonl"),
 			`{"partial\n${lines(turn("2026-11-06T09:03:00Z", "theirs", { cwd: "/other" }))}`,
@@ -720,9 +730,10 @@ describe("messages", () => {
 			{ since: "2026-11-01", repository: "acme/proj" },
 			{ env: {}, home, warn: (line) => notes.push(line) },
 		);
-		// Only a count of the directories no origin names, which may hold the repository's sessions.
+		// Only counts of the repositories left out, never their names.
 		expect(notes).toEqual([
-			"left out the entries of 2 directories no GitHub or Kixel Quest origin names; --all prints them",
+			`skipped 1 malformed line in session other (${join(home, ".claude", "projects", "p", "other.jsonl")})`,
+			"printed acme/proj's entries only, leaving out 2 other repositories', 2 of them directories no GitHub or Kixel Quest origin names",
 		]);
 		expect(mine.map((m) => m.kind === "message" && [m.repository, m.text])).toEqual([
 			["acme/proj", "from a worktree"],
@@ -740,14 +751,8 @@ describe("messages", () => {
 
 	test("names a T3 Code session by its project, a Codex one by its directory's origin, and skips what the base skipped", () => {
 		const home = tempDir();
-		const checkout = join(home, "proj");
-		mkdirSync(checkout);
-		execFileSync("git", ["init", "-q", checkout]);
-		execFileSync("git", ["-C", checkout, "remote", "add", "origin", "https://github.com/acme/proj.git"]);
-		const other = join(home, "other");
-		mkdirSync(other);
-		execFileSync("git", ["init", "-q", other]);
-		execFileSync("git", ["-C", other, "remote", "add", "origin", "https://github.com/acme/other.git"]);
+		const proj = checkout(join(home, "proj"), "https://github.com/acme/proj.git");
+		const other = checkout(join(home, "other"), "https://github.com/acme/other.git");
 		const scratch = join(home, "scratch");
 		mkdirSync(scratch);
 		mkdirSync(join(home, ".claude", "projects", "p"), { recursive: true });
@@ -758,8 +763,10 @@ describe("messages", () => {
 				turn("2026-10-01T09:00:00Z", "old", { cwd: undefined }),
 				// The session's last skill names its answer, wherever it ran, as an unscoped read names it.
 				{ ...skillTurn("2026-11-06T09:00:00Z", "/skills/quest-plan"), cwd: other },
-				// T3 Code removed the worktree this answer came from, after the person resumed the session outside it.
-				claudeAnswer("2026-11-06T09:01:00Z", { "Which color?": "Blue" }, { cwd: join(home, "t3-gone") }),
+				// T3 Code removed the worktree this answer came from.
+				claudeAnswer("2026-11-06T09:01:00Z", { "Which color?": "Blue" }, { cwd: join(home, "t3-gone", "src") }),
+				// A removed directory outside that worktree, where the person resumed the session, is not the project's.
+				claudeAnswer("2026-11-06T09:01:30Z", { "Which color?": "Green" }, { cwd: join(home, "resumed-gone") }),
 				// A directory that still exists keeps its own name, even unnamed.
 				claudeAnswer("2026-11-06T09:02:00Z", { "Which color?": "Red (Recommended)" }, { cwd: scratch }),
 			),
@@ -769,16 +776,14 @@ describe("messages", () => {
 			join(home, ".codex", "sessions", `rollout-2026-11-06T10-00-00-${THREAD}.jsonl`),
 			lines(
 				// Codex recorded the URL a rewrite gave, not the origin the checkout names.
-				codexMeta({ cwd: checkout, git: { repository_url: "https://kixel.quest/acme/proj" } }),
+				codexMeta({ cwd: proj, git: { repository_url: "https://kixel.quest/acme/proj" } }),
 				codexTurn("2026-11-06T11:00:00Z", [["and test", "user"]]),
 			),
 		);
 		const state = join(home, ".t3", "userdata", "statev2.sqlite");
 		mkdirSync(dirname(state), { recursive: true });
-		t3State(state, checkout, []);
+		t3State(state, proj, [], join(home, "t3-gone"));
 		const db = new DatabaseSync(state);
-		// T3 Code's last run of the session ended before the window.
-		db.exec("UPDATE orchestration_v2_projection_runs SET completed_at = '2026-10-01T00:00:00.000Z'");
 		// A structured question's answer in a thread whose project is gone.
 		db.prepare(
 			"INSERT INTO orchestration_v2_projection_messages VALUES ('async-answer:x', 'orphan', NULL, 'user', ?, ?)",
@@ -796,36 +801,31 @@ describe("messages", () => {
 			["message", "codex", "acme/proj", "and test"],
 		]);
 		expect(notes).toEqual([
-			"left out the entries of 1 directory no GitHub or Kixel Quest origin names; --all prints them",
+			"printed acme/proj's entries only, leaving out 2 other repositories', 2 of them directories no GitHub or Kixel Quest origin names",
 		]);
-		expect(messages({ since: "2026-11-01", repository: null }, { env: {}, home })).toHaveLength(3);
+		expect(messages({ since: "2026-11-01", repository: null }, { env: {}, home })).toHaveLength(4);
 		// A provider row SQLite cannot read, with no message of its own, maps no session and fails no read.
 		const broken = new DatabaseSync(state);
 		broken.prepare("INSERT INTO projection_projects VALUES ('theirs', ?)").run(other);
 		broken.exec(`
-			INSERT INTO orchestration_v2_projection_threads VALUES ('their-thread', 'theirs');
-			INSERT INTO orchestration_v2_projection_runs VALUES ('their-run', 'their-thread', 'their-pt', NULL);
+			INSERT INTO orchestration_v2_projection_threads VALUES ('their-thread', 'theirs', '{}');
+			INSERT INTO orchestration_v2_projection_runs VALUES ('their-run', 'their-thread', 'their-pt');
 			INSERT INTO orchestration_v2_projection_provider_threads VALUES ('their-pt', '{');
 		`);
 		broken.close();
 		expect(read()).toEqual(mine);
-		expect(messages({ since: "2026-11-01", repository: null }, { env: {}, home })).toHaveLength(3);
+		expect(messages({ since: "2026-11-01", repository: null }, { env: {}, home })).toHaveLength(4);
 	});
 
 	test("names each forge's repository from the configured origin of the physical directory", () => {
 		const home = tempDir();
-		const origin = (dir: string, url: string, ...config: string[]) => {
-			mkdirSync(dir);
-			execFileSync("git", ["init", "-q", dir]);
-			execFileSync("git", ["-C", dir, "remote", "add", "origin", url]);
-			for (let i = 0; i < config.length; i += 2)
-				execFileSync("git", ["-C", dir, "config", config[i]!, config[i + 1]!]);
-		};
-		origin(join(home, "hub"), "https://github.com/Acme/Proj.git");
-		origin(join(home, "hosted"), "https://kixel.quest/acme/proj.git");
+		checkout(join(home, "hub"), "https://github.com/Acme/Proj.git");
+		checkout(join(home, "hosted"), "https://kixel.quest/acme/proj.git");
 		// A rewrite to a mirror leaves the configured origin naming the repository.
-		origin(join(home, "mirrored"), "git@github.com:acme/proj.git", "url./srv/mirror/.insteadOf", "git@github.com:");
-		// A symlink in one checkout to a directory of another is that other's.
+		checkout(join(home, "mirrored"), "git@github.com:acme/proj.git", {
+			"url./srv/mirror/.insteadOf": "git@github.com:",
+		});
+		// A symlink in one proj to a directory of another is that other's.
 		mkdirSync(join(home, "hosted", "src"));
 		symlinkSync(join(home, "hosted", "src"), join(home, "hub", "link"));
 		const scope = repositories({});
@@ -843,15 +843,12 @@ describe("messages", () => {
 
 	test("the command prints only its checkout's repository, every one with --all, and needs a named origin", () => {
 		const home = tempDir();
-		const checkout = join(home, "acme", "proj");
-		mkdirSync(checkout, { recursive: true });
-		execFileSync("git", ["init", "-q", checkout]);
-		execFileSync("git", ["-C", checkout, "remote", "add", "origin", "https://github.com/acme/proj.git"]);
+		const proj = checkout(join(home, "acme", "proj"), "https://github.com/acme/proj.git");
 		mkdirSync(join(home, ".claude", "projects", "p"), { recursive: true });
 		writeFileSync(
 			join(home, ".claude", "projects", "p", `${SESSION}.jsonl`),
 			lines(
-				turn("2026-11-06T09:00:00Z", "ours", { cwd: checkout }),
+				turn("2026-11-06T09:00:00Z", "ours", { cwd: proj }),
 				turn("2026-11-06T09:01:00Z", "theirs", { cwd: "/other" }),
 			),
 		);
@@ -867,8 +864,8 @@ describe("messages", () => {
 						run("--root", root, "messages", "--since", "2026-11-01", "--json", ...args).stdout,
 					) as Entry[]
 				).map((m) => m.kind === "message" && m.text);
-			expect(texts(checkout)).toEqual(["ours"]);
-			expect(texts(checkout, "--all")).toEqual(["ours", "theirs"]);
+			expect(texts(proj)).toEqual(["ours"]);
+			expect(texts(proj, "--all")).toEqual(["ours", "theirs"]);
 			// A relative root spelled like its origin's name is still that checkout, not an unnamed directory.
 			process.chdir(home);
 			expect(texts("acme/proj")).toEqual(["ours"]);
@@ -876,6 +873,10 @@ describe("messages", () => {
 			const outside = run("--root", home, "messages", "--since", "2026-11-01");
 			expect(outside.code).toBe(2);
 			expect(outside.stderr).toMatch(/pass --all/);
+			// A stale root under a live checkout's worktrees is no checkout, not the one holding it.
+			const stale = run("--root", join(proj, ".worktrees", "gone"), "messages", "--since", "2026-11-01");
+			expect(stale.code).toBe(2);
+			expect(stale.stderr).toMatch(/does not exist/);
 		} finally {
 			process.chdir(cwd);
 			vi.unstubAllEnvs();

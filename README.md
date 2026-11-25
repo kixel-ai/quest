@@ -2255,9 +2255,9 @@ since `--since` (a local `YYYY-MM-DD`, by default 7 days ago), oldest first,
 for a periodic audit of what agents keep getting wrong. It reads every
 repository's sessions and prints only the entries of the checkout it runs in;
 `--all` prints every repository's. Outside a checkout whose origin is on GitHub
-or Kixel Quest it exits 2 and asks for `--all`, and it notes on stderr how many
-directories no origin names it dropped entries of, since they may hold this
-repository's sessions:
+or Kixel Quest it exits 2 and asks for `--all`. It notes on stderr how many
+other repositories it dropped entries of, and how many of those are directories
+no origin names, since they may hold this repository's sessions:
 
 ```console
 $ quest messages --since 2026-11-10
@@ -2270,7 +2270,8 @@ GitHub as `owner/name`, or on Kixel Quest as `<host>/owner/name`, compared
 without case, else its
 directory; a removed worktree under a checkout's `.worktrees/` or
 `.claude/worktrees/` takes that checkout's, one T3 Code removed takes its
-project's, and any other keeps its directory), and session, then its text. It also prints each
+project's, a Codex session's takes the origin Codex recorded, and any other
+keeps its directory), and session, then its text. It also prints each
 answer a person gave an agent's blocking question, such as Claude Code's
 `AskUserQuestion` or Codex's `request_user_input`, marked `answer` with the
 skill the session last ran, then the question, the options the agent marked
