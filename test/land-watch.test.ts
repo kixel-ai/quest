@@ -203,13 +203,19 @@ function deps(world: World): GitHubDependencies {
 				if (query.includes("defaultBranchRef"))
 					return Response.json({ data: { repository: { defaultBranchRef: { name: "main" } } } });
 				if (query.includes("query BaseRisk")) {
-					const oid =
-						world.origin &&
-						spawnSync("git", ["rev-parse", "--verify", "--quiet", `refs/heads/${variables.expression}`], {
-							cwd: world.origin,
-							encoding: "utf8",
-						});
-					const found = oid && oid.status === 0 ? { oid: oid.stdout.trim() } : null;
+					const [ref, file] = String(variables.expression).split(":");
+					const read = (args: string[]) =>
+						world.origin ? spawnSync("git", args, { cwd: world.origin, encoding: "utf8" }) : null;
+					const oid = read(["rev-parse", "--verify", "--quiet", `${ref}:${file}`]);
+					const found =
+						oid && oid.status === 0
+							? {
+									oid: oid.stdout.trim(),
+									text: read(["cat-file", "blob", oid.stdout.trim()])!.stdout,
+									isBinary: false,
+									isTruncated: false,
+								}
+							: null;
 					return Response.json({ data: { repository: { object: found } } });
 				}
 				if (query.includes("query ReviewTiers"))
@@ -424,13 +430,7 @@ function deps(world: World): GitHubDependencies {
 						.map((item) => ({ number: item.number, node_id: `PR_${item.number}` })),
 				);
 			}
-			// The base's RISK.md and a PR's files, from the upstream repository when the world has one.
-			if (path === "/repos/upstream/project/contents/RISK.md") {
-				const ref = url.searchParams.get("ref") ?? "main";
-				const risk =
-					world.origin && spawnSync("git", ["show", `refs/heads/${ref}:RISK.md`], { cwd: world.origin });
-				return risk && risk.status === 0 ? new Response(risk.stdout) : new Response("{}", { status: 404 });
-			}
+			// A PR's files, from the upstream repository when the world has one.
 			const compared = /^\/repos\/upstream\/project\/compare\/([^/]+)\.\.\.(\w+)$/.exec(path);
 			if (compared) {
 				const [, base, head] = compared;

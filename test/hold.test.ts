@@ -155,8 +155,6 @@ class FakePull {
 				files,
 			});
 		}
-		if (url.pathname === "/repos/example/project/contents/RISK.md")
-			return this.risk === null ? json(404, { message: "Not Found" }) : new Response(this.risk);
 		if (url.pathname === "/repos/example/project/collaborators/maintainer/permission")
 			return json(200, { permission: "write" });
 		if (url.pathname === "/repos/example/project/rules/branches/main") {
@@ -216,8 +214,10 @@ class FakePull {
 				},
 			};
 		if (query.includes("query BaseRisk")) {
-			const oid = this.risk === null ? null : blobId(this.risk);
-			return { data: { repository: { object: oid === null ? null : { oid } } } };
+			if (variables.expression !== "refs/heads/main:RISK.md") throw new Error("read RISK.md off another ref");
+			const risk = this.risk;
+			const found = risk === null ? null : { oid: blobId(risk), text: risk, isBinary: false, isTruncated: false };
+			return { data: { repository: { object: found } } };
 		}
 		if (query.includes("query ReviewStatus")) {
 			const status = this.statuses[String(variables.sha)];

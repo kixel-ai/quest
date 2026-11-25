@@ -137,12 +137,14 @@ export async function unreviewedHigh(
 }
 
 const BASE_RISK_QUERY = `query BaseRisk($owner: String!, $repo: String!, $expression: String!) {
-	repository(owner: $owner, name: $repo) { object(expression: $expression) { oid } }
+	repository(owner: $owner, name: $repo) {
+		object(expression: $expression) { oid ... on Blob { text isBinary isTruncated } }
+	}
 }`;
 
 /**
- * The base's risk file, with its blob SHA as Git stores it, which `quest review` records, or null where it has none.
- * The SHA comes from GitHub rather than a hash of the contents API's bytes, which follows a symlink and drops a BOM.
+ * The base branch's risk file and its blob SHA, read together, as `quest review` reads them from Git: a symlink's own
+ * blob, BOM and all. Null where it has none.
  */
 async function baseRisk(
 	github: GitHubReader,
@@ -151,15 +153,15 @@ async function baseRisk(
 	const data = await github.graphql(BASE_RISK_QUERY, {
 		owner: pr.owner,
 		repo: pr.repo,
-		expression: `${pr.base}:${RISK_FILE}`,
+		// Fully qualified, so a tag of the same name is never read instead.
+		expression: `refs/heads/${pr.base}:${RISK_FILE}`,
 	});
-	const blob = object(data.repository).object;
-	if (blob == null) return null;
-	const response = await github.request(
-		`${repositoryPath(pr)}/contents/${RISK_FILE}?ref=${encodeURIComponent(pr.base)}`,
-		{ accept: "application/vnd.github.raw+json" },
-	);
-	return { text: await response.text(), blob: string(object(blob).oid) };
+	const found = object(data.repository).object;
+	if (found == null) return null;
+	const blob = object(found);
+	if (blob.isBinary !== false || blob.isTruncated !== false || typeof blob.text !== "string")
+		throw new Error(`${pr.owner}/${pr.repo}'s ${RISK_FILE} on ${pr.base} is not a text file GitHub returns whole`);
+	return { text: blob.text, blob: string(blob.oid) };
 }
 
 /** Whether `sha` carries a `quest review` status that is not a pass. */
