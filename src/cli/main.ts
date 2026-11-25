@@ -782,7 +782,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"lacks (GitHub's review decision is review_required or changes_requested), it only arms auto-merge, which waits " +
 				"for it, and refuses where nothing would wait, since an admin's token merges or enqueues past the requirement. It refuses a head on which quest check " +
 				"--no-stubs --base <base> --branch <head branch> finds anything, read from git objects fetched from the base repository, " +
-				"so nothing from the head runs, except findings the base already has; a base without quests skips it. It refuses a body whose ## Review record's risk lines do not parse, until quest review rewrites it. It also refuses while an online reviewer's " +
+				"so nothing from the head runs, except findings the base or the head's merge base with it already has in a list entry or line the head left unchanged; a head without quests skips it when the base or its merge base has none, and one whose quest documents cannot be read is refused. It refuses a body whose ## Review record's risk lines do not parse, until quest review rewrites it. It also refuses while an online reviewer's " +
 				"unanswered finding on the head, or a newer comment opening with 'Maintainer decision', holds it. It uses the method --squash or --rebase names, refusing one " +
 				"the repository disallows; otherwise the only method the repository allows, or else a merge commit. " +
 				"On a base with GitHub's merge queue, which applies its own method, it enqueues that head, or arms " +
