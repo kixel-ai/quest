@@ -673,7 +673,7 @@ describe("usage", () => {
 			"- Findings: none",
 			"",
 			// A harness quest review does not run, as a hand-written record may name, reads as any other.
-			"- Reviewer: Claude Code, claude-sonnet-5-5, high effort",
+			"- Reviewer: Other CLI, other-model-1, high effort",
 			"- Session: `ses_1`, round 1",
 			"- Score: 8/10, `Fine.`",
 			"- Rounds: 1; findings 0: fixed 0, refuted 0, open 0",
@@ -1017,9 +1017,9 @@ describe("usage", () => {
 		]);
 		expect(report.reviewers.filter((r) => r.size === "L").map((r) => [r.model, r.effort, r.shadow])).toEqual([
 			["claude-opus-5-5", "high", false],
-			["claude-sonnet-5-5", "high", false],
 			["gpt-6.2-sol", "high", false],
 			["gpt-6.2-sol", "medium", true],
+			["other-model-1", "high", false],
 		]);
 		expect(ten.online).toEqual([
 			{
@@ -1054,7 +1054,7 @@ describe("usage", () => {
 			"rounds 2.0, findings 3 (high 1, medium 1, low 1): fixed 2, refuted 1, open 0, first rounds 0: 0; 0 land fixes, 1 later fixes; ~$2.00 per merged PR over 1",
 		);
 		expect(text).toContain(
-			"   L  Codex        gpt-6.2-sol        high            4 reviewed: rounds 2.3, findings 8 (high 4, medium 1, low 3): fixed 4, refuted 2, settled 1, open 1, first rounds 4: 4 (high 4); ~$1.25 per PR reviewed over 1\n",
+			"   L  Codex        gpt-6.2-sol      high            4 reviewed: rounds 2.3, findings 8 (high 4, medium 1, low 3): fixed 4, refuted 2, settled 1, open 1, first rounds 4: 4 (high 4); ~$1.25 per PR reviewed over 1\n",
 		);
 		// Spend split among seats nothing told apart is shown, so the text report does not hide it.
 		sol.spent.split = 0.5;
@@ -1092,7 +1092,7 @@ describe("usage", () => {
 		expect(report.breakages[0]!.culprit).toMatchObject({ tier: "high", size: "L" });
 		expect(text).toContain(
 			"Breakages, by the merged fix naming its culprit under ## Caused by:\n" +
-				"   #10  high, L, written by claude-opus-5-5 high, gpt-6.2-sol medium, reviewed by gpt-6.2-sol high, claude-sonnet-5-5 high, claude-opus-5-5 high, gpt-6.2-sol medium; fixed by #11, finder unrecorded, opened before it merged\n" +
+				"   #10  high, L, written by claude-opus-5-5 high, gpt-6.2-sol medium, reviewed by gpt-6.2-sol high, other-model-1 high, claude-opus-5-5 high, gpt-6.2-sol medium; fixed by #11, finder unrecorded, opened before it merged\n" +
 				"   #2   no tier, XS, written by gpt-6.2-sol low, no local review; fixed by #11, closing incident page 7, found by customer, 17.8d after merge\n",
 		);
 		// #10 is the one PR with a tier, and a later PR fixed it; #11, #5, and #6 of the rest merged.
