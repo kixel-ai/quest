@@ -75,10 +75,10 @@ Readout, the agent's choices for the implementer to revisit:
   `/quest-run` and `/quest-iterate`. The shadow reviewer
   stopped running on 2026-11-25 (maintainer, rejecting keeping L's shadow
   until its 116 first rounds), so read the shadow pairs gathered before
-  then, and once [reviewer rungs](/quest/m0/reviewer-rungs.md) lands compare
-  reviewer models and efforts from the rungs' draws: findings by severity, fixed against refuted, and later
-  `## Caused by` escapes, per `quest usage`'s reviewer rows. Recommend
-  moving a model up, down, or off its rung with its tally.
+  then, and compare reviewer models and efforts from `quest usage`'s
+  reviewer rows: findings by severity, fixed against refuted, and later
+  `## Caused by` escapes. Recommend moving a model's effort up or down
+  with its tally.
 - Carry the tallies into [the model check](/quest/m1/model-check.md)'s
   baseline.
 - Chart the arms' cost against quality as
@@ -173,9 +173,13 @@ three hosts' saved review rounds:
     routes them.
   - Astra picks for XL:
     [kixel-ai/quest#831](https://github.com/kixel-ai/quest/pull/831). Its
-    Fable seat beside the L pick was dropped on 2026-11-23 for
-    [reviewer rungs](/quest/m0/reviewer-rungs.md), which seats Fable as a
-    rung member.
+    Fable seat beside the L pick was dropped on 2026-11-23.
+  - Lineup of 2026-11-25 (maintainer): Opus writes S through XL and Fable
+    writes nothing, so L's Fable arm ended; each size reviews on Sol, with
+    Opus beside it on a high head and in its place when Sol cannot run;
+    no list names Fable, Astra, or Neon. On 2026-11-24, Fable xhigh as a
+    second reviewer took $976 of $1,430 of review spend, at $82 a PR
+    against Sol xhigh's $8, for 23 high findings against 44.
   - Cost metric? ✅ Mean spend per merged PR, every session's, plus the
     spend of later PRs that name it under `## Caused by`, with a bootstrap
     95% interval, the median reported beside it (rejected: the median
@@ -194,8 +198,7 @@ three hosts' saved review rounds:
     seat runs on high heads (Sol and Fable xhigh on Opus's work, Opus and
     Astra xhigh on Fable's, never weaker than the writer), compare what Pullfrog still
     finds behind it per dollar, and recommend retiring it once
-    [review seats](/quest/m0/review-seats.md)' one, two, or three vendor
-    seats match it, with its tally. The gate retired first: on 2026-11-24
+    the Sol and Opus seats match it, with its tally. The gate retired first: on 2026-11-24
     its review quota ran out, and the maintainer removed the `Pullfrog
     approval` ruleset in
     [kixel-ai/dotfiles#297](https://github.com/kixel-ai/dotfiles/pull/297), so only a maintainer's local `quest review` record
@@ -267,6 +270,5 @@ Baseline from the 2026-11-11 audit, at API list price:
 
 ## Related
 
-- [Reviewer rungs](/quest/m0/reviewer-rungs.md) - the per-round reviewer draw whose tallies the readout compares
 - [Model check](/quest/m1/model-check.md) - retunes the tables each
   milestone from these tallies

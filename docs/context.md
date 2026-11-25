@@ -24,14 +24,14 @@ Language and PR topic packs (`pr`, `rust`, `ts`, `uniffi`) load lazily via hooks
 - Reproduce a bug before fixing it, and fix it at the root cause, flaky tests included. Never work around one with a retry, sleep, timeout, or looser assertion.
 - Fail loud and early: error on unsupported or malformed input instead of warning and continuing, and decide a supported path at setup from known capabilities instead of trying one at runtime and silently falling back. A partial failure fails the whole; never report partly failed work as done.
 - Treat anything received over the network as hostile. Bound what a peer can make you hold by design, not with a constant. Run no code from a PR whose author lacks write access: it runs with your credentials.
-- For core functionality, build the comprehensive solution: handle every case, land it whole instead of a part plus follow-ups, refactor whatever stands in the way, and verify it a second independent way (property or differential test, model, or measurement). Keep everything outside the core minimal.
+- For core functionality, land the whole solution instead of a part plus follow-ups, refactor whatever stands in the way, and verify it a second independent way (property or differential test, model, or measurement). Handle the cases that will happen: one that needs two failures at once, or a setup the project does not have, gets a loud error, not machinery. Keep everything outside the core minimal.
 - Unit tests mock time instead of sleeping or reading the clock, and cover edge cases, not old bugs or trivial values.
 - A lasting fact or instruction about a project belongs in its repository, not agent memory. Propose checking it in, to the nearest `AGENTS.md` or its quest; change no rule until the user agrees, then follow `quest guide prompting`.
 - In a public repository, never mention customers, partners, or prospects, or link to a private repository its maintainer doesn't own. Justify work on its merits.
 
 ## Important
 
-- Everything must be worth its weight: code, dependencies, tests, CI jobs, CPU, memory, and build time. Deleting code beats adding it. Every change needs a current or planned consumer, and stays private until one needs it.
+- When in doubt, delete. Everything must be worth its weight: code, dependencies, tests, CI jobs, rules, CPU, memory, and build time. Every change needs a current or planned consumer, and stays private until one needs it.
 - Prefer the net simpler result: reuse what exists, inline simple helpers, or narrow the scope. Say what was dropped.
 - Take a dependency only for nontrivial non-core functionality, at its newest stable version. Do not bump package versions unless asked.
 - Comments explain the non-obvious why, never the history; every export gets one plain line, the way you'd say it out loud.
@@ -63,6 +63,7 @@ Language and PR topic packs (`pr`, `rust`, `ts`, `uniffi`) load lazily via hooks
 
 - Merge the base only when the branch conflicts with it or a landing step (`quest merge` or a merge queue) refuses the head. Before each push to a PR's branch, confirm it is still open (a push after merge restores the deleted branch).
 - Before marking a PR ready for review, exercise the change on its real surface, record `## Validation` and `## Models` (`Size: M` matching its quest or a quest-sized skill PR, plus `Implementer: <harness>, <model-id>, <effort>` per session, newest last, `unknown` if unreported), and run `/quest-review` (a model no weaker than the latest writer reviews the committed head; a later push needs a new review unless `/quest-merge` exempts it). See `quest context pr` for online review threads, CI rules, and `## Caused by`.
+- A review finding earns a fix when someone will hit what it describes or it points to a better direction. Decline the rest in a line each instead of adding code for a case that will not happen, whoever raised it.
 
 ## Quests
 
