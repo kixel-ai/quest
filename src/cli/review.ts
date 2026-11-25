@@ -3020,7 +3020,8 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 		// evidence and holds the branch at the raised tier.
 		await end(judged());
 		const raised = overridden(judged(), override);
-		if (riskier(raised.tier, current.tier))
+		// A reviewer's raise holds past the tier the run began at before any override, which the raise may have ended.
+		if (riskier(judged().tier, before.tier) && riskier(raised.tier, before.tier))
 			await deps.raised?.({ risk: current, skipped, branch, head, base, raised, overridden: false });
 		// A maintainer's override that raised the tier past the record's is held by their comment, so the run that
 		// could not seat it only ends the record's lower pass. A tier the classifier alone set holds nothing.

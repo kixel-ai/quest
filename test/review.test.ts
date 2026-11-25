@@ -2890,6 +2890,36 @@ agyFakes(
 	},
 );
 
+agyFakes("a reviewer's raise that ends a raising override holds when its run fails", async () => {
+	const s = setup();
+	moveBase(s.repo, (dir) => write(dir, "RISK.md", riskFile([])));
+	const pull: FakePull = {
+		number: 7,
+		body: "Fixes averaging.\n\n## Models\n\n- Size: S\n- Implementer: Claude Code, claude-opus-5-5, high effort\n",
+	};
+	onGitHub(s.repo, [pull]);
+	try {
+		vi.stubEnv("FAKE_RISK", JSON.stringify({ tier: "low", reason: "Only a constant changes." }));
+		vi.stubEnv("FAKE_RAISE", "medium");
+		vi.stubEnv("FAKE_LIMITED", "reset");
+		vi.stubEnv("FAKE_FAILS", "claude-fable-5-2");
+		const failed = await quest("--root", s.repo, "review", ...OPUS, "--override", "high", "--reason", "Ships.");
+		expect(failed.code).toBe(3);
+		// The raise to medium outgrew the override from low and ended it, so the record holds medium.
+		expect(pull.comments!.at(-1)!.body).toMatch(/^Risk override ended: /);
+		expect(pull.body).toContain("- Held: medium, ");
+		vi.stubEnv("FAKE_RAISE", undefined);
+		vi.stubEnv("FAKE_LIMITED", undefined);
+		vi.stubEnv("FAKE_FAILS", undefined);
+		vi.stubEnv("FAKE_REPLY", JSON.stringify({ score: 10, rationale: "Lands as is.", findings: [] }));
+		const retry = await quest("--root", s.repo, "review", ...OPUS);
+		expect(retry.code, retry.stderr).toBe(0);
+		expect(reviewersOf(retry.stdout)).toHaveLength(2);
+	} finally {
+		vi.unstubAllGlobals();
+	}
+});
+
 agyFakes("a held raise stays through a run at its tier that leaves a finding open", async () => {
 	const s = setup();
 	moveBase(s.repo, (dir) => write(dir, "RISK.md", riskFile([])));
