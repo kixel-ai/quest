@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
 
+import { REVIEW_MARK } from "../src/core";
 import { GitHubReader } from "../src/github/client";
 import { main } from "../src/cli/main";
 import { statusLines } from "../src/cli/status";
@@ -803,19 +804,18 @@ test("refuses a head moved between the paged state and ownership read", async ()
 
 describe("the review record", () => {
 	const C = "c".repeat(40);
+	const RECORD = `## Review\n\n${REVIEW_MARK}\n\n`;
 	const line = async (body: string, options: Parameters<typeof setup>[1] = {}) => {
 		const fixture = setup([pull({ body, checks: null, reviews: page([]), threads: page([]) })], options);
 		return statusLines(await pullRequestStatus(pr, fixture.deps)).find((l) => l.startsWith("review-record "));
 	};
 
 	test("is current when the section's last full SHA is the head, without comparing", async () => {
-		expect(await line(`## Review\n\n- Head: ${B}\n- Low findings fixed at ${A}`)).toBe(
-			`review-record current ${A}`,
-		);
+		expect(await line(`${RECORD}- Head: ${B}\n- Low findings fixed at ${A}`)).toBe(`review-record current ${A}`);
 	});
 
 	test("carries across a head whose diff from the base matches the reviewed head's, and not otherwise", async () => {
-		const body = `## Review\n\n- Head: ${B}`;
+		const body = `${RECORD}- Head: ${B}`;
 		expect(await line(body, { diffs: { [A]: "same", [B]: "same" } })).toBe(`review-record diff-identical ${B}`);
 		expect(await line(body, { diffs: { [A]: "new", [B]: "old" } })).toBe(`review-record stale ${B}`);
 	});
@@ -823,7 +823,7 @@ describe("the review record", () => {
 	test("is unknown, with a warning, when GitHub cannot compare a head", async () => {
 		for (const status of [406, 403]) {
 			const warnings: string[] = [];
-			expect(await line(`## Review\n\n- Head: ${B}`, { diffs: { [A]: status }, warnings })).toBe(
+			expect(await line(`${RECORD}- Head: ${B}`, { diffs: { [A]: status }, warnings })).toBe(
 				`review-record unknown ${B}`,
 			);
 			expect(warnings).toHaveLength(1);
@@ -832,6 +832,10 @@ describe("the review record", () => {
 
 	test("reads only the Review section, so a SHA elsewhere names no review", async () => {
 		expect(await line(`Fixes ${A}.\n\n## Review\n\nSkipped.\n\n## Models\n\n${C}`)).toBe("review-record -");
+	});
+
+	test("names no review for a section `quest review` never wrote, such as a skip naming the head", async () => {
+		expect(await line(`## Review\n\nSkipped as trivial at ${A}.`)).toBe("review-record -");
 	});
 });
 
@@ -842,7 +846,7 @@ describe("the risk tier", () => {
 		return { line: statusLines(status).find((l) => l.startsWith("risk ")), risk: status.risk };
 	};
 	const record = (head: string, extra = "") =>
-		`## Review\n\n- Head: ${head}\n- Base: origin/main at bbbbbbbbbbbb\n- Risk: high, \`it rewrites the wire format\`\n` +
+		`## Review\n\n${REVIEW_MARK}\n\n- Head: ${head}\n- Base: origin/main at bbbbbbbbbbbb\n- Risk: high, \`it rewrites the wire format\`\n` +
 		`- Classified: medium by Claude Code, claude-haiku-5-5, low effort, session \`s-1\`${extra}`;
 
 	test("names the record's tier, the classifier's, and whether it covers the head", async () => {

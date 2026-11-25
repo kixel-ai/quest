@@ -1814,6 +1814,24 @@ ${requeueScript}
 		git(root, "commit", "-qm", "add gitlink");
 		expect(() => validateFix(root, entry, git(root, "rev-parse", "HEAD"), forge.main())).toThrow("protected set");
 	});
+	test("rejects a fix that merges no base taking a path the base made a submodule", async () => {
+		const forge = new Forge();
+		forge.pull("one", { "one.txt": "yes" });
+		const deps = await forge.deps();
+		const plan = await resolveQueue(REPOSITORY, SQUASH, deps);
+		const root = forge.clone();
+		const entry = plan.queue[0];
+		git(root, "checkout", "--quiet", "--detach", forge.main());
+		git(root, "update-index", "--add", "--cacheinfo", "160000", entry.head, "vendor/module");
+		git(root, "commit", "-qm", "base adds a submodule");
+		const base = git(root, "rev-parse", "HEAD");
+		git(root, "checkout", "--quiet", "--detach", entry.head);
+		mkdirSync(join(root, "vendor"));
+		writeFileSync(join(root, "vendor", "module"), "file\n");
+		git(root, "add", "vendor/module");
+		git(root, "commit", "-qm", "take the path");
+		expect(() => validateFix(root, entry, git(root, "rev-parse", "HEAD"), base)).toThrow("protected set");
+	});
 
 	test("accepts one multiline Markdown comment per result and rejects a malformed one", () => {
 		const accepted = { number: 1, action: "requeue", reason: "fine", comment: "Line one\n\n- two\r\n\tthree" };
@@ -1950,6 +1968,133 @@ ${requeueScript}
 		git(root, "checkout", forge.main(), "--", "flake.nix");
 		git(root, "commit", "-qm", "revert");
 		expect(() => validateFix(root, entry, git(root, "rev-parse", "HEAD"), forge.main())).not.toThrow();
+	});
+	test("protects the paths the base's RISK.md holds high", async () => {
+		const forge = new Forge();
+		forge.advance({ "RISK.md": "# Risk\n\n## High\n\n- `assets/` - every agent loads it\n", "assets/a.md": "old" });
+		forge.pull("one", { "one.txt": "yes" });
+		const deps = await forge.deps();
+		const plan = await resolveQueue(REPOSITORY, SQUASH, deps);
+		forge.advance({ "assets/a.md": "base" });
+		const root = forge.clone();
+		const entry = plan.queue[0];
+		git(root, "checkout", "--quiet", "--detach", entry.head);
+		git(root, "merge", "--no-edit", forge.main());
+		expect(() => validateFix(root, entry, git(root, "rev-parse", "HEAD"), forge.main())).not.toThrow();
+		writeFileSync(join(root, "assets/a.md"), "fixer");
+		git(root, "commit", "-qam", "edit a high path");
+		expect(() => validateFix(root, entry, git(root, "rev-parse", "HEAD"), forge.main())).toThrow("protected set");
+	});
+	test("refuses any resolution of a protected conflict, the pin's side included", async () => {
+		const forge = new Forge();
+		forge.advance({ "flake.nix": "old" });
+		forge.pull("one", { "flake.nix": "PR" });
+		const deps = await forge.deps();
+		const plan = await resolveQueue(REPOSITORY, SQUASH, deps);
+		forge.advance({ "flake.nix": "base" });
+		const root = forge.clone();
+		const entry = plan.queue[0];
+		git(root, "checkout", "--quiet", "--detach", entry.head);
+		expect(() => git(root, "merge", "--no-edit", forge.main())).toThrow();
+		git(root, "checkout", "--ours", "--", "flake.nix");
+		git(root, "commit", "-qam", "keep the PR's flake.nix");
+		expect(() => validateFix(root, entry, git(root, "rev-parse", "HEAD"), forge.main())).toThrow(
+			"settles a conflict in a protected path",
+		);
+	});
+	test("refuses resolving a conflict that names no conflicted file, beside one that does or not", async () => {
+		for (const text of [false, true]) {
+			const forge = new Forge();
+			forge.advance({ "dir/a": "a\n", "dir/b": "b\n", "f.txt": "1\n" });
+			forge.pull("one", {
+				"dir/a": null,
+				"dir/b": null,
+				"x/a": "a\n",
+				"y/b": "b\n",
+				...(text && { "f.txt": "PR\n" }),
+			});
+			const deps = await forge.deps();
+			const plan = await resolveQueue(REPOSITORY, SQUASH, deps);
+			forge.advance({ "dir/c": "c\n", ...(text && { "f.txt": "base\n" }) });
+			const root = forge.clone();
+			const entry = plan.queue[0];
+			git(root, "checkout", "--quiet", "--detach", entry.head);
+			// The PR splits `dir` between two directories, so where the base's new file goes is a conflict on no file.
+			expect(() => git(root, "merge", "--no-edit", forge.main())).toThrow();
+			expect(git(root, "diff", "--name-only", "--diff-filter=U")).toBe(text ? "f.txt" : "");
+			writeFileSync(join(root, "f.txt"), "both\n");
+			git(root, "commit", "-qam", "resolve");
+			expect(() => validateFix(root, entry, git(root, "rev-parse", "HEAD"), forge.main())).toThrow(
+				"settles a conflict that names no conflicted file, at dir",
+			);
+		}
+	});
+	test("protects every path of a pull request that changes a high path", async () => {
+		const forge = new Forge();
+		forge.advance({ "RISK.md": "# Risk\n\n## High\n\n- `assets/` - every agent loads it\n", "assets/a.md": "old" });
+		forge.pull("one", { "assets/a.md": "PR", "one.txt": "yes" });
+		const deps = await forge.deps();
+		const plan = await resolveQueue(REPOSITORY, SQUASH, deps);
+		forge.advance({ "two.txt": "base" });
+		const root = forge.clone();
+		const entry = plan.queue[0];
+		git(root, "checkout", "--quiet", "--detach", entry.head);
+		git(root, "merge", "--quiet", "--no-edit", forge.main());
+		expect(() => validateFix(root, entry, git(root, "rev-parse", "HEAD"), forge.main())).not.toThrow();
+		writeFileSync(join(root, "one.txt"), "fixer");
+		git(root, "commit", "-qam", "fix the PR's own file");
+		expect(() => validateFix(root, entry, git(root, "rev-parse", "HEAD"), forge.main())).toThrow(
+			"protected set must equal the base merge result's, at one.txt; every path is protected, since the pull request changes assets/a.md, which is high",
+		);
+	});
+	test("refuses a base merge that keeps the pin's copy of a protected path the base changed", async () => {
+		const forge = new Forge();
+		forge.advance({ "flake.nix": "old" });
+		forge.pull("one", { "one.txt": "yes" });
+		const deps = await forge.deps();
+		const plan = await resolveQueue(REPOSITORY, SQUASH, deps);
+		forge.advance({ "flake.nix": "base" });
+		const root = forge.clone();
+		const entry = plan.queue[0];
+		git(root, "checkout", "--quiet", "--detach", entry.head);
+		git(root, "merge", "--quiet", "--no-edit", "-s", "ours", forge.main());
+		expect(() => validateFix(root, entry, git(root, "rev-parse", "HEAD"), forge.main())).toThrow(
+			"protected set must equal the base merge result's",
+		);
+	});
+	test("refuses a merge of only part of the base", async () => {
+		const forge = new Forge();
+		forge.pull("one", { "one.txt": "yes" });
+		const deps = await forge.deps();
+		const plan = await resolveQueue(REPOSITORY, SQUASH, deps);
+		forge.advance({ "flake.nix": "base" });
+		forge.advance({ "two.txt": "base" });
+		const root = forge.clone();
+		const entry = plan.queue[0];
+		git(root, "checkout", "--quiet", "--detach", entry.head);
+		git(root, "merge", "--quiet", "--no-edit", `${forge.main()}~1`);
+		expect(() => validateFix(root, entry, git(root, "rev-parse", "HEAD"), forge.main())).toThrow(
+			"must merge all of the base",
+		);
+	});
+	test("protects every path of a head recorded high, past a clean base merge", async () => {
+		const forge = new Forge();
+		forge.pull("one", { "one.txt": "yes" });
+		const deps = await forge.deps();
+		const plan = await resolveQueue(REPOSITORY, SQUASH, deps);
+		forge.advance({ "two.txt": "base" });
+		const root = forge.clone();
+		const entry = plan.queue[0];
+		git(root, "checkout", "--quiet", "--detach", entry.head);
+		git(root, "merge", "--quiet", "--no-edit", forge.main());
+		const head = () => git(root, "rev-parse", "HEAD");
+		expect(() => validateFix(root, entry, head(), forge.main(), "recorded high")).not.toThrow();
+		writeFileSync(join(root, "one.txt"), "fixer");
+		git(root, "commit", "-qam", "fix the PR's own file");
+		expect(() => validateFix(root, entry, head(), forge.main())).not.toThrow();
+		expect(() => validateFix(root, entry, head(), forge.main(), "recorded high")).toThrow(
+			"protected set must equal the base merge result's, at one.txt; every path is protected, since recorded high",
+		);
 	});
 });
 

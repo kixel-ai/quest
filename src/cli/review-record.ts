@@ -1,6 +1,6 @@
 // `quest review` rewrites the `## Review` section of its branch's open PR after each round, so the head
 // it reviewed counts without an agent copying the round into the body by hand.
-import { DEFAULT, PATHS, codeSpan, reviewSection } from "../core";
+import { DEFAULT, PATHS, REVIEW_MARK, codeSpan, reviewSection } from "../core";
 import { recorded } from "./models-record";
 import { type ClaimDependencies, upstream } from "./claims";
 import { pullsFrom } from "../github/claims";
@@ -101,7 +101,7 @@ export function reviewRecord({ rounds, tallies, risk, skipped, head, base }: Rev
 	const clean =
 		rounds.every((round) => round.findings.length === 0) && tallies.every((tally) => counted(tally).open === 0);
 	const lines = [
-		MARK,
+		REVIEW_MARK,
 		"",
 		// `quest status` counts a full SHA here as a review of that head, which an open finding has not passed.
 		`- Head: ${clean ? head : `${head.slice(0, 12)}, named in full once no reviewer reports a finding`}`,
@@ -174,8 +174,6 @@ export interface ReviewSummary {
 	open: Tally["findings"];
 }
 
-const MARK = "Rewritten by `quest review` after each round.";
-
 /**
  * The reviewer sessions `body`'s `## Review` record names, read from its `Session:` lines alone, so a record whose
  * other lines this version cannot parse, as one a newer `quest review` wrote, still names them.
@@ -184,7 +182,7 @@ export function reviewSessions(body: string): string[] {
 	const section = reviewSection(body);
 	if (!section) return [];
 	const all = body.slice(section.start, section.end);
-	const at = all.indexOf(MARK);
+	const at = all.indexOf(REVIEW_MARK);
 	if (at < 0) return [];
 	return [...all.slice(at).matchAll(/^- Session: (`+) ?(.*?) ?\1(?:, round \d+)?\r?$/gm)].map((found) => found[2]!);
 }
@@ -202,13 +200,13 @@ export function classifierSessions(body: string): string[] {
 
 /**
  * Each reviewer's latest round `body`'s `## Review` section records, or none when `quest review` wrote none
- * there, as when the section records a skipped review, even under the record's mark, or only the land fixer's fixes.
+ * there, as for a low head's record or a section with only the land fixer's fixes.
  */
 export function parseReview(body: string): ReviewSummary[] {
 	const section = reviewSection(body);
 	if (!section) return [];
 	const all = body.slice(section.start, section.end);
-	const at = all.indexOf(MARK);
+	const at = all.indexOf(REVIEW_MARK);
 	if (at < 0) return [];
 	// Each reviewer's block starts at its Reviewer line.
 	const blocks = all

@@ -15,7 +15,7 @@ import {
 } from "../github/client";
 import type { Repository } from "../core";
 import { lacksApproval } from "../github/merge";
-import type { Entry, LandMethod, Plan } from "./land";
+import { type Entry, git, type LandMethod, type Plan } from "./land";
 import type { Reason } from "../github/land";
 import { authenticatedRead } from "./land-git";
 import { jobLog } from "./land-checks";
@@ -965,6 +965,13 @@ export async function watch(
 	if (options.fixer) {
 		options.fixer = resolve(options.fixer);
 		accessSync(options.fixer, constants.X_OK);
+		// Validating a fix reads `git merge-tree -z`'s structured conflict messages, which Git 2.39 added.
+		const version = git(root, ["version"]);
+		const [major, minor] = (/(\d+)\.(\d+)/.exec(version) ?? []).slice(1).map(Number);
+		if (major === undefined || minor === undefined || major < 2 || (major === 2 && minor < 39))
+			throw new Error(
+				`--fixer needs Git 2.39 or later, whose merge-tree -z structures its messages; ${version} is installed`,
+			);
 	}
 	if (options.bump) checkTools();
 	const now = { fetch, now: Date.now };

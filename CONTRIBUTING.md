@@ -30,8 +30,7 @@ problem, resulting behavior, validation, and any limitations.
 
 On a PR whose author has write access, the PR body's `## Review` record of a
 local `quest review` round satisfies the required review `/quest-merge` describes when it names
-the exact head being landed, with no finding left unfixed or unrefuted; so does
-a recorded skip of a trivial change.
+the exact head being landed, with no finding left unfixed or unrefuted.
 `/quest-merge`'s exemptions still apply; a hand-resolved conflict outside them
 needs a local review of the new head, but not a maintainer review specifically.
 Dependabot PRs that only bump patch versions or a lockfile
@@ -44,7 +43,7 @@ The required `Queue` check skips on pull requests; the merge group runs `just ch
 That build lives in `.github/workflows/queue-build.yml`, which the merge group calls from `main`, so a PR's edit to it runs only after the PR lands.
 The host runs one `quest land watch` daemon per base, here `main`'s; it runs the Codex fixer when the queue drops a PR for a failed build or a conflict, and re-enqueues healthy heads at the back of the queue.
 The fixer resolves mechanical causes itself and pushes the fix onto the PR's branch: conflicts that keep both sides' intent, formatting and lint, generated files, lockfiles rebuilt from the base's copy, and build or test failures with an obvious fix, built and tested with registry access.
-It hands back, with a diagnosis on the PR, anything that needs a behavior or design decision; a fix that edits protected paths (`flake.nix`, `.github/`, ...) or that GitHub refuses to push comes back as a ready commit for `quest land apply <pr>`.
+It hands back, with a diagnosis on the PR, anything that needs a behavior or design decision; a fix that edits protected paths (`flake.nix`, `.github/`, `RISK.md`'s high paths, ...) or that GitHub refuses to push comes back as a ready commit for `quest land apply <pr>`.
 The admin bypass of `main`'s ruleset is for emergencies.
 
 The package stays `private`; GitHub releases will ship the `quest` binary.
