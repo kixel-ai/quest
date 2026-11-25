@@ -194,9 +194,7 @@ three hosts' saved review rounds:
     effort, and a token and cost table. Behind local review it still
     found something on 147 of 272 high-tier and 148 of 549 medium-tier
     merged PRs, 93% of its findings accepted, most likely for its model
-    differing from the mostly-Sol pick. Once kixel-ai/quest#819's second
-    seat runs on high heads (Sol and Fable xhigh on Opus's work, Opus and
-    Astra xhigh on Fable's, never weaker than the writer), compare what Pullfrog still
+    differing from the mostly-Sol pick. Now that a high head seats Sol and Opus, compare what Pullfrog still
     finds behind it per dollar, and recommend retiring it once
     the Sol and Opus seats match it, with its tally. The gate retired first: on 2026-11-24
     its review quota ran out, and the maintainer removed the `Pullfrog
@@ -211,19 +209,13 @@ three hosts' saved review rounds:
     needs about 100 PRs an arm for.
   - XL? ✅ No splitting rule: the maintainer judged XL quests harder, not
     bigger (rejected: split XL at plan time; measure XL against split
-    work first). Tally XL under Fable against this audit's baseline: 11
+    work first). Tally XL under Opus xhigh against this audit's baseline: 11
     merged, 82% later culprits, 7.5 rounds. That baseline is not all Opus:
     the maintainer has implemented and reviewed XL quests by hand with
     Fable, and those sessions' `Implementer:` lines may say Opus or
     `unknown`, so read each XL PR's sessions for its model before crediting
-    either. The baseline's rounds were reviewed by Sol xhigh, and since
-    [kixel-ai/quest#831](https://github.com/kixel-ai/quest/pull/831) Astra
-    high reviews XL, with Astra medium its shadow, so credit Fable with no
-    change in rounds or first-round findings that the reviewer change
-    could explain.
-  - Pace: report each Fable arm's fall-throughs, quests that started on
-    Fable but fell to Opus at its usage limit. When they exceed a fifth of
-    the L arm's quests, recommend running a quarter of L on Fable instead.
+    either. The baseline's rounds were reviewed by Sol xhigh, as XL's are
+    again.
 
 Baseline from the 2026-11-11 audit, at API list price:
 

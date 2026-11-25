@@ -39,18 +39,40 @@ it:
 Everything else that changes behavior is medium, which is most changes: a new
 or changed command or option, a bug fix, an export or field that existing
 consumers keep parsing, this repository's own agent instructions, its CI and
-workflows, and a dependency or pin bump. A bug agents act on while its
+workflows but the one that publishes, and a dependency or pin bump. A bug agents act on while its
 release is live is a risk every one of them carries.
 
 Tests, plans under `quest/`, and documentation change nothing others rely
 on, so they are low.
 
+## Automatic
+
+A low PR whose author has write access lands without the maintainer's pick
+when its whole diff falls in one class below, judged by the diff alone:
+a PR title's commit type is only the author's claim. Only a PR the
+maintainer picks changes this list, proposed with `quest usage`'s numbers
+for the class: its PRs merged, the culprits among them, and their wait on a
+person.
+
+- `test` - only tests, their fixtures, or benchmarks change
+- `quest` - only plans under `quest/` change, which no user or other
+  repository reads
+- `refactor` - code changes that keep every behavior and output the same,
+  such as a rename inside a module, a simplification, or a comment-only
+  change
+- `chore` - a dependency or pin bump at any tier, or another change as
+  small that is not high, from any author
+
 ## High
 
 - `assets/` - the rules, guide, skills, and audits every repository's
   agents load from `quest`, including when they may write remotely or merge
+- `SETUP.md` - the install steps agents follow from `main` when a skill
+  stub finds no `quest`
 - `src/cli/rules.ts` - the rules `quest context` prints and `quest hook`
   enforces on every agent's tool calls
 - `scripts/installer.sh` - users pipe it to a shell, and a release
   publishes it as it is
 - `scripts/release-plan.sh` - it decides which merges publish a release
+- `.github/workflows/release.yml` - it publishes each release, before any
+  check installs it

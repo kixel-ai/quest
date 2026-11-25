@@ -43,7 +43,8 @@ Superseded 2026-11-25 (maintainer, on the audit of 2026-11-24's sessions,
 which spent 62% on review and its rework): the risk tier seats no reviewer
 when low, Sol when medium, and Sol and Opus when high, each at its size's
 effort; Opus writes every size above XS; and no rung, shadow, or vendor
-quorum runs.
+quorum runs. A high head waits for both: while either cannot run, its round
+fails as an outage (rejected: review with the one left).
 
 Decided 2026-11-21 (maintainer, `/quest-plan` in
 [kixel-ai/kixel.quest#85](https://github.com/kixel-ai/kixel.quest/pull/85)),
