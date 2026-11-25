@@ -1512,7 +1512,8 @@ function scope({ base, mergeBase, head }: Change): string {
  */
 function reading(file: string): string {
 	return (
-		`The change's diff is in \`${file}\`, written with \`git --attr-source=<empty tree> diff ${DIFF_FLAGS.join(" ")}\`. ` +
+		`The change's diff is in \`${file}\`, written with \`git --attr-source=<empty tree> diff ${DIFF_FLAGS.join(" ")}\`, ` +
+		"and replaces any diff step of the review command's own. " +
 		"Read the change from the diff files named here, never a plain `git diff`, `git show`, or `git log -p`: the " +
 		"checkout's git config and the head's own .gitmodules and .gitattributes can leave a submodule update out of " +
 		"those or show a file as binary or rewritten."
@@ -2309,7 +2310,9 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 	// Digests of content only, so a base that moved without changing them restates nothing.
 	const given = {
 		instructions: digest(JSON.stringify(files)),
-		rules: digest(JSON.stringify([REVIEW, rules?.text ?? null])),
+		// With the diffs' form, so a session that read the change some other way, which config or attributes could
+		// shape, reviews it whole again instead of resuming.
+		rules: digest(JSON.stringify([REVIEW, rules?.text ?? null, DIFF_FLAGS])),
 	};
 	const queued: ReviewDependencies["queue"] = (session) => deps.queue(session);
 	// The tier picks how much review a change needs, so it is set before any reviewer runs.
@@ -2765,15 +2768,12 @@ async function reviewWith(shared: Shared, seat: Seat, responses: string | undefi
 	const schemaFile = saveSchema(shared.dir, replySchema);
 	// The same directory every round of the seat, since it is one of Claude's flags, which the prompt cache keys on.
 	const readable = `${shared.diffs}-${harness}${second ? "-second" : ""}`;
-	rmSync(readable, { recursive: true, force: true });
-	mkdirSync(readable, { recursive: true });
 	// Written by Git itself, since a head that adds large binaries makes a patch no string holds.
 	const write = (name: string, range: string[]) => {
 		const file = join(readable, name);
 		modelDiff(root, change.empty, ["--patch", `--output=${file}`, ...range]);
 		return file;
 	};
-	const diff = write("change.patch", [`${change.mergeBase}..${change.head}`]);
 	const context: Context = {
 		mergeBase: change.mergeBase,
 		root,
@@ -2792,6 +2792,9 @@ async function reviewWith(shared: Shared, seat: Seat, responses: string | undefi
 	let session: string | undefined = resume ? stored!.session : undefined;
 	let reply: Reply;
 	try {
+		rmSync(readable, { recursive: true, force: true });
+		mkdirSync(readable, { recursive: true });
+		const diff = write("change.patch", [`${change.mergeBase}..${change.head}`]);
 		if (!resume) {
 			const prompts = {
 				review: reviewPrompt(change, diff, rules, earlier, answered, first, shared.past),
