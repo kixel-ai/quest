@@ -865,6 +865,14 @@ describe("messages", () => {
 		mkdirSync(broken);
 		writeFileSync(join(broken, ".git"), "gitdir: /nonexistent\n");
 		expect(scope.name(broken)).toBe(broken);
+		// A remote with two URLs and no rewrite: git fetches from the first, and the configured last one names it.
+		const two = checkout(join(home, "two"), "https://github.com/acme/old.git");
+		configure(two, { "remote.origin.url": "https://github.com/acme/current.git" });
+		expect(scope.name(two)).toBe("acme/current");
+		expect(scope.names(two, undefined, "acme/current")).toBe(true);
+		expect(scope.names(two, undefined, "acme/old")).toBe(false);
+		// A rewrite of the configured URL names the same repository.
+		expect(scope.names(join(home, "mirrored"), undefined, "acme/proj")).toBe(true);
 	});
 
 	test("the command prints only its checkout's repository, every one with --all, and needs a named origin", () => {

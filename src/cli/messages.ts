@@ -6,6 +6,7 @@ import { closeSync, existsSync, openSync, readdirSync, readSync, realpathSync, s
 import { isAbsolute, join, sep } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { hostedRepository, originHost } from "./forge";
+import { git } from "./git";
 import { type Remote, type RemoteHost, readRemote, remoteHost, urlHost } from "./github";
 import { RECOMMENDED, checkoutRoot } from "./rules";
 import { kixelUrl } from "./tokens";
@@ -193,22 +194,28 @@ export function repositories(
 	const named = (host: RemoteHost | null) => forgeName(host, kixel);
 	const hosted = (url: string) => hostedRepository(kixel, url);
 	// By checkout, so its subdirectories and removed worktrees share one lookup: the repository its origin names, as
-	// `remoteHost` picks it, and the names of its configured URL and of the URL git uses, case-folded.
+	// `remoteHost` picks it, and the names of its configured URL and of that URL after rewrites, case-folded.
 	const origins = new Map<string, { name: string | null; aliases: string[] }>();
 	const origin = (checkout: string) => {
 		let found = origins.get(checkout);
 		if (found === undefined) {
 			let remote: Remote | null = null;
-			let used: string | null = null;
+			let rewritten: string | null = null;
 			try {
 				remote = readRemote(checkout, "origin");
-				used = remote?.used().fetch ?? null;
+				// The configured URL after `insteadOf` rewrites. Git fetches from a remote's first URL, which differs from
+				// the configured last one without any rewrite when the remote has several, so the rewrite is asked of git
+				// only then.
+				rewritten =
+					remote === null || remote.used().fetch === remote.configured.fetch
+						? (remote?.configured.fetch ?? null)
+						: git(checkout, ["ls-remote", "--get-url", remote.configured.fetch]).trim();
 			} catch {
 				// A directory git cannot read, such as a worktree whose repository moved or whose origin is removed
 				// while it is read, is named by itself: a session's recorded directory is history, not input to validate.
 				remote = null;
 			}
-			const urls = remote === null || used === null ? [] : [remote.configured.fetch, used];
+			const urls = remote === null || rewritten === null ? [] : [remote.configured.fetch, rewritten];
 			found = {
 				name: remote === null ? null : named(remoteHost(remote, hosted)),
 				aliases: urls.flatMap((url) => {
