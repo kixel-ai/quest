@@ -1078,7 +1078,8 @@ to trusted git and GitHub clients, never the fixer. API tokens stay in the
 daemon, refresh before expiry, and are replaced on a 401. Pass errors are
 logged and retried with bounded exponential backoff. `flock` prevents two
 daemons using the repository (including separate worktrees) or one state
-directory; `quest` must be on PATH for the merge driver. Full logs stay in the
+directory; `quest` must be on PATH for the merge driver, and the daemon refuses to start
+with a Git older than 2.39, whose `merge-tree -z` prints free-form messages. Full logs stay in the
 state directory: `--state`, or by default systemd's `$STATE_DIRECTORY` or the
 XDG state home, in `<owner>-<repo>@<base>`, never inside the checkout. Each
 pass deletes a log 7 days after its last write once no job or waiting removal
