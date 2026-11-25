@@ -19,7 +19,6 @@ let kixel: FakeKixelQuest;
 beforeEach(() => {
 	kixel = new FakeKixelQuest();
 	for (const [name, value] of Object.entries(kixelEnv())) vi.stubEnv(name, value);
-	vi.stubEnv("QUEST_FORGE", "");
 	// A GitHub call fails the test: none is expected, and no token is set to make one.
 	vi.stubEnv("GH_TOKEN", "");
 	vi.stubEnv("GITHUB_TOKEN", "");

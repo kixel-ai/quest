@@ -812,7 +812,6 @@ describe("start on GitHub, read through the Kixel Quest serving it", () => {
 		const github = new FakeGitHub();
 		const asked: string[] = [];
 		for (const [name, value] of Object.entries(kixelEnv())) vi.stubEnv(name, value);
-		vi.stubEnv("QUEST_FORGE", "");
 		vi.stubEnv("GH_TOKEN", "person");
 		vi.stubGlobal("fetch", async (input: string | URL | Request, init?: RequestInit) => {
 			const url = new URL(String(input));
