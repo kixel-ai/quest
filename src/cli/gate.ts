@@ -163,14 +163,15 @@ function cgroupStat(group: string, key: string): number {
 const BACKGROUND_SLICE = "background.slice";
 
 /**
- * Count reclaimable host cache and the headroom of every enclosing memory cgroup, and of the
- * slice `uid`'s gate scopes run in, so a slice at its cap reads as full however much the host
- * and the caller's own cgroups have free.
+ * Count reclaimable host cache and the headroom of every enclosing memory cgroup. With `uid`,
+ * a command that runs in that user's `background.slice` also counts the slice's headroom, so a
+ * slice at its cap reads as full however much the host and the caller's own cgroups have free.
+ * Its cap is no part of `total`, the host's RAM or container limit that sizes a command's budget.
  */
 export function linuxMemory(
 	proc = "/proc",
 	cgroups = "/sys/fs/cgroup",
-	uid = process.getuid?.(),
+	uid?: number,
 ): { total: number; available: number } {
 	const meminfo = readFileSync(join(proc, "meminfo"), "utf8");
 	const bytes = (key: string) => {
@@ -180,8 +181,8 @@ export function linuxMemory(
 	};
 	let total = bytes("MemTotal");
 	let available = bytes("MemAvailable");
-	/** Bound both by the limits of the cgroup at `path` under hierarchy `root` and of each ancestor. */
-	const bound = (root: string, path: string, unified: boolean) => {
+	/** Bound the headroom, and `total` unless `capacity` is false, by the limits of the cgroup at `path` under `root` and of each ancestor. */
+	const bound = (root: string, path: string, unified: boolean, capacity = true) => {
 		const usage = unified ? "memory.current" : "memory.usage_in_bytes";
 		// Usage includes inactive file cache, which the kernel reclaims without
 		// swapping; subtract it, as container runtimes do for their working set.
@@ -206,7 +207,7 @@ export function linuxMemory(
 					if (!Number.isFinite(current) || current < 0)
 						throw new Error("gate cannot read Linux cgroup memory usage");
 					const used = Math.max(0, current - cgroupStat(group, cache));
-					total = Math.min(total, limit);
+					if (capacity) total = Math.min(total, limit);
 					available = Math.min(available, Math.max(0, limit - used));
 				} catch (error) {
 					// The memory controller may not be enabled in every ancestor.
@@ -228,7 +229,7 @@ export function linuxMemory(
 	// runs in it, when nothing counts against its cap.
 	const slice = `/user.slice/user-${uid}.slice/user@${uid}.service/${BACKGROUND_SLICE}`;
 	if (uid !== undefined && existsSync(join(cgroups, "cgroup.controllers")) && existsSync(join(cgroups, slice)))
-		bound(resolve(cgroups), slice, true);
+		bound(resolve(cgroups), slice, true, false);
 	return { total, available };
 }
 
@@ -411,9 +412,10 @@ function remove(file: string) {
  * The ledger is a directory of numbered versions, each the JSON list of recent
  * admissions. A caller publishes version N + 1 by linking a complete draft to
  * that name, which only one caller can create. No lock is held, so a caller
- * that dies at any point leaves nothing that blocks the others.
+ * that dies at any point leaves nothing that blocks the others. A `uid` says the commands run
+ * in that user's `background.slice`, whose headroom bounds the host's memory (see `linuxMemory`).
  */
-export function fileHost(directory: string, now = Date.now): Host {
+export function fileHost(directory: string, now = Date.now, uid?: number): Host {
 	const path = (version: number) => join(directory, String(version));
 	// A scope's cgroup never moves, so systemd is asked for it once.
 	const groups = new Map<string, string>();
@@ -452,7 +454,7 @@ export function fileHost(directory: string, now = Date.now): Host {
 			process.platform === "darwin"
 				? Infinity
 				: process.platform === "linux"
-					? linuxMemory().available
+					? linuxMemory("/proc", "/sys/fs/cgroup", uid).available
 					: process.availableMemory(),
 		now,
 		running: (admission) =>
@@ -1120,7 +1122,9 @@ async function gated(
 			const precedence = {
 				priority: process.env[PRIORITY] === "1",
 			};
-			const host = options.host ?? fileHost(claimDirectory());
+			const host =
+				options.host ??
+				fileHost(claimDirectory(), Date.now, unit === undefined ? undefined : process.getuid?.());
 			admitted = { host, id: await admit(hostLimits(), host, cancel.signal, notice, precedence) };
 			observed.admitted = Date.now();
 		} catch (error) {
