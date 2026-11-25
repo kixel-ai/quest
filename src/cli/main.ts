@@ -122,6 +122,7 @@ import { TOKEN_MAX_MISSING, daysBefore, runTokenMax, usage, usageDependencies, u
 import { waitForActivity, WaitTimeout } from "./wait";
 import { version } from "./version";
 import { Worktrees } from "./worktree";
+import { OWN_MERGE, OWN_REVIEW, runsFromCheckout, runsFromHead } from "./own-build";
 import { HOOK_EVENTS, claudeHook } from "./worktree-hook";
 
 /** Where the command writes; the process streams, or a buffer under test. */
@@ -130,6 +131,8 @@ export interface Output {
 	stderr(text: string): void;
 	/** Set when stdout is a terminal, which gets themed output. Piped output is plain. */
 	terminal?: Terminal;
+	/** The files the running quest executes from, so `review` and `merge` can tell a PR's own build; none under test. */
+	entry?: string[];
 }
 
 /** A failure the user caused rather than the command, reported as a usage error. */
@@ -261,8 +264,10 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"one that leaves work rewrites it to what remains. Any other branch adds no finding. Fetch <ref> " +
 				"first: a stale base can predate the quest and skip it.\n\n" +
 				"A repository's own check also compares its skill stubs with the skills this binary carries, and " +
-				"reports a missing, outdated, or retired one. --no-stubs skips that, for a binary built from a base " +
-				"that checks a PR whose stubs follow the PR's own skills. It also reads the repository's RISK.md, if " +
+				"reports a missing, outdated, or retired one, and reports each audit this binary ships that no quest " +
+				"names and the root README does not skip, whose stub quest init would plant. --no-stubs skips both, " +
+				"and accepts any audit name in ## Audit and ## Skipped audits, for a binary built from a base that " +
+				"checks a PR whose stubs follow the PR's own skills and audits. It also reads the repository's RISK.md, if " +
 				"any, as quest review reads the base's, and reports each item of its ## High list that is not a " +
 				"backticked path pattern, ` - `, and a reason, and each item of its ## Automatic list that is not a " +
 				"backticked class name, an optional scope of backticked path patterns joined by `, ` in parentheses, " +
@@ -279,7 +284,10 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		)
 		.option("--base <ref>", "Also check the quest branch's diff from its merge base with this ref")
 		.option("--branch <name>", "The PR's head branch, when it differs from the current branch (needs --base)")
-		.option("--no-stubs", "Skip the comparison of the repository's skill stubs with this binary's skills")
+		.option(
+			"--no-stubs",
+			"Skip the comparison of the repository's skill and audit stubs with this binary's, and accept any audit name",
+		)
 		.option(
 			"--fix",
 			"First drop list links to quests the history deleted and epics' links to their own quests, and promote misleveled section headings",
@@ -295,7 +303,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				for (const line of [...edited].sort()) print(line);
 			}
 			const tree = checkout(root(), warn);
-			const findings = check(tree.docs, tree.exists);
+			const findings = check(tree.docs, tree.exists, { auditNames: options.stubs });
 			if (options.base !== undefined) findings.push(...landed(root(), options.base, { branch: options.branch }));
 			// A tree nested in another checkout, such as an example, has no stubs or risk file of its own.
 			const own = questRoot(resolve(root())) === resolve(root());
@@ -797,6 +805,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"AGENTS.md; never retry with --direct unless the user asks. GitHub keeps auto-merge across a " +
 				"writer's push, so disable it before pushing to the PR; quest status and quest wait report a head " +
 				"that moved since auto-merge was enabled.\n\n" +
+				"It refuses when quest runs from the source of the checkout --root names (bun src/cli/bin.ts, or a build there): a PR's own build never lands it, so run an installed quest.\n\n" +
 				"On a repository Kixel Quest hosts, it records a pick of that head instead, which Kixel Quest's queue " +
 				"lands by fast-forwarding the base and drops once the head moves; it takes no --squash, --rebase, or " +
 				"--direct, and refuses what Kixel Quest refuses.\n\n" +
@@ -809,6 +818,9 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		.option("--direct", "Merge at once when repository auto-merge is disabled; wait for checks to pass first")
 		.action((value: string, options: { land: string; squash?: boolean; rebase?: boolean; direct?: boolean }) => {
 			if (!/^[\da-f]{40}$/i.test(options.land)) throw new UsageError("--land needs a full 40-character SHA");
+			// The URL names the PR whatever --root is, so the head it pins is checked as well.
+			if (runsFromCheckout(root(), out.entry) || runsFromHead(options.land, out.entry))
+				throw new UsageError(OWN_MERGE);
 			const { pull, writes } = located(value);
 			const method = options.squash ? "squash" : options.rebase ? "rebase" : null;
 			// Kixel Quest's wire takes a lowercase SHA; GitHub compares either case.
@@ -1672,7 +1684,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		.description(
 			"Review the checkout's committed branch against its base with a reviewer its size picks, never one " +
 				`weaker than the model that changed it last, which may review its own work. Each size ranks its two reviewers (harness, model, effort): ${reviewers}. The ` +
-				"first whose model is not avoided reviews. One that cannot run, as its CLI or provider reports before any " +
+				"first whose model is not avoided reviews. A Git older than 2.41, which has no --attr-source to keep the head's .gitattributes from hiding its hunks, is a usage error, except under --accept. One that cannot run, as its CLI or provider reports before any " +
 				"finding is saved, passes the round to the next whose model is not avoided: a CLI that is not installed, " +
 				"logged out, or has its login rejected, or sent to a gateway with no credential, passes over every model of that CLI, and a model at its usage limit " +
 				"only itself; the run's report and record name each it passed over and why. A reviewer --harness, --model, " +
@@ -1751,7 +1763,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"its target, beside the directory agy runs in, files.txt listing them, and the diff of each range it reviews, " +
 				"both ignoring the head's .gitattributes. agy compares its read rules case-sensitively, so quest refuses to " +
 				"run it where a directory leading to its agent directory matches names case-insensitively, as on macOS's " +
-				"default volume, and on a Git older than 2.41, which has no --attr-source. The user's skills' text still reaches it, and their MCP servers start, with no tool it can call. A " +
+				"default volume. The user's skills' text still reaches it, and their MCP servers start, with no tool it can call. A " +
 				"RESOURCE_EXHAUSTED quota error is its usage limit.\n\n" +
 				"Before the reviewers run, the head gets a risk tier, low, medium, or high, from its change alone, never " +
 				"from who wrote it: who is hurt if it is wrong, and whether anything catches it first. A changed path, " +
@@ -1789,6 +1801,8 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"fixing them as recommended, accepting them, or dropping the PR, `next respond` to fix or refute the findings, or `next done`, which for a low head no reviewer ran says so, and for --accept `next done` or `next stop`. A reply without a valid score " +
 				"fails as any malformed reply does. --json prints " +
 				"one object: `rounds`, one per reviewer, `tallies`, every reviewer's findings across the branch's rounds, `risk`, the head's tier with its classification, `skipped`, each reviewer passed over with its reason, `accepted`, the maintainer's reason under --accept or null, `record`, and `next`.\n\n" +
+				"When quest runs from the source of the checkout it judges (bun src/cli/bin.ts, or a build there), the round still runs but writes no record and sets no status: it prints `record skipped: ...` " +
+				"telling you to rerun with an installed quest, and `next stop` where the round found nothing to fix, so a PR can exercise its own review changes without marking itself reviewed.\n\n" +
 				"After each round, it rewrites the `## Review` section of the branch's open PR into the base, the one from the repository the base's remote pushes to, else the only one from another repository whose pushed head `HEAD` contains, as the " +
 				"user the GitHub token names, keeping the rest of the body, and prints `record <url>`: the reviewed " +
 				"head, named in full only once no reviewer reports a finding, the base, the head's risk tier and reason, " +
@@ -1911,6 +1925,8 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 						}
 					}
 				};
+				// Decided once, before the round: a PR's own build never records its own review, whatever it finds.
+				const own = runsFromCheckout(root(), out.entry);
 				const run = review(
 					{
 						...options,
@@ -1920,6 +1936,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 						fresh: options.new,
 						override,
 						accept,
+						own,
 					},
 					{
 						env: process.env,
@@ -1934,7 +1951,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 						let record: Recorded | undefined;
 						let failure: unknown;
 						try {
-							record = await recordRounds(root(), reviewed, github);
+							record = own ? { skipped: OWN_REVIEW } : await recordRounds(root(), reviewed, github);
 						} catch (error) {
 							failure = error;
 						}
@@ -1945,7 +1962,9 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 						const attested = failure === undefined && record !== undefined && "url" in record && !status;
 						if (accepting && attested) reviewed.remember?.();
 						const next = !accepting
-							? nextStep(rounds)
+							? own && nextStep(rounds).startsWith("next done")
+								? `next stop: nothing was recorded, so ${OWN_REVIEW}`
+								: nextStep(rounds)
 							: attested
 								? "next done: the maintainer accepted the findings left open on this head"
 								: "next stop: an acceptance counts only once a maintainer's token sets the quest review status on the pushed head";
