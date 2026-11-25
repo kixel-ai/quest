@@ -209,6 +209,7 @@ describe("PR records", () => {
 		usage: [],
 		score: 7,
 		rationale: "One gap.",
+		recommendation: null,
 		findings: [{ file: "src/a.ts", line: 4, severity: "medium", title: "Misses a case", body: "b" }],
 		earlier: {
 			head: "c".repeat(40),

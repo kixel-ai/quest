@@ -1046,7 +1046,7 @@ fakes("codex reviews read-only with the base's instructions, then reports in the
 	const schema = second.argv[second.argv.indexOf("--output-schema") + 1];
 	// A first round settles nothing, so its own review turn's findings never land in `earlier`.
 	const replySchema = JSON.parse(readFileSync(schema, "utf8"));
-	expect(replySchema.required).toEqual(["score", "rationale", "risk", "findings"]);
+	expect(replySchema.required).toEqual(["score", "rationale", "recommendation", "risk", "findings"]);
 	expect(replySchema.properties.risk.properties.tier.enum).toEqual(["low", "medium", "high"]);
 	expect(replySchema.properties.earlier).toBeUndefined();
 });
@@ -1494,7 +1494,7 @@ fakes("a later round resumes the session with the new head and the author's resp
 	expect(resumed.argv.slice(0, 2)).toEqual(["exec", "resume"]);
 	expect(resumed.argv.at(-2)).toBe("thread-1");
 	const bounded = JSON.parse(readFileSync(resumed.argv[resumed.argv.indexOf("--output-schema") + 1], "utf8"));
-	expect(bounded.required).toEqual(["score", "rationale", "risk", "findings", "earlier"]);
+	expect(bounded.required).toEqual(["score", "rationale", "recommendation", "risk", "findings", "earlier"]);
 	// The new head is classified again before the round, which gives it to the reviewer.
 	expect(resumed.stdin).toContain("the change was classified medium risk");
 	expect(resumed.stdin).toContain("Fixed at src/lib.ts:1.");
@@ -1739,7 +1739,12 @@ fakes("each round rewrites the Review section of the branch's open PR, keeping t
 		const title = `Ping @someone about \`${base}\` in #12`;
 		vi.stubEnv(
 			"FAKE_REPLY",
-			JSON.stringify({ score: 9, rationale: "Fixes #3.", findings: [{ ...FINDING, line: null, title }] }),
+			JSON.stringify({
+				score: 9,
+				rationale: "Fixes #3.",
+				recommendation: "Ask @someone to derive it\nin the query.",
+				findings: [{ ...FINDING, line: null, title }],
+			}),
 		);
 		const second = await quest(
 			"--root",
@@ -1754,7 +1759,9 @@ fakes("each round rewrites the Review section of the branch's open PR, keeping t
 		const record = pull.body.split("## Review\r\n\n")[1]!.split("\n\n## Models")[0];
 		expect(record).toContain(`- Head: ${git(s.repo, "rev-parse", "HEAD").slice(0, 12)},`);
 		expect(record).toContain("- Session: `thread-1`, round 2\n");
-		expect(record).toContain("- Score: 9/10, `Fixes #3.`\n");
+		expect(record).toContain(
+			"- Score: 9/10, `Fixes #3.`\n- Recommendation: `Ask @someone to derive it in the query.`\n",
+		);
 		// The refuted finding counts beside the new one, across both rounds.
 		expect(record).toContain(
 			"- Rounds: 2; first round 1 (high 1); findings 2 (high 2): fixed 0, refuted 1, open 1\n",
@@ -2979,7 +2986,7 @@ fakes("a reply that does not match the schema fails rather than reads as clean",
 
 test("the verdict is checked field by field, settling each earlier finding once", () => {
 	const risk = { tier: "medium", reason: "It changes what the library returns." };
-	const scored = { score: 7, rationale: "Fix the finding.", risk, earlier: [] };
+	const scored = { score: 7, rationale: "Fix the finding.", recommendation: null, risk, earlier: [] };
 	expect(verdict({ structured: { ...scored, findings: [{ ...FINDING, line: null }] } }, 0)).toEqual({
 		...scored,
 		findings: [{ ...FINDING, line: null }],
@@ -3006,6 +3013,16 @@ test("the verdict is checked field by field, settling each earlier finding once"
 		expect(() => verdict({ structured: { ...scored, score, findings: [] } }, 0)).toThrow("no score from 0 to 10");
 	}
 	expect(() => verdict({ structured: { ...scored, rationale: " ", findings: [] } }, 0)).toThrow("no rationale");
+	// A recommendation is the approach the reviewer would build instead, or null; never missing or blank.
+	const instead = "Derive the average in the query, which drops the cache.";
+	expect(verdict({ structured: { ...scored, recommendation: instead, findings: [] } }, 0).recommendation).toBe(
+		instead,
+	);
+	for (const recommendation of [undefined, " ", 3]) {
+		expect(() => verdict({ structured: { ...scored, recommendation, findings: [] } }, 0)).toThrow(
+			"no recommendation",
+		);
+	}
 	// The reviewer's tier is one of the three, with a reason, which a reply puts on one line.
 	for (const bad of [undefined, { tier: "critical", reason: "x" }, { tier: "high", reason: " " }]) {
 		expect(() => verdict({ structured: { ...scored, risk: bad, findings: [] } }, 0)).toThrow("no risk tier");
@@ -3295,6 +3312,7 @@ test("a tally counts each finding once, by who raised it, through every round", 
 		usage: [],
 		score: 8,
 		rationale: "r",
+		recommendation: null,
 		earlier: null,
 		unchanged: false,
 	} satisfies Omit<Round, "reviewer" | "round" | "findings">;

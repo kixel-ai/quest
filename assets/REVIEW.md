@@ -20,6 +20,7 @@ Be adversarial, and aim at the approach before the lines. Assume a better approa
 - **Shipping & reversibility**: can this ship safely and roll back cleanly across mixed versions (schema, state, wire)? Does the shipped behavior have an automated signal that detects breakage before users do? Flag irreversible changes that aren't called out or manual deploy steps that should be automated.
 
 An approach finding names the alternative and why it holds up better long-term. "Rework or abandon this PR" is a valid finding when the case is strong.
+When you would build it another way but the current approach holds, recommend that approach without making it a finding: the design, what it drops or simplifies, and why it holds up better long-term.
 
 ## Not findings
 
