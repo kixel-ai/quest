@@ -17,7 +17,10 @@ checkout ran `bun run --silent quest`, the PR's build. That build predated
 record had no status. No single PR caused it: this repository's AGENTS.md
 told agents `quest` means the checkout's build, and nothing stopped a PR's code
 from judging that PR. The planning PR that added this quest also amended
-AGENTS.md to run review and merge with the dev shell's pinned build.
+AGENTS.md to run review and merge with an installed `quest` from outside the
+PR's checkout, since the dev shell's build is pinned by the PR's own
+`flake.lock`. This check catches only a source run inside the checkout; a
+build the PR's pin selects stays the AGENTS.md rule's.
 
 Decided 2026-11-25 (maintainer, `/quest-plan`):
 

@@ -24,8 +24,11 @@ limits, so a third vendor is less urgent than m0's work.
 
 - Extend [agy sandbox](/quest/m0/agy-sandbox.md)'s Seatbelt and
   bubblewrap/Landlock profiles with a writer mode that also allows writes
-  under the quest's checkout and Git's object store for it. Refuse agy as a
-  writer wherever that sandbox cannot run, as the reviewer does.
+  under the quest's working tree. Keep the clone's shared Git store
+  read-only to agy, since a linked worktree shares it with the main checkout
+  and its siblings: quest commits agy's changes outside the sandbox, or gives
+  agy a clone with its own object store. Refuse agy as a writer wherever that
+  sandbox cannot run, as the reviewer does.
 - Move agy from `REVIEW_HARNESSES` into `HARNESSES` in `src/cli/agent.ts`, with
   a writer's launch in place of the reviewer's read-only agent.
 - Check the launch on a host with Antigravity installed, on both Linux and
@@ -34,7 +37,8 @@ limits, so a third vendor is less urgent than m0's work.
 
 Tests: with stub harnesses, a writer list whose Claude and Codex entries both
 exit 3 starts the quest on agy, and the land fixer does the same. Under the
-sandbox, an agy write outside its checkout fails.
+sandbox, an agy write outside its working tree, including the shared Git
+store, fails.
 
 ## Hosts
 
