@@ -59,9 +59,9 @@ person.
   out, since the release workflows run them before or after publishing
 - `quest` (`quest/**`) - only plans under `quest/` change, which no user or
   other repository reads
-- `refactor` (`src/**`, `test/**`) - code changes that keep every behavior
-  and output the same, such as a rename inside a module, a simplification,
-  or a comment-only change
+- `refactor` - code changes that keep every behavior and output the same,
+  such as a rename inside a module, a simplification, or a comment-only
+  change
 - `chore` - a dependency or pin bump at any tier, or another change as
   small that is not high, from any author
 
