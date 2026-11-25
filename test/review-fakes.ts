@@ -84,7 +84,8 @@ const logged = (call) => {
  * FAKE_LIMITED to the harnesses and models it lists, comma-separated, so one
  * reviewer fails while the next runs. FAKE_QUOTED fails Claude Code's findings
  * turn with a reply that only quotes a limit's message. FAKE_REPLY replaces the
- * findings reply.
+ * findings reply. FAKE_HANG_CLAUDE hangs Claude Code's review turn until it is stopped, as a seat still
+ * running when another's failure cancels it.
  */
 export const FAKES: Record<string, string> = {
 	claude: `
@@ -102,6 +103,10 @@ const provider = Object.entries(process.env).some(([k, v]) => k.startsWith("CLAU
 const loggedIn = !fake("FAKE_LOGGED_OUT") || credential || provider;
 if (argv[0] === "auth") process.exit(loggedIn ? 0 : 1);
 const at = (flag) => argv[argv.indexOf(flag) + 1];
+if (process.env.FAKE_HANG_CLAUDE && argv.includes("--session-id") && !argv.includes("--json-schema")) {
+	setInterval(() => {}, 1000);
+	return;
+}
 const result = (fields) => console.log(JSON.stringify({ type: "result", is_error: false, ...fields }));
 const rejected = fake("FAKE_REJECTED") ?? (loggedIn ? undefined : "status");
 if (rejected) {

@@ -3167,8 +3167,9 @@ async function reviewWith(shared: Shared, seat: Seat, responses: string | undefi
 			reply = await turn(cli, reviewer.resume(context, session!, prompt), root, context.model);
 		}
 	} catch (error) {
-		// A first turn that failed after its session opened still spent tokens.
-		session ??= failedSession(error);
+		// A first turn that failed after its session opened still spent tokens. A sibling's failure cancels this seat
+		// with that same error, whose session is the sibling's, not this seat's.
+		if (error !== shared.signal.reason) session ??= failedSession(error);
 		throw error;
 	} finally {
 		if (session !== undefined) shared.queued({ harness, session, cwd: root, start: started });
