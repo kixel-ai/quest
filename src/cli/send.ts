@@ -95,13 +95,11 @@ function transcriptStart(path: string): number | null {
 	return found;
 }
 
-/** A stop hook's input, as Claude Code and Codex send it. */
-export interface Stopped {
-	harness: string;
-	session: string;
-	transcript: string;
-	cwd: string;
-}
+/**
+ * A session to queue: a stop hook's input, as Claude Code and Codex send it, which names its transcript, or a session
+ * `quest review` started, which knows its own first instant, epoch ms.
+ */
+export type Stopped = { harness: string; session: string; cwd: string } & ({ transcript: string } | { start: number });
 
 /** What `queue` did, for the hook to say. */
 export interface Queued {
@@ -112,7 +110,7 @@ export interface Queued {
 }
 
 /**
- * Queue the stopped session's record for Kixel Quest, in a checkout that uses Quest. A user holding no token for it
+ * Queue the session's record for Kixel Quest, in a checkout that uses Quest. A user holding no token for it
  * queues nothing and is told once. A sender's last failure, if the person has not seen it, is said too.
  */
 export function queue(stopped: Stopped, env: NodeJS.ProcessEnv = process.env): Queued {
@@ -140,8 +138,13 @@ export function queue(stopped: Stopped, env: NodeJS.ProcessEnv = process.env): Q
 			`quest: ${tokensPath(env)} holds no token for ${url}, so this host sends it no session records.`,
 		);
 	if (existsSync(refusal(env, url, token))) return { notices, queued: false };
-	const start = transcriptStart(stopped.transcript);
-	if (start === null) throw new Error(`${stopped.transcript} records no instant, so its session cannot be read`);
+	let start: number;
+	if ("start" in stopped) start = stopped.start;
+	else {
+		const first = transcriptStart(stopped.transcript);
+		if (first === null) throw new Error(`${stopped.transcript} records no instant, so its session cannot be read`);
+		start = first;
+	}
 	const dir = enqueue(env, {
 		harness: stopped.harness,
 		session: stopped.session,

@@ -44,6 +44,7 @@ import {
 import {
 	LINE_LIMIT,
 	LOGINS,
+	HARNESSES,
 	REVIEW_HARNESSES,
 	type ReviewHarness,
 	agentDirectory,
@@ -445,9 +446,20 @@ export interface ReviewDependencies {
 	 * it, as in the runner, only the options pick the reviewer.
 	 */
 	models?: (root: string, base: string, branch: string) => Promise<PullModels | null>;
+	/**
+	 * Queues a session for the record sender, as the stop hook does an interactive one, since no hook runs in a
+	 * reviewer. It says for itself anything the person must hear, and must not throw, so a round never fails on it.
+	 */
+	queue(session: Started): void;
 }
 
-export const processDependencies = (): ReviewDependencies => ({ env: process.env });
+/** A session `quest review` started, for the record sender: its checkout, and its first instant, epoch ms. */
+export interface Started {
+	harness: string;
+	session: string;
+	cwd: string;
+	start: number;
+}
 
 /** One reviewer's findings across every round on a branch, which a `--new` session continues. */
 export interface Tally {
@@ -512,6 +524,8 @@ interface Session {
 	/** The second reviewer's session; the branch keeps at most one. */
 	second?: true;
 	session: string;
+	/** The instant, epoch ms, before its first turn, so the record sender reads all of it. */
+	started: number;
 	/** Each round's head, the merge base its change started from, and its findings. */
 	rounds: { head: string; mergeBase: string; findings: Finding[] }[];
 	/** The session's last round, which a round on the same head with nothing to settle repeats. */
@@ -2196,6 +2210,7 @@ export function parseState(value: unknown): State {
 				(session.second === undefined || session.second === true) &&
 				state.tallies!.some((tally) => sameSeat(tally, session)) &&
 				typeof session.session === "string" &&
+				typeof session.started === "number" &&
 				Array.isArray(session.rounds) &&
 				session.rounds.length > 0 &&
 				session.rounds.every((round) => Array.isArray(round?.findings)) &&
@@ -2326,6 +2341,8 @@ interface Classifying {
 	changed: string[];
 	dir: string;
 	env: NodeJS.ProcessEnv;
+	/** Queues the classifier's session for the record sender. */
+	queued: ReviewDependencies["queue"];
 	signal?: AbortSignal;
 	saved?: State["classified"];
 	/** Refuse rather than run a classifier when no saved classification fits, as accepting reviewed rounds does. */
@@ -2375,6 +2392,7 @@ export async function classify(input: Classifying): Promise<{ key: string; value
 	const diff = (args: string[]) =>
 		git(root, ["diff", "--no-ext-diff", "--no-textconv", "--no-color", "--ignore-submodules=none", ...args, range]);
 	const prompt = classifyPrompt(change, { sha: baseSha, text }, diff(["--stat=160"]), diff(["--patch"]), offered);
+	const start = Date.now();
 	const answer = await ask(CLASSIFIERS, {
 		cwd: root,
 		dir: input.dir,
@@ -2388,6 +2406,7 @@ export async function classify(input: Classifying): Promise<{ key: string; value
 		task: "set the risk tier",
 		parse: (value) => classed(value, classes, "the classifier's reply"),
 	});
+	input.queued({ harness: answer.entry.harness, session: answer.session, cwd: root, start });
 	const { tier, reason } = answer.value;
 	return {
 		key,
@@ -2628,6 +2647,10 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 		instructions: digest(JSON.stringify(files)),
 		rules: digest(JSON.stringify([REVIEW, rules?.text ?? null])),
 	};
+	// token-max reads no agy session, so one has no record to send.
+	const queued: ReviewDependencies["queue"] = (session) => {
+		if ((HARNESSES as readonly string[]).includes(session.harness)) deps.queue(session);
+	};
 	// The tier picks how much review a change needs, so it is set before any reviewer runs.
 	const classified = await classify({
 		root,
@@ -2636,6 +2659,7 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 		changed,
 		dir,
 		env: deps.env,
+		queued,
 		signal: options.signal,
 		saved: options.fresh ? undefined : saved?.classified,
 		...(options.accept !== undefined && { savedOnly: true as const }),
@@ -2653,6 +2677,7 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 		past: saved?.history ?? [],
 		dir,
 		env: deps.env,
+		queued,
 	};
 	const before = settle(classified.value);
 	const override = options.override === undefined ? saved?.override : { ...options.override, from: before.tier };
@@ -3015,6 +3040,7 @@ interface Shared {
 	/** The directory holding the branch's sessions and the reply schemas. */
 	dir: string;
 	env: NodeJS.ProcessEnv;
+	queued: ReviewDependencies["queue"];
 	signal: AbortSignal;
 }
 
@@ -3088,27 +3114,39 @@ async function reviewWith(shared: Shared, seat: Seat, responses: string | undefi
 	};
 
 	const usage: Usage[] = [];
-	let session: string;
+	// A session's record is sent whatever its turns end in, since each spent tokens.
+	const started = resume ? stored!.started : Date.now();
+	let session: string | undefined = resume ? stored!.session : undefined;
 	let reply: Reply;
-	if (!resume) {
-		const opened = await open(cli, context, root, {
-			review: reviewPrompt(change, rules, earlier, answered, first, shared.past),
-			report: reportPrompt(change.head, earlier, first),
-		});
-		({ session, reply } = opened);
-		usage.push(...opened.usage);
-	} else {
-		session = stored!.session;
-		const prompt = laterPrompt({
-			...change,
-			previous: previous!.head,
-			earlier,
-			first,
-			responses: answered,
-			past: shared.past,
-		});
-		reply = await turn(cli, reviewer.resume(context, session, prompt), root, context.model);
+	try {
+		if (!resume) {
+			const prompts = {
+				review: reviewPrompt(change, rules, earlier, answered, first, shared.past),
+				report: reportPrompt(change.head, earlier, first),
+			};
+			const opened = await turn(cli, reviewer.review(context, randomUUID(), prompts.review), root, context.model);
+			if (opened.session === undefined) throw new Error(`${cli.harness} did not report its session`);
+			session = opened.session;
+			if (reported(opened.usage)) usage.push({ turn: "review", ...opened.usage });
+			// The report turn reads nothing, so it gets no export of the head.
+			const { head: _, ...reporting } = context;
+			reply = await turn(cli, reviewer.resume(reporting, session, prompts.report), root, context.model);
+		} else {
+			const prompt = laterPrompt({
+				...change,
+				previous: previous!.head,
+				earlier,
+				first,
+				responses: answered,
+				past: shared.past,
+			});
+			reply = await turn(cli, reviewer.resume(context, session!, prompt), root, context.model);
+		}
+	} finally {
+		if (session !== undefined) shared.queued({ harness, session, cwd: root, start: started });
 	}
+	// Either turn that failed threw, so a session is open here.
+	const sessionId = session!;
 	if (reported(reply.usage)) usage.push({ turn: "findings", ...reply.usage });
 	const { score, rationale, recommendation, findings: all, earlier: answers } = verdict(reply, earlier.length, first);
 	// Only what the reviewer rated above low holds the head, and is numbered, answered, and settled next round.
@@ -3127,7 +3165,7 @@ async function reviewWith(shared: Shared, seat: Seat, responses: string | undefi
 		branch: shared.branch,
 		size: shared.sized.size,
 		sizeFrom: shared.sized.from,
-		session,
+		session: sessionId,
 		round: rounds.length,
 		base: shared.base,
 		head: change.head,
@@ -3158,28 +3196,13 @@ async function reviewWith(shared: Shared, seat: Seat, responses: string | undefi
 		session: {
 			reviewer: harness,
 			...(second && { second }),
-			session,
+			session: sessionId,
+			started,
 			rounds,
 			last: round,
 			given,
 		},
 	};
-}
-
-/** A new session's two turns: the CLI's own review, then the report of it in the schema, with the review turn's usage. */
-async function open(
-	cli: Cli,
-	context: Context,
-	root: string,
-	prompts: { review: string; report: string },
-): Promise<{ session: string; reply: Reply; usage: Usage[] }> {
-	const opened = await turn(cli, cli.reviewer.review(context, randomUUID(), prompts.review), root, context.model);
-	if (opened.session === undefined) throw new Error(`${cli.harness} did not report its session`);
-	const session = opened.session;
-	// The report turn reads nothing, so it gets no export of the head.
-	const { head: _, ...reporting } = context;
-	const reply = await turn(cli, cli.reviewer.resume(reporting, session, prompts.report), root, context.model);
-	return { session, reply, usage: reported(opened.usage) ? [{ turn: "review", ...opened.usage }] : [] };
 }
 
 /**

@@ -16,7 +16,7 @@ import { basename, dirname, join } from "node:path";
 import { afterEach, expect, test, vi } from "vitest";
 
 import { REVIEWERS, weaker } from "../src/cli/models";
-import { recordedRisk } from "../src/core";
+import { REFERENCE_LINE, recordedRisk } from "../src/core";
 import {
 	type Finding,
 	type Round,
@@ -182,7 +182,7 @@ fakes("a quest branch is reviewed at its quest's size on the base, which its own
 		rounds: [runner],
 	} = await review(
 		{ root: s.repo, base: "origin/main", sizeBranch: "quest/m0/big" },
-		{ env: { ...process.env, CLAUDECODE: "1" } },
+		{ env: { ...process.env, CLAUDECODE: "1" }, queue: () => {} },
 	);
 	expect([runner!.size, runner!.sizeFrom, runner!.effort]).toEqual(["L", "quest/m0/big.md", "xhigh"]);
 	git(s.repo, "checkout", "-q", "quest/m0/big");
@@ -517,7 +517,7 @@ fakes("an abort stops the reviewer's turn and records no round", async () => {
 	const pid = join(s.bin, "..", "codex.pid");
 	vi.stubEnv("FAKE_HANG", pid);
 	const controller = new AbortController();
-	const round = review({ root: s.repo, signal: controller.signal }, { env: process.env });
+	const round = review({ root: s.repo, signal: controller.signal }, { env: process.env, queue: () => {} });
 	while (!existsSync(pid)) await new Promise((resolve) => setTimeout(resolve, 20));
 	controller.abort();
 	await expect(round).rejects.toThrow(/abort/i);
@@ -2146,6 +2146,64 @@ fakes("a second reviewer with open findings settles them on a head below high, e
 });
 
 fakes(
+	"every session a round starts is queued for the record sender, and a resumed one again once it runs",
+	async () => {
+		const s = setup();
+		moveBase(s.repo, (dir) => write(dir, "RISK.md", riskFile([])));
+		write(s.repo, "AGENTS.md", `HEAD-ROOT rule\n${REFERENCE_LINE}\n`);
+		git(s.repo, "commit", "-qam", "use Quest");
+		onGitHub(s.repo, []);
+		const state = tempDir();
+		const config = tempDir();
+		vi.stubEnv("XDG_STATE_HOME", state);
+		vi.stubEnv("XDG_CONFIG_HOME", config);
+		vi.stubEnv("QUEST_KIXEL_URL", "https://kixel.example");
+		// The token is for the sender; the forge stays GitHub.
+		vi.stubEnv("QUEST_FORGE", "github");
+		mkdirSync(join(config, "quest"));
+		writeFileSync(join(config, "quest", "records.json"), JSON.stringify({ "https://kixel.example": "secret" }));
+		// A sender that runs, so the person is told nothing.
+		mkdirSync(join(state, "quest", "records"), { recursive: true });
+		writeFileSync(join(state, "quest", "records", "sender.pid"), String(process.pid));
+		const pending = join(state, "quest", "records", "pending");
+		const queued = () =>
+			(existsSync(pending) ? readdirSync(pending) : [])
+				.map(
+					(name) =>
+						JSON.parse(readFileSync(join(pending, name), "utf8")) as { harness: string; session: string },
+				)
+				.map(({ harness, session }) => `${harness} ${session}`)
+				.sort();
+		// No findings, so a same-head rerun settles nothing and runs no turn.
+		vi.stubEnv("FAKE_REPLY", JSON.stringify({ score: 9, rationale: "Nothing holds this head.", findings: [] }));
+
+		// A high head: the classifier and both seats.
+		vi.stubEnv("FAKE_RISK", JSON.stringify({ tier: "high", reason: "It rewrites the wire format peers read." }));
+		const first = await quest("--root", s.repo, "review");
+		expect(first.code, first.stderr).toBe(0);
+		const sessions = queued();
+		expect(sessions).toHaveLength(3);
+		expect(sessions.map((each) => each.split(" ")[0])).toEqual(["claude", "claude", "codex"]);
+
+		// The same head again reuses every session without a turn, so nothing new is queued.
+		const again = await quest("--root", s.repo, "review");
+		expect(again.stderr).toBe("");
+		expect(queued()).toEqual(sessions);
+
+		// A new head resumes both seats, which spent tokens again, so each is queued once more under its same session.
+		write(s.repo, "src/lib.ts", "export const x = 3;\n");
+		git(s.repo, "commit", "-qam", "another constant");
+		const next = await quest("--root", s.repo, "review");
+		expect(next.code, next.stderr).toBe(0);
+		const after = queued();
+		// The new head's classifier is a new session; each seat's resumed session is queued again under its own id.
+		expect(after).toHaveLength(sessions.length + 3);
+		for (const each of sessions) expect(after).toContain(each);
+		expect(after.filter((each) => each === "codex thread-1")).toHaveLength(2);
+	},
+);
+
+fakes(
 	"a low head gets no local review, and the maintainer's override sets the tier until the change grows",
 	async () => {
 		const s = setup();
@@ -2978,6 +3036,7 @@ test("saved sessions are read only in the current format, or refused naming --ne
 	const session = {
 		reviewer: "codex",
 		session: "thread-1",
+		started: 1_000,
 		rounds: [{ head: "a", mergeBase: "m", findings: [finding] }],
 		last: { notes: [] },
 		given: { instructions: "i", rules: null },
@@ -2995,6 +3054,9 @@ test("saved sessions are read only in the current format, or refused naming --ne
 	expect(parseState(current)).toEqual(current);
 	const history = [{ ...finding, disposition: "refuted", reason: "r" }];
 	expect(parseState({ ...current, history })).toEqual({ ...current, history });
+	// A session saved before its start was kept cannot be queued whole, so it needs --new.
+	const { started: _, ...unstarted } = session;
+	expect(() => parseState({ ...current, sessions: [unstarted] })).toThrow("pass --new");
 	// A shadow, the pick one effort away, no longer runs, so state holding its session or tally needs --new.
 	for (const shadowed of [
 		{ branch: "feature", sessions: [session, { ...session, shadow: true }], tallies: [tally] },

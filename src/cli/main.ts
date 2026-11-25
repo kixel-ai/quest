@@ -87,7 +87,6 @@ import {
 	ReviewInputError,
 	ReviewOutageError,
 	ReviewerUnavailableError,
-	processDependencies as reviewDependencies,
 	ask,
 	review,
 	nextStep,
@@ -108,7 +107,7 @@ import { CHECKED_CONTEXT, USER_ASKED, questRoot } from "./rules";
 import { checkoutRepository, messageLines, messages } from "./messages";
 import { logWait, pullWaitKind, readWaits } from "./waits";
 import { readCalls } from "./calls";
-import { SEND_INTERVAL, background, parseInstant, reportIncident, runSender } from "./send";
+import { SEND_INTERVAL, background, parseInstant, queue, reportIncident, runSender } from "./send";
 import { installSender, uninstallSender } from "./service";
 import { heal, init, stubFindings, uninstall } from "./setup";
 import { describe, notUpstream, releaseQuest, startQuest } from "./start";
@@ -1907,8 +1906,19 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 						accept,
 					},
 					{
-						...reviewDependencies(),
+						env: process.env,
 						models: (dir, base, branch) => pullModels(dir, base, branch, github),
+						queue: (session) => {
+							// Only the dashboard loses a session that is not queued, so it never fails the round.
+							try {
+								for (const notice of queue(session, process.env).notices)
+									warn(notice.replace(/^quest: /, ""));
+							} catch (error) {
+								warn(
+									`cannot queue this session's record: ${error instanceof Error ? error.message : String(error)}`,
+								);
+							}
+						},
 					},
 				);
 				pending = run.then(
