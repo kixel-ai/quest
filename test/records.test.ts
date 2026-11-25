@@ -311,12 +311,12 @@ describe("wait log", () => {
 			const today = join(waitsDirectory(e), "2026-11-07.jsonl");
 			appendFileSync(today, '{"kind":"gate-r');
 			expect(readWaits(0, e)).toHaveLength(2);
-			expect(stderr).toHaveBeenLastCalledWith(`quest: skipped ${today}:2, not a wait quest logged\n`);
+			expect(stderr).toHaveBeenLastCalledWith(`quest: skipped ${today}:3, not a wait quest logged\n`);
 			// The next write starts on a fresh line, so the fragment sits between whole lines and costs only itself.
 			logWait(later, { env: e, cwd: "/w", now: Date.parse(later.end) });
 			stderr.mockClear();
 			expect(readWaits(0, e)).toHaveLength(3);
-			expect(stderr.mock.calls).toEqual([[`quest: skipped ${today}:2, not a wait quest logged\n`]]);
+			expect(stderr.mock.calls).toEqual([[`quest: skipped ${today}:3, not a wait quest logged\n`]]);
 		} finally {
 			stderr.mockRestore();
 		}
@@ -343,7 +343,7 @@ describe("wait log", () => {
 		const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
 		try {
 			expect(readWaits(0, e).map((w) => w.kind)).toEqual(["gate", "gate-run", "gate-run"]);
-			expect(stderr).toHaveBeenCalledWith(expect.stringContaining("2026-11-06.jsonl:3, not a wait"));
+			expect(stderr).toHaveBeenCalledWith(expect.stringContaining("2026-11-06.jsonl:5, not a wait"));
 		} finally {
 			stderr.mockRestore();
 		}

@@ -221,7 +221,7 @@ test("the call log keeps whole lines and reads from the day before a window's", 
 	try {
 		expect(readCalls(Date.parse("2026-11-14T20:00:00Z"), env)).toEqual([line, line]);
 		expect(stderr).toHaveBeenCalledWith(
-			expect.stringContaining("2026-11-14.jsonl:2, not a shell call quest logged"),
+			expect.stringContaining("2026-11-14.jsonl:4, not a shell call quest logged"),
 		);
 	} finally {
 		stderr.mockRestore();

@@ -1,18 +1,7 @@
 // The waits `quest gate` and `quest wait` time for the agent session that ran them, and the gate's runs, kept on this
 // host so a session's record can add them up. The harness names its session in each command's environment; nothing
 // is logged outside one.
-import {
-	closeSync,
-	constants,
-	fstatSync,
-	mkdirSync,
-	openSync,
-	readdirSync,
-	readFileSync,
-	readSync,
-	rmSync,
-	writeSync,
-} from "node:fs";
+import { closeSync, constants, mkdirSync, openSync, readdirSync, readFileSync, rmSync, writeSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -67,16 +56,13 @@ export function appendLog(dir: string, value: unknown, now: number, what: string
 		mkdirSync(dir, { recursive: true, mode: 0o700 });
 		const fd = openSync(
 			join(dir, `${day(now)}.jsonl`),
-			constants.O_RDWR | constants.O_APPEND | constants.O_CREAT | constants.O_NOFOLLOW,
+			constants.O_WRONLY | constants.O_APPEND | constants.O_CREAT | constants.O_NOFOLLOW,
 			0o600,
 		);
 		try {
-			// A short write, as on a full disk, leaves a line cut short; start on a fresh line after one, so it costs
-			// only its own record. The newline it would have needed may not fit either, so the next writer adds it.
-			const size = fstatSync(fd).size;
-			const last = Buffer.alloc(1);
-			const torn = size > 0 && readSync(fd, last, 0, 1, size - 1) === 1 && last[0] !== 0x0a;
-			const line = Buffer.from(`${torn ? "\n" : ""}${JSON.stringify(value)}\n`);
+			// A short write, as on a full disk, leaves a line cut short. Starting each record on a fresh line in the
+			// same write costs such a fragment only its own record, even when another writer's lands right after it.
+			const line = Buffer.from(`\n${JSON.stringify(value)}\n`);
 			const written = writeSync(fd, line);
 			if (written !== line.length) throw new Error(`wrote ${written} of ${line.length} bytes`);
 		} finally {
