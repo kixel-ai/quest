@@ -1032,7 +1032,7 @@ fakes("the base is the commit the round's fetch returned, whatever moves the tra
 	write(
 		s.repo,
 		".git/hooks/reference-transaction",
-		`#!/bin/sh\n[ "$1" = committed ] && grep -q refs/quest/base && git update-ref refs/remotes/origin/main ${old}\nexit 0\n`,
+		`#!/bin/sh\n[ "$1" = committed ] && grep -q '^0* [0-9a-f]* refs/quest/base' && git update-ref refs/remotes/origin/main ${old}\nexit 0\n`,
 	);
 	chmodSync(hook, 0o755);
 	const advance = (name: string) => {
@@ -1047,6 +1047,7 @@ fakes("the base is the commit the round's fetch returned, whatever moves the tra
 
 	// The fetch moves the tracking ref, then the writer sets it back.
 	const moved = advance("moved");
+	git(s.repo, "update-ref", "refs/remotes/origin/main", old);
 	const first = await quest("--root", s.repo, "review");
 	expect(first.code).toBe(0);
 	expect(first.stdout).toContain(`base ${moved} origin/main\n`);

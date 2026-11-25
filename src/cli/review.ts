@@ -2122,15 +2122,16 @@ export async function fetchBase(root: string, base?: string): Promise<{ ref: str
 	}
 	const { remote, branch } = parseBase(root, ref);
 	const pinned = `refs/quest/base/${process.pid}`;
-	await remoteGit(root, [
-		"fetch",
-		"--quiet",
-		"--no-tags",
-		remote,
-		`+refs/heads/${branch}:refs/remotes/${remote}/${branch}`,
-		`+refs/heads/${branch}:${pinned}`,
-	]);
+	// A fetch that fails on the tracking ref can still have written the private one, so cleanup covers the fetch.
 	try {
+		await remoteGit(root, [
+			"fetch",
+			"--quiet",
+			"--no-tags",
+			remote,
+			`+refs/heads/${branch}:refs/remotes/${remote}/${branch}`,
+			`+refs/heads/${branch}:${pinned}`,
+		]);
 		return { ref, sha: git(root, ["rev-parse", "--verify", `${pinned}^{commit}`]) };
 	} finally {
 		git(root, ["update-ref", "-d", pinned]);
