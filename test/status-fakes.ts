@@ -21,6 +21,15 @@ export const page = (nodes: Node[], next?: string) => ({
 	nodes,
 });
 
+/** The tip of `main` as the status query reads it: its root tree, holding `RISK.md` as `risk` or not at all. */
+export const baseTree = (risk: { oid: string } | null) => ({
+	target: {
+		tree: {
+			entries: [{ name: "README.md", oid: "c".repeat(40) }, ...(risk ? [{ name: "RISK.md", ...risk }] : [])],
+		},
+	},
+});
+
 /** A recorded GraphQL response; omitted connections stand for ones the query skipped. */
 export const CI = ".github/workflows/ci.yml";
 
@@ -44,7 +53,7 @@ export function pull(
 					updatedAt: "2026-10-07T12:00:00Z",
 					baseRefName: "main",
 					baseRefOid: "b".repeat(40),
-					baseRef: { target: { file: { oid: RISK_BLOB } } },
+					baseRef: baseTree({ oid: RISK_BLOB }),
 					headRefName: "quest/m0/example",
 					isMergeQueueEnabled: false,
 					labels: { nodes: [] },
@@ -296,6 +305,14 @@ export function setup(
 			texts.push(request.query);
 			const body = bodies.shift();
 			if (body === undefined) throw new Error("unexpected request");
+			// GitHub answers `Commit.file` on a missing path with an error, not null.
+			const tree = (body as Partial<ReturnType<typeof pull>>).data?.repository.pullRequest?.baseRef?.target.tree;
+			const missing = /file\(path: "([^"]+)"\)/.exec(request.query)?.[1];
+			if (missing !== undefined && tree !== undefined && !tree.entries.some((entry) => entry.name === missing))
+				return Response.json({
+					data: null,
+					errors: [{ type: "NOT_FOUND", message: `Could not resolve file for path '${missing}'.` }],
+				});
 			last = body as ReturnType<typeof pull>;
 			return Response.json(body);
 		},
