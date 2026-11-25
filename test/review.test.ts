@@ -1,17 +1,5 @@
 import { execFileSync } from "node:child_process";
-import {
-	chmodSync,
-	existsSync,
-	linkSync,
-	mkdirSync,
-	readdirSync,
-	readFileSync,
-	realpathSync,
-	rmSync,
-	symlinkSync,
-	writeFileSync,
-} from "node:fs";
-import { homedir } from "node:os";
+import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { afterEach, expect, test, vi } from "vitest";
 
@@ -24,11 +12,9 @@ import {
 	type Tally,
 	ReviewLimitError,
 	UnansweredError,
-	agyTurn,
 	ask,
 	authored,
 	baseInstructions,
-	beside,
 	claudeFlags,
 	codexFlags,
 	nextStep,
@@ -53,8 +39,6 @@ import {
 	type Call,
 	at,
 	effortOf,
-	agyFakes,
-	caseInsensitive,
 	fakes,
 	git,
 	quest,
@@ -1113,109 +1097,6 @@ fakes("the base is the commit the round's fetch returned, whatever moves the tra
 	expect(git(s.repo, "for-each-ref", "refs/quest")).toBe("");
 });
 
-test.skipIf(caseInsensitive)(
-	"agy's read rules leave every path outside the turn's directory under a denied one, and none inside",
-	() => {
-		const dir = realpathSync(tempDir());
-		for (const path of ["a/x/in.txt", "a/y/out.txt", "a/x-sibling/out.txt", "c/out.txt", "top.txt"])
-			write(dir, path, "");
-		symlinkSync(join(dir, "c"), join(dir, "a", "x", "link"));
-		// Paths that may appear during a turn: one beside the root, one its parent, and one inside it.
-		const later = ["d/login.json", "a", "a/x/new.txt"].map((path) => join(dir, path));
-		const denied = beside(join(dir, "a", "x"), later);
-		expect(denied).toContain(join(dir, "d/login.json"));
-		expect(denied).not.toContain(join(dir, "a"));
-		expect(denied).not.toContain(join(dir, "a/x/new.txt"));
-		// Antigravity matches a rule by whole components, so `a/x` never covers `a/x-sibling`.
-		const blocked = (path: string) => denied.some((rule) => path === rule || path.startsWith(`${rule}/`));
-		expect(blocked(join(dir, "a/x/in.txt"))).toBe(false);
-		for (const path of ["a/y/out.txt", "a/x-sibling/out.txt", "c/out.txt", "top.txt"])
-			expect(blocked(join(dir, path)), path).toBe(true);
-		// A link inside the root resolves outside it, where the rule beside its target matches.
-		expect(blocked(realpathSync(join(dir, "a", "x", "link", "out.txt")))).toBe(true);
-		// Above the tree too, as the system's own directories.
-		const top = dir.split("/")[1]!;
-		for (const name of readdirSync("/").filter((name) => name !== top))
-			expect(blocked(`/${name}`), name).toBe(true);
-	},
-);
-
-test.skipIf(caseInsensitive)(
-	"agy's read rules refuse a directory that matches names case-insensitively, since agy's rules do not",
-	() => {
-		const dir = realpathSync(tempDir());
-		write(dir, "a/x/in.txt", "");
-		write(dir, "a/Name", "");
-		// A link reaching the same entry with the case swapped, as a case-insensitive volume resolves any name.
-		linkSync(join(dir, "a", "Name"), join(dir, "a", "nAME"));
-		expect(() => beside(join(dir, "a", "x"))).toThrow(`since ${join(dir, "a")} matches names case-insensitively`);
-		// Two entries that differ only in case are a case-sensitive directory.
-		rmSync(join(dir, "a", "nAME"));
-		write(dir, "a/nAME", "");
-		expect(beside(join(dir, "a", "x"))).toContain(join(dir, "a", "nAME"));
-	},
-);
-
-test.skipIf(caseInsensitive)(
-	"agy's export fetches what a partial clone lacks of the head, in one batch, in the caller's runtime directory",
-	() => {
-		const dir = realpathSync(tempDir());
-		const run = (cwd: string, ...args: string[]) =>
-			execFileSync("git", ["-C", cwd, ...args], {
-				encoding: "utf8",
-				env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
-			});
-		const source = join(dir, "source");
-		run(dir, "init", "-q", source);
-		write(source, "top.txt", "top\n");
-		write(source, "sub/inner.txt", "inner\n");
-		run(source, "add", "-A");
-		run(source, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "one");
-		run(source, "config", "uploadpack.allowFilter", "true");
-		run(source, "config", "uploadpack.allowAnySHA1InWant", "true");
-		const part = join(dir, "part");
-		run(dir, "clone", "-q", "--no-local", "--filter=blob:none", "--sparse", `file://${source}`, part);
-		const head = run(part, "rev-parse", "HEAD").trim();
-		// The sparse checkout leaves sub/inner.txt's blob behind.
-		expect(run(part, "rev-list", "--objects", "--missing=print", "--no-walk", head)).toMatch(/^\?/m);
-		const call = agyTurn(
-			{
-				mergeBase: head,
-				root: part,
-				head,
-				ranges: [],
-				instructions: "",
-				model: "m",
-				effort: "low",
-				schema: {},
-				schemaFile: "",
-				// The caller's environment, not the process's, places the turn.
-				env: { ...process.env, XDG_RUNTIME_DIR: join(dir, "run") },
-			},
-			"",
-			[],
-		);
-		try {
-			expect(call.workspace!.dir.startsWith(join(dir, "run", "quest", "agent", "review-"))).toBe(true);
-			expect(readFileSync(join(call.workspace!.dir, "head", "sub", "inner.txt"), "utf8")).toBe("inner\n");
-		} finally {
-			rmSync(call.workspace!.dir, { recursive: true, force: true });
-		}
-	},
-);
-
-// Root lists any directory, so the refusal only shows for another user.
-test.skipIf(process.getuid?.() === 0 || caseInsensitive)("agy's read rules refuse a parent they cannot list", () => {
-	const dir = realpathSync(tempDir());
-	write(dir, "hidden/turn/in.txt", "");
-	chmodSync(join(dir, "hidden"), 0o311);
-	try {
-		expect(() => beside(join(dir, "hidden", "turn"))).toThrow(`since ${join(dir, "hidden")} cannot be listed`);
-	} finally {
-		chmodSync(join(dir, "hidden"), 0o755);
-	}
-});
-
 test("review refuses max effort", async () => {
 	const result = await quest("review", "--harness", "claude", "--model", "opus", "--effort", "max");
 	expect(result.code).toBe(2);
@@ -1281,189 +1162,6 @@ fakes("claude reviews read-only with the base's instructions, then reports in th
 	}
 });
 
-const AGY = ["--harness", "agy", "--model", "gemini-4-neon", "--effort", "high"];
-
-agyFakes(
-	"agy reviews from a directory of its own, reading an export of the head, then reports in the schema",
-	async () => {
-		const s = setup("CLAUDECODE");
-		// A head that would hide a file from an archive or its hunks from the diff, run one of the user's filter drivers,
-		// and link out of the export, with a path git would quote, beside a file the checkout ignores.
-		const login = join(realpathSync(homedir()), ".codex");
-		write(s.repo, ".gitattributes", "src/lib.ts export-ignore -diff\n* filter=plant\n");
-		symlinkSync(login, join(s.repo, "link"));
-		write(s.repo, "docs/café.md", "Accented.\n");
-		git(s.repo, "add", ".gitattributes", "link", "docs");
-		git(s.repo, "commit", "-qm", "attributes");
-		const smudged = join(s.repo, ".tmp", "smudged");
-		git(s.repo, "config", "filter.plant.smudge", `touch ${smudged}; cat`);
-		// The user's own attributes name the filter too, and their default attributes file converts line endings,
-		// neither of which the export applies.
-		write(s.repo, ".git/info/attributes", "* filter=plant\n");
-		const config = join(s.bin, "..", "config");
-		write(config, "git/attributes", "*.ts eol=crlf\n");
-		vi.stubEnv("XDG_CONFIG_HOME", config);
-		write(s.repo, ".tmp/secret.env", "UNTRACKED-SECRET\n");
-		// An Antigravity session's own state and an Antigravity gateway never reach the reviewer.
-		vi.stubEnv("ANTIGRAVITY_LS_ADDRESS", "127.0.0.1:1");
-		vi.stubEnv("AGY_LLM_GATEWAY_URL", "http://127.0.0.1:9");
-		const result = await quest("--root", s.repo, "review", ...AGY, "--json");
-		expect(result.code, result.stderr).toBe(0);
-		const [round] = JSON.parse(result.stdout).rounds;
-		expect(round).toMatchObject({ reviewer: "agy", model: "gemini-4-neon", effort: "high", score: 8 });
-		expect(round.findings).toEqual([FINDING]);
-		// Input counts the cached tokens, which agy reports apart; output already holds thinking.
-		expect(round.usage).toEqual([
-			{ turn: "review", input: 100, cached: 10, output: 50 },
-			{ turn: "findings", input: 100, cached: 80, output: 7 },
-		]);
-
-		const [status, first, second] = s.calls();
-		expect(status!.argv).toEqual(["models"]);
-		// Even the status check runs outside the checkout.
-		expect(status!.cwd.startsWith(s.repo)).toBe(false);
-		expect(existsSync(status!.cwd)).toBe(false);
-		const mergeBase = git(s.repo, "merge-base", "origin/main", "HEAD");
-		const head = git(s.repo, "rev-parse", "HEAD");
-		expect(first!.argv).not.toContain("--json-schema");
-		expect(first!.argv).not.toContain("--conversation");
-		expect(first!.stdin).toContain("Review the change for what it breaks");
-		expect(second!.argv[second!.argv.indexOf("--conversation") + 1]).toBe("conversation-1");
-		const schemaFile = second!.argv[second!.argv.indexOf("--json-schema") + 1]!;
-		expect(JSON.parse(readFileSync(schemaFile, "utf8")).required).toContain("recommendation");
-		const repo = realpathSync(s.repo);
-		// What the head tracks, apart from what the checkout ignores or keeps in .git.
-		const tracked = git(s.repo, "ls-tree", "-r", "-z", "--name-only", "HEAD").split("\0").filter(Boolean).sort();
-		expect(tracked).toContain("docs/café.md");
-		// The report turn reads nothing, so only the review turn gets the head's export.
-		expect(
-			Object.keys(second!.workspace!).filter((name) => name.startsWith("head/") || name === "files.txt"),
-		).toEqual([]);
-		for (const call of [first!, second!]) {
-			const flag = (name: string) => call.argv[call.argv.indexOf(name) + 1];
-			// The turn runs in a workspace inside its own directory, which holds the head's export beside it.
-			const dir = dirname(call.cwd);
-			expect(call.cwd).toBe(join(dir, "workspace"));
-			expect(call.argv.slice(0, 3)).toEqual(["-p", "", "--input-format"]);
-			expect(flag("--agent")).toBe("quest-reviewer");
-			expect(call.argv).toContain("--dangerously-skip-permissions");
-			expect(call.argv).toContain("--disable-slash-commands");
-			expect(flag("--settings")).toBe(join(dir, "settings.json"));
-			const deny: string[] = JSON.parse(call.workspace!["settings.json"]!).permissions.deny;
-			expect(deny).toEqual(expect.arrayContaining(["command(*)", "write_file(*)", "read_url(*)", "mcp(*)"]));
-			// Reads stay in the turn's directory: the checkout and what lies beside it are denied, and nothing in it.
-			const reads = deny.filter((rule) => rule.startsWith("read_file(")).map((rule) => rule.slice(10, -1));
-			const blocked = (path: string) => reads.some((rule) => path === rule || path.startsWith(`${rule}/`));
-			for (const path of [repo, join(repo, ".git", "config"), join(dirname(repo), "origin.git")])
-				expect(blocked(path), path).toBe(true);
-			// A login created while the turn runs, as by signing in to Codex, is denied before it exists.
-			expect(blocked(join(realpathSync(homedir()), ".codex"))).toBe(true);
-			// The rules list what lies beside the directory, so its settings file is denied too, and nothing else in it.
-			expect(reads.filter((rule) => rule === dir || rule.startsWith(`${dir}/`))).toEqual([
-				join(dir, "settings.json"),
-			]);
-			expect(blocked(join(dir, "head", "src", "lib.ts"))).toBe(false);
-			expect(flag("--model")).toBe("gemini-4-neon");
-			expect(flag("--effort")).toBe("high");
-			// It runs outside the checkout, in a directory removed after the turn.
-			expect(call.cwd.startsWith(s.repo)).toBe(false);
-			expect(existsSync(dir)).toBe(false);
-			const agent = call.workspace!["workspace/.agents/agents/quest-reviewer.md"]!;
-			expect(agent).toContain("tools:\n  - view_file\n  - finish\n");
-			expect(agent).toContain("inheritCustomizations: false");
-			expect(agent).toContain("BASE-ROOT rule");
-			expect(agent).not.toContain("HEAD-ROOT rule");
-			if (call === second) continue;
-			// The export holds exactly the head's tracked files, as committed, and the list names each, unquoted.
-			const exported = Object.keys(call.workspace!)
-				.filter((name) => name.startsWith("head/"))
-				.map((name) => name.slice("head/".length))
-				.sort();
-			expect(exported).toEqual(tracked);
-			expect(call.workspace!["files.txt"]!.split("\n").sort()).toEqual(tracked);
-			expect(call.workspace!["head/src/lib.ts"]).toBe("export const x = 2;\n");
-			// A link is a file holding its target, which no filter driver touched.
-			expect(call.workspace!["head/link"]).toBe(login);
-			expect(existsSync(smudged)).toBe(false);
-			expect(call.stdin).not.toContain(s.repo);
-			// A resumed conversation still names the first turn's removed directory, so each file is named in full.
-			expect(call.stdin).toContain(`tracked files are in \`${dir}/head\`, which \`${dir}/files.txt\` lists`);
-		}
-		for (const call of [first!, second!]) {
-			const dir = dirname(call.cwd);
-			// The head's `-diff` hides none of its hunks, and a path is written as the export names it.
-			expect(call.workspace!["diff-1.diff"]).toContain("+export const x = 2;");
-			expect(call.workspace!["diff-1.diff"]).toContain("+++ b/docs/café.md");
-			expect(call.stdin).toContain(`\`${dir}/diff-1.diff\` holds \`git diff ${mergeBase}..${head}\``);
-			expect(Object.keys(call.env).filter((name) => /^(ANTIGRAVITY|AGY)_/.test(name))).toEqual([]);
-		}
-
-		// A later round also gets what changed since the head it reviewed.
-		write(s.repo, "src/lib.ts", "export const x = 4;\n");
-		git(s.repo, "commit", "-qam", "fix");
-		const responses = join(s.repo, ".tmp", "responses.md");
-		write(s.repo, ".tmp/responses.md", "Fixed at src/lib.ts:1.\n");
-		const later = await quest("--root", s.repo, "review", ...AGY, "--responses", responses);
-		expect(later.code, later.stderr).toBe(0);
-		const resumed = s.calls().at(-1)!;
-		expect(resumed.argv[resumed.argv.indexOf("--conversation") + 1]).toBe("conversation-1");
-		const now = git(s.repo, "rev-parse", "HEAD");
-		expect(resumed.stdin).toContain(`\`${dirname(resumed.cwd)}/diff-2.diff\` holds \`git diff ${head} ${now}\``);
-		expect(resumed.workspace!["diff-2.diff"]).toContain("+export const x = 4;");
-		expect(resumed.workspace!["head/src/lib.ts"]).toBe("export const x = 4;\n");
-	},
-);
-
-agyFakes("a round whose last head is gone, as an amend pruned away, reviews the whole change anew", async () => {
-	const s = setup("CLAUDECODE");
-	expect((await quest("--root", s.repo, "review", ...AGY)).code).toBe(0);
-	const gone = git(s.repo, "rev-parse", "HEAD");
-	write(s.repo, "src/lib.ts", "export const x = 4;\n");
-	git(s.repo, "commit", "-q", "--amend", "-am", "change");
-	git(s.repo, "reflog", "expire", "--expire=now", "--all");
-	git(s.repo, "gc", "-q", "--prune=now");
-	expect(() => git(s.repo, "cat-file", "-e", `${gone}^{commit}`)).toThrow();
-	write(s.repo, ".tmp/responses.md", "Fixed at src/lib.ts:1.\n");
-	const later = await quest("--root", s.repo, "review", ...AGY, "--responses", join(s.repo, ".tmp", "responses.md"));
-	expect(later.code, later.stderr).toBe(0);
-	const [review] = s.calls().slice(-2);
-	expect(review!.argv).not.toContain("--conversation");
-	expect(review!.stdin).toContain("Review the change for what it breaks");
-	expect(Object.keys(review!.workspace!)).not.toContain("diff-2.diff");
-});
-
-agyFakes.for([
-	["FAKE_LOGGED_OUT", "1", "error: agy is not logged in; run `agy`"],
-	["FAKE_REJECTED", "1", "error: agy is not logged in; run `agy`"],
-	["FAKE_LIMITED", "reset", "error: agy hit its usage limit; resets 2030-03-17T17:46:40Z"],
-	["FAKE_LIMITED", "unknown", "error: agy hit its usage limit; resets unknown"],
-	["FAKE_LIMITED", "stderr", "error: agy hit its usage limit; resets 2030-03-17T17:46:40Z"],
-	["FAKE_EMPTY_ERROR", "1", "quest: agy failed: agy reported ERROR"],
-	["FAKE_DENIED", "1", "quest: agy failed: agy denied command, which ended the turn"],
-] as const)(
-	"agy's login, quota, and denied actions fail its round as the real CLI reports them (%s=%s)",
-	async ([flag, value, message]) => {
-		const s = setup("CLAUDECODE");
-		vi.stubEnv(flag, value);
-		const result = await quest("--root", s.repo, "review", ...AGY);
-		expect(result.stderr).toBe(`${message}\n`);
-		expect(result.code).toBe(flag === "FAKE_DENIED" || flag === "FAKE_EMPTY_ERROR" ? 1 : 3);
-	},
-);
-
-agyFakes("agy is refused where a directory leading to its workspace matches names case-insensitively", async () => {
-	const s = setup("CLAUDECODE");
-	// A link reaching the same entry with the case swapped, as a case-insensitive volume resolves any name.
-	const parent = join(s.bin, "..", "insensitive");
-	write(parent, "Name", "");
-	linkSync(join(parent, "Name"), join(parent, "nAME"));
-	vi.stubEnv("XDG_RUNTIME_DIR", join(parent, "run"));
-	const result = await quest("--root", s.repo, "review", ...AGY);
-	expect(result.code, result.stderr).toBe(3);
-	expect(result.stderr).toContain(`since ${realpathSync(parent)} matches names case-insensitively`);
-	expect(s.calls().filter((call) => call.argv[0] !== "models")).toEqual([]);
-});
-
 fakes("a review is a usage error with a Git older than 2.41, which has no --attr-source", async () => {
 	const s = setup("CLAUDECODE");
 	const real = execFileSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).trim();
@@ -1479,27 +1177,6 @@ fakes("a review is a usage error with a Git older than 2.41, which has no --attr
 	expect(result.stderr).toContain("git version 2.40.1 is installed");
 	expect(s.calls()).toEqual([]);
 });
-
-agyFakes("agy's status check failing other than on its login fails as it is, rather than as logged out", async () => {
-	const s = setup("CLAUDECODE");
-	vi.stubEnv("FAKE_OFFLINE", "1");
-	const result = await quest("--root", s.repo, "review", ...AGY);
-	expect(result.code).toBe(1);
-	expect(result.stderr).toContain("`agy models` failed: Fetching available models...\nError: dial tcp: lookup");
-	expect(result.stderr).not.toContain("not logged in");
-});
-
-agyFakes(
-	"a workspace inside a repository is refused before agy runs, since agy would load its configuration",
-	async () => {
-		const s = setup("CLAUDECODE");
-		vi.stubEnv("XDG_RUNTIME_DIR", join(s.repo, ".tmp", "run"));
-		const result = await quest("--root", s.repo, "review", ...AGY);
-		expect(result.code).toBe(2);
-		expect(result.stderr).toContain(`lies in the repository at ${s.repo}`);
-		expect(s.calls().filter((call) => call.argv[0] !== "models")).toEqual([]);
-	},
-);
 
 fakes("a later round resumes the session with the new head and the author's responses", async () => {
 	const s = setup();
@@ -2156,29 +1833,7 @@ fakes("without a logged-in Claude Code, Codex classifies", async () => {
 	]);
 });
 
-agyFakes("with only Antigravity installed, Gemini Flash classifies, reading the diff from its workspace", async () => {
-	const s = setup();
-	moveBase(s.repo, (dir) => write(dir, "RISK.md", riskFile([])));
-	const only = join(s.bin, "..", "agy-only");
-	mkdirSync(only);
-	symlinkSync(execFileSync("which", ["git"], { encoding: "utf8" }).trim(), join(only, "git"));
-	symlinkSync(join(s.bin, "agy"), join(only, "agy"));
-	vi.stubEnv("PATH", only);
-	const result = await quest("--root", s.repo, "review", ...AGY);
-	expect(result.code, result.stderr).toBe(0);
-	expect(result.stdout).toContain("classifier agy gemini-3.8-flash low conversation-ask\n");
-	const call = s.calls().find((each) => each.argv.includes("gemini-3.8-flash"))!;
-	expect(call.argv).not.toContain("--conversation");
-	expect(JSON.parse(readFileSync(call.argv[call.argv.indexOf("--json-schema") + 1]!, "utf8")).required).toEqual([
-		"tier",
-		"reason",
-	]);
-	expect(call.workspace!["diff-1.diff"]).toContain("+export const x = 2;");
-	// The question carries the patch, so no head is exported.
-	expect(Object.keys(call.workspace!).filter((name) => name.startsWith("head/") || name === "files.txt")).toEqual([]);
-});
-
-agyFakes(
+fakes(
 	"a classifier whose turn fails on its login or usage limit, or replies unusably, passes the turn to the next",
 	async () => {
 		const s = setup();
@@ -2194,39 +1849,31 @@ agyFakes(
 			expect(passed.code, passed.stderr).toBe(0);
 			expect(passed.stdout).toContain("classifier codex gpt-6.2-sol low thread-classify\n");
 		}
-		// Gemini Flash answers last.
-		const last = await run("claude-limited,codex-limited");
-		expect(last.code, last.stderr).toBe(0);
-		expect(last.stdout).toContain("classifier agy gemini-3.8-flash low conversation-ask\n");
 		// With every classifier out of usage, the run fails on the limit that resets first.
-		expect(await run("claude-limited,codex-limited,agy-limited")).toMatchObject({
+		expect(await run("claude-limited,codex-limited")).toMatchObject({
 			code: 3,
 			stdout: "",
 			stderr: `error: codex hit its usage limit; resets ${codexReset}\n`,
 		});
 		// A classifier whose CLI is not installed stands aside.
 		const path = process.env.PATH;
-		const without = join(s.bin, "..", "no-agy");
+		const without = join(s.bin, "..", "no-claude");
 		mkdirSync(without);
-		for (const name of ["claude", "codex"]) symlinkSync(join(s.bin, name), join(without, name));
+		symlinkSync(join(s.bin, "codex"), join(without, "codex"));
 		symlinkSync(execFileSync("which", ["git"], { encoding: "utf8" }).trim(), join(without, "git"));
 		vi.stubEnv("PATH", without);
-		// Even where its workspace would be refused, as inside a repository, before it is found missing.
-		const runtime = process.env.XDG_RUNTIME_DIR;
-		vi.stubEnv("XDG_RUNTIME_DIR", join(s.repo, ".tmp", "run"));
-		expect(await run("claude-limited,codex-limited")).toMatchObject({ code: 3, stdout: "" });
-		vi.stubEnv("XDG_RUNTIME_DIR", runtime);
+		expect(await run("codex-limited")).toMatchObject({ code: 3, stdout: "" });
 		vi.stubEnv("PATH", path);
 		// Otherwise it names why each failed.
-		const failed = await run("claude-rejected,codex-limited,agy-rejected");
+		const failed = await run("claude-rejected,codex-limited");
 		expect(failed.code).toBe(2);
 		expect(failed.stderr).toMatch(
-			/^error: no classifier could set the risk tier: claude is not logged in .*; codex hit its usage limit; resets .*; agy is not logged in; run `agy`\n$/,
+			/^error: no classifier could set the risk tier: claude is not logged in .*; codex hit its usage limit; resets .*\n$/,
 		);
-		const unusable = await run("claude-unusable,codex-unusable,agy-unusable");
+		const unusable = await run("claude-unusable,codex-unusable");
 		expect(unusable.code).toBe(2);
 		expect(unusable.stderr).toBe(
-			"error: no classifier could set the risk tier: claude claude-haiku-5-5: the classifier's reply has no risk tier with a reason; codex gpt-6.2-sol: the classifier's reply is not JSON; agy gemini-3.8-flash: the classifier's reply has no risk tier with a reason\n",
+			"error: no classifier could set the risk tier: claude claude-haiku-5-5: the classifier's reply has no risk tier with a reason; codex gpt-6.2-sol: the classifier's reply is not JSON\n",
 		);
 	},
 	20_000,
@@ -2262,7 +1909,7 @@ fakes("a question no model answers usably throws with what each reply took", asy
 fakes("a classifier session that hit its usage limit is queued though no classifier answers", async () => {
 	const s = setup();
 	moveBase(s.repo, (dir) => write(dir, "RISK.md", riskFile([])));
-	vi.stubEnv("FAKE_CLASSIFY", "claude-limited,codex-limited,agy-limited");
+	vi.stubEnv("FAKE_CLASSIFY", "claude-limited,codex-limited");
 	const queued: { harness: string; session: string }[] = [];
 	const error = await review({ root: s.repo }, { env: process.env, queue: (session) => queued.push(session) }).catch(
 		(each: unknown) => each,
@@ -2852,9 +2499,9 @@ test("an Implementer line reads as agents write it", () => {
 	expect(sameModel("gpt-6.1-sol", "gpt-6.2-sol")).toBe(false);
 	expect(sameModel("internal/gpt-5-mini", "openai/gpt-5-mini")).toBe(false);
 	// So do those of a model no table lists, which runs only when named, so a writer's spelling still avoids it.
-	expect(sameModel("google/gemini-4-neon", "Gemini 4 Neon")).toBe(true);
+	expect(sameModel("openai/gpt-6.2-astra", "GPT 6.2 Astra")).toBe(true);
 	expect(
-		authored({ exclude: ["google/gemini-4-neon"] })({ harness: "agy", model: "gemini-4-neon", effort: "high" }),
+		authored({ exclude: ["openai/gpt-6.2-astra"] })({ harness: "codex", model: "gpt-6.2-astra", effort: "high" }),
 	).toBe(true);
 	expect(read("GPT 6.2 Astra")?.model).toBe("gpt-6.2-astra");
 	expect(read("Claude Code, Opus 5.5, low effort (iterate, flow fix)")).toEqual(opus("low"));
@@ -3086,20 +2733,6 @@ test("the verdict is checked field by field, settling each earlier finding once"
 		"does not match",
 	);
 	expect(() => verdict({ text: '{"verdict":"approve"}' }, 0)).toThrow("no findings list");
-	// An agy reviewer naming a file by its path in the head's export names it in the repository.
-	const exported = (file: string) =>
-		verdict(
-			{
-				structured: {
-					...scored,
-					findings: [{ ...FINDING, file: `/run/user/1/quest/agent/review-AbC123/head/${file}` }],
-				},
-			},
-			0,
-		).findings[0]!.file;
-	expect(exported("src/lib.ts")).toBe("src/lib.ts");
-	// Only the export's own prefix, though a tracked path looks like one.
-	expect(exported("packages/review-ui/head/index.ts")).toBe("packages/review-ui/head/index.ts");
 	for (const score of [-1, 11, 7.5, "7", undefined]) {
 		expect(() => verdict({ structured: { ...scored, score, findings: [] } }, 0)).toThrow("no score from 0 to 10");
 	}

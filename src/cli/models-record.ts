@@ -58,9 +58,8 @@ const key = (name: string) =>
 		.replace(/^claude-/, "");
 // Models the tables no longer list, which older records still name.
 const RETIRED = ["gpt-6.1-sol"];
-// Models no table lists, which run only when named, as `--harness agy --model gemini-4-neon` does, and which
-// records still name.
-const NAMED = ["gemini-4-neon", "claude-fable-5-2", "gpt-6.2-astra"];
+// Models no table lists, which run only when named, as `--model claude-fable-5-2` does, and which records still name.
+const NAMED = ["claude-fable-5-2", "gpt-6.2-astra"];
 const KNOWN = new Map(
 	[
 		...[

@@ -25,7 +25,6 @@ import {
 export const HARNESSES: Record<Round["reviewer"], string> = {
 	claude: "Claude Code",
 	codex: "Codex",
-	agy: "Antigravity",
 };
 
 /**
