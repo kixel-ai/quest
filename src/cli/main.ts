@@ -92,7 +92,6 @@ import {
 	review,
 	nextStep,
 	roundLines,
-	savedReview,
 } from "./review";
 import { type Recorded, pullModels, recordRounds } from "./review-record";
 import {
@@ -1658,14 +1657,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		.join("; ");
 	const classifiers = CLASSIFIERS.map((e) => `${e.harness} ${e.model} ${e.effort}`).join(", then ");
 	/** quest review's exit code for `error`: 2 for a usage error, 3 when no reviewer could run, else 1. */
-	const reviewFailure = (error: unknown, json = false): number => {
-		// A failure after a raise saved the rounds that ran, so they print for their findings to be answered.
-		const reviewed = savedReview(error);
-		if (reviewed !== undefined) {
-			const { rounds, tallies, risk, skipped } = reviewed;
-			if (json) print(JSON.stringify({ rounds, tallies, risk, skipped, record: null, next: null }));
-			else for (const line of roundLines(reviewed)) print(line);
-		}
+	const reviewFailure = (error: unknown): number => {
 		const outage = error instanceof ReviewerUnavailableError || error instanceof ReviewOutageError;
 		if (error instanceof ReviewInputError || outage) {
 			out.stderr(`error: ${error.message}\n`);
@@ -1969,7 +1961,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 						);
 						return 1;
 					},
-					(error) => reviewFailure(error, options.json),
+					(error) => reviewFailure(error),
 				);
 			},
 		);

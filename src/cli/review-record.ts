@@ -123,7 +123,6 @@ export function reviewRecord({ rounds, tallies, risk, skipped, head, base, accep
 			`- Session: ${code(round.session)}, round ${round.round}`,
 			`- Score: ${round.score}/10, ${code(round.rationale)}`,
 			...(round.recommendation === null ? [] : [`- Recommendation: ${code(round.recommendation)}`]),
-			...(round.raised ? [`- Raised the risk to ${round.raised.tier}: ${code(round.raised.reason)}`] : []),
 		);
 		const tally = tallies.find((each) => sameSeat(each, round));
 		if (tally === undefined) throw new Error(`no tally for ${round.reviewer}'s round`);
@@ -137,6 +136,8 @@ export function reviewRecord({ rounds, tallies, risk, skipped, head, base, accep
 			);
 		for (const finding of round.findings)
 			lines.push(`  - ${capitalized(finding.severity)}, ${code(located(finding))}: ${code(finding.title)}`);
+		if (round.notes.length > 0) lines.push("- Notes, the author's to take or leave:");
+		for (const note of round.notes) lines.push(`  - ${code(located(note))}: ${code(note.title)}`);
 		const settled = round.earlier?.findings ?? [];
 		if (settled.length > 0) lines.push(`- The last round's findings, at ${round.earlier!.head.slice(0, 12)}:`);
 		for (const finding of settled)
@@ -150,10 +151,6 @@ export function reviewRecord({ rounds, tallies, risk, skipped, head, base, accep
 			reviewerLine(tally),
 			// Its session, still named so `quest usage` counts it as reviewing.
 			...(tally.session === undefined ? [] : [`- Session: ${code(tally.session)}`]),
-			// Its last round reviewed this head, so its raise still holds.
-			...(risk.raisedBy && sameSeat(risk.raisedBy, tally)
-				? [`- Raised the risk to ${risk.tier}: ${code(risk.reason)}`]
-				: []),
 			`- Rounds: ${tally.rounds}; ${findingsText(counted(tally))}`,
 		);
 	return lines.join("\n");

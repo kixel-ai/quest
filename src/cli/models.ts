@@ -77,16 +77,18 @@ export const unfit =
  * effort Opus writes the size at, its writer A/B arm's included, since it may review its own work. Another Codex model and then Fable close each size's list,
  * so a PR still has a reviewer while Sol, or all of Codex, is out. A high head reviews
  * from `high`, whatever its size: the pick, then a second reviewer from the other vendor, so Sol and Opus review
- * Opus's work, Opus and Astra Fable's. XL starts on Astra, the vendor's frontier model, at high rather than xhigh. Fable
- * never reviews above high, since its usage limit is the XL writers', and xhigh costs it far more than Opus xhigh.
+ * Opus's work, Opus and Astra Fable's. XL starts on Astra, the vendor's frontier model, at high rather than xhigh. No
+ * Claude model reviews above high: the effort is also Claude Code's `/code-review` level, and xhigh there asks
+ * for many findings, some uncertain, from a fan of sub-agents, which measured at ten times Sol xhigh's cost per PR
+ * for half its high findings.
  */
 export const REVIEWERS: Record<Listing, readonly ReviewModel[]> = {
 	XS: [sol("medium"), opus("medium"), astra("medium"), fable("medium")],
 	S: [sol("medium"), opus("medium"), astra("medium"), fable("medium")],
 	M: [sol("high"), opus("high"), astra("high"), fable("high")],
 	L: [sol("xhigh"), opus("high"), astra("xhigh"), fable("high")],
-	XL: [astra("high"), opus("xhigh"), sol("xhigh"), fable("high")],
-	high: [sol("xhigh"), opus("xhigh"), fable("high"), astra("xhigh")],
+	XL: [astra("high"), opus("high"), sol("xhigh"), fable("high")],
+	high: [sol("xhigh"), opus("high"), fable("high"), astra("xhigh")],
 };
 
 /** One side of the writer A/B: A runs the size's own first writer, B the alternative. */
