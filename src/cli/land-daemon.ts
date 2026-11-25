@@ -182,7 +182,7 @@ export function lockRepository(root: string, base: string): Promise<() => void> 
 }
 
 /**
- * Prepare a daemon for `repository`: check the App key and Git's version, resolve its base in `options` once, from
+ * Prepare a daemon for `repository`: check the App key, resolve its base in `options` once, from
  * `--base` or `defaultBase`, for the daemon's life, resolve and create its state directory, and hold
  * one lock per checkout's repository and base and one per state directory, whichever two daemons
  * would share, so two watchers never run beside each other on one base while
@@ -196,13 +196,6 @@ export async function startDaemon(
 ): Promise<() => void> {
 	// These are startup configuration failures; transient network failures in the loop are recoverable.
 	createPrivateKey(readFileSync(keyPath()));
-	// The land fixer's validation reads `git merge-tree -z`'s structured conflict messages, which Git 2.39 added.
-	const version = git(root, ["version"]);
-	const [major, minor] = (/(\d+)\.(\d+)/.exec(version) ?? []).slice(1).map(Number);
-	if (major === undefined || minor === undefined || major < 2 || (major === 2 && minor < 39))
-		throw new Error(
-			`quest land needs Git 2.39 or later, whose merge-tree -z structures its messages; ${version} is installed`,
-		);
 	const base = (options.base ||= await defaultBase());
 	options.state = resolve(root, options.state || defaultState(repository, base));
 	mkdirSync(options.state, { recursive: true, mode: 0o700 });
