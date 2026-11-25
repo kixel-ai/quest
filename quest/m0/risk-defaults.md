@@ -67,10 +67,12 @@ Open questions, with recommendations:
   scope and rule, so a repository can narrow or widen it; any other name
   adds a class. Offer no way to drop a default or an `ALWAYS_HIGH` path
   until a repository needs one.
-- Records: [kixel-ai/quest#888](https://github.com/kixel-ai/quest/pull/888)
-  reads a record as stale once the base's `RISK.md` changes, but a new
-  quest release that changes the defaults does not. Recommended: accept
-  that; the defaults change rarely, and the next review reclassifies.
+- Records: `classify` in `src/cli/review.ts` reuses a saved tier while its
+  key (merge base, head, the base's `RISK.md` text, changed paths) matches,
+  before `heldHigh` runs, so a release that changes the defaults would leave
+  an unchanged head's old tier standing. Recommended: add the built-in
+  default classes and `ALWAYS_HIGH` to that key, so a defaults change
+  reclassifies every open head on its next review.
 
 Risk: the PR is high. It changes `assets/` and when an agent may merge
 without asking in every repository, as this repository's `RISK.md` reads
@@ -85,3 +87,4 @@ Tests:
   `.github/actions/` high by the paths, with no model.
 - A base whose `RISK.md` lists its own `quest` class uses its scope and
   rule instead of the default's.
+- A saved classification is not reused once the built-in defaults change.
