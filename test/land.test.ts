@@ -1689,6 +1689,12 @@ ${requeueScript}
 		await expect(fix(dir, log, [1])).rejects.toThrow("fixer agent exited 1");
 		expect(ran()).toEqual(["claude"]);
 
+		// Nor is a finished reply that quotes one.
+		rmSync(join(dir, "ran.txt"));
+		fake("claude", `echo '{"type":"result","is_error":false,"result":"the usage limit check is fixed"}'\nexit 1`);
+		await expect(fix(dir, log, [1])).rejects.toThrow("fixer agent exited 1");
+		expect(ran()).toEqual(["claude"]);
+
 		// A fixer that changed the checkout before its limit ends the round, so Codex never builds on it blind.
 		rmSync(join(dir, "ran.txt"));
 		fake(

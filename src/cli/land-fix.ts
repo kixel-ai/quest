@@ -461,7 +461,8 @@ async function run(agent: Attempt, data: string, root: string): Promise<Init> {
 		if (!(error instanceof FixerAgentError)) throw error;
 		lines.end();
 		const result = reader.result(stderr);
-		if (result.unauthorized || result.limited)
+		// A reply that finished its turn, whatever it quotes, is no outage.
+		if (result.failed && (result.unauthorized || result.limited))
 			throw new Unavailable(
 				`${agent.harness} ${result.unauthorized ? "is logged out or its login was rejected" : "is at its usage limit"}`,
 			);
