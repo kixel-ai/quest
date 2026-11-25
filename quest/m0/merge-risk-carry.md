@@ -17,9 +17,8 @@ from the base. Suppose a low PR passed with no local reviewer, and the base
 then narrowed its class or made it medium. After a conflict-free base merge,
 the agent could carry the old pass forward and queue the PR without the
 review it now needs. A head the base now holds high is refused at
-`quest merge --land` by
-[A high head lands only with a review status for its diff](/quest/m0/high-review-status.md).
-This quest covers the medium and unclassed cases that the other one leaves.
+`quest merge --land` once https://github.com/kixel-ai/quest/pull/889
+lands. This quest covers the medium and unclassed cases that the other one leaves.
 
 Recommended: in merge.md's carry-forward exception, exclude a record that
 `quest status` warns was classified against another risk file. Alternative:
