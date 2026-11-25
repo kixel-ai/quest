@@ -19,8 +19,10 @@ import { eachLine } from "./messages";
 import { questRoot } from "./rules";
 import { type Labeled, type SplitDependencies, type Steps, labelSession, readSteps, splitOf } from "./split";
 import {
+	type Pins,
 	type Pull,
 	type Reached,
+	type Reviewed,
 	type Session,
 	fixBreakages,
 	fold,
@@ -49,6 +51,11 @@ export interface Pending {
 	root: string;
 	origin: string;
 	prefix: string;
+	/**
+	 * For a session `quest review` started, the PR branch it reviewed and the role it played there, which the sender
+	 * takes over what it infers from the session's checkout and the PR's `## Review` record.
+	 */
+	reviewed?: Reviewed;
 	/**
 	 * On a resend, the instant, epoch ms, its earlier upload read PRs from, so the resend reads at least as far back and
 	 * names every PR that upload did.
@@ -97,9 +104,11 @@ function transcriptStart(path: string): number | null {
 
 /**
  * A session to queue: a stop hook's input, as Claude Code and Codex send it, which names its transcript, or a session
- * `quest review` started, which knows its own first instant, epoch ms.
+ * `quest review` started, which knows its own first instant, epoch ms, and the branch and role it reviewed in.
  */
-export type Stopped = { harness: string; session: string; cwd: string } & ({ transcript: string } | { start: number });
+export type Stopped = { harness: string; session: string; cwd: string } & (
+	{ transcript: string } | ({ start: number } & Reviewed)
+);
 
 /** What `queue` did, for the hook to say. */
 export interface Queued {
@@ -139,8 +148,11 @@ export function queue(stopped: Stopped, env: NodeJS.ProcessEnv = process.env): Q
 		);
 	if (existsSync(refusal(env, url, token))) return { notices, queued: false };
 	let start: number;
-	if ("start" in stopped) start = stopped.start;
-	else {
+	let reviewed: Reviewed | undefined;
+	if ("start" in stopped) {
+		start = stopped.start;
+		reviewed = { branch: stopped.branch, role: stopped.role };
+	} else {
 		const first = transcriptStart(stopped.transcript);
 		if (first === null) throw new Error(`${stopped.transcript} records no instant, so its session cannot be read`);
 		start = first;
@@ -154,6 +166,7 @@ export function queue(stopped: Stopped, env: NodeJS.ProcessEnv = process.env): Q
 		root,
 		origin: repository,
 		prefix: run(["rev-parse", "--show-prefix"]).stdout.trim(),
+		...(reviewed && { reviewed }),
 	});
 	const sender = senderRuns(env);
 	if (!sender.runs)
@@ -450,6 +463,14 @@ async function sendTo(
 					`token-max lists no ${q.pending.harness} session ${q.pending.session} on this host, so its record was dropped`,
 				);
 			}
+			// A session queued twice, as a resumed reviewer is, names the same branch and role each time.
+			const pins: Pins = new Map(
+				group.flatMap((q) =>
+					q.pending.reviewed
+						? [[`${q.pending.harness}\0${q.pending.session}`, q.pending.reviewed] as const]
+						: [],
+				),
+			);
 			const repositories = new Set([origin, key(repository)]);
 			// A sub-agent stops without the stop hook naming it, so each queued session brings its own, routed as its
 			// own checkout routes it, found from the nearest folder still there: a checkout must be a queued one's, or
@@ -521,6 +542,7 @@ async function sendTo(
 				calls,
 				emit,
 				since,
+				pins,
 				split: (s, waits, from) => {
 					const read = labeled.get(s);
 					return read ? splitOf(read.steps, read.labeled, waits, from) : null;
@@ -539,7 +561,7 @@ async function sendTo(
 			if (!response.ok)
 				throw new Error(`${endpoint} answered ${response.status}: ${(await response.text()).slice(0, 500)}`);
 			clearBackoff(deps.env, id);
-			remember(deps.env, id, { group, emit, byId, from, waiting: unheaded([...emit], exported, pulls) });
+			remember(deps.env, id, { group, emit, byId, from, waiting: unheaded([...emit], exported, pulls, pins) });
 			resendDue(deps.env, id, pulls, group);
 			// Only once every resend these PRs call for is queued, so a pass that fails before then reads them again.
 			writeCursor(deps.env, id, read);
@@ -834,8 +856,8 @@ function readRemembered(path: string): Remembered | null {
 				(each) =>
 					typeof each?.name === "string" &&
 					typeof each.first === "number" &&
-					Array.isArray(each.repositories) &&
-					each.repositories.every((r) => typeof r === "string"),
+					(each.repositories === null ||
+						(Array.isArray(each.repositories) && each.repositories.every((r) => typeof r === "string"))),
 			)
 			? (value as Remembered)
 			: null;

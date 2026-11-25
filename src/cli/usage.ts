@@ -645,11 +645,14 @@ function byBranch(pulls: Pull[]): Map<string, Pull[]> {
 	return branches;
 }
 
-/** A branch a session reached at `first`, epoch ms, in one of `repositories`, as matching it to a PR needs. */
+/**
+ * A branch a session reached at `first`, epoch ms, in one of `repositories`, or in any head repository of the base's
+ * PRs when null, as matching it to a PR needs.
+ */
 export interface Reached {
 	name: string;
 	first: number;
-	repositories: string[];
+	repositories: string[] | null;
 }
 
 /**
@@ -662,7 +665,7 @@ function headed(branches: Map<string, Pull[]>, reached: Reached): Pull | null {
 		(each) =>
 			(each.closed === null || each.closed >= reached.first) &&
 			each.repository !== null &&
-			reached.repositories.includes(each.repository),
+			(reached.repositories === null || reached.repositories.includes(each.repository)),
 	);
 	if (new Set(open.map((each) => each.repository)).size > 1) return null;
 	return open[0] ?? null;
@@ -674,49 +677,65 @@ export function heading(pulls: Pull[]): (reached: Reached) => boolean {
 	return (reached) => headed(branches, reached) !== null;
 }
 
+/** The PR branch and role `quest review` gave a session it started. */
+export interface Reviewed {
+	branch: string;
+	role: "classifying" | "reviewing";
+}
+
+/** The sessions `quest review` started, by `harness\0id`. */
+export type Pins = Map<string, Reviewed>;
+
 /**
- * The PR each session's own branch heads: the one {@link headed} finds for the branch it last named that heads one.
- * Another repository may use the same branch name, so a session counts only where its repository is known. `evidence`
- * holds every exported copy, folded ones included, since a dropped copy may be the only one naming its directory's
- * repository.
+ * The branches a session reached, latest first, as matching it to a PR tries them: its pinned branch, the PR branch
+ * `quest review` named, so in any head repository, a fork's included; then each its transcript named, which count
+ * only where its repository is known, since another repository may use the same branch name.
+ */
+function reaches(session: Session, known: string[] | null, pins: Pins | undefined): Reached[] {
+	const pin = session.id === null ? undefined : pins?.get(`${session.harness}\0${session.id}`);
+	const pinned: Reached[] = pin ? [{ name: pin.branch, first: session.start, repositories: null }] : [];
+	if (known === null) return pinned;
+	const seen = [...session.branches].sort((a, b) => b.last - a.last);
+	return [...pinned, ...seen.map((b) => ({ name: b.name, first: b.first, repositories: known }))];
+}
+
+/**
+ * The PR each session's own branch heads: the one {@link headed} finds for the first branch {@link reaches} gives
+ * that heads one. `evidence` holds every exported copy, folded ones included, since a dropped copy may be the only one
+ * naming its directory's repository.
  */
 function attribute(
 	sessions: Session[],
 	evidence: Session[],
 	pulls: Pull[],
+	pins?: Pins,
 ): { own: Map<Session, Pull>; known: (session: Session) => string[] | null } {
 	const branches = byBranch(pulls);
 	const own = new Map<Session, Pull>();
 	const owned = owners(evidence);
-	for (const session of sessions) {
-		const known = owned(session);
-		if (known === null) continue;
-		for (const seen of [...session.branches].sort((a, b) => b.last - a.last)) {
-			const found = headed(branches, { name: seen.name, first: seen.first, repositories: known });
+	for (const session of sessions)
+		for (const reached of reaches(session, owned(session), pins)) {
+			const found = headed(branches, reached);
 			if (found) {
 				own.set(session, found);
 				break;
 			}
 		}
-	}
 	return { own, known: owned };
 }
 
 /**
- * Each of `sessions` whose latest branch heads no PR among `pulls`, by the rule {@link attribute} uses, with that
- * branch, so a PR that opens on it later can be noticed. A session whose repository is unknown, or that named no
- * branch, has none to wait for.
+ * Each of `sessions` whose latest branch, its pinned one first, heads no PR among `pulls`, by the rule
+ * {@link attribute} uses, with that branch, so a PR that opens on it later can be noticed. A session whose repository
+ * is unknown and that has no pin, or that named no branch, has none to wait for.
  */
-export function unheaded(sessions: Session[], evidence: Session[], pulls: Pull[]): Map<Session, Reached> {
+export function unheaded(sessions: Session[], evidence: Session[], pulls: Pull[], pins?: Pins): Map<Session, Reached> {
 	const branches = byBranch(pulls);
 	const owned = owners(evidence);
 	const waiting = new Map<Session, Reached>();
 	for (const session of sessions) {
-		const repositories = owned(session);
-		const latest = [...session.branches].sort((a, b) => b.last - a.last)[0];
-		if (repositories === null || latest === undefined) continue;
-		const reached = { name: latest.name, first: latest.first, repositories };
-		if (headed(branches, reached) === null) waiting.set(session, reached);
+		const reached = reaches(session, owned(session), pins)[0];
+		if (reached !== undefined && headed(branches, reached) === null) waiting.set(session, reached);
 	}
 	return waiting;
 }
@@ -741,19 +760,26 @@ export interface RecordSources {
 	since: number;
 	/** A local session's time split, or null while it has none. */
 	split?: RecordInput["split"];
+	/** The sessions `quest review` started, whose branch and role stand over what is inferred. */
+	pins?: Pins;
 }
 
 /** Each session's record, attributed to the PRs in the window, whose review records name their reviewers and classifier. */
 export function sessionRecords(sources: RecordSources): Map<Session, SessionRecord> {
-	const { repository, sessions, evidence, pulls, waits, calls, emit, since, split } = sources;
+	const { repository, sessions, evidence, pulls, waits, calls, emit, since, split, pins } = sources;
 	// Only the reviewer sessions are read, so no PR author can stop every session's record with a body this version
 	// cannot parse.
 	const reviewers = new Set(pulls.flatMap((pull) => reviewSessions(pull.body)));
 	const classifiers = new Set(pulls.flatMap((pull) => classifierSessions(pull.body)));
+	// A pinned role holds even when no record names the session, as for a classifier whose reply was unusable.
+	for (const [name, pin] of pins ?? []) {
+		const session = name.slice(name.indexOf("\0") + 1);
+		(pin.role === "classifying" ? classifiers : reviewers).add(session);
+	}
 	return buildRecords({
 		repository,
 		sessions,
-		...attribute(sessions, evidence, pulls),
+		...attribute(sessions, evidence, pulls, pins),
 		reviewers,
 		classifiers,
 		waits,

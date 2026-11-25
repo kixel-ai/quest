@@ -231,6 +231,31 @@ test("the sender posts each queued session with its sub-agents, from its transcr
 	expect(pending(env)).toEqual([]);
 });
 
+test("a session `quest review` queued is sent on the PR it reviewed, as the role it played", async () => {
+	const env = home();
+	const root = checkout();
+	const start = Date.parse("2026-11-06T10:00:00Z");
+	const reviewed = (session: string, branch: string, role: "classifying" | "reviewing") =>
+		queue({ harness: "claude", session, cwd: root, start, branch, role }, env);
+	reviewed("rev", "quest/m0/a", "reviewing");
+	// A fork's PR heads a repository other than the checkout's origin.
+	reviewed("cls", "fix/y", "classifying");
+	// The runner's review checkout names its own branch, and a detached one names none.
+	const sessions = [session("rev", "kix-review/1"), session("cls", "x", { branches: [] })];
+	const fork = {
+		...opened(8, "fix/y", "2026-11-06T11:30:00Z"),
+		head: { ref: "fix/y", repo: { full_name: "ann/proj" } },
+	};
+	const { deps, uploads } = sender(env, 200, sessions, () => {}, [fork]);
+	await sendPass(deps);
+	// No PR body names either session, as for a classifier whose reply was unusable.
+	expect(parseUpload(uploads[0]!.body).records.map((r) => [r.session, r.pulls, r.role, r.branch])).toEqual([
+		["rev", [7], "reviewing", "quest/m0/a"],
+		["cls", [8], "classifying", "fix/y"],
+	]);
+	expect(remembered(env)).toEqual([]);
+});
+
 test("a repository Kixel Quest does not serve is dropped, unsent and without token-max, and is said once", async () => {
 	const env = home();
 	const root = checkout();

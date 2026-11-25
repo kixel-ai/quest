@@ -9,6 +9,7 @@ import {
 	type Finding,
 	type Round,
 	type Settled,
+	type Started,
 	type Tally,
 	ReviewLimitError,
 	UnansweredError,
@@ -886,6 +887,20 @@ fakes("a detached checkout continues the session of the branch --branch names", 
 	expect(round.stderr).toBe("");
 	expect(round.stdout).toContain("session thread-1\nround 2\n");
 	expect(at(s.calls(), "high").filter((c) => c.argv[1] === "review")).toHaveLength(1);
+});
+
+fakes("a detached checkout queues each session with the branch --branch names and its role", async () => {
+	const s = setup();
+	moveBase(s.repo, (dir) => write(dir, "RISK.md", riskFile([])));
+	write(s.repo, "AGENTS.md", `HEAD-ROOT rule\n${REFERENCE_LINE}\n`);
+	git(s.repo, "commit", "-qam", "use Quest");
+	onGitHub(s.repo, []);
+	vi.stubEnv("FAKE_RISK", JSON.stringify({ tier: "medium", reason: "It changes one constant." }));
+	git(s.repo, "checkout", "-q", "--detach");
+	const queued: Started[] = [];
+	await review({ root: s.repo, branch: "feature" }, { env: process.env, queue: (session) => queued.push(session) });
+	expect(new Set(queued.map((each) => each.role))).toEqual(new Set(["classifying", "reviewing"]));
+	expect(queued.every((each) => each.branch === "feature")).toBe(true);
 });
 
 fakes("a differently named branch continues the session --branch names, and without it has its own", async () => {
