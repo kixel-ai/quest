@@ -92,13 +92,11 @@ export function buildRecords(input: RecordInput): Map<Session, SessionRecord> {
 		const parent = parentOf(s);
 		if (parent && depth < input.sessions.length) {
 			// A session known to be in another repository keeps out of its parent's PRs, as a sub-agent in another
-			// checkout does. One in the base's own keeps a fork's PR its parent reviewed from there.
+			// checkout does. One in the very checkout `quest review` ran in keeps the PR it reviewed, a fork's included.
 			const known = input.known?.(s) ?? null;
+			const reviewing = pinOf(parent) !== undefined && s.cwd !== null && s.cwd === parent.cwd;
 			const inherited = pullsOf(parent, depth + 1).pulls.filter(
-				(p) =>
-					known === null ||
-					known.includes(input.repository) ||
-					(p.repository !== null && known.includes(p.repository)),
+				(p) => known === null || reviewing || (p.repository !== null && known.includes(p.repository)),
 			);
 			if (inherited.length) return { pulls: inherited, via: "parent" };
 		}

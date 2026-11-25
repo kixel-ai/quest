@@ -238,6 +238,7 @@ test("a session `quest review` queued is sent on the PR it reviewed, as the role
 	const reviewed = (session: string, branch: string, role: "classifying" | "reviewing") =>
 		queue({ harness: "claude", session, cwd: root, start, branch, role }, env);
 	reviewed("rev", "quest/m0/a", "reviewing");
+	queue({ ...stopped(root), session: "impl" }, env);
 	// A fork's PR heads a repository other than the checkout's origin.
 	reviewed("cls", "fix/y", "classifying");
 	// Reviewed before its PR opens.
@@ -249,6 +250,9 @@ test("a session `quest review` queued is sent on the PR it reviewed, as the role
 		session("cls", "x", { branches: [] }),
 		session("sub", "x", { branches: [], parent: "cls" }),
 		session("early", "kix-review/2"),
+		// An implementer's sub-agent in another checkout keeps out of the fork's PR.
+		session("impl", "fix/y", { repositories: ["ann/proj"], cwd: "/fork" }),
+		session("away", "x", { branches: [], parent: "impl", cwd: "/up" }),
 	];
 	// An editable PR body naming a reviewer as its classifier does not relabel it.
 	const fork = {
@@ -264,6 +268,8 @@ test("a session `quest review` queued is sent on the PR it reviewed, as the role
 		["cls", [8], "classifying", "fix/y"],
 		["sub", [8], "classifying", "fix/y"],
 		["early", [], "reviewing", "feature/z"],
+		["impl", [8], "implementing", "fix/y"],
+		["away", [], "implementing", null],
 	]);
 	// It waits for a PR on the branch it reviewed, not its checkout's.
 	expect(remembered(env)).toEqual(["early"]);
