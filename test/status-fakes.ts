@@ -7,6 +7,9 @@ import { attestation, reviewTarget } from "../src/github/review-trust";
 
 export const A = "a".repeat(40);
 export const B = "b".repeat(40);
+/** The blob of `RISK.md` at the tip of `main`, and how a record names it. */
+export const RISK_BLOB = "d".repeat(40);
+export const RISK_ID = RISK_BLOB.slice(0, 12);
 /** Where every head branched from `main`. */
 export const MERGE_BASE = "e".repeat(40);
 export const pr = { owner: "example", repo: "project", number: 1 };
@@ -41,6 +44,7 @@ export function pull(
 					updatedAt: "2026-10-07T12:00:00Z",
 					baseRefName: "main",
 					baseRefOid: "b".repeat(40),
+					baseRef: { target: { file: { oid: RISK_BLOB } } },
 					headRefName: "quest/m0/example",
 					isMergeQueueEnabled: false,
 					labels: { nodes: [] },
@@ -265,7 +269,7 @@ export function setup(
 									"SUCCESS",
 									recorded === null || "malformed" in recorded
 										? "Risk low: passed"
-										: attestation(recorded.tier, recorded.class, "passed"),
+										: attestation(recorded, "passed"),
 									sha,
 								);
 				const object = status === null ? null : { status: status === undefined ? null : { context: status } };

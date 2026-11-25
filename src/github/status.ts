@@ -25,8 +25,10 @@ import {
 	type Status,
 	type Thread,
 	REVIEW_MARK,
+	RISK_FILE,
 	recordedRisk,
 	reviewSection,
+	riskFileId,
 } from "../core";
 import { readHoldStatus } from "./hold";
 import { readSignals } from "./signals";
@@ -43,6 +45,7 @@ const STATUS = `query($owner: String!, $repo: String!, $number: Int!,
 	repository(owner: $owner, name: $repo) {
 		pullRequest(number: $number) {
 			url body baseRefName state isDraft headRefOid headRefName mergeable mergeStateStatus reviewDecision
+			baseRef { target { ... on Commit { file(path: "${RISK_FILE}") { oid } } } }
 			headRepository { nameWithOwner }
 			autoMergeRequest { enabledAt mergeMethod commitBody enabledBy { login } }
 			mergeQueueEntry { state position enqueuedAt }
@@ -177,7 +180,11 @@ export async function pullRequestStatus(
 	);
 	const record = await reviewRecord(github, pr, { ...first!, body: trusted.body }, deps.warn);
 	status.reviewRecord = record && { ...record, localReview: trusted.localReview };
-	status.risk = risk(trusted.body, head, status.reviewRecord);
+	status.risk = risk(trusted.body, {
+		head,
+		record: status.reviewRecord,
+		...(first!.state === "OPEN" && { riskFile: baseRiskFile(first!) }),
+	});
 	if (status.autoMerge !== null) status.autoMerge.head = await enabledHead(github, first!, deps.warn);
 	const signaled = (await readSignals(github, pr, [pr.number])).get(pr.number)!;
 	if (signaled.head !== first!.headRefOid)
@@ -187,12 +194,27 @@ export async function pullRequestStatus(
 	return { ...status, holds: ownership.holds, starterHold: ownership.starter, duplicates };
 }
 
-/** The risk the PR body records, judged against the head as {@link Status.risk} describes. */
-function risk(body: string, head: string, record: ReviewRecord | null): Status["risk"] {
+/** The blob of the risk file at the tip of a PR node's base, or null where it has none. */
+function baseRiskFile(pull: ObjectValue): string | null {
+	// An open PR's base exists: GitHub closes the PR when its base branch is deleted.
+	const file = object(object(pull.baseRef).target).file;
+	return file === null || file === undefined ? null : string(object(file).oid);
+}
+
+/**
+ * The risk the PR body records, judged against the head, its review record, and for an open PR `riskFile`, the blob
+ * of the base's risk file at its tip, as {@link Status.risk} describes.
+ */
+function risk(
+	body: string,
+	{ head, record, riskFile }: { head: string; record: ReviewRecord | null; riskFile?: string | null },
+): Status["risk"] {
 	const recorded = recordedRisk(body);
 	if (recorded === null) return null;
 	if ("malformed" in recorded) return { state: "malformed", error: recorded.malformed };
-	const state = record?.state ?? (head.startsWith(recorded.head) ? "current" : "stale");
+	// A base whose risk file changed may no longer hold the tier or offer the class, so a new review must classify again.
+	const moved = riskFile !== undefined && recorded.riskFile !== riskFileId(riskFile);
+	const state = moved ? "stale" : (record?.state ?? (head.startsWith(recorded.head) ? "current" : "stale"));
 	return {
 		tier: recorded.tier,
 		reason: recorded.reason,

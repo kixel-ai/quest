@@ -34,7 +34,3 @@ held for a review.
 
 - kixel-ai/quest#868: lands its `quest review` commit status and the trust
   check that reads it. Check with `gh pr view 868 --repo kixel-ai/quest --json state`.
-
-## Related
-
-- [Risk records go stale when the base's risk file changes](/quest/m0/risk-base-stale.md) - another way a record stops covering the head

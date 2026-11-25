@@ -21,6 +21,8 @@ import {
 	setup,
 	reviewStatus,
 	MERGE_BASE,
+	RISK_BLOB,
+	RISK_ID,
 } from "./status-fakes";
 
 test("reports checks by requiredness, each reviewer's latest review against the head, and open threads", async () => {
@@ -864,11 +866,12 @@ describe("the review record", () => {
 
 describe("whose review record counts", () => {
 	const C = "c".repeat(40);
-	const RISK = "\n- Risk: low, `docs only`\n- Classified: low by default";
+	const RISK = `\n- Risk: low, \`docs only\`\n- Classified: low by default\n- Risk file: ${RISK_ID}`;
 	const record = (head: string, risk = RISK) =>
 		`Fixes it.\n\n## Review\n\n${REVIEW_MARK}\n\n- Head: ${head}${risk}\n\n## Models\n\nSize: S`;
 	const permissions = { maintainer: "admin", writer: "write", alice: "read" };
-	const passed = (sha: string, login?: string) => reviewStatus("SUCCESS", "Risk low: passed", sha, login);
+	const passed = (sha: string, login?: string) =>
+		reviewStatus("SUCCESS", `Risk low, risk file ${RISK_ID}: passed`, sha, login);
 	const read = async (body: string, options: Parameters<typeof setup>[1] = {}) => {
 		const warnings: string[] = [];
 		const fixture = setup([pull({ body, checks: null, reviews: page([]), threads: page([]) })], {
@@ -953,7 +956,7 @@ describe("whose review record counts", () => {
 		);
 	});
 
-	test("counts a record whose risk and class are the ones its status attests, and hides a forged one", async () => {
+	test("counts a record whose risk, class, and risk file are the ones its status attests, and hides a forged one", async () => {
 		const risk = `${RISK.replace("by default", "by Claude Code, m, low effort, session `s`")}\n- Class: \`test\``;
 		const attest = (description: string) => ({ statuses: { [A]: reviewStatus("SUCCESS", description, A) } });
 		// Whether a local reviewer ran comes from the status alone, whatever the body claims.
@@ -962,7 +965,12 @@ describe("whose review record counts", () => {
 			["findings accepted", "local-review"],
 			["passed with no local reviewer", "no-local-review"],
 		] as const)
-			expect(await read(record(A, risk), attest(attestation("low", "test", outcome)))).toMatchObject({
+			expect(
+				await read(
+					record(A, risk),
+					attest(attestation({ tier: "low", class: "test", riskFile: RISK_ID }, outcome)),
+				),
+			).toMatchObject({
 				record: `review-record current ${A} ${review}`,
 				risk: "risk low current low docs only",
 				warnings: [],
@@ -971,6 +979,10 @@ describe("whose review record counts", () => {
 			"Risk high, class test: passed",
 			"Risk low: passed",
 			"Risk low, class chore: passed",
+			// So a body edited to name the base's current risk file still reads as the file the classifier read.
+			"Risk low, class test: passed",
+			"Risk low, class test, risk file none: passed",
+			`Risk low, class test, risk file ${"0".repeat(12)}: passed`,
 		])
 			expect(await read(record(A, risk), attest(description))).toMatchObject({
 				record: "review-record -",
@@ -1021,9 +1033,10 @@ describe("the risk tier", () => {
 		const status = await pullRequestStatus(pr, fixture.deps);
 		return { line: statusLines(status).find((l) => l.startsWith("risk ")), risk: status.risk };
 	};
-	const record = (head: string, extra = "") =>
+	const record = (head: string, file: string | null = RISK_ID) =>
 		`## Review\n\n${REVIEW_MARK}\n\n- Head: ${head}\n- Base: origin/main at bbbbbbbbbbbb\n- Risk: high, \`it rewrites the wire format\`\n` +
-		`- Classified: medium by Claude Code, claude-haiku-5-5, low effort, session \`s-1\`${extra}`;
+		`- Classified: medium by Claude Code, claude-haiku-5-5, low effort, session \`s-1\`` +
+		(file === null ? "" : `\n- Risk file: ${file}`);
 
 	test("names the record's tier, the classifier's, and whether it covers the head", async () => {
 		expect(await risk(record(A))).toEqual({
@@ -1041,13 +1054,32 @@ describe("the risk tier", () => {
 	});
 
 	test("carries to a later head as the review record does", async () => {
-		const statuses = { [B]: reviewStatus("SUCCESS", "Risk high: passed", B) };
+		const statuses = { [B]: reviewStatus("SUCCESS", `Risk high, risk file ${RISK_ID}: passed`, B) };
 		expect((await risk(record(B), { statuses, diffs: { [A]: "same", [B]: "same" } })).line).toMatch(
 			/^risk high diff-identical /,
 		);
 		expect((await risk(record(B), { statuses, diffs: { [A]: "new", [B]: "old" } })).line).toMatch(
 			/^risk high stale /,
 		);
+	});
+
+	test("is stale once the base's risk file is not the one the record was classified against", async () => {
+		const base = (file: { oid: string } | null) => ({ baseRef: { target: { file } } });
+		const read = async (body: string, fields: Node, state = "OPEN") => {
+			const fixture = setup([
+				pull({ body, state, checks: null, reviews: page([]), threads: page([]), ...fields }),
+			]);
+			return (await pullRequestStatus(pr, fixture.deps)).risk;
+		};
+		// The base changed RISK.md after the review, so it may no longer hold the tier or offer the class.
+		expect(await read(record(A), base({ oid: "0".repeat(40) }))).toMatchObject({ state: "stale" });
+		expect(await read(record(A, "none"), base(null))).toMatchObject({ state: "current" });
+		expect(await read(record(A, "none"), base({ oid: RISK_BLOB }))).toMatchObject({ state: "stale" });
+		expect(await read(record(A), base(null))).toMatchObject({ state: "stale" });
+		// A record that does not say which file it was classified against can be trusted against none.
+		expect(await read(record(A, null), {})).toMatchObject({ state: "stale" });
+		// A closed PR cannot land, and its base may be gone, so only its head is compared.
+		expect(await read(record(A), { baseRef: null }, "MERGED")).toMatchObject({ state: "current" });
 	});
 
 	test("is absent from a record without one, and marks a malformed one without failing the read", async () => {

@@ -1,6 +1,13 @@
 // Whose `## Review` record `quest status` counts: only one a `quest review` commit status attests, set on the reviewed
 // head by a user with write access to the base repository, since anyone can write a SHA into their own PR's body.
-import { type PullRequest, REVIEW_MARK, type Repository, type Tier, recordedRisk, reviewSection } from "../core";
+import {
+	type PullRequest,
+	type RecordedRisk,
+	REVIEW_MARK,
+	type Repository,
+	recordedRisk,
+	reviewSection,
+} from "../core";
 import { GitHubDeadline, type GitHubReader, object, string } from "./client";
 
 /** The commit status context `quest review` sets on each head it records. */
@@ -9,9 +16,14 @@ export const REVIEW_CONTEXT = "quest review";
 /** A run's outcome as its status names it, including whether a local reviewer ran, which a standing pick needs. */
 export type Outcome = "passed" | "passed with no local reviewer" | "findings accepted" | "findings open";
 
-/** The status description `quest review` sets: the head's risk and class, which the body's record must match, and its outcome. */
-export function attestation(tier: Tier, kind: string | null, outcome: Outcome): string {
-	return `Risk ${tier}${kind === null ? "" : `, class ${kind}`}: ${outcome}`;
+/**
+ * The status description `quest review` sets: the head's risk, class, and the base's risk file they were set against,
+ * which the body's record must match, and its outcome.
+ */
+export function attestation(risk: Pick<RecordedRisk, "tier" | "class" | "riskFile">, outcome: Outcome): string {
+	const kind = risk.class === null ? "" : `, class ${risk.class}`;
+	const file = risk.riskFile === null ? "" : `, risk file ${risk.riskFile}`;
+	return `Risk ${risk.tier}${kind}${file}: ${outcome}`;
 }
 
 /**
@@ -23,7 +35,7 @@ export function reviewTarget(repository: Repository, from: string, sha: string):
 }
 
 const ATTESTED =
-	/^Risk (low|medium|high)(?:, class ([a-z0-9-]+))?: (passed|passed with no local reviewer|findings accepted|findings open)$/;
+	/^Risk (low|medium|high)(?:, class ([a-z0-9-]+))?(?:, risk file ([0-9a-f]{12}|none))?: (passed|passed with no local reviewer|findings accepted|findings open)$/;
 
 /** Repository permissions that can push. */
 const WRITE = ["admin", "maintain", "write"];
@@ -111,13 +123,16 @@ async function attestedOutcome(
 	// The status lives in this repository, so its target's diff binds it, whatever name the reader's remote gives it.
 	if (!String(targetUrl).toLowerCase().endsWith(`/compare/${from}...${sha}`))
 		return `the ${REVIEW_CONTEXT} status on ${sha} attests another diff than ${pr.base}'s, from ${from}: ${String(targetUrl)}`;
-	// The tier and class gate a standing pick, so the body's must be the ones attested.
+	// The tier, class, and risk file gate a standing pick, so the body's must be the ones attested.
 	const attested = ATTESTED.exec(typeof description === "string" ? description : "");
 	if (attested === null) return `the ${REVIEW_CONTEXT} status on ${sha} names no risk: ${String(description)}`;
 	const risk = recordedRisk(body);
 	if (risk === null) return `it names no risk, which the ${REVIEW_CONTEXT} status on ${sha} attests`;
 	// A malformed risk is left for `quest status` to print and `quest merge` to refuse.
-	if (!("malformed" in risk) && (risk.tier !== attested[1] || risk.class !== (attested[2] ?? null)))
+	if (
+		!("malformed" in risk) &&
+		(risk.tier !== attested[1] || risk.class !== (attested[2] ?? null) || risk.riskFile !== (attested[3] ?? null))
+	)
 		return `its risk differs from the ${REVIEW_CONTEXT} status on ${sha}: ${String(description)}`;
-	return { localReview: attested[3] !== "passed with no local reviewer" };
+	return { localReview: attested[4] !== "passed with no local reviewer" };
 }

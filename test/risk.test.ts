@@ -156,6 +156,7 @@ test("the review record's risk reads back, and a record without one names none",
 		head,
 		class: null,
 		overridden: null,
+		riskFile: null,
 	});
 	expect(
 		recordedRisk(
@@ -295,17 +296,28 @@ test("a code span renders its text whole, whatever backticks or edge spaces it h
 	}
 });
 
-test("the review record's class and override read back", () => {
+test("the review record's class, override, and risk file read back", () => {
 	const record = (lines: string[]) =>
 		["## Review", "", `- Head: ${"a".repeat(40)}`, "- Risk: low, `the maintainer says so`", ...lines].join("\n");
 	expect(
 		recordedRisk(
-			record(["- Overridden: from medium by the maintainer", "- Classified: low by default", "- Class: `tests`"]),
+			record([
+				"- Overridden: from medium by the maintainer",
+				"- Classified: low by default",
+				"- Class: `tests`",
+				"- Risk file: 0123456789ab",
+			]),
 		),
-	).toMatchObject({ tier: "low", class: "tests", overridden: "medium" });
-	const malformed = { malformed: "the ## Review record's class or override is malformed" };
+	).toMatchObject({ tier: "low", class: "tests", overridden: "medium", riskFile: "0123456789ab" });
+	expect(recordedRisk(record(["- Classified: low by default", "- Risk file: none"]))).toMatchObject({
+		riskFile: "none",
+	});
+	expect(recordedRisk(record(["- Classified: low by default"]))).toMatchObject({ riskFile: null });
+	const malformed = { malformed: "the ## Review record's class, override, or risk file is malformed" };
 	expect(recordedRisk(record(["- Classified: low by default", "- Class: tests"]))).toEqual(malformed);
 	expect(recordedRisk(record(["- Classified: low by default", "- Overridden: by someone"]))).toEqual(malformed);
+	// A full SHA would read as the reviewed head, so the record names the file by 12 characters.
+	expect(recordedRisk(record(["- Classified: low by default", `- Risk file: ${"b".repeat(40)}`]))).toEqual(malformed);
 });
 
 test("tiers order from low to high", () => {

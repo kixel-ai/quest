@@ -1648,7 +1648,7 @@ fakes("each round rewrites the Review section of the branch's open PR, keeping t
 				sha: head,
 				state: "failure",
 				context: "quest review",
-				description: "Risk medium: findings open",
+				description: "Risk medium, risk file none: findings open",
 				target_url: `https://github.com/acme/widget/compare/${base}...${head}`,
 			},
 		]);
@@ -1664,6 +1664,7 @@ fakes("each round rewrites the Review section of the branch's open PR, keeping t
 				`- Base: origin/main at ${base.slice(0, 12)}`,
 				"- Risk: medium, `the base has no RISK.md to name what is always high or customer-facing, so every change is medium`",
 				"- Classified: medium by default",
+				"- Risk file: none",
 				"",
 				// The body's `## Models` record sizes the PR S.
 				"- Reviewer: Codex, gpt-6.2-sol, medium effort",
@@ -1769,7 +1770,7 @@ fakes("each round rewrites the Review section of the branch's open PR, keeping t
 		expect(writes.statuses.at(-1)).toMatchObject({
 			sha: kept,
 			state: "success",
-			description: "Risk medium: findings accepted",
+			description: "Risk medium, risk file none: findings accepted",
 		});
 	} finally {
 		vi.unstubAllGlobals();
@@ -2180,15 +2181,24 @@ fakes(
 			const head = git(s.repo, "rev-parse", "HEAD");
 			// The head is named in full, so the record counts as its review.
 			expect(pull.body).toContain(`- Head: ${head}\n`);
-			expect(pull.body).toContain("- Class: `constants`\n- Local review: none, since the head is low risk");
-			expect(recordedRisk(pull.body)).toMatchObject({ tier: "low", class: "constants", overridden: null });
+			// Named by its blob's first 12 characters, so `quest status` can tell when the base's file changes.
+			const file = git(s.repo, "rev-parse", "origin/main:RISK.md").slice(0, 12);
+			expect(pull.body).toContain(
+				`- Class: \`constants\`\n- Risk file: ${file}\n- Local review: none, since the head is low risk`,
+			);
+			expect(recordedRisk(pull.body)).toMatchObject({
+				tier: "low",
+				class: "constants",
+				overridden: null,
+				riskFile: file,
+			});
 			// Its status attests the tier and class the record names, which `quest status` checks the body against.
 			expect(writes.statuses).toEqual([
 				{
 					sha: head,
 					state: "success",
 					context: "quest review",
-					description: "Risk low, class constants: passed with no local reviewer",
+					description: `Risk low, class constants, risk file ${file}: passed with no local reviewer`,
 					target_url: `https://github.com/acme/widget/compare/${git(s.repo, "merge-base", "origin/main", head)}...${head}`,
 				},
 			]);
@@ -2769,7 +2779,9 @@ fakes("--accept refuses another base's rounds, a high head without its second ro
 		const none = await quest("--root", s.repo, "review", "--accept", "Fine.");
 		expect(none.code).toBe(2);
 		expect(none.stderr).toContain("there is nothing to accept");
-		expect(writes.statuses.map((status) => status.description)).not.toContain("Risk medium: findings accepted");
+		expect(writes.statuses.map((status) => status.description)).not.toContain(
+			"Risk medium, risk file none: findings accepted",
+		);
 	} finally {
 		vi.unstubAllEnvs();
 		vi.unstubAllGlobals();

@@ -56,6 +56,7 @@ export {
 	patternError,
 	recordedRisk,
 	riskier,
+	riskFileId,
 } from "./risk";
 export { type Missed, type Moved, type Source, move, promote, relocate, remove } from "./edit";
 export { comparePaths, normalize } from "./path";
