@@ -1270,7 +1270,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		.description(
 			"Run one headless agent turn per call in the foreground, on the agent CLI's own login, so a spawn " +
 				"starts any harness's agent with one legible command.\n\n" +
-				"Codex requires a registered Quest checkout and Linux worktree supervision; these are checked before any agent state is written. " +
+				"Codex requires a registered Quest checkout and Linux worktree supervision; these are checked before any agent state is written, and a host without the supervision exits 1 with `codex cannot run on this host`. " +
 				"It uses the quest worktree run lifecycle: restore before each turn and release declared scratch after exit. Claude runs directly in the given checkout.\n\n" +
 				"The agent CLI runs from its absolute path on PATH, never from the worktree; on native Windows " +
 				"a batch shim such as npm's claude.cmd runs through System32's cmd.exe, and stop ends the agent's process tree at once.\n\n" +

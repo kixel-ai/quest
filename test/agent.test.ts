@@ -856,7 +856,7 @@ posix("Codex refuses unsupported supervision before writing agent state", async 
 	});
 	const result = await quest("agent", "start", ...launch("codex"), s.worktree, "go");
 	expect(result.code).toBe(1);
-	expect(result.stderr).toContain("unsupported host");
+	expect(result.stderr).toContain("codex cannot run on this host: unsupported host");
 	expect(existsSync(join(s.runtime, "quest", "agent"))).toBe(false);
 	expect(s.calls()).toEqual([]);
 });

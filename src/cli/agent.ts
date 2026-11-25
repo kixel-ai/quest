@@ -577,7 +577,12 @@ export async function runAgent(
 	const checkouts = launch.harness === "codex" ? new Worktrees() : undefined;
 	let checkout: string | undefined;
 	if (checkouts) {
-		systemdScopes.check();
+		try {
+			systemdScopes.check();
+		} catch (error) {
+			// A coordinator falls to the next writer on this wording; see assets/skills/run.md.
+			throw new Error(`codex cannot run on this host: ${(error as Error).message}`);
+		}
 		checkout = checkouts.registered(worktree)?.id;
 		if (checkout === undefined)
 			throw new AgentInputError(
