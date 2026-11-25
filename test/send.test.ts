@@ -875,6 +875,26 @@ test("a session sent before its branch's PR opened is resent with the PR on its 
 	expect(remembered(env)).toEqual(["s2"]);
 });
 
+test("a session remembered under a repository's former name is resent once a PR opens on its branch there", async () => {
+	const env = home();
+	const root = checkout();
+	queue(stopped(root), env);
+	const first = session("s1", "fix/x", { files: [transcript()] });
+	await sendPass(sender(env, 200, [first]).deps);
+	// The record was remembered before the repository moved, so it names the repository's former name.
+	const dir = join(env.XDG_STATE_HOME!, "quest", "records", "remembered");
+	for (const group of readdirSync(dir))
+		for (const name of readdirSync(join(dir, group))) {
+			const path = join(dir, group, name);
+			writeFileSync(path, readFileSync(path, "utf8").replaceAll("acme/proj", "old/proj"));
+		}
+	const s2 = later(env, root, "s2");
+	const next = sender(env, 200, [first, s2], () => {}, [opened(9, "fix/x", "2026-11-06T13:30:00Z")]);
+	next.clock.now = Date.parse("2026-11-06T14:00:00Z");
+	await sendPass(next.deps);
+	expect(pending(env)).toHaveLength(1);
+});
+
 test("a pass that fails before its resends are queued reads their PRs again, even ones older than its sessions", async () => {
 	const env = home();
 	const root = checkout();

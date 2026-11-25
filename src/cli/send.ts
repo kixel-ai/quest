@@ -23,6 +23,7 @@ import {
 	type Reached,
 	type Session,
 	fixBreakages,
+	currentNamer,
 	currentNames,
 	fold,
 	heading,
@@ -410,20 +411,22 @@ async function sendTo(
 	const active = [...groups.values()].flat();
 	if (active.length === 0) return false;
 	const since = Math.min(...active.map((q) => q.pending.start));
-	const read = deps.sessions(new Date(since));
-	if (read === null)
+	const listed = deps.sessions(new Date(since));
+	if (listed === null)
 		throw new Error(
 			"token-max is not installed, so no record can be priced; install it with `cargo install --locked token-max`",
 		);
-	const exported = await currentNames(client, read);
-	const { kept } = fold(exported);
-	const byId = new Map(kept.flatMap((s) => (s.id === null ? [] : [[`${s.harness}\0${s.id}`, s] as const])));
+	const current = currentNamer(client);
 	const waits = deps.waits(since);
 	const calls = deps.calls(since);
 	for (const [id, group] of groups) {
 		const { origin } = group[0]!.pending;
 		const roots = new Set(group.map((q) => q.pending.root));
 		try {
+			// Looked up here, so a repository GitHub fails to answer for holds back only the groups it fails for.
+			const exported = await currentNames(current, listed);
+			const { kept } = fold(exported);
+			const byId = new Map(kept.flatMap((s) => (s.id === null ? [] : [[`${s.harness}\0${s.id}`, s] as const])));
 			const repository = bases.get(id)!;
 			// PRs are read from the last upload's read, if earlier, so a fix that merged after its sessions were sent,
 			// as through the merge queue, still reaches the store with the next session. A resend reads from its earlier
@@ -542,7 +545,7 @@ async function sendTo(
 				throw new Error(`${endpoint} answered ${response.status}: ${(await response.text()).slice(0, 500)}`);
 			clearBackoff(deps.env, id);
 			remember(deps.env, id, { group, emit, byId, from, waiting: unheaded([...emit], exported, pulls) });
-			resendDue(deps.env, id, pulls, group);
+			await resendDue(deps.env, id, pulls, group, current);
 			// Only once every resend these PRs call for is queued, so a pass that fails before then reads them again.
 			writeCursor(deps.env, id, read);
 			for (const q of group) settle(q);
@@ -809,7 +812,13 @@ function forget(env: NodeJS.ProcessEnv, id: string, pending: Pending): boolean {
  * group's next pass rebuilds its tree, and forget each whose transcript is gone. The group's sessions in `sent` were
  * just rebuilt, so they are left as `remember` decided.
  */
-function resendDue(env: NodeJS.ProcessEnv, id: string, pulls: Pull[], sent: { pending: Pending }[]): void {
+async function resendDue(
+	env: NodeJS.ProcessEnv,
+	id: string,
+	pulls: Pull[],
+	sent: { pending: Pending }[],
+	current: (name: string) => Promise<string>,
+): Promise<void> {
 	const dir = rememberedDir(env, id);
 	if (!existsSync(dir)) return;
 	const fresh = new Set(sent.map((q) => rememberedPath(env, id, q.pending)));
@@ -820,7 +829,16 @@ function resendDue(env: NodeJS.ProcessEnv, id: string, pulls: Pull[], sent: { pe
 		const kept = readRemembered(path);
 		// An unreadable file loses only the resend of a record already sent once, so it never blocks the group.
 		if (kept === null || !kept.files.some((file) => existsSync(file))) rmSync(path, { force: true });
-		else if (kept.waiting.some(heads)) enqueue(env, { ...kept.pending, queued: randomUUID() });
+		else {
+			// A branch remembered before its repository moved names the old one, which GitHub's PRs no longer do.
+			const waiting = await Promise.all(
+				kept.waiting.map(async (reached) => ({
+					...reached,
+					repositories: [...new Set(await Promise.all(reached.repositories.map(current)))],
+				})),
+			);
+			if (waiting.some(heads)) enqueue(env, { ...kept.pending, queued: randomUUID() });
+		}
 	}
 }
 
