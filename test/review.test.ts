@@ -2259,6 +2259,14 @@ fakes(
 		expect(last).toContain("codex thread-classify");
 		const claudes = (list: string[]) => new Set(list.filter((each) => each.startsWith("claude "))).size;
 		expect(claudes(last)).toBe(claudes(after) + 1);
+
+		// So is one whose turn hit its usage limit after opening its session, beside the one that answered in its place.
+		write(s.repo, "src/lib.ts", "export const x = 5;\n");
+		git(s.repo, "commit", "-qam", "a fourth constant");
+		vi.stubEnv("FAKE_CLASSIFY", "claude-limited");
+		const limited = await quest("--root", s.repo, "review");
+		expect(limited.code, limited.stderr).toBe(0);
+		expect(claudes(queued())).toBe(claudes(last) + 1);
 	},
 );
 

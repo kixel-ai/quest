@@ -2489,8 +2489,9 @@ export async function ask<T>(entries: readonly ReviewModel[], question: Question
 	const spent: Answer<T>["spent"] = [];
 	for (const entry of entries) {
 		let reply: Reply;
+		let cli: Cli | undefined;
 		try {
-			const cli = await prepare(entry.harness, question.cwd, question.env, question.signal);
+			cli = await prepare(entry.harness, question.cwd, question.env, question.signal);
 			const context: Context = {
 				// A question reviews no range.
 				mergeBase: "",
@@ -2512,6 +2513,8 @@ export async function ask<T>(entries: readonly ReviewModel[], question: Question
 			);
 		} catch (error) {
 			if (!(error instanceof ReviewerUnavailableError)) throw error;
+			// A turn that hit its limit after opening its session still spent tokens there.
+			if (cli?.failed !== undefined) spent.push({ entry, usage: null, session: cli.failed });
 			failures.push(error);
 			continue;
 		}
