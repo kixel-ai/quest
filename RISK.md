@@ -54,10 +54,9 @@ maintainer picks changes this list, proposed with `quest usage`'s numbers
 for the class: its PRs merged, the culprits among them, and their wait on a
 person.
 
-- `test` (`test/**`, `scripts/*.test.sh`, `scripts/*-bench.sh`,
-  `scripts/lifecycle-check.sh`, `scripts/lifecycle-check.mjs`,
-  `scripts/gate-check.sh`, `scripts/install-check.sh`) - only tests, their
-  fixtures, or benchmarks change
+- `test` (`test/**`, `scripts/*.test.sh`, `scripts/*-bench.sh`) - only
+  tests, their fixtures, or benchmarks change; the other check scripts stay
+  out, since the release workflows run them before or after publishing
 - `quest` (`quest/**`) - only plans under `quest/` change, which no user or
   other repository reads
 - `refactor` (`src/**`, `test/**`) - code changes that keep every behavior
