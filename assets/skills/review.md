@@ -20,14 +20,13 @@ Never alter the repository's harness to get a pass, such as by disabling a tool,
 
 Run no new round when a review already counts for the committed head, as `/quest-merge` defines below, and leaves no finding unrefuted: go on to pushing and marking it ready.
 `quest status <pr>` reads the pushed head, so trust its `review-record` line only while its `head` line is the committed head.
-If you judge the change too trivial to review, skip the review instead and record the skip and its reason in `## Review`.
 
 Otherwise, review the committed branch with `quest review --base <remote>/<base>`, in the foreground; a round takes minutes.
 It draws a reviewer the branch has not had, never the model that changed the branch last, from the rung the PR's size sets or the one beside it.
 It reads that model, and off a quest branch the size, from the PR body's `## Models` record: open the draft PR and write the record before the first round, as `Size: M` and `Implementer: Claude Code, claude-opus-5-5, high effort`.
 Pass `--exclude-model` or `--size` only for a PR whose body cannot hold the record.
 Where the repository's root instructions name other reviewers, run each with `--harness`, `--model`, and `--effort`, which runs that reviewer alone and never counts for a medium or high head, then the drawn run, whose record counts.
-Each round rewrites the PR body's `## Review` section, so add context only after it, and write a round's record by hand only when it printed `record skipped`.
+Each round rewrites the PR body's `## Review` section, so add context only after it; when it printed `record skipped`, run it again once the PR can take the record, since `quest status` counts only the record `quest review` writes.
 
 `quest review` sets the head's risk tier before any reviewer runs and seats one reviewer on a low head, two on medium, and three on high, each on a different vendor, the extra of which a round that raises the tier seats at once.
 When the user overrides the tier, pass it with `--override <tier> --reason <their reason>`.

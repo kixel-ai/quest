@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
 
+import { REVIEW_MARK } from "../src/core";
 import { GitHubReader } from "../src/github/client";
 import { main } from "../src/cli/main";
 import { statusLines } from "../src/cli/status";
@@ -812,9 +813,10 @@ const seats = (vendors: string[], open = "") =>
 
 describe("the review record", () => {
 	const C = "c".repeat(40);
+	const RECORD = `## Review\n\n${REVIEW_MARK}\n\n`;
 	// A low head's record, whose one seat passed it.
 	const low = (head: string, extra = "") =>
-		`## Review\n\n- Head: ${head}\n- Risk: low, \`docs\`\n- Classified: low by default${seats(["Codex"])}${extra}`;
+		`${RECORD}- Head: ${head}\n- Risk: low, \`docs\`\n- Classified: low by default${seats(["Codex"])}${extra}`;
 	const line = async (body: string, options: Parameters<typeof setup>[1] = {}) => {
 		const fixture = setup([pull({ body, checks: null, reviews: page([]), threads: page([]) })], options);
 		return statusLines(await pullRequestStatus(pr, fixture.deps)).find((l) => l.startsWith("review-record "));
@@ -826,7 +828,7 @@ describe("the review record", () => {
 
 	test("counts a full SHA only beside a run that passed it", async () => {
 		const high = (vendors: string[], open = "") =>
-			`## Review\n\n- Head: ${A}\n- Risk: high, \`wire\`\n- Classified: high by default${seats(vendors, open)}`;
+			`${RECORD}- Head: ${A}\n- Risk: high, \`wire\`\n- Classified: high by default${seats(vendors, open)}`;
 		expect(await line(high(["Codex", "Claude Code", "Antigravity"]))).toBe(`review-record current ${A}`);
 		// Too few vendors, as a --harness run's, or one vendor twice.
 		expect(await line(high(["Codex"]))).toBe("review-record -");
@@ -844,8 +846,8 @@ describe("the review record", () => {
 			"review-record -",
 		);
 		expect(await line(high(vendors).replace("- Risk: high, `wire`", "- Risk:dire"))).toBe("review-record -");
-		// A recorded skip names no run, so its SHA counts as the review skill has it.
-		expect(await line(`## Review\n\nSkipped as trivial: a typo, at ${A}.`)).toBe(`review-record current ${A}`);
+		// A section without the record `quest review` writes counts for nothing.
+		expect(await line(`## Review\n\nSkipped as trivial: a typo, at ${A}.`)).toBe("review-record -");
 		// Seats of different runs are not one run's: a round-1 block beside round-2 ones takes no seat.
 		expect(
 			await line(
@@ -875,6 +877,10 @@ describe("the review record", () => {
 	test("reads only the Review section, so a SHA elsewhere names no review", async () => {
 		expect(await line(`Fixes ${A}.\n\n## Review\n\nSkipped.\n\n## Models\n\n${C}`)).toBe("review-record -");
 	});
+
+	test("names no review for a section `quest review` never wrote, such as a skip naming the head", async () => {
+		expect(await line(`## Review\n\nSkipped as trivial at ${A}.`)).toBe("review-record -");
+	});
 });
 
 describe("the risk tier", () => {
@@ -884,7 +890,7 @@ describe("the risk tier", () => {
 		return { line: statusLines(status).find((l) => l.startsWith("risk ")), risk: status.risk };
 	};
 	const record = (head: string, extra = "") =>
-		`## Review\n\n- Head: ${head}\n- Base: origin/main at bbbbbbbbbbbb\n- Risk: high, \`it rewrites the wire format\`\n` +
+		`## Review\n\n${REVIEW_MARK}\n\n- Head: ${head}\n- Base: origin/main at bbbbbbbbbbbb\n- Risk: high, \`it rewrites the wire format\`\n` +
 		`- Classified: medium by Claude Code, claude-haiku-5-5, low effort, session \`s-1\`` +
 		`${seats(["Codex", "Claude Code", "Antigravity"])}${extra}`;
 

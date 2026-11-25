@@ -24,6 +24,7 @@ import {
 	type ReviewRecord,
 	type Status,
 	type Thread,
+	REVIEW_MARK,
 	passed,
 	recordedRisk,
 	recordedRun,
@@ -202,17 +203,13 @@ async function reviewRecord(
 ): Promise<ReviewRecord | null> {
 	const body = typeof pull.body === "string" ? pull.body : "";
 	const section = reviewSection(body);
-	// Only the last SHA, so a body naming many costs no more requests than one.
-	const reviewed =
-		section &&
-		body
-			.slice(section.start, section.end)
-			.match(/\b[0-9a-f]{40}\b/g)
-			?.at(-1);
-	// A full SHA counts only beside a run that passed: every seat its tier needs, with nothing left for another round.
-	// A record of no run, as a recorded skip, counts by its SHA alone, as the review skill has it.
+	const text = section ? body.slice(section.start, section.end) : "";
+	// Only a section holding `quest review`'s record names a reviewed head, and only its last SHA, so a body naming
+	// many costs no more requests than one; and it counts only beside a run that passed: every seat its tier needs,
+	// with nothing left for another round.
+	const reviewed = text.includes(REVIEW_MARK) && text.match(/\b[0-9a-f]{40}\b/g)?.at(-1);
 	const run = recordedRun(body);
-	if (!reviewed || (run !== null && !passed(run))) return null;
+	if (!reviewed || run === null || !passed(run)) return null;
 	const head = string(pull.headRefOid);
 	if (reviewed === head) return { state: "current", head: reviewed };
 	const base = encodeURIComponent(string(pull.baseRefName));

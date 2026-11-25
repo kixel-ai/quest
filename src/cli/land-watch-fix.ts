@@ -102,7 +102,7 @@ interface WatchJob extends Process {
 	/** A clean merge of the base with the quest merge driver, which needs no fixer; `result` holds its head. */
 	merged?: boolean;
 	result?: FixResult;
-	/** The head this round published on the PR, so a restart neither validates nor pushes it again. */
+	/** The head this round validated to publish on the PR: once the PR is at it, a restart neither validates nor pushes it again. */
 	published?: string;
 	/** The head being put back in the queue, recorded before asking GitHub, so a restart finds its own request. */
 	requeuing?: string;
@@ -137,7 +137,7 @@ const JUDGED: Record<Cause, string> = {
 };
 
 const PULL = `query($id: ID!) { node(id: $id) { ... on PullRequest {
-	number repository { nameWithOwner } state baseRefName headRefOid mergeStateStatus reviewDecision mergeQueueEntry { enqueuedAt } autoMergeRequest { enabledAt }
+	number body repository { nameWithOwner } state baseRefName headRefOid mergeStateStatus reviewDecision mergeQueueEntry { enqueuedAt } autoMergeRequest { enabledAt }
 	labels(first: 100) { nodes { name } }
 	headRepository { nameWithOwner }
 } } }`;
@@ -685,7 +685,9 @@ async function collect(
 	if (!handback && result && result.action !== "handback") {
 		try {
 			if (result.action === "fixed") {
-				if (job.published === undefined) {
+				// Until the head is pushed, every pass checks it again against the review record that pass read, so a
+				// restart never pushes a fix checked under an older record.
+				if (!ours) {
 					if (job.merged) {
 						if (entry.repository !== job.repository && !entry.maintainerCanModify)
 							throw new FixerRefusal("fork does not allow maintainer edits");
@@ -701,6 +703,7 @@ async function collect(
 							context.read,
 							entry.head,
 							deps.warn,
+							typeof pull.body === "string" ? pull.body : "",
 						);
 					job.published = head;
 					save(path, job);

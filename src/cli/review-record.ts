@@ -1,6 +1,16 @@
 // `quest review` rewrites the `## Review` section of its branch's open PR after each round, so the head
 // it reviewed counts without an agent copying the round into the body by hand.
-import { DEFAULT, PATHS, SEATS, codeSpan, passed, recordedHeld, recordedRisk, reviewSection } from "../core";
+import {
+	DEFAULT,
+	PATHS,
+	REVIEW_MARK,
+	SEATS,
+	codeSpan,
+	passed,
+	recordedHeld,
+	recordedRisk,
+	reviewSection,
+} from "../core";
 import { DRAWN, RUNG_NAMES } from "./models";
 import { recorded } from "./models-record";
 import { type ClaimDependencies, upstream } from "./claims";
@@ -107,7 +117,7 @@ export function reviewRecord({ rounds, tallies, risk, skipped, head, base }: Rev
 		tallies.reduce((sum, tally) => sum + counted(tally).open, 0);
 	const run = { tier: risk.tier, vendors: rounds.map((round) => round.reviewer), open };
 	const lines = [
-		MARK,
+		REVIEW_MARK,
 		"",
 		// `quest status` counts a full SHA here as a review of that head, which only a run that passed it has.
 		`- Head: ${
@@ -195,8 +205,6 @@ export interface ReviewSummary {
 	open: Tally["findings"];
 }
 
-const MARK = "Rewritten by `quest review` after each round.";
-
 /**
  * The reviewer sessions `body`'s `## Review` record names, read from its `Session:` lines alone, so a record whose
  * other lines this version cannot parse, as one a newer `quest review` wrote, still names them.
@@ -205,7 +213,7 @@ export function reviewSessions(body: string): string[] {
 	const section = reviewSection(body);
 	if (!section) return [];
 	const all = body.slice(section.start, section.end);
-	const at = all.indexOf(MARK);
+	const at = all.indexOf(REVIEW_MARK);
 	if (at < 0) return [];
 	return [...all.slice(at).matchAll(/^- Session: (`+) ?(.*?) ?\1(?:, round \d+)?\r?$/gm)].map((found) => found[2]!);
 }
@@ -223,13 +231,13 @@ export function classifierSessions(body: string): string[] {
 
 /**
  * Each reviewer's latest round `body`'s `## Review` section records, or none when `quest review` wrote none
- * there, as when the section records a skipped review, even under the record's mark, or only the land fixer's fixes.
+ * there, as for a section with only the land fixer's fixes.
  */
 export function parseReview(body: string): ReviewSummary[] {
 	const section = reviewSection(body);
 	if (!section) return [];
 	const all = body.slice(section.start, section.end);
-	const at = all.indexOf(MARK);
+	const at = all.indexOf(REVIEW_MARK);
 	if (at < 0) return [];
 	// Each reviewer's block starts at its Reviewer line.
 	const blocks = all

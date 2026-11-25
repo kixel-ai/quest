@@ -481,9 +481,9 @@ describe("PR records", () => {
 			).toThrow(/Rounds line/);
 	});
 
-	test("a skipped review or a fixer-only section has no round", () => {
-		expect(parseReview("## Review\n\nSkipped: too trivial to need one.\n")).toEqual([]);
-		// A skip written by hand under the mark a round rewrote, as `/quest-review` allows.
+	test("a section no round wrote, or a fixer-only one, has no round", () => {
+		expect(parseReview("## Review\n\nSkipped: pin bump.\n")).toEqual([]);
+		// Text written by hand under the mark a round rewrote names no reviewer.
 		expect(
 			parseReview(
 				"## Review\n\nRewritten by `quest review` after each round.\n\n- Head: 6c2ce3d381 (skipped review)\n- Skip: one reworded sentence.\n",

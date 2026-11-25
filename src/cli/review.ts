@@ -25,9 +25,9 @@ import { dirname, join, posix } from "node:path";
 import { promisify } from "node:util";
 
 import {
-	ALWAYS_HIGH,
 	type Class,
 	type Held,
+	heldHigh,
 	type MalformedRisk,
 	RISK_FILE,
 	type RecordedRisk,
@@ -2380,7 +2380,7 @@ interface Classifying {
 
 /**
  * Set the head's risk tier before any reviewer runs, from the change alone: high when it touches a path
- * {@link ALWAYS_HIGH} or the base's risk file holds high, medium when the base has no risk file, and otherwise as the
+ * {@link heldHigh} names from the base's risk file, medium when the base has no risk file, and otherwise as the
  * first of {@link CLASSIFIERS} that can run judges the diff against the file. The last classification is reused while
  * the change and the file are the same, which `key` names.
  */
@@ -2395,7 +2395,7 @@ export async function classify(input: Classifying): Promise<{ key: string; value
 	if (file !== null && file.problems.length > 0)
 		throw new ReviewInputError(`the base's ${RISK_FILE} cannot be read: ${file.problems.join("; ")}`);
 	const range = `${change.mergeBase}..${change.head}`;
-	const held = [...ALWAYS_HIGH, ...(file?.high ?? [])];
+	const held = heldHigh(file);
 	const hits = changed.flatMap((path) => {
 		const rule = held.find((each) => matches(each.pattern, path));
 		return rule === undefined ? [] : [{ path, rule }];
