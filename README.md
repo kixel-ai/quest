@@ -290,7 +290,8 @@ objects. Each wait is `{line, party, kind, text}`: a decision adds `choices:
 [{label, description, recommended}]` and leaves its choice list out of `text`,
 and an action adds `pc`. A draft's item that names no party is the
 maintainer's prose, warning when it holds a choice list, and since `quest check` never reads PR bodies, a draft's
-malformed choice list reads as prose with a warning. Drafts come from
+malformed choice list reads as prose with a warning, keeping `pc: true`
+under `Maintainer (PC):` so `--no-pc` still drops it. Drafts come from
 the upstream's open PRs, found as for `unblocked --unclaimed`; without the
 remote, off GitHub, or when GitHub cannot be read, it lists the tree's items
 and warns that drafts were skipped. `/quest-run` walks you through them.

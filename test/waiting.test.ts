@@ -11,6 +11,7 @@ import {
 	readWait,
 	unblocked,
 	waiting,
+	waitLine,
 	withoutHandBack,
 } from "../src/core";
 import { TODAY } from "./fixture";
@@ -243,6 +244,7 @@ test("a draft's malformed choice list reads as prose, keeping a (PC) qualifier, 
 	expect(handBackWaits(action)).toEqual([
 		{ line: 3, party: "Maintainer", kind: "prose", pc: true, text: "which camera? Front (Recommended) Back" },
 	]);
+	expect(waitLine(handBackWaits(action)[0])).toBe("Maintainer (PC): which camera? Front (Recommended) Back");
 	// So a session away from the maintainer's computers still skips it.
 	const draft = { url: "https://github.com/o/r/pull/1", branch: "fix", body: action };
 	expect(waiting([], TODAY, { drafts: [draft], pc: false })).toEqual([]);

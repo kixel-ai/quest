@@ -512,8 +512,9 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"ready, waits} objects, where pr is the draft's URL or null, path is the " +
 				"quest, the quest a draft carries, or null. Each wait is {line, party, kind, text}, with party " +
 				"Maintainer for an action; a decision adds choices: [{label, description, recommended}], description " +
-				"null when absent, and its text leaves out its choice list; an action adds pc, true for Maintainer (PC):. " +
-				"--maintainer keeps only the items the maintainer settles, and --no-pc drops the Maintainer (PC): ones, " +
+				"null when absent, and its text leaves out its choice list; an action adds pc, true for Maintainer (PC):, and prose " +
+				"carries pc: true for a draft's Maintainer (PC): item read as prose for its malformed choice list. " +
+				"--maintainer keeps only the items the maintainer settles, and --no-pc drops every item with pc, " +
 				"for a session away from the maintainer's computers; both filter before ranking, so order follows the items kept. " +
 				"Invalid trees fail before printing. Outside conditions are never checked, nor whether another " +
 				"session holds a draft.\n\n" +

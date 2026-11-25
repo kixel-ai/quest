@@ -234,7 +234,7 @@ export function onMaintainer(wait: Wait): boolean {
 
 /** `wait` as one line: its party, qualifier, text, and a decision's choices. */
 export function waitLine(wait: Wait): string {
-	const qualifier = wait.kind === "action" ? (wait.pc ? " (PC)" : " (action)") : "";
+	const qualifier = wait.kind !== "decision" && wait.pc ? " (PC)" : wait.kind === "action" ? " (action)" : "";
 	const choices =
 		wait.kind === "decision"
 			? ` Choices: ${wait.choices
