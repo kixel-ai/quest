@@ -1652,9 +1652,9 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 			else for (const line of messageLines(found)) print(line);
 		});
 
-	const reviewers = [...SIZES, "high" as const]
-		.map((list) => `${list} ${REVIEWERS[list].map((e) => `${e.harness} ${e.model} ${e.effort}`).join(", then ")}`)
-		.join("; ");
+	const reviewers = SIZES.map(
+		(list) => `${list} ${REVIEWERS[list].map((e) => `${e.harness} ${e.model} ${e.effort}`).join(", then ")}`,
+	).join("; ");
 	const classifiers = CLASSIFIERS.map((e) => `${e.harness} ${e.model} ${e.effort}`).join(", then ");
 	/** quest review's exit code for `error`: 2 for a usage error, 3 when no reviewer could run, else 1. */
 	const reviewFailure = (error: unknown): number => {

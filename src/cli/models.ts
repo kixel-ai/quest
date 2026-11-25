@@ -20,10 +20,8 @@ export type ReviewModel = Model<ReviewHarness>;
 export const DEFAULT_SIZE: Size = "M";
 
 const sol = (effort: string): Model => ({ harness: "codex", model: "gpt-6.2-sol", effort });
-const astra = (effort: string): Model => ({ harness: "codex", model: "gpt-6.2-astra", effort });
 const opus = (effort: string): Model => ({ harness: "claude", model: "claude-opus-5-5", effort });
 const sonnet = (effort: string): Model => ({ harness: "claude", model: "claude-sonnet-5-5", effort });
-const fable = (effort: string): Model => ({ harness: "claude", model: "claude-fable-5-2", effort });
 
 /**
  * Each size's writers, ranked: a spawn starts the quest on the first that can
@@ -33,20 +31,16 @@ const fable = (effort: string): Model => ({ harness: "claude", model: "claude-fa
  * than the cheaper Haiku, whose surcharge past 100k input tokens leads users
  * to cap its compaction window there, barely above an agent's fixed load of
  * prompt, context, and skill. No size runs Opus at low, which misses too much.
- * XL starts on Fable, since its quests are hard rather than just big; Opus
- * takes over when Fable hits its usage limit, which a subscription caps at
- * half the weekly limit.
+ * XL runs Opus at xhigh rather than Fable, which costs several times as much
+ * and draws on a limit a subscription caps at half the weekly one.
  */
 export const WRITERS: Record<Size, readonly Model[]> = {
 	XS: [sonnet("high")],
 	S: [opus("medium")],
 	M: [opus("high")],
 	L: [opus("high")],
-	XL: [fable("high"), opus("xhigh")],
+	XL: [opus("xhigh")],
 };
-
-/** The lists a reviewer comes from: each PR size's, and the one every high-risk head reviews from. */
-export type Listing = Size | "high";
 
 /**
  * The writers each model is weaker than, so it never reviews their work: Sonnet is weaker than every other model,
@@ -72,23 +66,19 @@ export const unfit =
 		entry.model === model || weaker(entry.model, model);
 
 /**
- * Each list's reviewers, ranked: the first not {@link weaker} than the latest writer's model reviews the PR, which
- * may be the writer's own model, and one that cannot run passes the review to the next. Opus never runs below the
- * effort Opus writes the size at, its writer A/B arm's included, since it may review its own work. Another Codex model and then Fable close each size's list,
- * so a PR still has a reviewer while Sol, or all of Codex, is out. A high head reviews
- * from `high`, whatever its size: the pick, then a second reviewer from the other vendor, so Sol and Opus review
- * Opus's work, Opus and Astra Fable's. XL starts on Astra, the vendor's frontier model, at high rather than xhigh. No
- * Claude model reviews above high: the effort is also Claude Code's `/code-review` level, and xhigh there asks
- * for many findings, some uncertain, from a fan of sub-agents, which measured at ten times Sol xhigh's cost per PR
- * for half its high findings.
+ * Each size's two reviewers, one per vendor: Sol reviews a medium head alone, Opus takes its place when Sol cannot
+ * run or is {@link weaker} than the latest writer, and a high head gets both. Opus reviews at the effort it writes
+ * the size at, since it may review its own work, but never above high: the effort is also Claude Code's
+ * `/code-review` level, and xhigh there asks for many findings, some uncertain, from a fan of sub-agents, which
+ * measured at ten times Sol xhigh's cost per PR for half its high findings. No list names Fable or Astra, for
+ * which no review showed a finding the two here missed.
  */
-export const REVIEWERS: Record<Listing, readonly ReviewModel[]> = {
-	XS: [sol("medium"), opus("medium"), astra("medium"), fable("medium")],
-	S: [sol("medium"), opus("medium"), astra("medium"), fable("medium")],
-	M: [sol("high"), opus("high"), astra("high"), fable("high")],
-	L: [sol("xhigh"), opus("high"), astra("xhigh"), fable("high")],
-	XL: [astra("high"), opus("high"), sol("xhigh"), fable("high")],
-	high: [sol("xhigh"), opus("high"), fable("high"), astra("xhigh")],
+export const REVIEWERS: Record<Size, readonly ReviewModel[]> = {
+	XS: [sol("low"), opus("medium")],
+	S: [sol("medium"), opus("medium")],
+	M: [sol("high"), opus("high")],
+	L: [sol("xhigh"), opus("high")],
+	XL: [sol("xhigh"), opus("high")],
 };
 
 /** One side of the writer A/B: A runs the size's own first writer, B the alternative. */
@@ -128,12 +118,11 @@ export const SPLIT_CHECKERS: readonly Model[] = [sonnet("medium"), sol("medium")
 /**
  * The writer A/B: each armed size's quests split between its first writer
  * and an alternative where published results disagree, until the readout in
- * quest/m0/routing-evidence/README.md deletes it. M and XL run no arm.
+ * quest/m0/routing-evidence/README.md deletes it. M, L, and XL run no arm.
  */
 export const ARMS: Partial<Record<Size, Record<Arm, Model>>> = {
 	XS: { A: sonnet("high"), B: opus("medium") },
 	S: { A: opus("medium"), B: sonnet("high") },
-	L: { A: opus("high"), B: fable("medium") },
 };
 
 /**
