@@ -1966,9 +1966,8 @@ fakes(
 		moveBase(s.repo, (dir) => write(dir, "RISK.md", riskFile([])));
 		vi.stubEnv("FAKE_RISK", JSON.stringify({ tier: "medium", reason: "It changes the output." }));
 		vi.stubEnv("FAKE_REPLY", JSON.stringify({ score: 10, rationale: "Lands as is.", findings: [] }));
-		// A head that marks its source binary, and plants a NUL byte in another file, which Git calls binary itself.
+		// A head that marks its source binary.
 		write(s.repo, "src/lib.ts", "export const x = 3;\n");
-		write(s.repo, "src/nul.ts", "export const y = 1;\0\n");
 		write(s.repo, ".gitattributes", "src/lib.ts -diff\n");
 		git(s.repo, "add", ".");
 		git(s.repo, "commit", "-qm", "hide the hunks");
@@ -1976,8 +1975,17 @@ fakes(
 		expect(first.code, first.stderr).toBe(0);
 		const [call] = classifying(s.calls());
 		expect(call!.stdin).toContain("-export const x = 1;\n+export const x = 3;");
-		expect(call!.stdin).toContain("+export const y = 1;\0");
 		expect(call!.stdin).not.toContain("Binary files");
+		// A NUL byte planted in another file, which Git calls binary itself, or a real binary keeps its bytes out of the
+		// prompt, which names the file of the whole diff instead.
+		write(s.repo, "src/nul.ts", "export const y = 1;\0\n");
+		git(s.repo, "add", ".");
+		git(s.repo, "commit", "-qm", "plant a NUL byte");
+		expect((await quest("--root", s.repo, "review")).code).toBe(0);
+		const nul = classifying(s.calls()).at(-1)!;
+		expect(nul.stdin).not.toContain("\0");
+		expect(nul.stdin).toContain("or holds binary data");
+		expect(Object.values(nul.readable!)[0]).toContain("+export const y = 1;\0");
 		// Past the budget, the prompt holds the stat and names a file of the attribute-free diff, which the turn may read.
 		write(s.repo, "src/big.ts", `${"export const z = 1;\n".repeat(11_000)}`);
 		git(s.repo, "add", ".");

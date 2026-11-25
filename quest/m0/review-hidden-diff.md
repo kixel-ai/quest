@@ -25,14 +25,10 @@ them. The diffs the reviewers read do not:
 - They also run a `diff.external` helper or a textconv driver from the local
   config or `.git/info/attributes`, which can print an empty or rewritten
   patch.
-- `agyTurn` writes Antigravity's diffs itself (`diff-<n>.diff`), since it
-  has no shell. Those diffs already pass `--attr-source=<empty tree>`,
-  `--text`, `--no-ext-diff`, and `--no-textconv`, but not `--ignore-submodules=none`,
-  so a hidden gitlink bump is left out there too.
 
-Recommended: name every reviewer diff, and generate agy's, with
+Recommended: name every reviewer diff with
 `--ignore-submodules=none --no-ext-diff --no-textconv`, plus the attribute
-handling the classifier's diff has (`--attr-source=<empty tree>` and
-`--text`), so all of them read diffs the same way. Test each, agy's generated diff included, with a fixture head
+handling the classifier's and agy's diffs have (`--attr-source=<empty tree>` and
+`--text`), so all of them read diffs the same way. Test each with a fixture head
 that hides its change each way: a gitlink under `diff.ignoreSubmodules=all`,
 a `-diff` attribute, and a `diff.external` helper that prints nothing.

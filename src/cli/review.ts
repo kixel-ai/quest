@@ -2068,7 +2068,7 @@ export function classifyPrompt(
 		`The repository's risk file, read from ${RISK_FILE} at the base branch's tip ${file.sha}:\n\n<risk-file>\n${file.text}\n</risk-file>`,
 		whole
 			? `The change, \`git diff --stat --patch ${range}\`:`
-			: `The diff is ${stat.length + size} characters, more than this prompt holds, so only its stat ` +
+			: `The diff is ${stat.length + size} characters or holds binary data, which this prompt does not hold, so only its stat ` +
 				`follows${shown.length < stat.length ? ", cut short" : ""}. Read the parts you need from ` +
 				// A file, since no Bash command with the flags that keep the head's attributes out is allowed the classifier.
 				`\`${patchFile}\`, which holds \`git diff --stat --patch ${range}\` with every file shown as text, ` +
@@ -2401,7 +2401,9 @@ export async function classify(input: Classifying): Promise<{ key: string; value
 		const patchFile = join(scratch, DIFF_PATCH);
 		diff(["--patch", `--output=${patchFile}`]);
 		const size = statSync(patchFile).size;
-		const patch = stat.length + size <= DIFF_BUDGET ? readFileSync(patchFile, "utf8") : null;
+		// A NUL byte means a binary, whose raw bytes tokenize far past their length, so it goes down the file path too.
+		const bytes = stat.length + size <= DIFF_BUDGET ? readFileSync(patchFile) : null;
+		const patch = bytes && !bytes.includes(0) ? bytes.toString("utf8") : null;
 		const prompt = classifyPrompt(change, { sha: baseSha, text }, { stat, patch, file: patchFile, size }, offered);
 		answer = await ask(CLASSIFIERS, {
 			readable: scratch,
