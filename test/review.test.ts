@@ -1976,6 +1976,14 @@ fakes(
 		const [call] = classifying(s.calls());
 		expect(call!.stdin).toContain("-export const x = 1;\n+export const x = 3;");
 		expect(call!.stdin).not.toContain("Binary files");
+		// Bytes that are not UTF-8, before any NUL byte is in the diff, would decode to far more characters, so they go down the file path too.
+		writeFileSync(join(s.repo, "src/bin.ts"), Buffer.alloc(150_000, 0xff));
+		git(s.repo, "add", ".");
+		git(s.repo, "commit", "-qm", "plant invalid UTF-8");
+		expect((await quest("--root", s.repo, "review")).code).toBe(0);
+		const bin = classifying(s.calls()).at(-1)!;
+		expect(bin.stdin).not.toContain("\uFFFD");
+		expect(bin.stdin).toContain("or holds binary data");
 		// A NUL byte planted in another file, which Git calls binary itself, or a real binary keeps its bytes out of the
 		// prompt, which names the file of the whole diff instead.
 		write(s.repo, "src/nul.ts", "export const y = 1;\0\n");
@@ -1986,14 +1994,6 @@ fakes(
 		expect(nul.stdin).not.toContain("\0");
 		expect(nul.stdin).toContain("or holds binary data");
 		expect(Object.values(nul.readable!)[0]).toContain("+export const y = 1;\0");
-		// Bytes that are not UTF-8 and hold no NUL would decode to far more characters, so they go down the file path too.
-		writeFileSync(join(s.repo, "src/bin.ts"), Buffer.alloc(150_000, 0xff));
-		git(s.repo, "add", ".");
-		git(s.repo, "commit", "-qm", "plant invalid UTF-8");
-		expect((await quest("--root", s.repo, "review")).code).toBe(0);
-		const bin = classifying(s.calls()).at(-1)!;
-		expect(bin.stdin).not.toContain("\uFFFD");
-		expect(bin.stdin).toContain("or holds binary data");
 		// Past the budget, the prompt holds the stat and names a file of the attribute-free diff, which the turn may read.
 		write(s.repo, "src/big.ts", `${"export const z = 1;\n".repeat(11_000)}`);
 		git(s.repo, "add", ".");
