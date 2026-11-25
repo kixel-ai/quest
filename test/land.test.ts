@@ -1981,7 +1981,7 @@ ${requeueScript}
 		git(root, "checkout", "--ours", "--", "flake.nix");
 		git(root, "commit", "-qam", "keep the PR's flake.nix");
 		expect(() => validateFix(root, entry, git(root, "rev-parse", "HEAD"), forge.main())).toThrow(
-			"resolves a conflict in a protected path",
+			"settles a conflict in a protected path",
 		);
 	});
 	test("refuses resolving a conflict that names no conflicted file, beside one that does or not", async () => {
@@ -2007,7 +2007,7 @@ ${requeueScript}
 			writeFileSync(join(root, "f.txt"), "both\n");
 			git(root, "commit", "-qam", "resolve");
 			expect(() => validateFix(root, entry, git(root, "rev-parse", "HEAD"), forge.main())).toThrow(
-				"resolves a conflict that names no conflicted file, at dir",
+				"settles a conflict that names no conflicted file, at dir",
 			);
 		}
 	});

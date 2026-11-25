@@ -526,11 +526,6 @@ export function outputSection(output: string, room: number): string {
 /** The build and CI paths a fixer never edits unread on any PR, beside those the base's risk file holds high. */
 const BUILD = ["flake.nix", "flake.lock", "shell.nix", "default.nix", ".gitmodules", ".envrc", "nix", ".github"];
 
-/** Whether a PR that is not high protects `path`: a {@link BUILD} path, or one of `held`. */
-const guarded = (held: HighPath[], path: string) =>
-	BUILD.some((prefix) => path === prefix || path.startsWith(`${prefix}/`)) ||
-	held.some(({ pattern }) => matches(pattern, path));
-
 /** `git <args> -z`'s NUL-separated paths in `root`, untrimmed, since a path may start with a space. */
 function paths(root: string, args: string[]): string[] {
 	const result = tryGit(root, [...args, "-z"]);
@@ -551,7 +546,7 @@ function highPaths(root: string, base: string): HighPath[] {
 
 /**
  * New commits descend from the pin. A head that takes no history of `base`, the base the fixer was given, keeps the
- * pin's protected content and modes; one that does merges all of `base`, resolves no conflict in a protected path or
+ * pin's protected content and modes; one that does merges all of `base`, settles no conflict in a protected path or
  * one naming no conflicted file, and keeps the plain merge's. Every path is protected on a high head: one whose PR's
  * review record makes it high, `high` saying why, or whose own change touches a path the base's risk file holds high.
  */
@@ -576,21 +571,21 @@ export function validateFix(root: string, entry: Pick<Entry, "head">, head: stri
 		entry.head,
 	]).find((path) => held.some(({ pattern }) => matches(pattern, path)));
 	const every = high ?? (hit === undefined ? undefined : `the pull request changes ${hit}, which is high`);
-	const protectedPath = (path: string) => every !== undefined || guarded(held, path);
+	const protectedPath = (path: string) =>
+		every !== undefined ||
+		BUILD.some((prefix) => path === prefix || path.startsWith(`${prefix}/`)) ||
+		held.some(({ pattern }) => matches(pattern, path));
 	const refuse = (what: string, path: string) =>
 		new ProtectedEdit(
 			`off-limits fixer edit: ${what}, at ${path}${every === undefined ? "" : `; every path is protected, since ${every}`}`,
 		);
-	const merged = tryGit(root, ["merge-tree", "--write-tree", "--name-only", "-z", entry.head, base]);
-	if (merged.status !== 0 && merged.status !== 1) throw new Error("cannot compute protected merge result");
-	const { tree, conflicts, unlisted } = mergeResult(merged.stdout);
-	const gitlinks = new Set(
-		[head, entry.head, tree].flatMap((ref) =>
-			paths(root, ["ls-tree", "-r", ref])
-				.filter((line) => line.startsWith("160000 "))
-				.map((line) => line.slice(line.indexOf("\t") + 1)),
-		),
-	);
+	const gitlinks = new Set<string>();
+	const addGitlinks = (ref: string) => {
+		for (const line of paths(root, ["ls-tree", "-r", ref]))
+			if (line.startsWith("160000 ")) gitlinks.add(line.slice(line.indexOf("\t") + 1));
+	};
+	addGitlinks(head);
+	addGitlinks(entry.head);
 	// Only the paths whose entries differ need the protection test, not every path of three trees.
 	const edited = (from: string) =>
 		paths(root, ["diff-tree", "-r", "--name-only", "--no-renames", "--ignore-submodules=none", from, head]).find(
@@ -604,11 +599,15 @@ export function validateFix(root: string, entry: Pick<Entry, "head">, head: stri
 	}
 	// With the base's history in the head, the pin's copy of a path the base changed reverts that change.
 	if (!contains(root, base, head)) throw new Error("a fix that merges base history must merge all of the base");
+	const merged = tryGit(root, ["merge-tree", "--write-tree", "--name-only", "-z", entry.head, base]);
+	if (merged.status !== 0 && merged.status !== 1) throw new Error("cannot compute protected merge result");
+	const { tree, conflicts, unlisted } = mergeResult(merged.stdout);
+	addGitlinks(tree);
 	// Some conflicts, such as a directory rename split, name no conflicted file, so one may fall in a protected path.
 	if (unlisted !== undefined || (merged.status === 1 && conflicts.length === 0))
-		throw refuse("it resolves a conflict that names no conflicted file", unlisted ?? "an unnamed path");
+		throw refuse("it settles a conflict that names no conflicted file", unlisted ?? "an unnamed path");
 	const conflict = conflicts.find((path) => protectedPath(path) || gitlinks.has(path));
-	if (conflict !== undefined) throw refuse("it resolves a conflict in a protected path", conflict);
+	if (conflict !== undefined) throw refuse("it settles a conflict in a protected path", conflict);
 	const path = edited(tree);
 	if (path !== undefined) throw refuse("protected set must equal the base merge result's", path);
 }
