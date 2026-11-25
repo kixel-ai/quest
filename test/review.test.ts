@@ -1492,7 +1492,7 @@ fakes("each round rewrites the Review section of the branch's open PR, keeping t
 			"--json",
 		);
 		expect(second.code).toBe(0);
-		expect(JSON.parse(second.stdout).record).toEqual({ url: "https://github.com/acme/widget/pull/7", number: 7 });
+		expect(JSON.parse(second.stdout).record).toEqual({ url: "https://github.com/acme/widget/pull/7" });
 		const record = pull.body.split("## Review\r\n\n")[1]!.split("\n\n## Models")[0];
 		expect(record).toContain(`- Head: ${git(s.repo, "rev-parse", "HEAD").slice(0, 12)},`);
 		expect(record).toContain("- Session: `thread-1`, round 2\n");
@@ -2051,7 +2051,7 @@ fakes("each session a round starts is queued with the PR its record went to, or 
 		new Set(
 			readdirSync(pending).map(
 				(name) =>
-					(JSON.parse(readFileSync(join(pending, name), "utf8")) as { reviewed: { pull: number | null } })
+					(JSON.parse(readFileSync(join(pending, name), "utf8")) as { reviewed: { pull: string | null } })
 						.reviewed.pull,
 			),
 		);
@@ -2064,7 +2064,7 @@ fakes("each session a round starts is queued with the PR its record went to, or 
 		write(s.repo, "src/lib.ts", "export const x = 3;\n");
 		git(s.repo, "commit", "-qam", "another constant");
 		expect((await quest("--root", s.repo, "review", "--new")).code).toBe(0);
-		expect(queued()).toEqual(new Set([8]));
+		expect(queued()).toEqual(new Set(["https://github.com/acme/widget/pull/8"]));
 	} finally {
 		vi.unstubAllGlobals();
 	}

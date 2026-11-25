@@ -710,9 +710,12 @@ export function heading(pulls: Pull[]): (reached: Reached) => boolean {
 	return (reached) => headed(branches, reached) !== null;
 }
 
-/** The PR `quest review` recorded a session it started on, by number, or null when it recorded on none; its branch; and its role. */
+/**
+ * The PR `quest review` recorded a session it started on, by URL so a same-numbered PR in another repository never
+ * claims it, or null when it recorded on none; its branch; and its role.
+ */
 export interface Reviewed {
-	pull: number | null;
+	pull: string | null;
 	branch: string;
 	role: "classifying" | "reviewing";
 }
@@ -753,8 +756,8 @@ function attribute(
 	const own = new Map<Session, Pull>();
 	const owned = owners(evidence);
 	for (const session of sessions) {
-		const number = pinOf(session, pins)?.pull ?? null;
-		const recorded = number === null ? undefined : pulls.find((each) => each.number === number);
+		const url = pinOf(session, pins)?.pull?.toLowerCase();
+		const recorded = url === undefined ? undefined : pulls.find((each) => each.url.toLowerCase() === url);
 		if (recorded) {
 			own.set(session, recorded);
 			continue;

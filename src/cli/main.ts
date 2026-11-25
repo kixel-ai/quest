@@ -1911,7 +1911,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				// Queued once the round's record names its sessions, so the sender never reads one as ordinary work.
 				const started: Started[] = [];
 				// Each carries the PR the round recorded on, so the sender never credits a stranger fork's PR on the same branch name.
-				const queueStarted = (pull: number | null): void => {
+				const queueStarted = (pull: string | null): void => {
 					for (const session of started.splice(0)) {
 						// Only the dashboard loses a session that is not queued, so it never fails the round.
 						try {
@@ -1954,7 +1954,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 						} catch (error) {
 							failure = error;
 						}
-						queueStarted(record !== undefined && "url" in record ? record.number : null);
+						queueStarted(record !== undefined && "url" in record ? record.url : null);
 						const status = record !== undefined && "url" in record ? record.status : undefined;
 						// An acceptance is the status alone, so one no status records has not happened.
 						const accepting = reviewed.accepted !== undefined;

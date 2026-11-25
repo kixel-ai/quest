@@ -321,7 +321,7 @@ const passed = ({ rounds, tallies, accepted }: Pick<Reviewed, "rounds" | "tallie
  * Where a round's record went: the PR whose body holds it, and why its status was not set, skipped for a token that
  * cannot push, whose status would count for nothing, else refused; or why no body changed.
  */
-export type Recorded = { url: string; number: number; status?: Unattested } | { skipped: string };
+export type Recorded = { url: string; status?: Unattested } | { skipped: string };
 
 /** Why `quest review` set no status on the head it recorded. */
 type Unattested = { skipped: string } | { refused: string };
@@ -339,7 +339,6 @@ async function openPull(
 ): Promise<
 	| {
 			url: string;
-			number: number;
 			body: string;
 			edit(body: string): Promise<void>;
 			/** Set the `quest review` status on `head`, for its diff from the merge base `from`, or say why not. */
@@ -387,7 +386,6 @@ async function openPull(
 				).body as string | null) ?? "");
 	return {
 		url: pull.url,
-		number: pull.number,
 		body,
 		edit: (body) => hosting.writes().edit({ ...repository, number: pull.number }, { title: null, body }),
 		// The status goes on the person's own token, which `quest status` counts only when it can push. Another forge
@@ -467,6 +465,5 @@ export async function recordRounds(root: string, reviewed: Reviewed, deps: Claim
 	// The status goes first, so a body edit that fails cannot leave an earlier pass standing for a failed head; an
 	// acceptance no status records is written nowhere.
 	if (next !== pull.body && !(status !== null && reviewed.accepted !== undefined)) await pull.edit(next);
-	const recorded = { url: pull.url, number: pull.number };
-	return status === null ? recorded : { ...recorded, status };
+	return status === null ? { url: pull.url } : { url: pull.url, status };
 }

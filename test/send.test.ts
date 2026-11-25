@@ -236,17 +236,19 @@ test("a session `quest review` queued is sent on the PR it recorded on, as the r
 	const env = home();
 	const root = checkout();
 	const start = Date.parse("2026-11-06T10:00:00Z");
-	const reviewed = (session: string, pull: number | null, branch: string, role: "classifying" | "reviewing") =>
+	const reviewed = (session: string, pull: string | null, branch: string, role: "classifying" | "reviewing") =>
 		queue({ harness: "claude", session, cwd: root, start, pull, branch, role }, env);
 	// A round that recorded on no PR, as one whose PR had not opened, pins its branch alone.
 	reviewed("rev", null, "quest/m0/a", "reviewing");
 	queue({ ...stopped(root), session: "impl" }, env);
 	// A fork's PR heads a repository other than the checkout's origin.
-	reviewed("cls", 8, "fix/y", "classifying");
+	reviewed("cls", "https://github.com/acme/proj/pull/8", "fix/y", "classifying");
 	// Reviewed before its PR opens.
 	reviewed("early", null, "feature/z", "reviewing");
 	// Its round skipped the only PR on its branch, a stranger fork's whose head the checkout lacks.
 	reviewed("skipped", null, "patch-1", "reviewing");
+	// Its round recorded on another repository's PR of the same number as this one's.
+	reviewed("elsewhere", "https://github.com/other/proj/pull/7", "quest/m0/a", "reviewing");
 	// The runner's review checkout names its own branch, and a detached one names none. A sub-agent anywhere in the
 	// same checkout follows its parent onto the fork's PR.
 	const sessions = [
@@ -259,6 +261,7 @@ test("a session `quest review` queued is sent on the PR it recorded on, as the r
 		session("aside", "quest/m0/a", { parent: "cls", cwd: root }),
 		session("early", "kix-review/2"),
 		session("skipped", "kix-review/3"),
+		session("elsewhere", "kix-review/4"),
 		// An implementer's sub-agent in another checkout keeps out of the fork's PR.
 		session("impl", "fix/y", { repositories: ["ann/proj"], cwd: "/fork" }),
 		session("away", "x", { branches: [], parent: "impl", cwd: "/up" }),
@@ -285,6 +288,7 @@ test("a session `quest review` queued is sent on the PR it recorded on, as the r
 		["aside", [8], "classifying", "fix/y"],
 		["early", [], "reviewing", "feature/z"],
 		["skipped", [], "reviewing", "patch-1"],
+		["elsewhere", [], "reviewing", "quest/m0/a"],
 		["impl", [8], "implementing", "fix/y"],
 		["away", [], "implementing", null],
 	]);
