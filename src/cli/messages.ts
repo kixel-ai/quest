@@ -6,7 +6,8 @@ import { closeSync, existsSync, openSync, readdirSync, readSync, realpathSync, s
 import { isAbsolute, join, sep } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { hostedRepository, originHost } from "./forge";
-import { type RemoteHost, urlHost } from "./github";
+import { GitError } from "./git";
+import { type Remote, type RemoteHost, readRemote, urlHost } from "./github";
 import { RECOMMENDED, checkoutRoot } from "./rules";
 import { kixelUrl } from "./tokens";
 
@@ -127,6 +128,11 @@ export interface Repositories {
 	name(dir: string, session?: string): string;
 	/** The repository a recorded origin URL names on either forge, as `name` would, or null for neither. */
 	origin(url: string): string | null;
+	/**
+	 * Whether `repository` is the one the checkout naming `dir`, where `session` ran, names by its configured origin
+	 * or by that URL after `insteadOf` rewrites.
+	 */
+	names(dir: string, session: string | undefined, repository: string): boolean;
 }
 
 export interface MessagesDependencies {
@@ -184,46 +190,68 @@ export function repositories(
 	env: NodeJS.ProcessEnv,
 	projects: ReadonlyMap<string, T3Project> = new Map(),
 ): Repositories {
-	const names = new Map<string, string>();
-	const removed = new Set<string>();
-	// By checkout, so its subdirectories and removed worktrees share one lookup.
-	const hosts = new Map<string, RemoteHost | null>();
 	const kixel = kixelUrl(env);
 	const named = (host: RemoteHost | null) => forgeName(host, kixel);
-	const name = (dir: string): string => {
-		let found = names.get(dir);
+	const hosted = (url: string) => hostedRepository(kixel, url);
+	// By checkout, so its subdirectories and removed worktrees share one lookup: the repository its configured origin
+	// names, else the one that URL names after rewrites, and both names, case-folded.
+	const origins = new Map<string, { name: string | null; aliases: string[] }>();
+	const origin = (checkout: string) => {
+		let found = origins.get(checkout);
+		if (found === undefined) {
+			let remote: Remote | null = null;
+			let used: string | undefined;
+			try {
+				remote = readRemote(checkout, "origin");
+				used = remote?.used().fetch;
+			} catch (error) {
+				// A directory git cannot read, such as a worktree whose repository moved, is named by itself.
+				if (!(error instanceof GitError)) throw error;
+			}
+			const each = [remote?.configured.fetch, used].map((url) =>
+				url === undefined ? null : named(urlHost(url, hosted)),
+			);
+			found = { name: each[0] ?? each[1] ?? null, aliases: each.filter((one) => one !== null).map(folded) };
+			origins.set(checkout, found);
+		}
+		return found;
+	};
+	// By directory, the checkout that names it, if any, and whether the directory is gone.
+	const checkouts = new Map<string, string | null>();
+	const removed = new Set<string>();
+	const checkout = (dir: string): string | null => {
+		let found = checkouts.get(dir);
 		if (found === undefined) {
 			// The physical directory, as git would find it: a symlink's own parents can be another checkout.
 			const real = physical(dir);
 			if (real === null) removed.add(dir);
-			const checkout = real !== null ? checkoutRoot(real) : WORKTREE.exec(dir)?.[1];
-			let host: RemoteHost | null = null;
-			if (checkout !== undefined && existsSync(checkout)) {
-				host = hosts.get(checkout) ?? null;
-				if (!hosts.has(checkout)) {
-					// A directory git cannot read, such as a worktree whose repository moved, is named by itself.
-					host = originHost(checkout, env);
-					hosts.set(checkout, host);
-				}
-			}
-			found = named(host) ?? dir;
-			names.set(dir, found);
+			const root = real !== null ? checkoutRoot(real) : WORKTREE.exec(dir)?.[1];
+			found = root !== undefined && existsSync(root) ? root : null;
+			checkouts.set(dir, found);
 		}
 		return found;
 	};
+	// The directory whose checkout names `dir`: T3 Code removes its worktrees, which sit outside the checkout, but keeps
+	// their project and path. A directory that still exists is what it is, even unnamed, and one outside the session's
+	// worktree, such as where a person resumed it, is not the project's.
+	const source = (dir: string, session: string | undefined): string => {
+		const own = checkout(dir);
+		if (own !== null && origin(own).name !== null) return dir;
+		const project = session === undefined ? undefined : projects.get(session);
+		const inside = (root: string | null) => root !== null && (dir === root || dir.startsWith(`${root}${sep}`));
+		return project !== undefined && removed.has(dir) && inside(project.worktree) ? project.root : dir;
+	};
+	const name = (dir: string): string => {
+		const own = checkout(dir);
+		return (own === null ? null : origin(own).name) ?? dir;
+	};
 	return {
-		name(dir, session) {
-			const found = name(dir);
-			// T3 Code removes its worktrees, which sit outside the checkout, but keeps their project and path. A directory
-			// that still exists is what it is, even unnamed, and one outside the session's worktree, such as where a
-			// person resumed it, is not the project's.
-			const project = session === undefined ? undefined : projects.get(session);
-			const inside = (root: string | null) => root !== null && (dir === root || dir.startsWith(`${root}${sep}`));
-			return isAbsolute(found) && project !== undefined && removed.has(dir) && inside(project.worktree)
-				? name(project.root)
-				: found;
+		name: (dir, session) => name(source(dir, session)),
+		origin: (url) => named(urlHost(url, hosted)),
+		names(dir, session, repository) {
+			const own = checkout(source(dir, session));
+			return own !== null && origin(own).aliases.includes(folded(repository));
 		},
-		origin: (url) => named(urlHost(url, (each) => hostedRepository(kixel, each))),
 	};
 }
 
@@ -253,9 +281,6 @@ function forgeName(host: RemoteHost | null, kixel: string): string | null {
 export function checkoutRepository(dir: string, env: NodeJS.ProcessEnv): string | null {
 	return forgeName(originHost(checkoutRoot(realpathSync(dir)), env), kixelUrl(env));
 }
-
-/** A repository's `owner/name`, whichever forge it is on. */
-const ownerName = (name: string) => name.split("/").slice(-2).join("/").toLowerCase();
 
 /** Files under `dir` with `.jsonl` names written since `since`, recursively; a log untouched since holds nothing newer. */
 function logsSince(dir: string, since: number): string[] {
@@ -434,15 +459,18 @@ export function readCodexMessages(path: string, since: number, repositories: Rep
 			typed = payload.originator !== T3_CODEX;
 			unmarked = writesNoProvenance(payload.cli_version);
 			session = payload.id;
-			// The directory's origin names it as other harnesses' sessions there are named, since the URL Codex recorded
-			// can carry an `insteadOf` rewrite to the same owner/name elsewhere; a recorded repository of another
-			// owner/name means the directory has since held another checkout, and one that names none, no checkout.
-			const dir = typeof payload.cwd === "string" ? repositories.name(payload.cwd, payload.id) : null;
+			// The directory's origin names it as other harnesses' sessions there are named when the URL Codex recorded
+			// is that origin, or the URL an `insteadOf` rewrite makes of it; a recorded repository it names neither way
+			// means the directory has since held another checkout.
+			const cwd = typeof payload.cwd === "string" ? payload.cwd : null;
+			const dir = cwd === null ? null : repositories.name(cwd, payload.id);
 			const url = (payload.git as Record<string, unknown> | undefined)?.repository_url;
 			const recorded = typeof url === "string" ? repositories.origin(url) : null;
-			const current = dir !== null && !isAbsolute(dir);
+			const current = cwd !== null && dir !== null && !isAbsolute(dir);
 			const repository =
-				current && (recorded === null || ownerName(recorded) === ownerName(dir)) ? dir : (recorded ?? dir);
+				current && (recorded === null || repositories.names(cwd, payload.id, recorded))
+					? dir
+					: (recorded ?? dir);
 			if (repository === null) throw new Error(`${path} names no directory`);
 			where = repository;
 			return true;

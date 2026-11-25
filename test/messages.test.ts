@@ -751,7 +751,10 @@ describe("messages", () => {
 
 	test("names a T3 Code session by its project, a Codex one by its directory's origin, and skips what the base skipped", () => {
 		const home = tempDir();
-		const proj = checkout(join(home, "proj"), "https://github.com/acme/proj.git");
+		// Fetches go through a mirror of another owner/name.
+		const proj = checkout(join(home, "proj"), "https://github.com/acme/proj.git", {
+			"url.https://kixel.quest/mirrors/.insteadOf": "https://github.com/acme/",
+		});
 		const other = checkout(join(home, "other"), "https://github.com/acme/other.git");
 		const scratch = join(home, "scratch");
 		mkdirSync(scratch);
@@ -775,8 +778,8 @@ describe("messages", () => {
 		writeFileSync(
 			join(home, ".codex", "sessions", `rollout-2026-11-06T10-00-00-${THREAD}.jsonl`),
 			lines(
-				// Codex recorded the URL a rewrite gave, not the origin the checkout names.
-				codexMeta({ cwd: proj, git: { repository_url: "https://kixel.quest/acme/proj" } }),
+				// Codex recorded the URL the rewrite gave, not the origin the checkout names.
+				codexMeta({ cwd: proj, git: { repository_url: "https://kixel.quest/mirrors/proj" } }),
 				codexTurn("2026-11-06T11:00:00Z", [["and test", "user"]]),
 			),
 		);
@@ -787,6 +790,15 @@ describe("messages", () => {
 				// The directory held another repository's checkout when Codex recorded it.
 				codexMeta({ id: reused, cwd: proj, git: { repository_url: "https://github.com/Acme/Old.git" } }),
 				codexTurn("2026-11-06T11:30:00Z", [["old work", "user"]]),
+			),
+		);
+		const moved = "66666666-7777-8888-9999-000000000000";
+		writeFileSync(
+			join(home, ".codex", "sessions", `rollout-2026-11-06T10-00-00-${moved}.jsonl`),
+			lines(
+				// The same owner/name on the other forge, which no rewrite of this checkout's origin gives, is another repository.
+				codexMeta({ id: moved, cwd: other, git: { repository_url: "https://kixel.quest/acme/other" } }),
+				codexTurn("2026-11-06T11:40:00Z", [["hosted work", "user"]]),
 			),
 		);
 		const state = join(home, ".t3", "userdata", "statev2.sqlite");
@@ -810,9 +822,14 @@ describe("messages", () => {
 			["message", "codex", "acme/proj", "and test"],
 		]);
 		expect(notes).toEqual([
-			"printed acme/proj's entries only, leaving out 3 other repositories', 2 of them directories no GitHub or Kixel Quest origin names",
+			"printed acme/proj's entries only, leaving out 4 other repositories', 2 of them directories no GitHub or Kixel Quest origin names",
 		]);
-		expect(messages({ since: "2026-11-01", repository: null }, { env: {}, home })).toHaveLength(5);
+		const all = messages({ since: "2026-11-01", repository: null }, { env: {}, home });
+		expect(all.map((m) => m.kind === "message" && [m.repository, m.text]).filter(Boolean)).toEqual([
+			["acme/proj", "and test"],
+			["Acme/Old", "old work"],
+			["kixel.quest/acme/other", "hosted work"],
+		]);
 		// A provider row SQLite cannot read, with no message of its own, maps no session and fails no read.
 		const broken = new DatabaseSync(state);
 		broken.prepare("INSERT INTO projection_projects VALUES ('theirs', ?)").run(other);
@@ -823,7 +840,7 @@ describe("messages", () => {
 		`);
 		broken.close();
 		expect(read()).toEqual(mine);
-		expect(messages({ since: "2026-11-01", repository: null }, { env: {}, home })).toHaveLength(5);
+		expect(messages({ since: "2026-11-01", repository: null }, { env: {}, home })).toHaveLength(6);
 	});
 
 	test("names each forge's repository from the configured origin of the physical directory", () => {
@@ -885,7 +902,12 @@ describe("messages", () => {
 			// A stale root under a live checkout's worktrees is no checkout, not the one holding it.
 			const stale = run("--root", join(proj, ".worktrees", "gone"), "messages", "--since", "2026-11-01");
 			expect(stale.code).toBe(2);
-			expect(stale.stderr).toMatch(/does not exist/);
+			expect(stale.stderr).toMatch(/is not a directory/);
+			// Nor is a root under a regular file.
+			writeFileSync(join(proj, "README.md"), "");
+			const file = run("--root", join(proj, "README.md", "sub"), "messages", "--since", "2026-11-01");
+			expect(file.code).toBe(2);
+			expect(file.stderr).toMatch(/is not a directory/);
 		} finally {
 			process.chdir(cwd);
 			vi.unstubAllEnvs();

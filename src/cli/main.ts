@@ -1602,7 +1602,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"AGENTS.md instructions), outside headless and sub-agent sessions. The repository is the " +
 				"checkout's configured origin, as owner/name on GitHub or <host>/owner/name on Kixel Quest, else the directory; a removed worktree under a checkout's .worktrees/ " +
 				"or .claude/worktrees/ is named by that checkout, and one T3 Code removed by its project. A Codex session takes the origin " +
-				"Codex recorded when the directory's names none or another owner/name, and any other session keeps its directory. It prints only the repository of the checkout it runs in, " +
+				"Codex recorded unless that is the directory's configured origin or the URL an insteadOf rewrite makes of it, and any other session keeps its directory. It prints only the repository of the checkout it runs in, " +
 				"comparing names without case: it reads every repository's sessions as --all does, which prints them all, " +
 				"and drops the other repositories' entries. Output goes to stdout only, except notes on stderr " +
 				"naming each Claude Code session whose malformed lines, such as a partial record a crashed write left, " +
@@ -1625,8 +1625,9 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				try {
 					repository = checkoutRepository(dir, process.env);
 				} catch (error) {
-					if ((error as NodeJS.ErrnoException).code === "ENOENT")
-						throw new UsageError(`${dir} does not exist`);
+					// A root under a regular file, ENOTDIR, names no directory either.
+					const code = (error as NodeJS.ErrnoException).code;
+					if (code === "ENOENT" || code === "ENOTDIR") throw new UsageError(`${dir} is not a directory`);
 					throw error;
 				}
 				if (repository === null)

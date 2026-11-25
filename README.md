@@ -2270,9 +2270,9 @@ GitHub as `owner/name`, or on Kixel Quest as `<host>/owner/name`, compared
 without case, else its
 directory; a removed worktree under a checkout's `.worktrees/` or
 `.claude/worktrees/` takes that checkout's, one T3 Code removed takes its
-project's; a Codex session takes the origin Codex recorded when the
-directory's names none or another owner/name, and any other keeps its
-directory), and session, then its text. It also prints each
+project's; a Codex session takes the origin Codex recorded unless that is
+the directory's configured origin or the URL an `insteadOf` rewrite makes of
+it, and any other keeps its directory), and session, then its text. It also prints each
 answer a person gave an agent's blocking question, such as Claude Code's
 `AskUserQuestion` or Codex's `request_user_input`, marked `answer` with the
 skill the session last ran, then the question, the options the agent marked
