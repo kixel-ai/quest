@@ -1331,6 +1331,28 @@ agyFakes(
 	},
 );
 
+agyFakes("the user's own attributes hide no hunk from agy's diff", async () => {
+	const s = setup("CLAUDECODE");
+	git(s.repo, "rm", "-q", "docs/AGENTS.md");
+	git(s.repo, "commit", "-qm", "delete");
+	const diffs = async () => {
+		const result = await quest("--root", s.repo, "review", ...AGY, "--new");
+		expect(result.code, result.stderr).toBe(0);
+		const call = s.calls().filter((each) => each.workspace?.["diff-1.diff"] !== undefined).at(-1);
+		return call!.workspace!["diff-1.diff"]!;
+	};
+	const plain = await diffs();
+	expect(plain).toContain("-BASE-DOCS rule");
+	// Binary in the checkout's own attributes and in the user's global ones, with a helper that would print nothing.
+	write(s.repo, ".git/info/attributes", "* -diff\ndocs/AGENTS.md binary diff=plant\n");
+	const config = join(s.bin, "..", "config");
+	write(config, "git/attributes", "* -diff\n");
+	vi.stubEnv("XDG_CONFIG_HOME", config);
+	git(s.repo, "config", "diff.plant.command", "true");
+	git(s.repo, "config", "diff.plant.textconv", "true");
+	expect(await diffs()).toBe(plain);
+});
+
 agyFakes("a round whose last head is gone, as an amend pruned away, reviews the whole change anew", async () => {
 	const s = setup("CLAUDECODE");
 	expect((await quest("--root", s.repo, "review", ...AGY)).code).toBe(0);
