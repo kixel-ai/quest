@@ -951,12 +951,13 @@ function outcome(row: ReturnType<typeof noOutcomes>, each: PullRow, latest: Set<
 	// Each run seats other models, so the PR's runs are the latest's number, not any one reviewer's rounds, and its
 	// first round is the branch's first run's, not each later model's first, which would count a finding kept open
 	// once per model.
-	const debut = Math.min(...counted.map((review) => review.runs?.debut ?? 1));
+	const tallies = counted.map((review) => review.tally!);
+	const debut = Math.min(...tallies.map((tally) => tally.debut));
 	count(
 		row,
-		counted.map((review) => review.tally!),
-		Math.max(...counted.map((review) => review.runs?.last ?? Math.max(review.round ?? 0, review.tally!.rounds))),
-		counted.filter((review) => (review.runs?.debut ?? 1) === debut).map((review) => review.tally!),
+		tallies,
+		Math.max(...tallies.map((tally) => tally.last)),
+		tallies.filter((tally) => tally.debut === debut),
 	);
 }
 

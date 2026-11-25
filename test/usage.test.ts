@@ -337,11 +337,12 @@ describe("PR records", () => {
 				rung: { name: "deep", drawn: "down" },
 				session: THREAD,
 				sessions: [THREAD, "thread-0"],
-				runs: { debut: 1, last: 3 },
 				round: 3,
 				score: 7,
 				tally: {
 					rounds: 3,
+					debut: 1,
+					last: 3,
 					first: { high: 1, medium: 0, low: 1 },
 					findings: { high: 1, medium: 1, low: 2 },
 					fixed: 2,
@@ -358,11 +359,12 @@ describe("PR records", () => {
 				rung: null,
 				session: "thread-2",
 				sessions: ["thread-2"],
-				runs: { debut: 1, last: 1 },
 				round: 1,
 				score: 10,
 				tally: {
 					rounds: 1,
+					debut: 1,
+					last: 1,
 					first: { high: 0, medium: 0, low: 0 },
 					findings: { high: 0, medium: 0, low: 0 },
 					fixed: 0,
@@ -380,11 +382,12 @@ describe("PR records", () => {
 				rung: { name: "frontier", drawn: "up" },
 				session: CLAUDE,
 				sessions: [CLAUDE],
-				runs: { debut: 1, last: 2 },
 				round: null,
 				score: null,
 				tally: {
 					rounds: 2,
+					debut: 1,
+					last: 2,
 					first: { high: 0, medium: 0, low: 0 },
 					findings: { high: 2, medium: 0, low: 0 },
 					fixed: 1,
@@ -444,22 +447,18 @@ describe("PR records", () => {
 		expect(classifierSessions(`## Review\n\n${classified}\n`)).toEqual(["k1"]);
 	});
 
-	test("a record written before tallies has none, and a Rounds line that does not add up fails", () => {
+	test("a record written before tallies has none, and a Rounds line that does not add up or names no runs fails", () => {
 		const record = reviewRecord({ ...at, rounds: [second], tallies: [tallies[1]!], risk, skipped: [] });
 		const older = `## Review\n\n${record.replace(/^- Rounds: .*\n/m, "")}\n`;
 		expect(parseReview(older)[0]!.tally).toBeNull();
-		// An older record's shadow block is left out, and its second reviewer reads as one a flag named.
-		const both = reviewRecord({ ...at, rounds: [round, second], tallies, risk, skipped: [] });
-		const marked = (suffix: string) =>
-			`## Review\n\n${both.replace(/^(- Reviewer: Codex, gpt-6.2-astra, medium effort)$/m, `$1, ${suffix}`)}\n`;
-		expect(parseReview(marked("shadow")).map((review) => review.model)).not.toContain("gpt-6.2-astra");
-		expect(parseReview(marked("second")).find((review) => review.model === "gpt-6.2-astra")!.rung).toBeNull();
 		// The settled count `quest usage` prints reads back.
-		const settled = "1; findings 2 (low 2): fixed 1, refuted 0, settled 1, open 0";
+		const settled = "1, runs 2 to 2; findings 2 (low 2): fixed 1, refuted 0, settled 1, open 0";
 		expect(
 			parseReview(`## Review\n\n${record.replace(/^- Rounds: .*$/m, `- Rounds: ${settled}`)}\n`)[0]!.tally,
 		).toEqual({
 			rounds: 1,
+			debut: 2,
+			last: 2,
 			first: null,
 			findings: { high: 0, medium: 0, low: 2 },
 			fixed: 1,
@@ -468,13 +467,14 @@ describe("PR records", () => {
 			open: 0,
 		});
 		for (const line of [
-			"2; first round 1 (high 2); findings 2 (high 2): fixed 2, refuted 0, open 0",
-			"2; first round 1 (severe 1); findings 1 (high 1): fixed 1, refuted 0, open 0",
-			"1; findings 1 (high 1): fixed 0, refuted 0, open 0",
-			"1; findings 2 (high 1): fixed 1, refuted 0, open 1",
-			"1; findings 2 (low 2): fixed 1, refuted 0, settled 1, open 1",
-			"1; findings 1 (severe 1): fixed 1, refuted 0, open 0",
+			"2, runs 1 to 2; first round 1 (high 2); findings 2 (high 2): fixed 2, refuted 0, open 0",
+			"2, runs 1 to 2; first round 1 (severe 1); findings 1 (high 1): fixed 1, refuted 0, open 0",
+			"1, runs 1 to 1; findings 1 (high 1): fixed 0, refuted 0, open 0",
+			"1, runs 1 to 1; findings 2 (high 1): fixed 1, refuted 0, open 1",
+			"1, runs 1 to 1; findings 2 (low 2): fixed 1, refuted 0, settled 1, open 1",
+			"1, runs 1 to 1; findings 1 (severe 1): fixed 1, refuted 0, open 0",
 			"one",
+			"1; findings 0: fixed 0, refuted 0, open 0",
 		])
 			expect(() =>
 				parseReview(`## Review\n\n${record.replace(/^- Rounds: .*$/m, `- Rounds: ${line}`)}\n`),
@@ -723,24 +723,24 @@ describe("usage", () => {
 			"- Reviewer: Codex, gpt-6.2-sol, high effort",
 			`- Session: \`${THREAD}\`, round 2`,
 			"- Score: 9/10, `Fine.`",
-			"- Rounds: 2; first round 1 (high 1); findings 2 (high 1, low 1): fixed 1, refuted 1, open 0",
+			"- Rounds: 2, runs 1 to 2; first round 1 (high 1); findings 2 (high 1, low 1): fixed 1, refuted 1, open 0",
 			"- Findings: none",
 			"",
 			// A harness quest review does not run, as a hand-written record may name, reads as any other.
 			"- Reviewer: Gemini CLI, gemini-3-pro, high effort",
 			"- Session: `ses_1`, round 1",
 			"- Score: 8/10, `Fine.`",
-			"- Rounds: 1; findings 0: fixed 0, refuted 0, open 0",
+			"- Rounds: 1, runs 1 to 1; findings 0: fixed 0, refuted 0, open 0",
 			"- Findings: none",
 			"",
 			// A reviewer of an earlier run has only its tally.
 			"- Reviewer: Claude Code, claude-opus-5-5, high effort",
-			"- Rounds: 1; findings 1 (medium 1): fixed 1, refuted 0, open 0",
+			"- Rounds: 1, runs 1 to 1; findings 1 (medium 1): fixed 1, refuted 0, open 0",
 			"",
 			// An earlier run's reviewer, drawn from the rung below the size's, spelled as a gateway names it, which
 			// the reviewer rows fold into its listed ID.
 			"- Reviewer: Codex, openai/gpt-6.2-sol, medium effort, standard rung (down)",
-			"- Rounds: 1; findings 3 (high 3): fixed 2, refuted 1, open 0",
+			"- Rounds: 1, runs 1 to 1; findings 3 (high 3): fixed 2, refuted 1, open 0",
 		].join("\n");
 		// #9's record and #10's tally the same branch, so the rollup counts the tally once, from #10. Only #10 has a tier.
 		const unrated = body10.slice(body10.indexOf("## Review")).replace(`${RISK}\n`, "");
@@ -805,7 +805,7 @@ describe("usage", () => {
 			// Two open PRs from another branch, whose older record holds the later tally (3 Sol rounds against
 			// 2), as when a round rewrote only its own PR's record: the older counts, not the stale newer one.
 			...[
-				[3, body9.replace("- Rounds: 2;", "- Rounds: 3;")],
+				[3, body9.replace("- Rounds: 2, runs 1 to 2;", "- Rounds: 3, runs 1 to 3;")],
 				[4, body9],
 			].map(([number, body]) =>
 				pr(number as number, "quest/m0/b", body as string, "2026-11-02T00:00:00Z", {
@@ -1219,7 +1219,7 @@ describe("usage", () => {
 			head,
 			"- Risk: garbled",
 			reviewer,
-			"- Rounds: 2; findings 1 (medium 1): fixed 1, refuted 0, open 0",
+			"- Rounds: 2, runs 1 to 2; findings 1 (medium 1): fixed 1, refuted 0, open 0",
 		);
 		const { root, deps, sessions } = setup({
 			pulls: [
@@ -1254,7 +1254,7 @@ describe("usage", () => {
 			"",
 			`- Head: ${"a".repeat(40)}`,
 			"- Reviewer: Antigravity, gemini-4-neon, high effort",
-			"- Rounds: 1; findings 0: fixed 0, refuted 0, open 0",
+			"- Rounds: 1, runs 1 to 1; findings 0: fixed 0, refuted 0, open 0",
 			"",
 		].join("\n");
 		const { root, deps, sessions } = setup({
@@ -1279,7 +1279,7 @@ describe("usage", () => {
 				"",
 				"- Reviewer: Codex, gpt-6.2-sol, high effort",
 				"- Score: 8/10, `Ok.`",
-				"- Rounds: 2; findings 1 (medium 1): fixed 1, refuted 0, open 0",
+				"- Rounds: 2, runs 1 to 2; findings 1 (medium 1): fixed 1, refuted 0, open 0",
 				"",
 			].join("\n");
 		const armed = (number: number, branch: string, ...lines: string[]) =>

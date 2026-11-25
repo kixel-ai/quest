@@ -197,10 +197,8 @@ export interface ReviewSummary {
 	round: number | null;
 	/** Null when the latest run left it out, or on a record written before rounds were scored. */
 	score: number | null;
-	/** Its findings across every round on the branch, null on a record written before tallies. */
-	tally: Counts | null;
-	/** The branch's runs of its first and latest rounds, null on a record that names none. */
-	runs: { debut: number; last: number } | null;
+	/** Its findings across every round on the branch and the branch's runs of its first and latest, null on a record written before tallies. */
+	tally: Ran | null;
 	/** The severity of each finding its latest round left open. */
 	open: Tally["findings"];
 }
@@ -243,10 +241,7 @@ export function parseReview(body: string): ReviewSummary[] {
 	const blocks = all
 		.slice(at)
 		.split(/^(?=- Reviewer: )/m)
-		.slice(1)
-		// An older record's shadow reviewer measured an effort step, not the writer or a rung, so its block stays out;
-		// its second reviewer reads as one a flag named.
-		.filter((text) => !/^- Reviewer: .*, shadow\r?$/m.test(text));
+		.slice(1);
 	return blocks.map((text) => {
 		const match = (pattern: RegExp) => {
 			const found = pattern.exec(text);
@@ -255,12 +250,11 @@ export function parseReview(body: string): ReviewSummary[] {
 		};
 		const reviewer = match(
 			new RegExp(
-				`^- Reviewer: (.+?), (\\S+), (\\S+) effort(?:, (${RUNG_NAMES.join("|")}) rung \\((${DRAWN.join("|")})\\)|, second)?\\r?$`,
+				`^- Reviewer: (.+?), (\\S+), (\\S+) effort(?:, (${RUNG_NAMES.join("|")}) rung \\((${DRAWN.join("|")})\\))?\\r?$`,
 				"m",
 			),
 		);
 		const tally = parseCounts(text);
-		const runs = /^- Rounds: \d+, runs (\d+) to (\d+);/m.exec(text);
 		// A reviewer the latest run left out has its tally, and its session with no round once tallies name it.
 		const session =
 			tally !== null && !/^- Session: /m.test(text)
@@ -290,18 +284,23 @@ export function parseReview(body: string): ReviewSummary[] {
 			round: session?.[3] === undefined ? null : Number(session[3]),
 			score: score ? Number(score[1]) : null,
 			tally,
-			runs: runs && { debut: Number(runs[1]), last: Number(runs[2]) },
 			open,
 		};
 	});
 }
 
+/** A reviewer's tally with the branch's runs of its first and latest rounds. */
+export interface Ran extends Counts {
+	debut: number;
+	last: number;
+}
+
 /** A block's `Rounds:` line, or null without one; malformed or inconsistent counts fail. */
-function parseCounts(text: string): Counts | null {
+function parseCounts(text: string): Ran | null {
 	const line = /^- Rounds: (.*?)\r?$/m.exec(text);
 	if (!line) return null;
 	const found =
-		/^(\d+)(?:, runs \d+ to \d+)?; (?:first round (\d+)(?: \(([^)]*)\))?; )?findings (\d+)(?: \(([^)]*)\))?: fixed (\d+), refuted (\d+)(?:, settled (\d+))?, open (\d+)$/.exec(
+		/^(\d+), runs (\d+) to (\d+); (?:first round (\d+)(?: \(([^)]*)\))?; )?findings (\d+)(?: \(([^)]*)\))?: fixed (\d+), refuted (\d+)(?:, settled (\d+))?, open (\d+)$/.exec(
 			line[1]!,
 		);
 	const malformed = () => new Error(`the ## Review record's Rounds line is malformed: ${line[1]}`);
@@ -319,17 +318,19 @@ function parseCounts(text: string): Counts | null {
 			throw new Error(`the ## Review record's Rounds line does not add up: ${line[1]}`);
 		return findings;
 	};
-	const findings = severities(found[4]!, found[5]);
+	const findings = severities(found[6]!, found[7]);
 	const counts = {
 		rounds: Number(found[1]),
-		first: found[2] === undefined ? null : severities(found[2], found[3]),
+		debut: Number(found[2]),
+		last: Number(found[3]),
+		first: found[4] === undefined ? null : severities(found[4], found[5]),
 		findings,
-		fixed: Number(found[6]),
-		refuted: Number(found[7]),
-		settled: Number(found[8] ?? 0),
-		open: Number(found[9]),
+		fixed: Number(found[8]),
+		refuted: Number(found[9]),
+		settled: Number(found[10] ?? 0),
+		open: Number(found[11]),
 	};
-	if (counts.fixed + counts.refuted + counts.settled + counts.open !== Number(found[4]))
+	if (counts.fixed + counts.refuted + counts.settled + counts.open !== Number(found[6]))
 		throw new Error(`the ## Review record's Rounds line does not add up: ${line[1]}`);
 	return counts;
 }
