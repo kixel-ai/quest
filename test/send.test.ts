@@ -895,6 +895,32 @@ test("a session remembered under a repository's former name is resent once a PR 
 	expect(pending(env)).toHaveLength(1);
 });
 
+test("a remembered repository GitHub fails to answer for holds the group's upload back, not repeats it", async () => {
+	const env = home();
+	const root = checkout();
+	queue(stopped(root), env);
+	const first = session("s1", "fix/x", { files: [transcript()] });
+	await sendPass(sender(env, 200, [first]).deps);
+	const dir = join(env.XDG_STATE_HOME!, "quest", "records", "remembered");
+	for (const group of readdirSync(dir))
+		for (const name of readdirSync(join(dir, group))) {
+			const path = join(dir, group, name);
+			writeFileSync(path, readFileSync(path, "utf8").replaceAll("acme/proj", "broken/proj"));
+		}
+	const s2 = later(env, root, "s2");
+	const next = sender(env, 200, [first, s2]);
+	const github = next.deps.github;
+	next.deps.github = () => ({
+		...github(),
+		fetch: (async (input: string | URL | Request, init?: RequestInit) =>
+			new URL(String(input)).pathname === "/repos/broken/proj"
+				? new Response("down", { status: 500 })
+				: (github().fetch as typeof fetch)(input, init)) as typeof fetch,
+	});
+	await expect(sendPass(next.deps)).rejects.toThrow("broken/proj");
+	expect(next.uploads).toEqual([]);
+});
+
 test("a pass that fails before its resends are queued reads their PRs again, even ones older than its sessions", async () => {
 	const env = home();
 	const root = checkout();

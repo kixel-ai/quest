@@ -408,7 +408,7 @@ export function parseSessions(text: string): Session[] {
 
 /**
  * A lookup of the lowercase `owner/repo` that GitHub serves under `name` now, asking once per distinct name through
- * `client`. A name GitHub no longer serves at all stays as recorded, since a deleted checkout's sessions have no other
+ * `client`, its failure too, so the lookup fails fast for every caller. A name GitHub no longer serves at all stays as recorded, since a deleted checkout's sessions have no other
  * repository to name.
  */
 export function currentNamer(client: GitHubReader): (name: string) => Promise<string> {
@@ -418,8 +418,6 @@ export function currentNamer(client: GitHubReader): (name: string) => Promise<st
 		if (now === undefined) {
 			const [owner, repo] = name.split("/") as [string, string];
 			now = client.currentName({ owner, repo }).then((current) => current ?? name);
-			// A failed lookup is asked again by the next caller.
-			now.catch(() => asked.delete(name));
 			asked.set(name, now);
 		}
 		return now;
