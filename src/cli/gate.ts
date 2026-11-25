@@ -126,8 +126,8 @@ export interface Precedence {
 export const COMMAND_MEMORY = 4 * 2 ** 30;
 
 /** Usable memory: physical RAM, or a smaller cgroup/container limit. */
-function usableMemory(): number {
-	if (process.platform === "linux") return linuxMemory().total;
+function usableMemory(uid?: number): number {
+	if (process.platform === "linux") return linuxMemory("/proc", "/sys/fs/cgroup", uid).total;
 	const constrained = process.constrainedMemory?.() ?? 0;
 	return constrained > 0 ? Math.min(totalmem(), constrained) : totalmem();
 }
@@ -166,7 +166,7 @@ const BACKGROUND_SLICE = "background.slice";
  * Count reclaimable host cache and the headroom of every enclosing memory cgroup. With `uid`,
  * a command that runs in that user's `background.slice` also counts the slice's headroom, so a
  * slice at its cap reads as full however much the host and the caller's own cgroups have free.
- * Its cap is no part of `total`, the host's RAM or container limit that sizes a command's budget.
+ * Its cap bounds `total` too, so a command's budget (see `hostLimits`) fits under it.
  */
 export function linuxMemory(
 	proc = "/proc",
@@ -181,8 +181,8 @@ export function linuxMemory(
 	};
 	let total = bytes("MemTotal");
 	let available = bytes("MemAvailable");
-	/** Bound the headroom, and `total` unless `capacity` is false, by the limits of the cgroup at `path` under `root` and of each ancestor. */
-	const bound = (root: string, path: string, unified: boolean, capacity = true) => {
+	/** Bound `total` and the headroom by the limits of the cgroup at `path` under `root` and of each ancestor. */
+	const bound = (root: string, path: string, unified: boolean) => {
 		const usage = unified ? "memory.current" : "memory.usage_in_bytes";
 		// Usage includes inactive file cache, which the kernel reclaims without
 		// swapping; subtract it, as container runtimes do for their working set.
@@ -207,7 +207,7 @@ export function linuxMemory(
 					if (!Number.isFinite(current) || current < 0)
 						throw new Error("gate cannot read Linux cgroup memory usage");
 					const used = Math.max(0, current - cgroupStat(group, cache));
-					if (capacity) total = Math.min(total, limit);
+					total = Math.min(total, limit);
 					available = Math.min(available, Math.max(0, limit - used));
 				} catch (error) {
 					// The memory controller may not be enabled in every ancestor.
@@ -229,7 +229,7 @@ export function linuxMemory(
 	// runs in it, when nothing counts against its cap.
 	const slice = `/user.slice/user-${uid}.slice/user@${uid}.service/${BACKGROUND_SLICE}`;
 	if (uid !== undefined && existsSync(join(cgroups, "cgroup.controllers")) && existsSync(join(cgroups, slice)))
-		bound(resolve(cgroups), slice, true, false);
+		bound(resolve(cgroups), slice, true);
 	return { total, available };
 }
 
@@ -1122,10 +1122,11 @@ async function gated(
 			const precedence = {
 				priority: process.env[PRIORITY] === "1",
 			};
-			const host =
-				options.host ??
-				fileHost(claimDirectory(), Date.now, unit === undefined ? undefined : process.getuid?.());
-			admitted = { host, id: await admit(hostLimits(), host, cancel.signal, notice, precedence) };
+			// Only a command launched into the slice is held to its cap, which also sizes its budget.
+			const user = unit === undefined ? undefined : process.getuid?.();
+			const host = options.host ?? fileHost(claimDirectory(), Date.now, user);
+			const limits = hostLimits(undefined, usableMemory(user));
+			admitted = { host, id: await admit(limits, host, cancel.signal, notice, precedence) };
 			observed.admitted = Date.now();
 		} catch (error) {
 			if (cancel.signal.aborted) return cancelled(cancel.signal);

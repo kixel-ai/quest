@@ -768,10 +768,9 @@ test("Linux memory counts the background slice's headroom wherever the caller ru
 	writeFileSync(join(slice, "memory.current"), String(30 * GiB));
 	// An uncapped slice leaves the host's answer.
 	expect(linuxMemory(proc, cgroups, 1000)).toEqual({ total: 64 * GiB, available: 24 * GiB });
-	// One at its cap queues the next command while the host has room, but is no part of a
-	// command's budget, which the host's RAM sets.
+	// One at its cap queues the next command while the host has room, and bounds its budget.
 	writeFileSync(join(slice, "memory.high"), String(32 * GiB));
-	expect(linuxMemory(proc, cgroups, 1000)).toEqual({ total: 64 * GiB, available: 2 * GiB });
+	expect(linuxMemory(proc, cgroups, 1000)).toEqual({ total: 32 * GiB, available: 2 * GiB });
 	// A command that runs outside the slice, as on the process-group fallback, is not held by it.
 	expect(linuxMemory(proc, cgroups)).toEqual({ total: 64 * GiB, available: 24 * GiB });
 	// Its inactive file cache is reclaimable, so it counts as free.
