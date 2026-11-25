@@ -99,16 +99,6 @@ a merge queue, and diff-scoped gates in moq-dev/moq and moq-dev/moq.pro.
 No post describes attributing cost, model, and effort to each change, so
 that part has no precedent to copy.
 
-## Waiting
-
-- Maintainer: install the Kixel Quest App on the repositories the factory
-  works on and pair each host's record sender, as kixel-ai/kixel.quest's
-  `quest/m0/factory-try.md` asks, so the factory page
-  (https://kixel.quest/factory, built in kixel.quest `eec160ae`) has a real
-  PR to show. An agent could click through the installation in Chrome, but
-  granting the App a private repository is the owner's call. Done when the
-  page lists merged PRs; then this epic's end-to-end check can start.
-
 ## Related
 
 - [Routing evidence](/quest/m0/routing-evidence/README.md) - measures what
