@@ -562,10 +562,14 @@ interface Turn {
 	 * instead of the checkout.
 	 */
 	workspace?: { dir: string; cwd: string };
+	/** The directory holding the head's export, with its trailing slash, which a finding may name a file by. */
+	exported?: string;
 }
 
 interface Reply {
 	session?: string;
+	/** The head exports the turns behind this reply held, which a finding's absolute path may start with. */
+	exports?: string[];
 	/** The reply's text: the review, or the schema's JSON. */
 	text?: string;
 	/** The parsed reply, when the CLI enforced the schema itself. */
@@ -990,9 +994,6 @@ const AGY_AGENT = "quest-reviewer";
 /** The settings file in a turn's directory, which holds its deny rules. */
 const AGY_SETTINGS = "settings.json";
 
-/** The head's export in a turn's directory, should an agy reviewer name a finding's file by its absolute path. */
-const IN_EXPORT = /^\/.*?\/review-[^/]+\/head\//;
-
 /** The empty tree in `root`'s object format, whose attributes are none. */
 const emptyTree = (root: string) => git(root, ["hash-object", "-t", "tree", "--stdin"], "");
 
@@ -1223,18 +1224,14 @@ function agyAgent(context: Context): string {
  */
 export function agyTurn(context: Context, prompt: string, flags: string[]): Turn {
 	const files: Record<string, string> = { [`workspace/.agents/agents/${AGY_AGENT}.md`]: agyAgent(context) };
-	// Unquoted, since the reviewer reads each path as written, and the diffs with no attributes, so the head can mark
-	// none of its own hunks binary.
+	// A JSON array of the paths, from NUL-separated output, since a path may hold any byte but NUL, a newline or tab
+	// included, which a line list or Git's quoting would leave ambiguous.
 	if (context.head !== undefined)
-		files["files.txt"] = git(context.root, [
-			"-c",
-			"core.quotePath=false",
-			"ls-tree",
-			"-r",
-			"--name-only",
-			"--full-tree",
-			context.head,
-		]);
+		files["files.json"] = JSON.stringify(
+			git(context.root, ["ls-tree", "-r", "-z", "--name-only", "--full-tree", context.head])
+				.split("\0")
+				.filter(Boolean),
+		);
 	const empty = context.ranges.length > 0 ? emptyTree(context.root) : "";
 	for (const [index, range] of context.ranges.entries())
 		files[`diff-${index + 1}.diff`] = git(context.root, [
@@ -1262,8 +1259,8 @@ export function agyTurn(context: Context, prompt: string, flags: string[]): Turn
 	const head =
 		context.head === undefined
 			? ""
-			: ` The reviewed head's tracked files are in \`${dir}/head\`, which \`${dir}/files.txt\` lists: read them ` +
-				"by absolute path, and name each file by its path inside that directory.";
+			: ` The reviewed head's tracked files are in \`${dir}/head\`, which \`${dir}/files.json\` lists as a JSON array of ` +
+				"paths: read each by absolute path, taking the string as it decodes, and name each file by its path inside that directory.";
 	const content =
 		`You have no shell, so run no command.${head}` +
 		context.ranges
@@ -1294,6 +1291,7 @@ export function agyTurn(context: Context, prompt: string, flags: string[]): Turn
 		stdin: `${JSON.stringify({ event: "user", message: { role: "user", content } })}\n`,
 		env: {},
 		workspace: { dir, cwd: join(dir, "workspace") },
+		...(context.head !== undefined && { exported: `${dir}/head/` }),
 	};
 }
 
@@ -1301,8 +1299,8 @@ export function agyTurn(context: Context, prompt: string, flags: string[]): Turn
  * Google's Antigravity CLI, which only reviews. It runs on the user's own login and configuration directory, where
  * it keeps its login when no keyring holds it, as over ssh; the reviewer agent keeps the user's customizations out,
  * except their skills' text and their MCP servers' processes, whose tools it cannot call. Its status check lists the
- * account's models, which fails while it is logged out, and over the network otherwise. It ignores GEMINI_API_KEY and
- * GOOGLE_API_KEY in favor of the login, so no credential is added.
+ * account's models, which fails while it is logged out, and over the network otherwise. GEMINI_API_KEY and GOOGLE_API_KEY
+ * would run it on that key under a `gemini` model provider, so `strippedEnvironment` drops them and no credential is added.
  */
 const agy: Reviewer = {
 	status: ["agy", "models"],
@@ -1633,14 +1631,20 @@ async function turn(cli: Cli, call: Turn, cwd: string, model: string): Promise<R
 		const detail = reply.error ?? stderr.trim().split("\n").slice(-5).join("\n");
 		throw new Error(`${call.argv[0]} failed${detail ? `: ${detail}` : ` with exit status ${code}`}`);
 	}
-	return reply;
+	return call.exported === undefined ? reply : { ...reply, exports: [call.exported] };
+}
+
+/** `file` as the repository names it, where an agy reviewer named it by its absolute path in one of the `exports`. */
+function inExport(file: string, exports: string[]): string {
+	const prefix = exports.find((each) => file.startsWith(each));
+	return prefix === undefined ? file : file.slice(prefix.length);
 }
 
 /**
  * The verdict in a reply, checked against `schema` so a malformed reply fails rather than reads as clean,
  * and settling each of the last round's `earlier` findings, numbered from `first`, exactly once.
  */
-export function verdict(reply: { structured?: unknown; text?: string }, earlier: number, first = 1): Verdict {
+export function verdict(reply: { structured?: unknown; text?: string; exports?: string[] }, earlier: number, first = 1): Verdict {
 	const fields = record(replied(reply, "the reviewer's reply"));
 	const list = fields?.findings;
 	if (!Array.isArray(list)) throw new Error("the reviewer's reply has no findings list");
@@ -1669,7 +1673,7 @@ export function verdict(reply: { structured?: unknown; text?: string }, earlier:
 			throw new Error(`the reviewer's finding ${index + 1} does not match the schema`);
 		}
 		return {
-			file: finding.file.replace(IN_EXPORT, ""),
+			file: inExport(finding.file, reply.exports ?? []),
 			line: line as number | null,
 			severity: finding.severity as Finding["severity"],
 			title: finding.title,
@@ -3050,7 +3054,7 @@ async function reviewWith(shared: Shared, seat: Seat, responses: string | undefi
 	// against. Anything else starts a new session that reviews the whole change, since a resumed one keeps its first
 	// instructions.
 	const last = stored?.last;
-	const resume =
+	const resumable =
 		previous !== undefined &&
 		last !== undefined &&
 		sameSeat(stored!, { reviewer: harness, second }) &&
@@ -3064,12 +3068,14 @@ async function reviewWith(shared: Shared, seat: Seat, responses: string | undefi
 
 	// The last round already passed this head, and has nothing left to settle; it repeats against the run's base
 	// and size.
-	if (resume && previous!.head === change.head && previous!.mergeBase === change.mergeBase && earlier.length === 0) {
+	if (resumable && previous!.head === change.head && previous!.mergeBase === change.mergeBase && earlier.length === 0) {
 		const { size, from: sizeFrom } = shared.sized;
 		return { round: { ...last!, base: shared.base, size, sizeFrom, usage: [], unchanged: true }, session: stored! };
 	}
 
 	const cli = await prepare(harness, root, shared.env, shared.signal);
+	// Checked again, since the status check's wait may have pruned the last head, which a resumed range would name.
+	const resume = resumable && present(root, previous!.head);
 
 	const replySchema = schema(earlier.length);
 	const schemaFile = saveSchema(shared.dir, replySchema);
@@ -3178,7 +3184,9 @@ async function open(
 	const session = opened.session;
 	// The report turn reads nothing, so it gets no export of the head.
 	const { head: _, ...reporting } = context;
-	const reply = await turn(cli, cli.reviewer.resume(reporting, session, prompts.report), root, context.model);
+	const closing = await turn(cli, cli.reviewer.resume(reporting, session, prompts.report), root, context.model);
+	// The report may name a file by the review turn's export, which only that turn held.
+	const reply = { ...closing, exports: [...(opened.exports ?? []), ...(closing.exports ?? [])] };
 	return { session, reply, usage: reported(opened.usage) ? [{ turn: "review", ...opened.usage }] : [] };
 }
 

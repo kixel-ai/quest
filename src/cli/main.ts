@@ -1738,8 +1738,8 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"The base is fetched first, since the sandbox has no network.\n\n" +
 				"--harness agy reviews with Google's Antigravity CLI, which only reviews; name its --model and --effort, as " +
 				"gemini-4-neon and xhigh. It runs `agy -p` on the user's own Antigravity login, in the keyring or, over ssh, " +
-				"its configuration directory, with no ANTIGRAVITY_* or AGY_* variable, so no gateway, and GEMINI_API_KEY and " +
-				"GOOGLE_API_KEY never replace the login. Each turn and the status check, `agy models`, run in a new private " +
+				"its configuration directory, with no ANTIGRAVITY_* or AGY_* variable, so no gateway, and quest strips GEMINI_API_KEY and " +
+				"GOOGLE_API_KEY, so neither replaces the login. Each turn and the status check, `agy models`, run in a new private " +
 				"directory outside any repository, since agy loads the agent configuration of each directory up to the " +
 				"repository's root, which makes an agent directory inside one a usage error. Each turn runs as quest's own " +
 				"agent, whose only tools are view_file and finish and which inherits none of the user's hooks, rules, plugins, or " +
@@ -1748,7 +1748,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"its start lists, such as the checkout's untracked files or another CLI's login, and the usual login paths under " +
 				"home before they exist; a file created beside its parents while the turn runs is not covered. With no shell, that directory holds an " +
 				"export of the reviewed head's tracked files, for the review turn alone, writing a symlink as a file holding " +
-				"its target, beside the directory agy runs in, files.txt listing them, and the diff of each range it reviews, " +
+				"its target, beside the directory agy runs in, files.json listing them as a JSON array, and the diff of each range it reviews, " +
 				"both ignoring the head's .gitattributes. agy compares its read rules case-sensitively, so quest refuses to " +
 				"run it where a directory leading to its agent directory matches names case-insensitively, as on macOS's " +
 				"default volume, and on a Git older than 2.41, which has no --attr-source. The user's skills' text still reaches it, and their MCP servers start, with no tool it can call. A " +
@@ -1763,7 +1763,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				`${classifiers}, reads the diff and the base's RISK.md, which says what is customer-facing, ` +
 				"in one read-only turn and replies with a tier and its reason. One that is logged out, whose login the " +
 				"API rejects, or at its usage limit passes the turn to the next; when none is left, the run fails on the " +
-				"limit that resets first if every one whose CLI is installed hit its own, else as a usage error naming why each failed. A later round on the same head and base " +
+				"limit that resets first if every one whose CLI is installed, and that this host can run, hit its own, else as a usage error naming why each failed. A later round on the same head and base " +
 				"RISK.md reuses the tier unless --new. Reviewers never judge it. " +
 				"The classifier also names the class of RISK.md's ## Automatic list every changed file falls in, or none, " +
 				"offered only the classes whose scope, backticked patterns in parentheses after the class's name, holds " +

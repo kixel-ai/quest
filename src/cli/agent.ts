@@ -249,7 +249,8 @@ export class AgentInputError extends Error {}
  * are dropped too, with the mbx priority a priority gate sets. Each CLI keeps the
  * user's configuration directory. An Antigravity session hands its commands its
  * language server's address and token, which would put a launched `agy` in that
- * session, and `AGY_` variables route `agy` to a gateway or another account.
+ * session, `AGY_` variables route `agy` to a gateway or another account, and
+ * `GEMINI_API_KEY` or `GOOGLE_API_KEY` runs it on that key under a `gemini` model provider.
  */
 const STRIPPED = [
 	/^CLAUDE(?!_CONFIG_DIR$)/,
@@ -258,6 +259,7 @@ const STRIPPED = [
 	/^OPENAI_API_KEY$/,
 	/^ANTIGRAVITY_/,
 	/^AGY_/,
+	/^(GEMINI|GOOGLE)_API_KEY$/,
 	/^OP_/,
 	/^QUEST_GATE_(ADMITTED|PRIORITY)$/,
 ];

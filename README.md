@@ -1703,7 +1703,8 @@ model and effort, as `--model gemini-4-neon --effort xhigh`. It runs `agy -p`
 on your own Antigravity login, wherever `agy` keeps it: the OS keyring, or over
 ssh its configuration directory, `~/.gemini/antigravity-cli`. Run `agy` to sign
 in. No `ANTIGRAVITY_*` or `AGY_*` variable reaches it, so no gateway either,
-and `GEMINI_API_KEY` and `GOOGLE_API_KEY` never replace the login. `agy` loads
+and quest strips `GEMINI_API_KEY` and `GOOGLE_API_KEY`, which would run it on
+that key under a `gemini` model provider, so neither replaces the login. `agy` loads
 the `.agents/`, `AGENTS.md`, and `GEMINI.md` of every directory from where it
 runs up to the repository's root, so each turn, and its status check, `agy
 models`, runs in a new private directory under quest's agent directory instead,
@@ -1715,7 +1716,7 @@ directory, so permissions are skipped, and deny rules on commands, writes, web
 requests, and MCP calls back up the tool list. With no shell, the turn's
 directory holds what `git` would show: an export of the reviewed head's tracked
 files, beside the directory `agy` runs in so none of its configuration loads,
-`files.txt` listing them, and each reviewed range's diff; `agy` 1.5.14 gives an
+`files.json` listing them as a JSON array, and each reviewed range's diff; `agy` 1.5.14 gives an
 agent no search tool. The export and the diffs ignore the head's
 `.gitattributes`, so a head can neither hide a file or its hunks nor run a
 filter driver, and the export writes each symlink as a file holding its target.
@@ -1875,7 +1876,7 @@ until a review classifies the head again. It runs as Claude Code
 Antigravity `gemini-3.8-flash` at low, each when those before it are missing,
 logged out, have their login rejected, or hit their usage limit. When none can
 run, the review fails on the limit that resets first if every one whose CLI is
-installed hit its own, and otherwise as a usage error naming why each failed. A diff past 200,000 characters gives it only the
+installed, and that this host can run, hit its own, and otherwise as a usage error naming why each failed. A diff past 200,000 characters gives it only the
 stat, and it reads the parts it needs. The tier is kept with the reviewers'
 sessions, so a later round on the same head and base `RISK.md` reuses it, and
 `--new` classifies again. The record names it after the base:

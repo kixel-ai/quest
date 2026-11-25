@@ -1204,6 +1204,8 @@ agyFakes(
 		write(s.repo, ".gitattributes", "src/lib.ts export-ignore -diff\n* filter=plant\n");
 		symlinkSync(login, join(s.repo, "link"));
 		write(s.repo, "docs/café.md", "Accented.\n");
+		// A name Git quotes even with core.quotePath off, which a line list could not tell from two names.
+		write(s.repo, "docs/tab\tnew\nline.md", "Odd.\n");
 		git(s.repo, "add", ".gitattributes", "link", "docs");
 		git(s.repo, "commit", "-qm", "attributes");
 		const smudged = join(s.repo, ".tmp", "smudged");
@@ -1218,6 +1220,9 @@ agyFakes(
 		// An Antigravity session's own state and an Antigravity gateway never reach the reviewer.
 		vi.stubEnv("ANTIGRAVITY_LS_ADDRESS", "127.0.0.1:1");
 		vi.stubEnv("AGY_LLM_GATEWAY_URL", "http://127.0.0.1:9");
+		// Nor does a Google API key, which would run it on the key under a `gemini` model provider.
+		vi.stubEnv("GEMINI_API_KEY", "gemini-key");
+		vi.stubEnv("GOOGLE_API_KEY", "google-key");
 		const result = await quest("--root", s.repo, "review", ...AGY, "--json");
 		expect(result.code, result.stderr).toBe(0);
 		const [round] = JSON.parse(result.stdout).rounds;
@@ -1231,6 +1236,7 @@ agyFakes(
 
 		const [status, first, second] = s.calls();
 		expect(status!.argv).toEqual(["models"]);
+		expect(Object.keys(status!.env).filter((name) => /^(GEMINI|GOOGLE)_/.test(name))).toEqual([]);
 		// Even the status check runs outside the checkout.
 		expect(status!.cwd.startsWith(s.repo)).toBe(false);
 		expect(existsSync(status!.cwd)).toBe(false);
@@ -1248,7 +1254,7 @@ agyFakes(
 		expect(tracked).toContain("docs/café.md");
 		// The report turn reads nothing, so only the review turn gets the head's export.
 		expect(
-			Object.keys(second!.workspace!).filter((name) => name.startsWith("head/") || name === "files.txt"),
+			Object.keys(second!.workspace!).filter((name) => name.startsWith("head/") || name === "files.json"),
 		).toEqual([]);
 		for (const call of [first!, second!]) {
 			const flag = (name: string) => call.argv[call.argv.indexOf(name) + 1];
@@ -1291,14 +1297,14 @@ agyFakes(
 				.map((name) => name.slice("head/".length))
 				.sort();
 			expect(exported).toEqual(tracked);
-			expect(call.workspace!["files.txt"]!.split("\n").sort()).toEqual(tracked);
+			expect((JSON.parse(call.workspace!["files.json"]!) as string[]).sort()).toEqual(tracked);
 			expect(call.workspace!["head/src/lib.ts"]).toBe("export const x = 2;\n");
 			// A link is a file holding its target, which no filter driver touched.
 			expect(call.workspace!["head/link"]).toBe(login);
 			expect(existsSync(smudged)).toBe(false);
 			expect(call.stdin).not.toContain(s.repo);
 			// A resumed conversation still names the first turn's removed directory, so each file is named in full.
-			expect(call.stdin).toContain(`tracked files are in \`${dir}/head\`, which \`${dir}/files.txt\` lists`);
+			expect(call.stdin).toContain(`tracked files are in \`${dir}/head\`, which \`${dir}/files.json\` lists`);
 		}
 		for (const call of [first!, second!]) {
 			const dir = dirname(call.cwd);
@@ -1306,7 +1312,7 @@ agyFakes(
 			expect(call.workspace!["diff-1.diff"]).toContain("+export const x = 2;");
 			expect(call.workspace!["diff-1.diff"]).toContain("+++ b/docs/café.md");
 			expect(call.stdin).toContain(`\`${dir}/diff-1.diff\` holds \`git diff ${mergeBase}..${head}\``);
-			expect(Object.keys(call.env).filter((name) => /^(ANTIGRAVITY|AGY)_/.test(name))).toEqual([]);
+			expect(Object.keys(call.env).filter((name) => /^(ANTIGRAVITY|AGY|GEMINI|GOOGLE)_/.test(name))).toEqual([]);
 		}
 
 		// A later round also gets what changed since the head it reviewed.
@@ -1343,6 +1349,24 @@ agyFakes("a round whose last head is gone, as an amend pruned away, reviews the 
 	expect(Object.keys(review!.workspace!)).not.toContain("diff-2.diff");
 });
 
+agyFakes("a head pruned while the status check waited reviews the whole change anew", async () => {
+	const s = setup("CLAUDECODE");
+	expect((await quest("--root", s.repo, "review", ...AGY)).code).toBe(0);
+	const gone = git(s.repo, "rev-parse", "HEAD");
+	write(s.repo, "src/lib.ts", "export const x = 4;\n");
+	git(s.repo, "commit", "-q", "--amend", "-am", "change");
+	// The old head is still in the reflog, so it is here when the round starts, and gone once the status check ran.
+	vi.stubEnv("FAKE_STATUS_RUNS", `git -C '${s.repo}' reflog expire --expire=now --all && git -C '${s.repo}' gc -q --prune=now`);
+	git(s.repo, "cat-file", "-e", `${gone}^{commit}`);
+	write(s.repo, ".tmp/responses.md", "Fixed at src/lib.ts:1.\n");
+	const later = await quest("--root", s.repo, "review", ...AGY, "--responses", join(s.repo, ".tmp", "responses.md"));
+	expect(later.code, later.stderr).toBe(0);
+	expect(() => git(s.repo, "cat-file", "-e", `${gone}^{commit}`)).toThrow();
+	const [review] = s.calls().slice(-2);
+	expect(review!.argv).not.toContain("--conversation");
+	expect(Object.keys(review!.workspace!)).not.toContain("diff-2.diff");
+});
+
 agyFakes.for([
 	["FAKE_LOGGED_OUT", "1", "error: agy is not logged in; run `agy`"],
 	["FAKE_REJECTED", "1", "error: agy is not logged in; run `agy`"],
@@ -1372,7 +1396,8 @@ agyFakes("agy is refused where a directory leading to its workspace matches name
 	const result = await quest("--root", s.repo, "review", ...AGY);
 	expect(result.code, result.stderr).toBe(3);
 	expect(result.stderr).toContain(`since ${realpathSync(parent)} matches names case-insensitively`);
-	expect(s.calls().filter((call) => call.argv[0] !== "models")).toEqual([]);
+	// Not even its status check ran.
+	expect(s.calls()).toEqual([]);
 });
 
 agyFakes("agy is refused with a Git older than 2.41, which has no --attr-source", async () => {
@@ -2032,7 +2057,7 @@ agyFakes("with only Antigravity installed, Gemini Flash classifies, reading the 
 	]);
 	expect(call.workspace!["diff-1.diff"]).toContain("+export const x = 2;");
 	// The question carries the patch, so no head is exported.
-	expect(Object.keys(call.workspace!).filter((name) => name.startsWith("head/") || name === "files.txt")).toEqual([]);
+	expect(Object.keys(call.workspace!).filter((name) => name.startsWith("head/") || name === "files.json")).toEqual([]);
 });
 
 agyFakes(
@@ -2854,19 +2879,25 @@ test("the verdict is checked field by field, settling each earlier finding once"
 	);
 	expect(() => verdict({ text: '{"verdict":"approve"}' }, 0)).toThrow("no findings list");
 	// An agy reviewer naming a file by its path in the head's export names it in the repository.
-	const exported = (file: string) =>
+	const exported = (file: string, exports: string[]) =>
 		verdict(
 			{
-				structured: {
-					...scored,
-					findings: [{ ...FINDING, file: `/run/user/1/quest/agent/review-AbC123/head/${file}` }],
-				},
+				structured: { ...scored, findings: [{ ...FINDING, file }] },
+				exports,
 			},
 			0,
 		).findings[0]!.file;
-	expect(exported("src/lib.ts")).toBe("src/lib.ts");
-	// Only the export's own prefix, though a tracked path looks like one.
-	expect(exported("packages/review-ui/head/index.ts")).toBe("packages/review-ui/head/index.ts");
+	const dir = "/run/user/1/quest/agent/review-AbC123/head/";
+	expect(exported(`${dir}src/lib.ts`, [dir])).toBe("src/lib.ts");
+	// The review turn's export, which the report turn's reply may name, is stripped as the turn's own is.
+	const earlierDir = "/run/user/1/quest/agent/review-XyZ789/head/";
+	expect(exported(`${earlierDir}src/lib.ts`, [earlierDir, dir])).toBe("src/lib.ts");
+	// Only the export's own prefix, though a tracked path looks like one, and a runtime directory may hold `review-*/head/`.
+	expect(exported("packages/review-ui/head/index.ts", [dir])).toBe("packages/review-ui/head/index.ts");
+	const nested = "/tmp/review-cache/head/run/quest/agent/review-AbC123/head/";
+	expect(exported(`${nested}src/lib.ts`, [nested])).toBe("src/lib.ts");
+	// A path in no export of the turn is left as written.
+	expect(exported(`${earlierDir}src/lib.ts`, [dir])).toBe(`${earlierDir}src/lib.ts`);
 	for (const score of [-1, 11, 7.5, "7", undefined]) {
 		expect(() => verdict({ structured: { ...scored, score, findings: [] } }, 0)).toThrow("no score from 0 to 10");
 	}

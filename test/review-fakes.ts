@@ -248,7 +248,7 @@ const path = require("node:path");${LOG}
 const argv = process.argv.slice(2);
 const raw = fs.readFileSync(0, "utf8");
 const stdin = raw ? JSON.parse(raw).message.content : "";
-const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => /^(CLAUDE|CODEX|ANTHROPIC|ANTIGRAVITY|AGY|FAKE_HOST|PATH$)/.test(k)));
+const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => /^(CLAUDE|CODEX|ANTHROPIC|ANTIGRAVITY|AGY|GEMINI|GOOGLE|FAKE_HOST|PATH$)/.test(k)));
 const walk = (dir) => fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) =>
 	entry.isDirectory() ? walk(path.join(dir, entry.name)).map((name) => entry.name + "/" + name) : [entry.name]);
 // A turn runs in its directory's workspace, so the whole directory, its export included, is logged.
@@ -259,6 +259,8 @@ const only = process.env.FAKE_FAILS?.split(",");
 const fake = (name) => (!only || only.includes("agy") || only.includes(model) ? process.env[name] : undefined);
 if (argv[0] === "models") {
 	console.log("Fetching available models...");
+	// FAKE_STATUS_RUNS is a command the status check runs, as the checkout changes while it waits.
+	if (process.env.FAKE_STATUS_RUNS) require("node:child_process").execSync(process.env.FAKE_STATUS_RUNS, { stdio: "ignore" });
 	if (fake("FAKE_LOGGED_OUT")) {
 		console.log("Error: Please sign in to view available models. Launch the CLI without arguments to sign in.");
 		process.exit(1);

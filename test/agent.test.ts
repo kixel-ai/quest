@@ -270,6 +270,8 @@ test("the agent environment holds no session credentials or harness state", () =
 		ANTIGRAVITY_LS_ADDRESS: "127.0.0.1:1",
 		ANTIGRAVITY_CSRF_TOKEN: "t",
 		AGY_LLM_GATEWAY_URL: "https://gateway",
+		GEMINI_API_KEY: "g",
+		GOOGLE_API_KEY: "g",
 	});
 	expect(env).toEqual({
 		PATH: "/bin",
