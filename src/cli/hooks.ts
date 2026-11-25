@@ -344,8 +344,9 @@ export function hook(input: unknown, deps: HookDependencies = { env: process.env
 				const stubs = stubFindings(root).length;
 				if (stubs > 0)
 					note = `\nQuest's skill and audit stubs here differ from what quest ${version} plants (\`quest check\` lists ${stubs}): in a PR, run \`quest init\` with the repository's pinned quest, bumping the pin first if it is older. An audit the maintainer declines goes under \`## Skipped audits\` in \`quest/README.md\` instead.\n`;
-			} catch (error) {
-				note = `\nQuest could not compare the stubs here with quest ${version}'s (${error instanceof Error ? error.message : String(error)}); run \`quest check\` for its findings.\n`;
+			} catch {
+				// The error can quote checkout-controlled file names, which stay out of the rules.
+				note = `\nQuest could not compare the stubs here with quest ${version}'s; run \`quest check\` for why.\n`;
 			}
 			const context = `${CONTEXT}${note}`;
 			return JSON.stringify({ hookSpecificOutput: { hookEventName: event, additionalContext: context } });
