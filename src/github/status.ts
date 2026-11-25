@@ -45,7 +45,7 @@ const STATUS = `query($owner: String!, $repo: String!, $number: Int!,
 	repository(owner: $owner, name: $repo) {
 		pullRequest(number: $number) {
 			url body baseRefName state isDraft headRefOid headRefName mergeable mergeStateStatus reviewDecision
-			baseRef { target { ... on Commit { file(path: "${RISK_FILE}") { oid } } } }
+			baseRef { target { ... on Commit { tree { entries { name oid } } } } }
 			headRepository { nameWithOwner }
 			autoMergeRequest { enabledAt mergeMethod commitBody enabledBy { login } }
 			mergeQueueEntry { state position enqueuedAt }
@@ -201,9 +201,11 @@ export async function pullRequestStatus(
 
 /** The blob of the risk file at the tip of a PR node's base, or null where it has none. */
 function baseRiskFile(pull: ObjectValue): string | null {
-	// An open PR's base exists: GitHub closes the PR when its base branch is deleted.
-	const file = object(object(pull.baseRef).target).file;
-	return file === null || file === undefined ? null : string(object(file).oid);
+	// An open PR's base exists: GitHub closes the PR when its base branch is deleted. The root tree's entry, since
+	// `Commit.file` errors on a missing path rather than returning null; its oid is a symlink's own blob, as Git reads it.
+	const tree = object(object(object(pull.baseRef).target).tree);
+	const file = array(tree.entries).find((entry) => object(entry).name === RISK_FILE);
+	return file === undefined ? null : string(object(file).oid);
 }
 
 /**

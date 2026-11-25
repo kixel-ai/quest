@@ -8,6 +8,7 @@ import { pullRequestStatus, requiredOf } from "../src/github/status";
 import { attestation } from "../src/github/review-trust";
 import {
 	A,
+	baseTree,
 	B,
 	pr,
 	URL_,
@@ -1066,7 +1067,7 @@ describe("the risk tier", () => {
 	});
 
 	test("is stale with its review record once the base's risk file is not the one it was classified against", async () => {
-		const base = (file: { oid: string } | null) => ({ baseRef: { target: { file } } });
+		const base = (file: { oid: string } | null) => ({ baseRef: baseTree(file) });
 		const read = async (body: string, fields: Node, state = "OPEN") => {
 			const warnings: string[] = [];
 			const fixture = setup(
