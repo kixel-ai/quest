@@ -46,6 +46,12 @@ effort; Opus writes every size above XS, S's Sonnet arm aside while the
 writer A/B runs; and no rung, shadow, or vendor
 quorum runs. A high head waits for both: while either cannot run, its round
 fails as an outage (rejected: review with the one left).
+Narrowed 2026-11-25 (maintainer, closing
+[kixel-ai/quest#898](https://github.com/kixel-ai/quest/pull/898) and
+[kixel-ai/quest#891](https://github.com/kixel-ai/quest/pull/891)): ✅ "keep it
+simple. Claude writes, codex+claude reviews" (rejected: Codex, then Gemini, as
+fallback writers; Gemini as an opt-in reviewer). Quest runs no Antigravity;
+[agy removal](/quest/m0/agy-removal.md) takes it out.
 
 Decided 2026-11-21 (maintainer, `/quest-plan` in
 [kixel-ai/kixel.quest#85](https://github.com/kixel-ai/kixel.quest/pull/85)),
