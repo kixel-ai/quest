@@ -1,7 +1,7 @@
 import { appendFileSync, existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 
 import {
 	type BreakageRecord,
@@ -298,17 +298,28 @@ describe("wait log", () => {
 		]);
 	});
 
-	test("reads waits that ended since an instant, tolerating only a cut-off last line", () => {
-		const e = env({ CODEX_THREAD_ID: "x1" });
-		logWait(wait, { env: e, cwd: "/w", now: Date.parse(wait.end) });
-		const later = { ...wait, start: "2026-11-07T10:00:00.000Z", end: "2026-11-07T10:05:00.000Z" };
-		logWait(later, { env: e, cwd: "/w", now: Date.parse(later.end) });
-		expect(readWaits(Date.parse("2026-11-07T00:00:00Z"), e).map((w) => w.end)).toEqual([later.end]);
-		const today = join(waitsDirectory(e), "2026-11-07.jsonl");
-		appendFileSync(today, '{"kind":"gate-r');
-		expect(readWaits(0, e)).toHaveLength(2);
-		appendFileSync(today, '\n{"kind":"gate-run"}\n');
-		expect(() => readWaits(0, e)).toThrow("2026-11-07.jsonl:2");
+	test("reads waits that ended since an instant, skipping and reporting a torn line wherever it sits", () => {
+		const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+		try {
+			const e = env({ CODEX_THREAD_ID: "x1" });
+			logWait(wait, { env: e, cwd: "/w", now: Date.parse(wait.end) });
+			const later = { ...wait, start: "2026-11-07T10:00:00.000Z", end: "2026-11-07T10:05:00.000Z" };
+			logWait(later, { env: e, cwd: "/w", now: Date.parse(later.end) });
+			expect(readWaits(Date.parse("2026-11-07T00:00:00Z"), e).map((w) => w.end)).toEqual([later.end]);
+			expect(stderr).not.toHaveBeenCalled();
+			// A short write's fragment, last in the file.
+			const today = join(waitsDirectory(e), "2026-11-07.jsonl");
+			appendFileSync(today, '{"kind":"gate-r');
+			expect(readWaits(0, e)).toHaveLength(2);
+			expect(stderr).toHaveBeenLastCalledWith(`quest: skipped ${today}:2, not a wait quest logged\n`);
+			// The next write starts on a fresh line, so the fragment sits between whole lines and costs only itself.
+			logWait(later, { env: e, cwd: "/w", now: Date.parse(later.end) });
+			stderr.mockClear();
+			expect(readWaits(0, e)).toHaveLength(3);
+			expect(stderr.mock.calls).toEqual([[`quest: skipped ${today}:2, not a wait quest logged\n`]]);
+		} finally {
+			stderr.mockRestore();
+		}
 	});
 
 	test("logs a gate run as one line, which still reads beside the waits older gates logged", () => {
@@ -329,7 +340,13 @@ describe("wait log", () => {
 			`${JSON.stringify({ ...run, cpu: -1, sessions: [], directory: "/w" })}\n`,
 		);
 		logWait(wait, { env: e, cwd: "/w", now: Date.parse(run.end) });
-		expect(() => readWaits(0, e)).toThrow("2026-11-06.jsonl:3");
+		const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+		try {
+			expect(readWaits(0, e).map((w) => w.kind)).toEqual(["gate", "gate-run", "gate-run"]);
+			expect(stderr).toHaveBeenCalledWith(expect.stringContaining("2026-11-06.jsonl:3, not a wait"));
+		} finally {
+			stderr.mockRestore();
+		}
 	});
 
 	test("drops days past what it keeps", () => {
