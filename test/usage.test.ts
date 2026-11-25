@@ -281,7 +281,7 @@ describe("PR records", () => {
 	const risk: Risk = {
 		tier: "medium",
 		reason,
-		classified: { tier: "medium", reason, by: { kind: "paths" }, class: null, usage: [] },
+		classified: { tier: "medium", reason, by: { kind: "paths" }, class: null, riskFile: null, usage: [] },
 	};
 	const at = {
 		branch: round.branch,

@@ -138,6 +138,8 @@ export interface Status {
 	/**
 	 * Null when the `## Review` section holds no record `quest review` wrote or names no full SHA, or no writer's passing `quest review` status attests it.
 	 * `localReview` is whether that status attests a local reviewer's round, false for a low head none ran on.
+	 * `state` is `stale` for an open PR whose base's risk file at its tip is not the one the record names, since the
+	 * tier that file set decided how much review the head got.
 	 */
 	reviewRecord: (ReviewRecord & { localReview: boolean }) | null;
 	/**

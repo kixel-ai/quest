@@ -43,7 +43,3 @@ Validate by replaying recent merged PRs' changed files, both sides of
 each rename, through `classesFor` against the new file. The PRs classed
 `internal-docs` since 2026-10-01 were all plan-only, so each should still
 be offered `quest`.
-
-## Required
-
-- [Risk records go stale when the base's risk file changes](/quest/m0/risk-base-stale.md) - so a PR classed before a scope narrows its class does not land on the standing pick

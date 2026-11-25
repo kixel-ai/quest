@@ -605,8 +605,8 @@ comes last, and a missing value prints as `-`:
 | --- | --- |
 | `url`, `state`, `draft`, `head` | The PR URL; `open`, `closed`, or `merged`; `true` or `false`; the head SHA. |
 | `mergeable`, `merge-state`, `review-decision` | GitHub's values, lowercased. |
-| `review-record` | Whether the PR body's [`## Review` record](#review-locally) still covers the head, and the head it names last: `current` when it is the head, `diff-identical` when `git diff <base>...<head>` prints the same as for it, `stale` otherwise, or `unknown` when GitHub cannot compare them, such as a diff too large; then `local-review`, or `no-local-review` for a low head no local reviewer ran on, as the status below attests; `-` when the section holds no record `quest review` wrote or it names no full SHA, or, with a warning saying why, when no passing [`quest review` commit status](#review-locally) attests it: the latest one on the head it names must be `success`, set by a user with write access to the base repository, its target the diff from the head's merge base with the PR's base, and its description must name the record's risk tier and class. So a record a contributor or a bot wrote, or edited to name another head, base, or tier, counts for nothing. Reading the setter's permission takes a token that can push to the repository; any other sees every record as untrusted. |
-| `risk` | The record's [risk tier](#risk-tiers), `low`, `medium`, or `high`; the same state as `review-record` for the head it names; the tier its classifier set; and the reason. `-` when the record names none or does not count, and `- malformed -` with why when its risk lines do not parse, which `quest merge` refuses. |
+| `review-record` | Whether the PR body's [`## Review` record](#review-locally) still covers the head, and the head it names last: `current` when it is the head, `diff-identical` when `git diff <base>...<head>` prints the same as for it, `stale` otherwise, and also, with a warning, for an open PR once `RISK.md` at the base's tip is not the file the record names, since the tier that file set decided how much review the head got, or `unknown` when GitHub cannot compare them, such as a diff too large; then `local-review`, or `no-local-review` for a low head no local reviewer ran on, as the status below attests; `-` when the section holds no record `quest review` wrote or it names no full SHA, or, with a warning saying why, when no passing [`quest review` commit status](#review-locally) attests it: the latest one on the head it names must be `success`, set by a user with write access to the base repository, its target the diff from the head's merge base with the PR's base, and its description must name the record's risk tier, class, and risk file. So a record a contributor or a bot wrote, or edited to name another head, base, or tier, counts for nothing. Reading the setter's permission takes a token that can push to the repository; any other sees every record as untrusted. |
+| `risk` | The record's [risk tier](#risk-tiers), `low`, `medium`, or `high`; the same state as `review-record` for the head it names, so `stale` once the base's `RISK.md` changes, since that base may no longer hold the tier or offer the class; the tier its classifier set; and the reason. `-` when the record names none or does not count, and `- malformed -` with why when its risk lines do not parse, which `quest merge` refuses. |
 | `class` | The `## Automatic` class of the base's `RISK.md` the record's classifier found the change in, or `-`. |
 | `auto-merge` | Method, who enabled it, when, and the head it was enabled on. |
 | `merge-queue` | Queue state, position, and when it was enqueued. |
@@ -793,9 +793,10 @@ base with the base touches a path the base's `RISK.md` holds high, as
 [Risk tiers](#risk-tiers) says, or reaches GitHub's 300-file compare limit. A
 high head lands only once a `quest review` status that `quest status` counts
 covers its diff, on that head or on an earlier one whose diff from the base is
-identical, unless the head itself carries a `quest review` status that is not
-a pass. So any push after the last review that changes the diff, a person's or
-a helper's, waits for a new round.
+identical, and its record names the base's current `RISK.md`, unless the head
+itself carries a `quest review` status that is not a pass. So any push after
+the last review that changes the diff, a person's or a helper's, and any change
+to the base's `RISK.md` since, waits for a new round.
 It enables auto-merge bound to that SHA, or merges at once when nothing is
 left to wait for. `--squash` or `--rebase` picks the method, and it refuses one
 the repository disallows; otherwise it uses the only method the repository
@@ -1791,8 +1792,9 @@ and prints `record skipped: <why>`. It edits as the user the GitHub token names
 (`GH_TOKEN`, `GITHUB_TOKEN`, or `gh auth token`), then on GitHub sets the
 `quest review` commit status on the head on the same token, so push the head
 first: `success` once no finding is open, else `failure`, described by the
-head's risk tier and class and whether a local reviewer ran, as `Risk low,
-class test: passed with no local reviewer`, or `findings accepted` after
+head's risk tier, class, and risk file and whether a local reviewer ran, as
+`Risk low, class test, risk file 3f9c2a7b1e04: passed with no local
+reviewer`, or `findings accepted` after
 `--accept`, its target the diff from the
 head's merge base with the PR's base. `quest status` counts a record only
 through that status, set by someone who can push, so a contributor's own record
@@ -1874,8 +1876,9 @@ class every changed file falls in, or none. It is offered only the classes
 whose scope holds every changed path, either side of a rename, checked
 before it runs so it judges just the rule and cannot widen a scope; a change
 that touches no path falls in none. The scope is checked when the head is
-classified, so a record keeps its class after the base narrows that scope
-until a review classifies the head again. It runs as Claude Code
+classified, so once the base's `RISK.md` changes, `quest status` reads an
+open PR's review record, tier, and class as `stale` until a review
+classifies the head again. It runs as Claude Code
 `claude-haiku-5-5` at low effort, then Codex `gpt-6.2-sol` at low when Claude Code is
 missing, logged out, has its login rejected, or hits its usage limit. When none can
 run, the review fails on the limit that resets first if every one whose CLI is
@@ -1890,10 +1893,13 @@ sessions, so a later round on the same head and base `RISK.md` reuses it, and
 ```markdown
 - Risk: medium, `It changes the record format quest status parses.`
 - Classified: medium by Claude Code, claude-haiku-5-5, low effort, session `5b0e6c1a-27d4-4f8e-9a51-3c2d7e8f9b10`
+- Risk file: 3f9c2a7b1e04
 ```
 
 `Classified:` names `the always-high paths` or `default` when no model set the
-tier. A `- Class:` line follows when the classifier named a class.
+tier. A `- Class:` line follows when the classifier named a class, then
+`- Risk file:`, the base's `RISK.md` the tier was set against by its blob's
+first 12 characters, or `none`.
 
 A low head with no finding left to settle runs no local reviewer, unless
 `--harness`, `--model`, or `--effort` names one: the record names the head in

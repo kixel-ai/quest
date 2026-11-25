@@ -205,6 +205,8 @@ export interface Classified extends Assessment {
 	by: Classification;
 	/** The risk file's `## Automatic` class the classifier found every changed file in, or null for none. */
 	class: string | null;
+	/** The blob of the base's risk file the tier was set against, or null where the base has none. */
+	riskFile: string | null;
 	usage: Usage[];
 }
 
@@ -498,7 +500,7 @@ interface State {
 	/** Every finding the branch's rounds refuted or the maintainer accepted, which `--new` keeps. */
 	history?: Past[];
 	/** The last head's classification, reused while its change and the base's risk file are the same (`key`). */
-	classified?: { key: string; value: Omit<Classified, "usage"> };
+	classified?: { key: string; value: Omit<Classified, "usage" | "riskFile"> };
 	/** The maintainer's override of the branch's tier. */
 	override?: Override;
 }
@@ -1966,17 +1968,21 @@ interface Classifying {
  */
 export async function classify(input: Classifying): Promise<{ key: string; value: Classified }> {
 	const { root, baseSha, change, changed } = input;
-	const text = exists(root, baseSha, RISK_FILE) ? show(root, baseSha, RISK_FILE) : null;
+	// One lookup for the blob and its text, read here rather than saved, so the record names the file a reused tier
+	// was set against.
+	// Plain `ls-tree` output, `<mode> <type> <object>\t<path>`, since Git before 2.36 has no `--object-only`.
+	const riskFile = git(root, ["ls-tree", baseSha, "--", RISK_FILE]).split(/\s/)[2] ?? null;
+	const text = riskFile === null ? null : git(root, ["cat-file", "blob", riskFile]);
 	// The paths too, since they set the tier and the offered classes along with the risk file.
 	// And the diff's form, so a tier set from a diff the head's attributes could shape is set again.
 	const empty = emptyTree(root);
 	const key = digest(JSON.stringify([change.mergeBase, change.head, text, changed, empty, DIFF_FLAGS]));
-	if (input.saved?.key === key) return { key, value: { ...input.saved.value, usage: [] } };
+	if (input.saved?.key === key) return { key, value: { ...input.saved.value, riskFile, usage: [] } };
 	if (input.savedOnly)
 		throw new ReviewInputError(
 			`no round classified ${change.head} from this base with this quest's diff; review it before accepting its findings`,
 		);
-	const set = (value: Omit<Classified, "usage">) => ({ key, value: { ...value, usage: [] } });
+	const set = (value: Omit<Classified, "usage" | "riskFile">) => ({ key, value: { ...value, riskFile, usage: [] } });
 	const file = text === null ? null : parseRiskFile(text);
 	if (file !== null && file.problems.length > 0)
 		throw new ReviewInputError(`the base's ${RISK_FILE} cannot be read: ${file.problems.join("; ")}`);
@@ -2044,6 +2050,7 @@ export async function classify(input: Classifying): Promise<{ key: string; value
 			reason,
 			by: { kind: "model", ...answer.entry, session: answer.session },
 			class: answer.value.class,
+			riskFile,
 			usage: answer.usage ? [{ turn: "classify", ...answer.usage }] : [],
 		},
 	};
@@ -2320,7 +2327,7 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 	const tallies = options.fresh ? dropped(saved) : (saved?.tallies ?? []);
 	// `--new` drops the sessions, never what the branch already settled.
 	const past = saved?.history ?? [];
-	const { usage: _, ...value } = classified.value;
+	const { usage: _, riskFile: __, ...value } = classified.value;
 	const state = (kept: Session[], tallies: Tally[], risk: Risk, history: Past[]): State => ({
 		branch,
 		sessions: kept,
