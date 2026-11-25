@@ -62,7 +62,7 @@ draft PR right away, and refuses a quest whose branch or PR, including one from
 a fork, already exists. `quest unblocked --unclaimed` lists the ready quests
 nobody holds.
 
-You review each change: `/quest-review` has a model other than its latest writer review a
+You review each change: `/quest-review` has a model no weaker than its latest writer review a
 draft locally and marks it ready, and `/quest-merge` (`$quest-merge` in Codex)
 queues it to land once a review covers its head and checks pass.
 `/quest-run` queues a writer's PR that changes no user-facing behavior,

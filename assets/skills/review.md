@@ -1,5 +1,5 @@
 ---
-description: Review a PR's branch locally with a model other than its latest writer, then mark it ready for review.
+description: Review a PR's branch locally with a model no weaker than its latest writer, then mark it ready for review.
 guide: Creation, Execution, Summaries, Questions
 skills: merge
 ---
@@ -22,7 +22,7 @@ Run no new round when a review already counts for the committed head, as `/quest
 `quest status <pr>` reads the pushed head, so trust its `review-record` line only while its `head` line is the committed head.
 
 Otherwise, push the committed branch unless GitHub already has its head, since each round's status goes on the head GitHub has, first disabling auto-merge with `gh pr merge <pr> --disable-auto` when `quest status <pr>` shows it enabled, since GitHub would land the pushed head unreviewed, then review it with `quest review --base <remote>/<base>`, in the foreground; a round takes minutes.
-It picks a reviewer other than the model that changed the branch last, at an effort the PR's size sets.
+It picks a reviewer no weaker than the model that changed the branch last, which may be that model, at an effort the PR's size sets.
 It reads that model, and off a quest branch the size, from the PR body's `## Models` record: open the draft PR and write the record before the first round, as `Size: M` and `Implementer: Claude Code, claude-opus-5-5, high effort`.
 Pass `--exclude-model` or `--size` only for a PR whose body cannot hold the record.
 Where the repository's root instructions name other reviewers, pass them with `--harness`, `--model`, and `--effort`, which runs that reviewer alone.

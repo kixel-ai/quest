@@ -1518,36 +1518,25 @@ whole branch at the PR's size.
 
 ## Review locally
 
-`quest review` has a model other than the latest writer review the checkout's
+`quest review` has a model no weaker than the latest writer review the checkout's
 committed and pushed branch before it is marked ready for review, at an effort set by the PR's
 size. Each size ranks its reviewers, the same for every repository:
 
-| PR size | Reviewer | When the reviewer wrote it or is weaker than its writer | Then, while those are out |
+| PR size | Reviewer | When the reviewer is weaker than its writer | Then, while those are out |
 |---|---|---|---|
 | XS | Codex `gpt-6.2-sol` medium | Claude Code `claude-opus-5-5` low | Codex `gpt-6.2-astra` medium, then Claude Code `claude-fable-5-2` medium |
 | S | Codex `gpt-6.2-sol` medium | Claude Code `claude-opus-5-5` low | Codex `gpt-6.2-astra` medium, then Claude Code `claude-fable-5-2` medium |
 | M, or none | Codex `gpt-6.2-sol` high | Claude Code `claude-opus-5-5` medium | Codex `gpt-6.2-astra` high, then Claude Code `claude-fable-5-2` high |
-| L | Codex `gpt-6.2-sol` xhigh | Claude Code `claude-opus-5-5` high | Codex `gpt-6.2-astra` xhigh, then Claude Code `claude-fable-5-2` xhigh |
-| XL | Codex `gpt-6.2-astra` high | Claude Code `claude-opus-5-5` xhigh | Codex `gpt-6.2-sol` xhigh, then Claude Code `claude-fable-5-2` xhigh |
+| L | Codex `gpt-6.2-sol` xhigh | Claude Code `claude-opus-5-5` high | Codex `gpt-6.2-astra` xhigh, then Claude Code `claude-fable-5-2` high |
+| XL | Codex `gpt-6.2-astra` high | Claude Code `claude-opus-5-5` xhigh | Codex `gpt-6.2-sol` xhigh, then Claude Code `claude-fable-5-2` high |
 
 Sol is weaker than Fable and Astra, so Opus reviews what either wrote below XL.
-XL starts on Astra, which may review Fable's and Sol's work, so Opus takes
-Astra's; the rest of the row follows in order while those before it are out.
+A model may review its own work, in a session of its own, so the writer's model
+is never skipped for that alone. The rest of the row follows in order while
+those before it are out. Fable never reviews above high: its usage limit is the
+XL writers', and its xhigh costs far more than Opus xhigh.
 
-Beside it, the shadow, the pick's model one effort away on the ladder (low,
-medium, high, xhigh), reviews the same head in its own session, so the routing
-can be retuned from what each effort step finds over its neighbor. It runs one
-effort above the pick for an S or M PR (Sol high for S), one below for an L or
-XL PR (Astra medium for XL), and not at all for an XS PR or a Fable pick, whose limit also writes XL
-quests and seats high heads' second reviewer, and is skipped when no such effort is on
-the ladder, as above xhigh or for an `--effort` off it.
-
-It runs on the branch's first run of the pick, then reruns only while it has findings to settle, or once the pick
-changed so that it is no longer that step away; its findings are numbered,
-answered, and settled like any reviewer's. A pick with no shadow, as at XS or on a high
-head, seats the old shadow as it ran while it still has findings, so none is
-left unanswered and its session carries on, unless its model is avoided or
-cannot run, when one at the pick's effort settles them. The reviewers run at once;
+The reviewers run at once;
 the first to fail, such as on a usage limit, stops the others, and the round
 saves none.
 
@@ -1565,8 +1554,7 @@ header:
 - Skipped: Codex, gpt-6.2-sol, high effort: usage limit, resets 2026-11-18T03:00:00Z
 ```
 
-The new reviewer settles the open findings of the one it replaces, and the
-shadow follows it. Only when every eligible reviewer is out does the run fail,
+The new reviewer settles the open findings of the one it replaces. Only when every eligible reviewer is out does the run fail,
 exiting 3 with each one's error. A reviewer `--harness`, `--model`, or
 `--effort` names never passes the round on.
 
@@ -1574,20 +1562,14 @@ A quest branch takes its quest's size, read from the base branch's tip so a
 change cannot lower its own review; any other PR, such as a skill's own, takes
 the `Size:` line of the `## Models` record in its open PR's body, and a PR with
 neither gets M's reviewers. `--size` overrides both. The first reviewer whose
-model is neither the latest writer's nor weaker than it reviews: Sonnet is
-weaker than every other model and never reviews its own work, so it reviews
-nothing and no list names it, and Sol is
-weaker than Fable and Astra. The record's last `Implementer:` line
+model is not weaker than the latest writer's reviews, which may be the writer's
+own model: Sonnet is weaker than every other model, so no list names it, and
+Sol is weaker than Fable and Astra. The record's last `Implementer:` line
 names the latest writer, since each session moves its line last whenever it pushes, or
 `--exclude-model` names each model to avoid instead, with every model weaker
-than it. Earlier writers may review.
-Without a record, or when its last line names an `unknown` model, the harness
-running the command, usually the session that
-just pushed, detected from the variables Claude Code, Codex, and Antigravity
-each set, is taken to be the latest writer, so Codex reviews from Claude Code
-and Claude Code from Codex; with no model known, no weaker one is avoided, so
-the never-weaker rule needs the record. `--harness` names the only reviewer instead of
-the pick and the shadow, at the model and effort of its first entry whose model is not avoided, and
+than it. Without a record, or when its last line names an `unknown` model,
+none is avoided, so the never-weaker rule needs the record. `--harness` names the only reviewer instead of
+the pick and the second reviewer, at the model and effort of its first entry whose model is not avoided, and
 `--model` and `--effort` override the size pick's or that reviewer's, as a
 repository whose `AGENTS.md` names other reviewers needs; a `--model` the list
 names, in any spelling such as `openai/gpt-6.2-astra`, runs on its own entry's
@@ -1598,8 +1580,7 @@ reviewers' sessions for the pick's next run, and refuses while one has
 findings to settle, so a head never passes one reviewer alone while the other's
 findings are open. When the latest writer changes the size's pick to one with
 no session on the branch, its first session settles the open findings of the
-reviewer it replaces, and the new pick's shadow settles the old shadow's. An unknown harness or a size whose
-every reviewer is avoided is an error rather than a same-model review. The reviewer reaches its model as the user's own CLI does:
+reviewer it replaces. A size whose every reviewer is avoided is an error. The reviewer reaches its model as the user's own CLI does:
 Claude Code keeps `ANTHROPIC_BASE_URL`, `ANTHROPIC_CUSTOM_HEADERS`, and its
 cloud providers' `CLAUDE_CODE_USE_*` switches and settings, so a gateway such
 as CLIProxyAPI, Bedrock, Vertex, or Foundry works, and Codex keeps
@@ -1838,7 +1819,7 @@ run catches what those miss.
 |---|---|---|
 | Low | None, unless `--harness`, `--model`, or `--effort` names one | Its own, once its class is in `RISK.md`'s `## Automatic` list; else the maintainer's pick |
 | Medium | The size's pick | The maintainer's pick |
-| High | No shadow, but a second reviewer from another vendor on the high list; the pick comes from that list too when the classifier or an override set the tier | The maintainer's pick, with the full brief |
+| High | A second reviewer from another vendor on the high list; the pick comes from that list too when the classifier or an override set the tier | The maintainer's pick, with the full brief |
 
 `/quest-run` carries the picks.
 
@@ -1910,11 +1891,11 @@ to its block. A `- Class:` line follows when the classifier named a class.
 A low head with no finding left to settle runs no local reviewer, unless
 `--harness`, `--model`, or `--effort` names one: the record names the head in
 full, adds `- Local review: none, since the head is low risk`, and `next done`
-says so. A high head runs no shadow but gets a
+says so. A high head gets a
 second reviewer: the first of the `high` list (Codex `gpt-6.2-sol` xhigh,
-Claude Code `claude-opus-5-5` xhigh, Claude Code `claude-fable-5-2` xhigh,
+Claude Code `claude-opus-5-5` xhigh, Claude Code `claude-fable-5-2` high,
 Codex `gpt-6.2-astra` xhigh) from a vendor other than the pick's that can
-run, so Sol and Fable review Opus's work, and Opus and Astra Sol's or
+run, so Sol and Opus review Opus's work, and Opus and Astra Sol's or
 Fable's. It is marked `second`, in a session of its own that
 reviews every head while the tier is high and settles its findings after. A
 head the classifier or `--override` holds high also takes its pick from that
@@ -1927,8 +1908,7 @@ with none. A round that raises the tier to high saves its rounds and runs the
 second reviewer at once; when that review
 fails, as when none can run, it prints those rounds before the error, so their
 findings can be answered. When every model of the other vendor is avoided, as
-with no `## Models` record, which avoids every model of the harness running the
-command, the run fails as a usage error; when they cannot run, as an outage.
+by `--exclude-model`, the run fails as a usage error; when they cannot run, as an outage.
 
 `--override <tier> --reason <text>` records the maintainer's tier for the
 branch in place of the reviewed one, as `- Risk: <tier>, <reason>` and
@@ -2597,7 +2577,7 @@ arrives with the guide sections and other skills it builds on, in one call:
 | `quest-import` | Bring open GitHub issues into the planning conversation. |
 | `quest-start` | Claim a ready quest, complete it, and open a PR. |
 | `quest-iterate` | Iterate on an open PR to settle its open decisions, fix CI and review findings, and push. |
-| `quest-review` | Review a PR's branch locally with a model other than its latest writer, then mark it ready for review. |
+| `quest-review` | Review a PR's branch locally with a model no weaker than its latest writer, then mark it ready for review. |
 | `quest-merge` | Queue a PR to land, running `quest-iterate` first when it needs work. |
 | `quest-run` | Orchestrate a project from one session: start ready quests, take PRs to merge, and settle what quests and drafts wait on you, in a loop until only your decisions remain, then plan the follow-ups no quest owns yet. Pass a filter such as `prs` to start no quests. |
 | `quest-afk` | Keep a session such as `quest-run` going while you are away: it acts on its recommendations, defers merges, and walks you through the rest when you return. `afk merge` also merges low- and medium-risk PRs it strongly recommends, and `afk soon` asks pending questions in one batch before you leave. |
