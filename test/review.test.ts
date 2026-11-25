@@ -355,10 +355,12 @@ fakes("a seat cancelled by its sibling's usage limit queues no session but its o
 	git(s.repo, "commit", "-qam", "use Quest");
 	onGitHub(s.repo, []);
 	vi.stubEnv("FAKE_RISK", JSON.stringify({ tier: "high", reason: "It rewrites the wire format peers read." }));
-	// Sol hits its limit after opening thread-1 while Claude's review turn is still running.
+	// Sol hits its limit after opening thread-1, once Claude's review turn is running.
 	vi.stubEnv("FAKE_FAILS", "gpt-6.2-sol");
 	vi.stubEnv("FAKE_LIMITED", "reset");
-	vi.stubEnv("FAKE_HANG_CLAUDE", "1");
+	const started = join(s.bin, "..", "claude-turn");
+	execFileSync("mkfifo", [started]);
+	vi.stubEnv("FAKE_HANG_CLAUDE", started);
 	const queued: { harness: string; session: string }[] = [];
 	await review({ root: s.repo }, { env: process.env, queue: (session) => queued.push(session) }).catch(() => {});
 	expect(queued).toContainEqual(expect.objectContaining({ harness: "codex", session: "thread-1" }));

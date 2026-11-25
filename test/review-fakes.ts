@@ -84,8 +84,9 @@ const logged = (call) => {
  * FAKE_LIMITED to the harnesses and models it lists, comma-separated, so one
  * reviewer fails while the next runs. FAKE_QUOTED fails Claude Code's findings
  * turn with a reply that only quotes a limit's message. FAKE_REPLY replaces the
- * findings reply. FAKE_HANG_CLAUDE hangs Claude Code's review turn until it is stopped, as a seat still
- * running when another's failure cancels it. FAKE_HANG_CODEX, a FIFO's path, does the same to Codex's, after it opened its thread and
+ * findings reply. FAKE_HANG_CLAUDE, a FIFO's path, hangs Claude Code's review turn until it is stopped, as a seat still
+ * running when another's failure cancels it, after signalling on the FIFO, which Codex's limit waits to read before
+ * failing, so the limit never lands before that turn starts. FAKE_HANG_CODEX, a FIFO's path, does the same to Codex's, after it opened its thread and
  * signalled on the FIFO, which Claude Code's limit waits to read before failing, so the limit never lands first.
  */
 export const FAKES: Record<string, string> = {
@@ -105,6 +106,7 @@ const loggedIn = !fake("FAKE_LOGGED_OUT") || credential || provider;
 if (argv[0] === "auth") process.exit(loggedIn ? 0 : 1);
 const at = (flag) => argv[argv.indexOf(flag) + 1];
 if (process.env.FAKE_HANG_CLAUDE && argv.includes("--session-id") && !argv.includes("--json-schema")) {
+	fs.writeFileSync(process.env.FAKE_HANG_CLAUDE, "");
 	setInterval(() => {}, 1000);
 	return;
 }
@@ -216,6 +218,8 @@ if (rejected) {
 	process.exit(1);
 }
 if (fake("FAKE_LIMITED")) {
+	// A read of the FIFO blocks until Claude's review turn is running, with nothing to poll.
+	if (process.env.FAKE_HANG_CLAUDE) fs.readFileSync(process.env.FAKE_HANG_CLAUDE);
 	const message = fake("FAKE_LIMITED") === "retried"
 		? "exceeded retry limit, last status: 429 Too Many Requests"
 		: fake("FAKE_LIMITED") === "unknown"
