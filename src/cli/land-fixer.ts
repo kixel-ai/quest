@@ -40,7 +40,7 @@ export class FixerRefusal extends Error {
 }
 /** A refusal because a finding or decision holds the head, which `quest status` reports as `unanswered_signal`. */
 export class SignalRefusal extends FixerRefusal {}
-/** A refusal because the head is high and no `quest review` status covers it, so it waits for a new round. */
+/** A refusal because the head is high and no `quest review` status covers it, so it waits for a new round, which `quest status` reports as `unreviewed`. */
 export class ReviewRefusal extends FixerRefusal {}
 /** A fix that edits protected paths beyond what the base merge carries: only a maintainer's push lands it. */
 export class ProtectedEdit extends Error {}

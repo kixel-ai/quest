@@ -924,7 +924,7 @@ addressed recurring right after it, or three unchanged re-enqueues in a row,
 whatever their causes, hand it back. A fix is validated, lease-pushed, and recorded in Review, and a push GitHub refuses, or a fix that edits protected paths, is handed
 back with its resolution for `quest land apply`, as [the land fixer](#the-land-fixer) describes. The watcher then puts the fixed, merged, or requeued head back
 in the queue, unless it is high and no `quest review` status covers its diff, as
-`quest merge --land` requires, which hands it back for a review round. It goes back with `expectedHeadOid` bound to it: it enqueues a head whose
+`quest merge --land` requires, which hands it back for a review round, marked `unreviewed` in `quest status`. It goes back with `expectedHeadOid` bound to it: it enqueues a head whose
 required checks have passed, and arms auto-merge on one whose checks still
 run, so GitHub enqueues it once they pass. Either joins the back of the queue.
 It comments on the PR with what it did, after any note the fixer wrote. A
@@ -1057,7 +1057,7 @@ rename split, and keeps that set as a plain merge of the base leaves it. It cove
 `.gitmodules`, and gitlinks anywhere. A high head gets fixes like any other, but
 the watcher puts it back in the queue only when a `quest review` status covers
 the new head's diff, as `quest merge --land` requires; otherwise it hands the PR back
-for a review round. The watcher's own merge with the quest merge driver, below, is
+for a review round, marked `unreviewed` in `quest status`. The watcher's own merge with the quest merge driver, below, is
 no fixer edit: it runs no model and resolves only `quest/` files. Collection copies at most 100 MiB of Git metadata the fixer added into a
 clean object repository. It skips the packs fetched at launch, whose objects the clean
 repository borrows from the daemon's own. It ignores fixer configuration and never
