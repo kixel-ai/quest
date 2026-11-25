@@ -771,15 +771,11 @@ export function sessionRecords(sources: RecordSources): Map<Session, SessionReco
 	// cannot parse.
 	const reviewers = new Set(pulls.flatMap((pull) => reviewSessions(pull.body)));
 	const classifiers = new Set(pulls.flatMap((pull) => classifierSessions(pull.body)));
-	// A pinned role holds even when no record names the session, as for a classifier whose reply was unusable.
-	for (const [name, pin] of pins ?? []) {
-		const session = name.slice(name.indexOf("\0") + 1);
-		(pin.role === "classifying" ? classifiers : reviewers).add(session);
-	}
 	return buildRecords({
 		repository,
 		sessions,
 		...attribute(sessions, evidence, pulls, pins),
+		pins,
 		reviewers,
 		classifiers,
 		waits,

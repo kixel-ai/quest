@@ -2,7 +2,7 @@
 import { type GatedRun, type Role, type SessionRecord, type SessionWait, type TimeSplit, branchQuest } from "../core";
 import { type CallLine, sessionGroup, shellGroups } from "./calls";
 import { type TranscriptFacts, transcriptFacts } from "./transcript";
-import type { Pull, Session } from "./usage";
+import type { Pins, Pull, Session } from "./usage";
 import type { LoggedWait } from "./waits";
 
 /** The role the first quest skill a session ran gives it; a skill not listed gives none. Retired skills stay while transcripts still run them. */
@@ -35,6 +35,8 @@ export interface RecordInput {
 	own: Map<Session, Pull>;
 	/** The repositories a session is known to be in, or null when unknown. */
 	known?: (session: Session) => string[] | null;
+	/** The sessions `quest review` started, whose branch and role stand over every inference below. */
+	pins?: Pins;
 	/** Session IDs a PR's review record names as reviewers, and as its risk classifier. */
 	reviewers: Set<string>;
 	classifiers: Set<string>;
@@ -58,7 +60,7 @@ const iso = (ms: number) => new Date(ms).toISOString();
 
 /**
  * A record for each session that `emit` names, or that worked on a PR. A session's PRs are its own, else its parent's, else, for one that spawned
- * sub-agents, every PR they worked on. Its role is classifying when a PR's review record names it as the risk
+ * sub-agents, every PR they worked on. Its role is classifying when  a PR's review record names it as the risk
  * classifier, reviewing when Codex marks it a review or a PR's review record
  * names it, else the one its first quest skill gives, else its parent's unless that is coordinating, else coordinating for a
  * session whose PRs are only its sub-agents', planning on a planning skill's branch, and implementing or iterating
@@ -73,6 +75,7 @@ export function buildRecords(input: RecordInput): Map<Session, SessionRecord> {
 		if (parent && parent !== s) children.set(parent, [...(children.get(parent) ?? []), s]);
 	}
 	const parentOf = (s: Session) => (s.parent === null ? undefined : byId.get(id(s.harness, s.parent)));
+	const pinOf = (s: Session) => (s.id === null ? undefined : input.pins?.get(id(s.harness, s.id)));
 
 	const descendants = (s: Session, seen = new Set<Session>()): Pull[] => {
 		seen.add(s);
@@ -89,10 +92,13 @@ export function buildRecords(input: RecordInput): Map<Session, SessionRecord> {
 		const parent = parentOf(s);
 		if (parent && depth < input.sessions.length) {
 			// A session known to be in another repository keeps out of its parent's PRs, as a sub-agent in another
-			// checkout does.
+			// checkout does. One in the base's own keeps a fork's PR its parent reviewed from there.
 			const known = input.known?.(s) ?? null;
 			const inherited = pullsOf(parent, depth + 1).pulls.filter(
-				(p) => known === null || (p.repository !== null && known.includes(p.repository)),
+				(p) =>
+					known === null ||
+					known.includes(input.repository) ||
+					(p.repository !== null && known.includes(p.repository)),
 			);
 			if (inherited.length) return { pulls: inherited, via: "parent" };
 		}
@@ -109,6 +115,8 @@ export function buildRecords(input: RecordInput): Map<Session, SessionRecord> {
 	};
 
 	const roleOf = (s: Session, depth = 0): Role => {
+		const pinned = pinOf(s)?.role;
+		if (pinned) return pinned;
 		if (s.id !== null && input.classifiers.has(s.id)) return "classifying";
 		if (s.review || (s.id !== null && input.reviewers.has(s.id))) return "reviewing";
 		const skill = factsOf(s)?.skill;
@@ -134,7 +142,10 @@ export function buildRecords(input: RecordInput): Map<Session, SessionRecord> {
 		const { pulls, via } = pullsOf(s);
 		if (input.emit ? !input.emit.has(s) : pulls.length === 0) continue;
 		const own = input.own.get(s);
-		const branch = own?.branch ?? (via === "none" ? lastBranch(s) : pulls.length === 1 ? pulls[0]!.branch : null);
+		const branch =
+			own?.branch ??
+			pinOf(s)?.branch ??
+			(via === "none" ? lastBranch(s) : pulls.length === 1 ? pulls[0]!.branch : null);
 		const local = factsOf(s);
 		const person: SessionWait[] = (local?.questions ?? [])
 			.filter((q) => q.end >= input.since)

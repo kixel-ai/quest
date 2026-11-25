@@ -240,20 +240,33 @@ test("a session `quest review` queued is sent on the PR it reviewed, as the role
 	reviewed("rev", "quest/m0/a", "reviewing");
 	// A fork's PR heads a repository other than the checkout's origin.
 	reviewed("cls", "fix/y", "classifying");
-	// The runner's review checkout names its own branch, and a detached one names none.
-	const sessions = [session("rev", "kix-review/1"), session("cls", "x", { branches: [] })];
+	// Reviewed before its PR opens.
+	reviewed("early", "feature/z", "reviewing");
+	// The runner's review checkout names its own branch, and a detached one names none. A sub-agent in the same
+	// checkout follows its parent onto the fork's PR.
+	const sessions = [
+		session("rev", "kix-review/1"),
+		session("cls", "x", { branches: [] }),
+		session("sub", "x", { branches: [], parent: "cls" }),
+		session("early", "kix-review/2"),
+	];
+	// An editable PR body naming a reviewer as its classifier does not relabel it.
 	const fork = {
 		...opened(8, "fix/y", "2026-11-06T11:30:00Z"),
 		head: { ref: "fix/y", repo: { full_name: "ann/proj" } },
+		body: "## Review\n\n- Classified: medium by Claude Code, session `rev`\n",
 	};
 	const { deps, uploads } = sender(env, 200, sessions, () => {}, [fork]);
 	await sendPass(deps);
-	// No PR body names either session, as for a classifier whose reply was unusable.
+	// No PR body names the classifier, as for one whose reply was unusable.
 	expect(parseUpload(uploads[0]!.body).records.map((r) => [r.session, r.pulls, r.role, r.branch])).toEqual([
 		["rev", [7], "reviewing", "quest/m0/a"],
 		["cls", [8], "classifying", "fix/y"],
+		["sub", [8], "classifying", "fix/y"],
+		["early", [], "reviewing", "feature/z"],
 	]);
-	expect(remembered(env)).toEqual([]);
+	// It waits for a PR on the branch it reviewed, not its checkout's.
+	expect(remembered(env)).toEqual(["early"]);
 });
 
 test("a repository Kixel Quest does not serve is dropped, unsent and without token-max, and is said once", async () => {
