@@ -1228,8 +1228,8 @@ function agyAgent(context: Context): string {
  */
 export function agyTurn(context: Context, prompt: string, flags: string[]): Turn {
 	const files: Record<string, string> = { [`workspace/.agents/agents/${AGY_AGENT}.md`]: agyAgent(context) };
-	// Unquoted, since the reviewer reads each path as written, and the diffs with no attributes and as text, so the
-	// head can mark none of its own hunks binary, or plant a NUL byte in them.
+	// Unquoted, since the reviewer reads each path as written, and the diffs with no attributes, so the head can mark
+	// none of its own hunks binary.
 	if (context.head !== undefined)
 		files["files.txt"] = git(context.root, [
 			"-c",
@@ -1241,6 +1241,17 @@ export function agyTurn(context: Context, prompt: string, flags: string[]): Turn
 			context.head,
 		]);
 	const empty = context.ranges.length > 0 ? emptyTree(context.root) : "";
+	for (const [index, range] of context.ranges.entries())
+		files[`diff-${index + 1}.diff`] = git(context.root, [
+			"-c",
+			"core.quotePath=false",
+			`--attr-source=${empty}`,
+			"diff",
+			"--no-ext-diff",
+			"--no-textconv",
+			"--no-color",
+			...range.split(" "),
+		]);
 	// Created last, since a turn that is never run leaves its directory behind.
 	const dir = workspace(files, context.env);
 	// A file, since the rules can outgrow the 128 KiB an argument holds on Linux, as beside a crowded /tmp.
@@ -1248,17 +1259,6 @@ export function agyTurn(context: Context, prompt: string, flags: string[]): Turn
 	try {
 		// The rules first, since they refuse a host agy cannot be confined on before any export.
 		writeFileSync(settings, agySettings(dir, context.env), { mode: 0o600 });
-		// Written by Git itself, since a head that adds large binaries makes a patch no string holds.
-		for (const [index, range] of context.ranges.entries())
-			git(context.root, [
-				"-c",
-				"core.quotePath=false",
-				`--attr-source=${empty}`,
-				"diff",
-				...DIFF_FLAGS,
-				`--output=${join(dir, `diff-${index + 1}.diff`)}`,
-				...range.split(" "),
-			]);
 		if (context.head !== undefined) exportHead(context.root, context.head, join(dir, "head"));
 	} catch (error) {
 		rmSync(dir, { recursive: true, force: true });
@@ -1274,8 +1274,7 @@ export function agyTurn(context: Context, prompt: string, flags: string[]): Turn
 		context.ranges
 			.map((range, index) => ` \`${dir}/diff-${index + 1}.diff\` holds \`git diff ${range}\`.`)
 			.join("") +
-		// Its workspace holds the diff, and its rules deny the classifier's scratch file the prompt names for Claude.
-		`\n\n${context.readable === undefined ? prompt : prompt.replaceAll(join(context.readable, DIFF_PATCH), `${dir}/diff-1.diff`)}`;
+		`\n\n${prompt}`;
 	return {
 		argv: [
 			"agy",

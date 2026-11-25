@@ -15,7 +15,6 @@ let kixel: FakeKixelQuest;
 beforeEach(() => {
 	kixel = new FakeKixelQuest();
 	for (const [name, value] of Object.entries(kixelEnv())) vi.stubEnv(name, value);
-	vi.stubEnv("QUEST_FORGE", "");
 	vi.stubEnv("GH_TOKEN", "");
 	vi.stubEnv("GITHUB_TOKEN", "");
 	vi.stubGlobal("fetch", kixel.fetch);

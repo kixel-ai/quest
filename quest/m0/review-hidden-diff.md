@@ -28,7 +28,7 @@ them. The diffs the reviewers read do not:
 
 Recommended: name every reviewer diff with
 `--ignore-submodules=none --no-ext-diff --no-textconv`, plus the attribute
-handling the classifier's and agy's diffs have (`--attr-source=<empty tree>` and
+handling the classifier's diff has (`--attr-source=<empty tree>` and
 `--text`), so all of them read diffs the same way. Test each with a fixture head
 that hides its change each way: a gitlink under `diff.ignoreSubmodules=all`,
 a `-diff` attribute, and a `diff.external` helper that prints nothing.
