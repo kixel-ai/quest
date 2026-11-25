@@ -457,7 +457,13 @@ export function effortOf(call: Call): string | null {
 /** The turns at `effort`, so two seats on the same CLI read apart. */
 export const at = (calls: Call[], effort: string) => calls.filter((call) => effortOf(call) === effort);
 
-export async function quest(...args: string[]): Promise<{ code: number; stdout: string; stderr: string }> {
+export const quest = (...args: string[]) => questFrom(undefined, ...args);
+
+/** Run the CLI as the quest executing from `entry`, as `bin.ts` reports it. */
+export async function questFrom(
+	entry: string[] | undefined,
+	...args: string[]
+): Promise<{ code: number; stdout: string; stderr: string }> {
 	let stdout = "";
 	let stderr = "";
 	const out: Output = {
@@ -467,6 +473,7 @@ export async function quest(...args: string[]): Promise<{ code: number; stdout: 
 		stderr: (text) => {
 			stderr += text;
 		},
+		entry,
 	};
 	const code = await main(args, out);
 	return { code, stdout, stderr };

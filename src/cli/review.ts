@@ -435,6 +435,11 @@ export type ReviewOptions = BaseOptions & {
 	signal?: AbortSignal;
 	/** The maintainer's tier for the branch and their reason, which holds until its change grows riskier. */
 	override?: Assessment;
+	/**
+	 * The round is a PR's own build judging itself, which records nothing, so its sessions and findings
+	 * are kept apart from those a recorded round resumes.
+	 */
+	own?: boolean;
 	/** The maintainer's reason for accepting the findings the last rounds of the head left open, running no reviewer. */
 	accept?: string;
 };
@@ -2183,8 +2188,8 @@ function saveSchema(dir: string, schema: object): string {
 }
 
 /** Where a branch's review session is kept, under the clone's common Git directory `common`. */
-export function sessionFile(common: string, branch: string): string {
-	return join(common, "quest", "review", `${digest(branch)}.json`);
+export function sessionFile(common: string, branch: string, own = false): string {
+	return join(common, "quest", "review", `${digest(own ? `own:${branch}` : branch)}.json`);
 }
 
 function load(path: string): unknown {
@@ -2629,7 +2634,11 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 	// A named reviewer runs alone, as for a repository whose instructions name its own.
 	const auto = options.harness === undefined;
 
-	const statePath = sessionFile(git(root, ["rev-parse", "--path-format=absolute", "--git-common-dir"]), branch);
+	const statePath = sessionFile(
+		git(root, ["rev-parse", "--path-format=absolute", "--git-common-dir"]),
+		branch,
+		options.own,
+	);
 	const dir = dirname(statePath);
 	mkdirSync(dir, { recursive: true });
 	const saved = savedState(statePath, options.fresh);
