@@ -2146,6 +2146,11 @@ The hook queues each record with that URL, and the sender sends it there with th
 its own environment names, so one queue can serve several Kixel Quests; it drops a record only when the
 person removed that token or its Kixel Quest refused it.
 
+No hook runs in a reviewer, so `quest review` queues each Claude Code and Codex session it starts or resumes
+the same way, its classifier's and each reviewer's, once the round's record names them, so reviewer spend reaches Kixel Quest
+beside the writer's. A round that reuses its sessions runs no turn and queues nothing; one that resumes a
+session queues it again, and its record replaces the earlier copy. A failure to queue is said on stderr and never fails the round.
+
 Kixel Quest refuses a whole upload naming a repository it does not index or
 the sender cannot read, so the sender asks `GET /forge` which repositories it
 serves and sends only those. The rest are dropped from this host's queue, so an

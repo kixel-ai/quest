@@ -484,7 +484,7 @@ async function reviewIn(dir: Home, verify: () => void) {
 	try {
 		outcome = await review(
 			{ root: fixture.clone, base: "origin/main", harness: dir.harness, effort: EFFORT, fresh: true },
-			{ env: environment(dir) },
+			{ env: environment(dir), queue: () => {} },
 		).catch((error: unknown) => error);
 	} finally {
 		clearTimeout(timer);
