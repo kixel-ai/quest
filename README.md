@@ -1543,7 +1543,8 @@ whole branch at the PR's size.
 `quest review` has a model no weaker than the latest writer review the checkout's
 committed and pushed branch before it is marked ready for review, at an effort set by the PR's
 size. It needs Git 2.41 or later, whose `--attr-source` keeps a head's
-`.gitattributes` from hiding its hunks from the risk classifier, and is a usage error
+`.gitattributes` from hiding its hunks from the risk classifier and the diffs it writes for
+reviewers, and is a usage error
 before it; `--accept` runs no diff and is exempt. Each size has two reviewers,
 the same for every repository:
 
@@ -1645,7 +1646,9 @@ with the base's tip, so a branch behind its base draws no findings on code the
 base gained since, which a diff against its tip shows as reverted.
 The first round explores the change once. It runs the reviewer's own review,
 `codex exec review` with custom instructions or Claude Code's `/code-review
-<effort> <merge-base>...HEAD` with text after the target, given the range, Quest's shared
+<effort> <merge-base>...HEAD` with text after the target, given the range and a file
+of its diff, written with flags that keep the checkout's config and the head's
+`.gitmodules` and `.gitattributes` from hiding a change, Quest's shared
 review rules (`assets/REVIEW.md`), the base's `REVIEW.md`, if any (which adds to
 them and takes precedence), and any earlier findings and responses up front. It
 also asks the reviewer to name each contract the change alters and search past

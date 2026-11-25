@@ -976,7 +976,7 @@ const emptyTree = (root: string) => git(root, ["hash-object", "-t", "tree", "--s
 
 /**
  * Refuse a Git older than 2.41, whose missing `--attr-source` would let a head's `.gitattributes` hide its hunks from
- * the classifier.
+ * the classifier and reviewers.
  */
 function requireAttrSource(): void {
 	const printed = spawnSync("git", ["version"], { encoding: "utf8" }).stdout?.trim() ?? "";
@@ -984,7 +984,7 @@ function requireAttrSource(): void {
 	// A Git that prints no version fails on the first command that needs it.
 	if (major === undefined || minor === undefined || major > 2 || (major === 2 && minor >= 41)) return;
 	throw new ReviewInputError(
-		`quest review needs Git 2.41 or later, whose --attr-source keeps the head's .gitattributes from hiding its hunks from the classifier; ${printed} is installed`,
+		`quest review needs Git 2.41 or later, whose --attr-source keeps the head's .gitattributes from hiding its hunks from the classifier and reviewers; ${printed} is installed`,
 	);
 }
 
@@ -1488,6 +1488,8 @@ export interface Change {
 	base: string;
 	mergeBase: string;
 	head: string;
+	/** The empty tree in the checkout's object format, which every diff a model reads takes its attributes from. */
+	empty: string;
 }
 
 /**
@@ -1497,9 +1499,23 @@ export interface Change {
  */
 function scope({ base, mergeBase, head }: Change): string {
 	return (
-		`The change under review is the branch's own, \`git diff ${mergeBase}..${head}\`: from its merge base with ` +
+		`The change under review is the branch's own, \`${mergeBase}..${head}\`: from its merge base with ` +
 		`${base}, ${mergeBase}, to ${head}. Commits ${base} gained after the merge base are not part of it, even though ` +
 		`a diff against ${base}'s tip shows them as reverted, so report none of their code as the change's.`
+	);
+}
+
+/**
+ * How a reviewer reads the change: from files Quest wrote, since a plain `git diff` follows the checkout's config and
+ * the head's `.gitmodules` and `.gitattributes`, which can hide a submodule update or blank a file, and Claude Code
+ * denies the flags that stop them as not read-only.
+ */
+function reading(file: string): string {
+	return (
+		`The change's diff is in \`${file}\`, written with \`git --attr-source=<empty tree> diff ${DIFF_FLAGS.join(" ")}\`. ` +
+		"Read the change from the diff files named here, never a plain `git diff`, `git show`, or `git log -p`: the " +
+		"checkout's git config and the head's own .gitmodules and .gitattributes can leave a submodule update out of " +
+		"those or show a file as binary or rewritten."
 	);
 }
 
@@ -1519,6 +1535,7 @@ const DEPENDENTS =
  */
 export function reviewPrompt(
 	change: Change,
+	diff: string,
 	rules: Rules | null,
 	earlier: Finding[] = [],
 	responses?: string,
@@ -1527,6 +1544,7 @@ export function reviewPrompt(
 ): string {
 	return [
 		scope(change),
+		reading(diff),
 		// The shared and repository rules outrank the built-in review's defaults; a session that resumes keeps them.
 		"The shared review rules follow. They take precedence over the review's defaults: drop the findings they exclude, " +
 			"and check anything they ask for.",
@@ -1571,6 +1589,9 @@ const TIER_SCALE =
 /** What a later round tells the resumed session, which reviewed the same range under the same rules. */
 export interface LaterRound extends Change {
 	previous: string;
+	/** The files holding the whole change's diff, and the diff from `previous`. */
+	diff: string;
+	since: string;
 	/** The findings of the review of `previous`. */
 	earlier: Finding[];
 	/** The number of the first of `earlier`; 1 unless another reviewer's findings come before them. */
@@ -1589,8 +1610,9 @@ export function laterPrompt(round: LaterRound): string {
 	const parts = [
 		`The branch is now at ${head}; your last review covered ${previous}.`,
 		scope(round),
+		reading(round.diff),
 		`Check only what changed since ${previous} and the findings below; the rest of the change was reviewed ` +
-			`already. \`git diff ${previous} ${head}\` shows what changed, along with any base commits merged in ` +
+			`already. \`${round.since}\` holds the diff from ${previous} to ${head}, which shows what changed along with any base commits merged in ` +
 			"since, which are not part of the change.",
 	];
 	if (round.earlier.length > 0) parts.push(earlierList(round.earlier, round.first ?? 1), settling("in `earlier`"));
@@ -1617,12 +1639,16 @@ export const CLASSIFY_INSTRUCTIONS =
 	"global AGENTS.md, which are for the user's own sessions.";
 
 /**
- * The flags of every diff a model reads in place of the checkout's own: each file as text, since a head can plant a NUL
+ * The flags of every diff a model reads, in place of the checkout's own: each file as text, since a head can plant a NUL
  * byte to trip Git's binary detection, which ignores attributes, with no helper or driver, and every submodule update.
  * Callers add `--attr-source=<empty tree>`, which keeps the head's attributes out. The classifier's saved tier is
  * keyed to them.
  */
 const DIFF_FLAGS = ["--text", "--no-ext-diff", "--no-textconv", "--no-color", "--ignore-submodules=none"];
+
+/** `git diff` with `args` in the form a model reads, with no attributes but those of `empty`, the empty tree. */
+const modelDiff = (root: string, empty: string, args: string[]) =>
+	git(root, [`--attr-source=${empty}`, "diff", ...DIFF_FLAGS, ...args]);
 
 /** The bytes as UTF-8 text, or null when they are not valid UTF-8, which decoding would swell with U+FFFD. */
 function text8(bytes: Buffer): string | null {
@@ -1969,7 +1995,7 @@ export async function classify(input: Classifying): Promise<{ key: string; value
 	const text = exists(root, baseSha, RISK_FILE) ? show(root, baseSha, RISK_FILE) : null;
 	// The paths too, since they set the tier and the offered classes along with the risk file.
 	// And the diff's form, so a tier set from a diff the head's attributes could shape is set again.
-	const empty = emptyTree(root);
+	const { empty } = change;
 	const key = digest(JSON.stringify([change.mergeBase, change.head, text, changed, empty, DIFF_FLAGS]));
 	if (input.saved?.key === key) return { key, value: { ...input.saved.value, usage: [] } };
 	if (input.savedOnly)
@@ -1997,7 +2023,7 @@ export async function classify(input: Classifying): Promise<{ key: string; value
 	const classes = offered.map((each) => each.name);
 
 	// With no attributes and every file as text, so the head can hide none of its hunks by marking them binary.
-	const diff = (args: string[]) => git(root, [`--attr-source=${empty}`, "diff", ...DIFF_FLAGS, ...args, range]);
+	const diff = (args: string[]) => modelDiff(root, empty, [...args, range]);
 	const stat = diff(["--stat=160"]);
 	// Written by Git itself, since a head that adds large binaries makes a patch no string holds.
 	const scratch = mkdtempSync(join(input.dir, "classify-"));
@@ -2265,7 +2291,7 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 	} catch {
 		throw new ReviewInputError(`HEAD shares no history with ${baseRef}`);
 	}
-	const change: Change = { base: baseRef, mergeBase, head };
+	const change: Change = { base: baseRef, mergeBase, head, empty: emptyTree(root) };
 	// Both sides of a rename, so moving a file out of a high path, a class's scope, or an instructed directory counts,
 	// and every submodule update, whatever the local config hides.
 	const changed = git(root, [
@@ -2311,6 +2337,7 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 		given,
 		past: saved?.history ?? [],
 		dir,
+		diffs: statePath.replace(/\.json$/, ""),
 		env: deps.env,
 		queued,
 	};
@@ -2674,6 +2701,8 @@ interface Shared {
 	past: Past[];
 	/** The directory holding the branch's sessions and the reply schemas. */
 	dir: string;
+	/** The branch's own prefix for its seats' diff directories, since other branches' reviews share `dir`. */
+	diffs: string;
 	env: NodeJS.ProcessEnv;
 	queued: ReviewDependencies["queue"];
 	signal: AbortSignal;
@@ -2734,6 +2763,17 @@ async function reviewWith(shared: Shared, seat: Seat, responses: string | undefi
 
 	const replySchema = schema(earlier.length);
 	const schemaFile = saveSchema(shared.dir, replySchema);
+	// The same directory every round of the seat, since it is one of Claude's flags, which the prompt cache keys on.
+	const readable = `${shared.diffs}-${harness}${second ? "-second" : ""}`;
+	rmSync(readable, { recursive: true, force: true });
+	mkdirSync(readable, { recursive: true });
+	// Written by Git itself, since a head that adds large binaries makes a patch no string holds.
+	const write = (name: string, range: string[]) => {
+		const file = join(readable, name);
+		modelDiff(root, change.empty, ["--patch", `--output=${file}`, ...range]);
+		return file;
+	};
+	const diff = write("change.patch", [`${change.mergeBase}..${change.head}`]);
 	const context: Context = {
 		mergeBase: change.mergeBase,
 		root,
@@ -2743,6 +2783,7 @@ async function reviewWith(shared: Shared, seat: Seat, responses: string | undefi
 		schema: replySchema,
 		schemaFile,
 		env: cli.env,
+		readable,
 	};
 
 	const usage: Usage[] = [];
@@ -2753,7 +2794,7 @@ async function reviewWith(shared: Shared, seat: Seat, responses: string | undefi
 	try {
 		if (!resume) {
 			const prompts = {
-				review: reviewPrompt(change, rules, earlier, answered, first, shared.past),
+				review: reviewPrompt(change, diff, rules, earlier, answered, first, shared.past),
 				report: reportPrompt(change.head, earlier, first),
 			};
 			const opened = await turn(cli, reviewer.review(context, randomUUID(), prompts.review), root, context.model);
@@ -2765,6 +2806,8 @@ async function reviewWith(shared: Shared, seat: Seat, responses: string | undefi
 			const prompt = laterPrompt({
 				...change,
 				previous: previous!.head,
+				diff,
+				since: write("since.patch", [previous!.head, change.head]),
 				earlier,
 				first,
 				responses: answered,
@@ -2778,6 +2821,7 @@ async function reviewWith(shared: Shared, seat: Seat, responses: string | undefi
 		throw error;
 	} finally {
 		if (session !== undefined) shared.queued({ harness, session, cwd: root, start: started });
+		rmSync(readable, { recursive: true, force: true });
 	}
 	// Either turn that failed threw, so a session is open here.
 	const sessionId = session!;
