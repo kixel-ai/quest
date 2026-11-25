@@ -121,14 +121,15 @@ export const ARMS: Partial<Record<Size, Record<Arm, Model>>> = {
  * The writers that start quest `doc`, ranked, and its writer A/B arm. A quest
  * whose size runs an arm starts on the arm's entry, then the size's list
  * without it; the arm hashes the quest's path, so a restart or respawn draws
- * the same one. A `Maintainer:` wait leaves it a decision to settle, so it
- * runs the next size's list and no arm, which keeps each arm at its PR's size.
+ * the same one. A `Maintainer:` decision or prose wait leaves it a decision to
+ * settle, so it runs the next size's list and no arm, which keeps each arm at
+ * its PR's size; an action is only a step for the maintainer, not part of the work.
  */
 export function questWriters(doc: Doc): { arm: Arm | null; models: readonly Model[] } {
 	const sized = size(doc);
 	// `quest check` requires a size of every quest that is not an epic, and only those can be ready.
 	if (sized === null) throw new Error(`${doc.path} has no size`);
-	if (waits(doc).some(onMaintainer))
+	if (waits(doc).some((wait) => onMaintainer(wait) && wait.kind !== "action"))
 		return { arm: null, models: WRITERS[SIZES[Math.min(SIZES.indexOf(sized) + 1, SIZES.length - 1)]!] };
 	const arms = ARMS[sized];
 	if (!arms) return { arm: null, models: WRITERS[sized] };

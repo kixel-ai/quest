@@ -70,9 +70,20 @@ function handBackItems(body: string): HandBackItem[] {
 				const parts = itemParts(item);
 				if (typeof parts[0] === "string") parts[0] = parts[0].replace(TASK, "");
 				const line = item.position?.start.line ?? 1;
-				const { wait, problems } = readWait({ line, parts });
+				const read = readWait({ line, parts });
+				if (read.wait !== null) return { wait: read.wait, problems: read.problems };
+				// An item that names no party is the maintainer's, so read it as theirs, choice list included.
+				const [lead, ...rest] = parts;
+				const named = readWait({
+					line,
+					parts:
+						typeof lead === "string" ? [`${MAINTAINER}: ${lead}`, ...rest] : [`${MAINTAINER}:`, ...parts],
+				});
 				const text = collapse(rendered(item)).replace(TASK, "");
-				return { wait: wait ?? { line, party: MAINTAINER, kind: "prose", text }, problems };
+				return {
+					wait: named.wait ?? { line, party: MAINTAINER, kind: "prose", text },
+					problems: named.problems,
+				};
 			});
 		if (items.length === 0)
 			items.push({

@@ -1487,8 +1487,8 @@ it:
 | XL | Claude Code `claude-opus-5-5` xhigh |
 
 `quest unblocked --json` lists each ready quest's ranked `models`: its size's
-list, or the next size's while a `Maintainer:` item under its `## Waiting`
-leaves a decision open, since settling it is part of the work; an XL stays
+list, or the next size's while a `Maintainer:` item under its `## Waiting`,
+other than an action, leaves a decision open, since settling it is part of the work; an XL stays
 XL. `/quest-run` starts a quest on the first entry that can run, and falls
 to the next only while nothing is written: when the CLI is missing or logged
 out, or the agent stops at its usage limit with nothing beyond the claim

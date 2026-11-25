@@ -218,7 +218,11 @@ test("unblocked routes a quest with a decision open one size up, and XL stays XL
 				[String(quest.arm), ...quest.models.map((entry) => entry.effort)].join(" "),
 		);
 	// Its path hashes to arm B at every size that runs one; a decision left open runs no arm.
-	const tree = Tree.baseline().append("quest/m0/epic/one.md", "\n## Waiting\n\n- moq-dev/moq: a release.\n");
+	// An action is only a step for the maintainer, so it keeps the arm too.
+	const tree = Tree.baseline().append(
+		"quest/m0/epic/one.md",
+		"\n## Waiting\n\n- moq-dev/moq: a release.\n- Maintainer (action): approve the install.\n- Maintainer (PC): log in.\n",
+	);
 	expect(models(tree)).toEqual(["B high medium"]);
 	tree.append("quest/m0/epic/one.md", "- Maintainer: pick a name.\n");
 	expect(models(tree)).toEqual(["null high"]);

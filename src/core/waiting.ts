@@ -139,6 +139,8 @@ export function readWait(entry: Pick<Entry, "line" | "parts">): ReadWait {
 	const base = { line: entry.line, party: qualified ? MAINTAINER : party, text: match[2] };
 	const fallback: Wait =
 		qualifier === undefined ? { ...base, kind: "prose" } : { ...base, kind: "action", pc: qualifier === "pc" };
+	// A malformed choice list is an unsettled question, never a step to mark done.
+	const broken: Wait = { ...base, kind: "prose" };
 
 	// Only a marker makes a nested list a choice list, so checklists and detail lists stay prose. Under a
 	// decision a marker anywhere counts, so a misplaced one is caught; elsewhere only one ending a label.
@@ -150,7 +152,7 @@ export function readWait(entry: Pick<Entry, "line" | "parts">): ReadWait {
 	if (marked.length === 0) return { wait: fallback, problems: [] };
 	if (!plain)
 		return {
-			wait: fallback,
+			wait: broken,
 			problems: marked.map((list) => ({
 				line: list.line,
 				message: `a choice list belongs only under a plain '${MAINTAINER}:' decision`,
@@ -163,11 +165,11 @@ export function readWait(entry: Pick<Entry, "line" | "parts">): ReadWait {
 			line: other.line,
 			message: "a decision holds one choice list; split the others into items of their own",
 		});
-	if (problems.length > 0) return { wait: fallback, problems };
+	if (problems.length > 0) return { wait: broken, problems };
 	const question = PARTY.exec(render(entry.parts.filter((part) => part !== list)));
 	if (!question)
 		return {
-			wait: fallback,
+			wait: broken,
 			problems: [{ line: entry.line, message: "a decision needs its question before its choices" }],
 		};
 	return { wait: { ...base, kind: "decision", text: question[2], choices }, problems: [] };

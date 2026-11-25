@@ -109,6 +109,8 @@ test("a decision is a Maintainer item with a marked choice list, from a quest an
 		problems: [],
 	});
 	expect(handBackWaits(`Work.\n\n## Waiting\n\n${item}`)).toEqual([decision]);
+	// A draft's item that names no party is the maintainer's, choice list included.
+	expect(handBackWaits(`Work.\n\n## Waiting\n\n${item.replace("Maintainer: ", "")}`)).toEqual([decision]);
 	expect(handBackProblems(`Work.\n\n## Waiting\n\n${item}`)).toEqual([]);
 });
 
@@ -195,7 +197,14 @@ test("check rejects a malformed choice list by line", () => {
 	]);
 });
 
-test("a draft's malformed choice list reads as prose, with its problem by line", () => {
+test("a draft's malformed choice list reads as prose, even under an action, with its problem by line", () => {
+	const action = "## Waiting\n\n- Maintainer (PC): which camera?\n  - Front (Recommended)\n  - Back\n";
+	expect(handBackWaits(action)).toEqual([
+		{ line: 3, party: "Maintainer", kind: "prose", text: "which camera? Front (Recommended) Back" },
+	]);
+	expect(handBackProblems(action)).toEqual([
+		{ line: 4, message: "a choice list belongs only under a plain 'Maintainer:' decision" },
+	]);
 	const body = "Work.\n\n## Waiting\n\n- Maintainer: pick one.\n  - Foo (Recommended)\n  - Bar (Recommended)\n";
 	expect(handBackWaits(body)).toEqual([
 		{ line: 5, party: "Maintainer", kind: "prose", text: "pick one. Foo (Recommended) Bar (Recommended)" },
