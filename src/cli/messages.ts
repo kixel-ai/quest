@@ -6,8 +6,7 @@ import { closeSync, existsSync, openSync, readdirSync, readSync, realpathSync, s
 import { isAbsolute, join, sep } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { hostedRepository, originHost } from "./forge";
-import { GitError } from "./git";
-import { type Remote, type RemoteHost, readRemote, urlHost } from "./github";
+import { type Remote, type RemoteHost, readRemote, remoteHost, urlHost } from "./github";
 import { RECOMMENDED, checkoutRoot } from "./rules";
 import { kixelUrl } from "./tokens";
 
@@ -193,25 +192,30 @@ export function repositories(
 	const kixel = kixelUrl(env);
 	const named = (host: RemoteHost | null) => forgeName(host, kixel);
 	const hosted = (url: string) => hostedRepository(kixel, url);
-	// By checkout, so its subdirectories and removed worktrees share one lookup: the repository its configured origin
-	// names, else the one that URL names after rewrites, and both names, case-folded.
+	// By checkout, so its subdirectories and removed worktrees share one lookup: the repository its origin names, as
+	// `remoteHost` picks it, and the names of its configured URL and of the URL git uses, case-folded.
 	const origins = new Map<string, { name: string | null; aliases: string[] }>();
 	const origin = (checkout: string) => {
 		let found = origins.get(checkout);
 		if (found === undefined) {
 			let remote: Remote | null = null;
-			let used: string | undefined;
+			let used: string | null = null;
 			try {
 				remote = readRemote(checkout, "origin");
-				used = remote?.used().fetch;
-			} catch (error) {
-				// A directory git cannot read, such as a worktree whose repository moved, is named by itself.
-				if (!(error instanceof GitError)) throw error;
+				used = remote?.used().fetch ?? null;
+			} catch {
+				// A directory git cannot read, such as a worktree whose repository moved or whose origin is removed
+				// while it is read, is named by itself: a session's recorded directory is history, not input to validate.
+				remote = null;
 			}
-			const each = [remote?.configured.fetch, used].map((url) =>
-				url === undefined ? null : named(urlHost(url, hosted)),
-			);
-			found = { name: each[0] ?? each[1] ?? null, aliases: each.filter((one) => one !== null).map(folded) };
+			const urls = remote === null || used === null ? [] : [remote.configured.fetch, used];
+			found = {
+				name: remote === null ? null : named(remoteHost(remote, hosted)),
+				aliases: urls.flatMap((url) => {
+					const one = named(urlHost(url, hosted));
+					return one === null ? [] : [folded(one)];
+				}),
+			};
 			origins.set(checkout, found);
 		}
 		return found;
