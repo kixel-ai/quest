@@ -12,7 +12,11 @@ Do not edit `CONTRIBUTING.md`, `assets/CONTEXT.md`, `assets/AGENTS.md`, or
 - Read `quest guide` completely before starting work, since this repository develops it.
 - Keep README examples consistent with the CLI's actual `--help` output.
   In this checkout, `quest` means `bun run --silent quest`; the dev shell's
-  `quest` is a pinned build for the merge driver, not this checkout.
+  `quest` is a pinned build for the merge driver, not this checkout. Run
+  `quest review` and `quest merge` with an installed `quest` from outside the
+  PR's checkout, such as `~/.nix-profile/bin/quest`, passing `--root` where
+  needed. The checkout's build and the dev shell's, which its `flake.lock`
+  pins, are both the PR's to choose.
 - Worktrees live under `.worktrees/`.
 - Run `just check` and `just test` before handing off changes. A missing tool is
   a failure, not a check to skip.
