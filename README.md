@@ -2161,7 +2161,7 @@ its own environment names, so one queue can serve several Kixel Quests; it drops
 person removed that token or its Kixel Quest refused it.
 
 No hook runs in a reviewer, so `quest review` queues each Claude Code and Codex session it starts or resumes
-the same way, its classifier's and each reviewer's, once its turns end, so reviewer spend reaches Kixel Quest
+the same way, its classifier's and each reviewer's, once the round's record names them, so reviewer spend reaches Kixel Quest
 beside the writer's. A round that reuses its sessions runs no turn and queues nothing; one that resumes a
 session queues it again, and its record replaces the earlier copy. Antigravity sessions are not sent, since
 token-max reads none. A failure to queue is said on stderr and never fails the round.

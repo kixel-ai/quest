@@ -2393,6 +2393,11 @@ export async function classify(input: Classifying): Promise<{ key: string; value
 		git(root, ["diff", "--no-ext-diff", "--no-textconv", "--no-color", "--ignore-submodules=none", ...args, range]);
 	const prompt = classifyPrompt(change, { sha: baseSha, text }, diff(["--stat=160"]), diff(["--patch"]), offered);
 	const start = Date.now();
+	// Every model that replied spent tokens, whether or not its reply was the one used.
+	const queueSpent = (spent: Answer<unknown>["spent"]) => {
+		for (const { entry, session } of spent)
+			if (session !== undefined) input.queued({ harness: entry.harness, session, cwd: root, start });
+	};
 	const answer = await ask(CLASSIFIERS, {
 		cwd: root,
 		dir: input.dir,
@@ -2405,8 +2410,11 @@ export async function classify(input: Classifying): Promise<{ key: string; value
 		who: "classifier",
 		task: "set the risk tier",
 		parse: (value) => classed(value, classes, "the classifier's reply"),
+	}).catch((error: unknown) => {
+		if (error instanceof UnansweredError) queueSpent(error.spent);
+		throw error;
 	});
-	input.queued({ harness: answer.entry.harness, session: answer.session, cwd: root, start });
+	queueSpent(answer.spent);
 	const { tier, reason } = answer.value;
 	return {
 		key,
@@ -2450,7 +2458,7 @@ export interface Answer<T = unknown> {
 	session: string;
 	value: T;
 	usage: Omit<Usage, "turn"> | null;
-	spent: { entry: ReviewModel; usage: Omit<Usage, "turn"> | null }[];
+	spent: { entry: ReviewModel; usage: Omit<Usage, "turn"> | null; session?: string }[];
 }
 
 /**
@@ -2490,7 +2498,7 @@ export async function ask<T>(entries: readonly ReviewModel[], question: Question
 			continue;
 		}
 		const usage = reported(reply.usage) ? reply.usage : null;
-		spent.push({ entry, usage });
+		spent.push({ entry, usage, ...(reply.session !== undefined && { session: reply.session }) });
 		// A model that answered with no session, or unusably, passes the question on like one that could not run.
 		let value: T;
 		try {

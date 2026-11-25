@@ -2111,8 +2111,8 @@ fakes("a question no model answers usably throws with what each reply took", asy
 	}).catch((each: unknown) => each);
 	expect(error).toBeInstanceOf(UnansweredError);
 	expect((error as UnansweredError).spent).toEqual([
-		{ entry: entries[0], usage: { input: 40, cached: 0, output: 3 } },
-		{ entry: entries[1], usage: { input: 40, cached: 0, output: 3 } },
+		{ entry: entries[0], usage: { input: 40, cached: 0, output: 3 }, session: expect.any(String) },
+		{ entry: entries[1], usage: { input: 40, cached: 0, output: 3 }, session: expect.any(String) },
 	]);
 });
 
@@ -2200,6 +2200,17 @@ fakes(
 		expect(after).toHaveLength(sessions.length + 3);
 		for (const each of sessions) expect(after).toContain(each);
 		expect(after.filter((each) => each === "codex thread-1")).toHaveLength(2);
+
+		// A classifier that spent tokens on an unusable reply is queued too, beside the one that answered.
+		write(s.repo, "src/lib.ts", "export const x = 4;\n");
+		git(s.repo, "commit", "-qam", "a third constant");
+		vi.stubEnv("FAKE_CLASSIFY", "claude-unusable");
+		const passed = await quest("--root", s.repo, "review");
+		expect(passed.code, passed.stderr).toBe(0);
+		const last = queued();
+		expect(last).toContain("codex thread-classify");
+		const claudes = (list: string[]) => new Set(list.filter((each) => each.startsWith("claude "))).size;
+		expect(claudes(last)).toBe(claudes(after) + 1);
 	},
 );
 
