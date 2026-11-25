@@ -6,7 +6,15 @@ import { expect, test } from "vitest";
 
 import { REFERENCE_LINE, parseUpload } from "../src/core";
 import { hook } from "../src/cli/hooks";
-import { type SendDependencies, parseInstant, queue, reportIncident, runSender, sendPass } from "../src/cli/send";
+import {
+	type Pending,
+	type SendDependencies,
+	parseInstant,
+	queue,
+	reportIncident,
+	runSender,
+	sendPass,
+} from "../src/cli/send";
 import { tokensPath } from "../src/cli/tokens";
 import type { Session } from "../src/cli/usage";
 import { tempDir } from "./fixture";
@@ -230,6 +238,84 @@ test("the sender posts each queued session with its sub-agents, from its transcr
 		["sub", [7], "implementing", "quest/m0/a.md"],
 	]);
 	expect(pending(env)).toEqual([]);
+});
+
+test("a session `quest review` queued is sent on the PR it recorded on, as the role it played", async () => {
+	const env = home();
+	const root = checkout();
+	const start = Date.parse("2026-11-06T10:00:00Z");
+	const reviewed = (session: string, pull: string | null, branch: string, role: "classifying" | "reviewing") =>
+		queue({ harness: "claude", session, cwd: root, start, pull, branch, role }, env);
+	// A round that recorded on no PR, as one whose PR had not opened, pins its branch alone.
+	reviewed("rev", null, "quest/m0/a", "reviewing");
+	queue({ ...stopped(root), session: "impl" }, env);
+	// A fork's PR heads a repository other than the checkout's origin.
+	// Resumed after its PR opened, so only its later queue names the PR, whichever pending file is read last.
+	reviewed("cls", null, "fix/y", "classifying");
+	reviewed("cls", "https://github.com/acme/proj/pull/8", "fix/y", "classifying");
+	reviewed("cls", null, "fix/y", "classifying");
+	// Reviewed before its PR opens.
+	reviewed("early", null, "feature/z", "reviewing");
+	// Its round skipped the only PR on its branch, a stranger fork's whose head the checkout lacks.
+	reviewed("skipped", null, "patch-1", "reviewing");
+	// Its round recorded on another repository's PR of the same number as this one's.
+	reviewed("elsewhere", "https://github.com/other/proj/pull/7", "quest/m0/a", "reviewing");
+	// The runner's review checkout names its own branch, and a detached one names none. A sub-agent anywhere in the
+	// same checkout follows its parent onto the fork's PR.
+	const sessions = [
+		session("rev", "kix-review/1"),
+		session("cls", "x", { branches: [], cwd: root }),
+		session("sub", "x", { branches: [], parent: "cls", cwd: root }),
+		session("deep", "x", { branches: [], parent: "cls", cwd: `${root}/src` }),
+		session("deeper", "x", { branches: [], parent: "sub", cwd: `${root}/src` }),
+		// One whose checkout's own branch heads another PR, as under `quest review --branch`, still follows the review.
+		session("aside", "quest/m0/a", { parent: "cls", cwd: root }),
+		// One in another checkout on a branch no PR heads yet keeps its parent, and the PR its parent recorded on, waiting.
+		session("later", "wip/q", { parent: "cls", repositories: ["acme/proj"], cwd: "/other" }),
+		session("early", "kix-review/2"),
+		session("skipped", "kix-review/3"),
+		session("elsewhere", "kix-review/4"),
+		// An implementer's sub-agent in another checkout keeps out of the fork's PR.
+		session("impl", "fix/y", { repositories: ["ann/proj"], cwd: "/fork" }),
+		session("away", "x", { branches: [], parent: "impl", cwd: "/up" }),
+	];
+	// An editable PR body naming a reviewer as its classifier does not relabel it.
+	const fork = {
+		...opened(8, "fix/y", "2026-11-06T11:30:00Z"),
+		head: { ref: "fix/y", repo: { full_name: "ann/proj" } },
+		body: "## Review\n\n- Classified: medium by Claude Code, session `rev`\n",
+	};
+	const stranger = {
+		...opened(9, "patch-1", "2026-11-06T11:30:00Z"),
+		head: { ref: "patch-1", repo: { full_name: "eve/proj" } },
+	};
+	const { deps, uploads } = sender(env, 200, sessions, () => {}, [fork, stranger]);
+	await sendPass(deps);
+	// No PR body names the classifier, as for one whose reply was unusable.
+	expect(parseUpload(uploads[0]!.body).records.map((r) => [r.session, r.pulls, r.role, r.branch])).toEqual([
+		["rev", [7], "reviewing", "quest/m0/a"],
+		["cls", [8], "classifying", "fix/y"],
+		["sub", [8], "classifying", "fix/y"],
+		["deep", [8], "classifying", "fix/y"],
+		["deeper", [8], "classifying", "fix/y"],
+		["aside", [8], "classifying", "fix/y"],
+		["later", [], "classifying", "wip/q"],
+		["early", [], "reviewing", "feature/z"],
+		["skipped", [], "reviewing", "patch-1"],
+		["elsewhere", [], "reviewing", "quest/m0/a"],
+		["impl", [8], "implementing", "fix/y"],
+		["away", [], "implementing", null],
+	]);
+	// Each waits for a PR on the branch it reviewed, not its checkout's.
+	expect(remembered(env)).toEqual(["cls", "early", "skipped"]);
+	// The classifier is remembered with the copy naming its PR, so a resend still credits it.
+	const dir = join(env.XDG_STATE_HOME!, "quest", "records", "remembered");
+	const pins = readdirSync(dir).flatMap((group) =>
+		readdirSync(join(dir, group)).map(
+			(name) => (JSON.parse(readFileSync(join(dir, group, name), "utf8")) as { pending: Pending }).pending,
+		),
+	);
+	expect(pins.find((p) => p.session === "cls")?.reviewed?.pull).toBe("https://github.com/acme/proj/pull/8");
 });
 
 test("a session that recorded a transferred repository's former name is sent on the PR its branch heads now", async () => {

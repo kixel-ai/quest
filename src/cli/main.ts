@@ -1910,11 +1910,12 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				const github = claimDependencies();
 				// Queued once the round's record names its sessions, so the sender never reads one as ordinary work.
 				const started: Started[] = [];
-				const queueStarted = (): void => {
+				// Each carries the PR the round recorded on, so the sender never credits a stranger fork's PR on the same branch name.
+				const queueStarted = (pull: string | null): void => {
 					for (const session of started.splice(0)) {
 						// Only the dashboard loses a session that is not queued, so it never fails the round.
 						try {
-							for (const notice of queue(session, process.env).notices)
+							for (const notice of queue({ ...session, pull }, process.env).notices)
 								warn(notice.replace(/^quest: /, ""));
 						} catch (error) {
 							warn(
@@ -1953,7 +1954,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 						} catch (error) {
 							failure = error;
 						}
-						queueStarted();
+						queueStarted(record !== undefined && "url" in record ? record.url : null);
 						const status = record !== undefined && "url" in record ? record.status : undefined;
 						// An acceptance is the status alone, so one no status records has not happened.
 						const accepting = reviewed.accepted !== undefined;
@@ -1996,7 +1997,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 						return 1;
 					},
 					(error) => {
-						queueStarted();
+						queueStarted(null);
 						return reviewFailure(error);
 					},
 				);

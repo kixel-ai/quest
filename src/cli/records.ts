@@ -1,8 +1,9 @@
 // Each session's record, as `quest usage` prints it and the stop hook sends it: its PRs, role, spend, and waits.
 import { type GatedRun, type Role, type SessionRecord, type SessionWait, type TimeSplit, branchQuest } from "../core";
 import { type CallLine, sessionGroup, shellGroups } from "./calls";
+import { checkoutRoot } from "./rules";
 import { type TranscriptFacts, transcriptFacts } from "./transcript";
-import type { Pull, Session } from "./usage";
+import type { Pins, Pull, Session } from "./usage";
 import type { LoggedWait } from "./waits";
 
 /** The role the first quest skill a session ran gives it; a skill not listed gives none. Retired skills stay while transcripts still run them. */
@@ -35,6 +36,8 @@ export interface RecordInput {
 	own: Map<Session, Pull>;
 	/** The repositories a session is known to be in, or null when unknown. */
 	known?: (session: Session) => string[] | null;
+	/** The sessions `quest review` started, whose branch and role stand over every inference below. */
+	pins?: Pins;
 	/** Session IDs a PR's review record names as reviewers, and as its risk classifier. */
 	reviewers: Set<string>;
 	classifiers: Set<string>;
@@ -58,7 +61,7 @@ const iso = (ms: number) => new Date(ms).toISOString();
 
 /**
  * A record for each session that `emit` names, or that worked on a PR. A session's PRs are its own, else its parent's, else, for one that spawned
- * sub-agents, every PR they worked on. Its role is classifying when a PR's review record names it as the risk
+ * sub-agents, every PR they worked on. Its role is classifying when  a PR's review record names it as the risk
  * classifier, reviewing when Codex marks it a review or a PR's review record
  * names it, else the one its first quest skill gives, else its parent's unless that is coordinating, else coordinating for a
  * session whose PRs are only its sub-agents', planning on a planning skill's branch, and implementing or iterating
@@ -73,26 +76,40 @@ export function buildRecords(input: RecordInput): Map<Session, SessionRecord> {
 		if (parent && parent !== s) children.set(parent, [...(children.get(parent) ?? []), s]);
 	}
 	const parentOf = (s: Session) => (s.parent === null ? undefined : byId.get(id(s.harness, s.parent)));
+	const pinOf = (s: Session) => (s.id === null ? undefined : input.pins?.get(id(s.harness, s.id)));
 
+	// Another host's directories cannot be looked up here, so its sessions compare their exact directories.
+	const rootOf = (s: Session) => (s.cwd === null ? null : s.host === null ? checkoutRoot(s.cwd) : s.cwd);
+	// Whether a chain of ancestors in this session's checkout reaches one `quest review` queued, so a grandchild keeps its
+	// PR as a child does. Bounded by the sessions' count, so a cycle in recorded lineage cannot loop.
+	const inReview = (s: Session, depth = 0): boolean => {
+		const parent = parentOf(s);
+		const root = rootOf(s);
+		if (!parent || root === null || root !== rootOf(parent) || depth >= input.sessions.length) return false;
+		return pinOf(parent) !== undefined || inReview(parent, depth + 1);
+	};
+	// A sub-agent of a review works on the PR the review was queued with, even where its checkout's own branch heads
+	// another, as under `quest review --branch`.
+	const ownOf = (s: Session) => (inReview(s) ? undefined : input.own.get(s));
 	const descendants = (s: Session, seen = new Set<Session>()): Pull[] => {
 		seen.add(s);
 		return (children.get(s) ?? []).flatMap((child) => {
 			if (seen.has(child)) return [];
-			const own = input.own.get(child);
+			const own = ownOf(child);
 			return own ? [own, ...descendants(child, seen)] : descendants(child, seen);
 		});
 	};
 	// Bounded by the sessions' count, so a cycle in recorded lineage cannot loop.
 	const pullsOf = (s: Session, depth = 0): { pulls: Pull[]; via: "own" | "parent" | "children" | "none" } => {
-		const own = input.own.get(s);
+		const own = ownOf(s);
 		if (own) return { pulls: [own], via: "own" };
 		const parent = parentOf(s);
 		if (parent && depth < input.sessions.length) {
 			// A session known to be in another repository keeps out of its parent's PRs, as a sub-agent in another
-			// checkout does.
+			// checkout does. One anywhere in the checkout `quest review` ran in keeps the PR it reviewed, a fork's included.
 			const known = input.known?.(s) ?? null;
 			const inherited = pullsOf(parent, depth + 1).pulls.filter(
-				(p) => known === null || (p.repository !== null && known.includes(p.repository)),
+				(p) => known === null || inReview(s) || (p.repository !== null && known.includes(p.repository)),
 			);
 			if (inherited.length) return { pulls: inherited, via: "parent" };
 		}
@@ -109,12 +126,14 @@ export function buildRecords(input: RecordInput): Map<Session, SessionRecord> {
 	};
 
 	const roleOf = (s: Session, depth = 0): Role => {
+		const pinned = pinOf(s)?.role;
+		if (pinned) return pinned;
 		if (s.id !== null && input.classifiers.has(s.id)) return "classifying";
 		if (s.review || (s.id !== null && input.reviewers.has(s.id))) return "reviewing";
 		const skill = factsOf(s)?.skill;
 		const fromSkill = skill ? SKILL_ROLES[skill] : undefined;
 		if (fromSkill) return fromSkill;
-		const own = input.own.get(s);
+		const own = ownOf(s);
 		const parent = parentOf(s);
 		// A sub-agent with no skill of its own works for its parent, unless that parent hands out whole PRs.
 		if (parent && depth < input.sessions.length) {
@@ -133,8 +152,11 @@ export function buildRecords(input: RecordInput): Map<Session, SessionRecord> {
 	for (const s of input.sessions) {
 		const { pulls, via } = pullsOf(s);
 		if (input.emit ? !input.emit.has(s) : pulls.length === 0) continue;
-		const own = input.own.get(s);
-		const branch = own?.branch ?? (via === "none" ? lastBranch(s) : pulls.length === 1 ? pulls[0]!.branch : null);
+		const own = ownOf(s);
+		const branch =
+			own?.branch ??
+			pinOf(s)?.branch ??
+			(via === "none" ? lastBranch(s) : pulls.length === 1 ? pulls[0]!.branch : null);
 		const local = factsOf(s);
 		const person: SessionWait[] = (local?.questions ?? [])
 			.filter((q) => q.end >= input.since)

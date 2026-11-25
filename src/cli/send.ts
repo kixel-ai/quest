@@ -19,8 +19,10 @@ import { eachLine } from "./messages";
 import { questRoot } from "./rules";
 import { type Labeled, type SplitDependencies, type Steps, labelSession, readSteps, splitOf } from "./split";
 import {
+	type Pins,
 	type Pull,
 	type Reached,
+	type Reviewed,
 	type Session,
 	fixBreakages,
 	currentNamer,
@@ -51,6 +53,11 @@ export interface Pending {
 	root: string;
 	origin: string;
 	prefix: string;
+	/**
+	 * For a session `quest review` started, the PR it recorded on, the branch it reviewed, and the role it played
+	 * there, which the sender takes over what it infers from the session's checkout and the PR's `## Review` record.
+	 */
+	reviewed?: Reviewed;
 	/**
 	 * On a resend, the instant, epoch ms, its earlier upload read PRs from, so the resend reads at least as far back and
 	 * names every PR that upload did.
@@ -99,9 +106,11 @@ function transcriptStart(path: string): number | null {
 
 /**
  * A session to queue: a stop hook's input, as Claude Code and Codex send it, which names its transcript, or a session
- * `quest review` started, which knows its own first instant, epoch ms.
+ * `quest review` started, which knows its own first instant, epoch ms, and the PR, branch, and role it reviewed in.
  */
-export type Stopped = { harness: string; session: string; cwd: string } & ({ transcript: string } | { start: number });
+export type Stopped = { harness: string; session: string; cwd: string } & (
+	{ transcript: string } | ({ start: number } & Reviewed)
+);
 
 /** What `queue` did, for the hook to say. */
 export interface Queued {
@@ -141,8 +150,11 @@ export function queue(stopped: Stopped, env: NodeJS.ProcessEnv = process.env): Q
 		);
 	if (existsSync(refusal(env, url, token))) return { notices, queued: false };
 	let start: number;
-	if ("start" in stopped) start = stopped.start;
-	else {
+	let reviewed: Reviewed | undefined;
+	if ("start" in stopped) {
+		start = stopped.start;
+		reviewed = { pull: stopped.pull, branch: stopped.branch, role: stopped.role };
+	} else {
 		const first = transcriptStart(stopped.transcript);
 		if (first === null) throw new Error(`${stopped.transcript} records no instant, so its session cannot be read`);
 		start = first;
@@ -156,6 +168,7 @@ export function queue(stopped: Stopped, env: NodeJS.ProcessEnv = process.env): Q
 		root,
 		origin: repository,
 		prefix: run(["rev-parse", "--show-prefix"]).stdout.trim(),
+		...(reviewed && { reviewed }),
 	});
 	const sender = senderRuns(env);
 	if (!sender.runs)
@@ -455,7 +468,13 @@ async function sendTo(
 					`token-max lists no ${q.pending.harness} session ${q.pending.session} on this host, so its record was dropped`,
 				);
 			}
+			// Pinned under the origin's current name, so a repository renamed since the review still matches its PR.
 			const here = await current(origin);
+			const pins: Pins = new Map(
+				[...bySession(group)].flatMap(([name, pending]) =>
+					pending.reviewed ? [[name, { ...pending.reviewed, origin: here }] as const] : [],
+				),
+			);
 			const repositories = new Set([here, key(repository)]);
 			// A sub-agent stops without the stop hook naming it, so each queued session brings its own, routed as its
 			// own checkout routes it, found from the nearest folder still there: a checkout must be a queued one's, or
@@ -533,6 +552,7 @@ async function sendTo(
 				calls,
 				emit,
 				since,
+				pins,
 				split: (s, waits, from) => {
 					const read = labeled.get(s);
 					return read ? splitOf(read.steps, read.labeled, waits, from) : null;
@@ -552,7 +572,7 @@ async function sendTo(
 			if (!response.ok)
 				throw new Error(`${endpoint} answered ${response.status}: ${(await response.text()).slice(0, 500)}`);
 			clearBackoff(deps.env, id);
-			remember(deps.env, id, { group, emit, byId, from, waiting: unheaded([...emit], exported, pulls) });
+			remember(deps.env, id, { group, emit, byId, from, waiting: unheaded([...emit], exported, pulls, pins) });
 			for (const path of due.forget) rmSync(path, { force: true });
 			for (const pending of due.resend) enqueue(deps.env, { ...pending, queued: randomUUID() });
 			// Only once every resend these PRs call for is queued, so a pass that fails before then reads them again.
@@ -757,6 +777,23 @@ const rememberedPath = (env: NodeJS.ProcessEnv, id: string, pending: Pending) =>
  * `buildRecords` passes PRs between parent and sub-agent, so a PR opening on a sub-agent's branch changes its parent's
  * record too.
  */
+const recorded = (pending: Pending | undefined) => (pending?.reviewed?.pull ?? null) !== null;
+
+/**
+ * Each queued session's pending file, by `harness\0session`. A session that stopped twice is queued twice and either
+ * copy stands for it, except that a resumed reviewer's copy naming the PR its round recorded on outlasts one from a
+ * round before that PR opened, whichever is read last.
+ */
+function bySession(group: { pending: Pending }[]): Map<string, Pending> {
+	const sessions = new Map<string, Pending>();
+	for (const { pending } of group) {
+		const name = `${pending.harness}\0${pending.session}`;
+		if (recorded(sessions.get(name)) && !recorded(pending)) continue;
+		sessions.set(name, pending);
+	}
+	return sessions;
+}
+
 function remember(
 	env: NodeJS.ProcessEnv,
 	id: string,
@@ -775,8 +812,7 @@ function remember(
 		const parent = `${s.harness}\0${s.parent}`;
 		children.set(parent, [...(children.get(parent) ?? []), s]);
 	}
-	// A session that stopped twice is queued twice; its latest stop stands for it.
-	const roots = new Map(sent.group.map((q) => [`${q.pending.harness}\0${q.pending.session}`, q.pending]));
+	const roots = bySession(sent.group);
 	for (const [name, pending] of roots) {
 		const root = sent.byId.get(name);
 		if (root === undefined || !sent.emit.has(root)) continue;

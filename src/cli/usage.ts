@@ -711,24 +711,59 @@ export function heading(pulls: Pull[]): (reached: Reached) => boolean {
 }
 
 /**
- * The PR each session's own branch heads: the one {@link headed} finds for the branch it last named that heads one.
- * Another repository may use the same branch name, so a session counts only where its repository is known. `evidence`
- * holds every exported copy, folded ones included, since a dropped copy may be the only one naming its directory's
- * repository.
+ * The PR `quest review` recorded a session it started on, by URL so a same-numbered PR in another repository never
+ * claims it, or null when it recorded on none; its branch; and its role.
+ */
+export interface Reviewed {
+	pull: string | null;
+	branch: string;
+	role: "classifying" | "reviewing";
+}
+
+/** The sessions `quest review` started, by `harness\0id`, with the repository of the checkout that queued each. */
+export type Pins = Map<string, Reviewed & { origin: string }>;
+
+const pinOf = (session: Session, pins: Pins | undefined) =>
+	session.id === null ? undefined : pins?.get(`${session.harness}\0${session.id}`);
+
+/**
+ * The branches a session reached, latest first, as matching it to a PR tries them: for a review that recorded on no
+ * PR, its pinned branch in its checkout's repository, so a PR opening on it later counts but a stranger fork's of the
+ * same name, which the review skipped, does not; then each its transcript named, which count only where its
+ * repository is known, since another repository may use the same branch name.
+ */
+function reaches(session: Session, known: string[] | null, pins: Pins | undefined): Reached[] {
+	const pin = pinOf(session, pins);
+	const pinned: Reached[] =
+		pin && pin.pull === null ? [{ name: pin.branch, first: session.start, repositories: [pin.origin] }] : [];
+	if (known === null) return pinned;
+	const seen = [...session.branches].sort((a, b) => b.last - a.last);
+	return [...pinned, ...seen.map((b) => ({ name: b.name, first: b.first, repositories: known }))];
+}
+
+/**
+ * The PR each session's own branch heads: for a review, the PR it recorded on; else the one {@link headed} finds for
+ * the first branch {@link reaches} gives that heads one. `evidence` holds every exported copy, folded ones included,
+ * since a dropped copy may be the only one naming its directory's repository.
  */
 function attribute(
 	sessions: Session[],
 	evidence: Session[],
 	pulls: Pull[],
+	pins?: Pins,
 ): { own: Map<Session, Pull>; known: (session: Session) => string[] | null } {
 	const branches = byBranch(pulls);
 	const own = new Map<Session, Pull>();
 	const owned = owners(evidence);
 	for (const session of sessions) {
-		const known = owned(session);
-		if (known === null) continue;
-		for (const seen of [...session.branches].sort((a, b) => b.last - a.last)) {
-			const found = headed(branches, { name: seen.name, first: seen.first, repositories: known });
+		const url = pinOf(session, pins)?.pull?.toLowerCase();
+		const recorded = url === undefined ? undefined : pulls.find((each) => each.url.toLowerCase() === url);
+		if (recorded) {
+			own.set(session, recorded);
+			continue;
+		}
+		for (const reached of reaches(session, owned(session), pins)) {
+			const found = headed(branches, reached);
 			if (found) {
 				own.set(session, found);
 				break;
@@ -739,20 +774,18 @@ function attribute(
 }
 
 /**
- * Each of `sessions` whose latest branch heads no PR among `pulls`, by the rule {@link attribute} uses, with that
- * branch, so a PR that opens on it later can be noticed. A session whose repository is unknown, or that named no
- * branch, has none to wait for.
+ * Each of `sessions` whose latest branch, its pinned one first, heads no PR among `pulls`, by the rule
+ * {@link attribute} uses, with that branch, so a PR that opens on it later can be noticed. A review that recorded on a
+ * PR, a session whose repository is unknown and that has no pin, or one that named no branch has none to wait for.
  */
-export function unheaded(sessions: Session[], evidence: Session[], pulls: Pull[]): Map<Session, Reached> {
+export function unheaded(sessions: Session[], evidence: Session[], pulls: Pull[], pins?: Pins): Map<Session, Reached> {
 	const branches = byBranch(pulls);
 	const owned = owners(evidence);
 	const waiting = new Map<Session, Reached>();
 	for (const session of sessions) {
-		const repositories = owned(session);
-		const latest = [...session.branches].sort((a, b) => b.last - a.last)[0];
-		if (repositories === null || latest === undefined) continue;
-		const reached = { name: latest.name, first: latest.first, repositories };
-		if (headed(branches, reached) === null) waiting.set(session, reached);
+		if ((pinOf(session, pins)?.pull ?? null) !== null) continue;
+		const reached = reaches(session, owned(session), pins)[0];
+		if (reached !== undefined && headed(branches, reached) === null) waiting.set(session, reached);
 	}
 	return waiting;
 }
@@ -777,11 +810,13 @@ export interface RecordSources {
 	since: number;
 	/** A local session's time split, or null while it has none. */
 	split?: RecordInput["split"];
+	/** The sessions `quest review` started, whose branch and role stand over what is inferred. */
+	pins?: Pins;
 }
 
 /** Each session's record, attributed to the PRs in the window, whose review records name their reviewers and classifier. */
 export function sessionRecords(sources: RecordSources): Map<Session, SessionRecord> {
-	const { repository, sessions, evidence, pulls, waits, calls, emit, since, split } = sources;
+	const { repository, sessions, evidence, pulls, waits, calls, emit, since, split, pins } = sources;
 	// Only the reviewer sessions are read, so no PR author can stop every session's record with a body this version
 	// cannot parse.
 	const reviewers = new Set(pulls.flatMap((pull) => reviewSessions(pull.body)));
@@ -789,7 +824,8 @@ export function sessionRecords(sources: RecordSources): Map<Session, SessionReco
 	return buildRecords({
 		repository,
 		sessions,
-		...attribute(sessions, evidence, pulls),
+		...attribute(sessions, evidence, pulls, pins),
+		pins,
 		reviewers,
 		classifiers,
 		waits,

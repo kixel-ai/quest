@@ -440,13 +440,21 @@ export interface ReviewDependencies {
 	queue(session: Started): void;
 }
 
-/** A session `quest review` started, for the record sender: its checkout, and its first instant, epoch ms. */
+/**
+ * A session `quest review` started, for the record sender: its checkout, its first instant, epoch ms, and the PR
+ * branch and role it worked in, which the sender cannot infer from a review checkout or a record not yet written.
+ */
 export interface Started {
 	harness: string;
 	session: string;
 	cwd: string;
 	start: number;
+	branch: string;
+	role: "classifying" | "reviewing";
 }
+
+/** A session a round started, before the run adds the branch it reviews. */
+type Spent = Omit<Started, "branch">;
 
 /** One reviewer's findings across every round on a branch, which a `--new` session continues. */
 export interface Tally {
@@ -1980,7 +1988,7 @@ interface Classifying {
 	dir: string;
 	env: NodeJS.ProcessEnv;
 	/** Queues the classifier's session for the record sender. */
-	queued: ReviewDependencies["queue"];
+	queued: (session: Spent) => void;
 	signal?: AbortSignal;
 	saved?: State["classified"];
 	/** Refuse rather than run a classifier when no saved classification fits, as accepting reviewed rounds does. */
@@ -2039,7 +2047,8 @@ export async function classify(input: Classifying): Promise<{ key: string; value
 	const spent: Answer<unknown>["spent"] = [];
 	const queueSpent = () => {
 		for (const { entry, session } of spent)
-			if (session !== undefined) input.queued({ harness: entry.harness, session, cwd: root, start });
+			if (session !== undefined)
+				input.queued({ harness: entry.harness, session, cwd: root, start, role: "classifying" });
 	};
 	let answer;
 	try {
@@ -2321,7 +2330,7 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 		// shape, reviews it whole again instead of resuming.
 		rules: digest(JSON.stringify([REVIEW, rules?.text ?? null, DIFF_FLAGS])),
 	};
-	const queued: ReviewDependencies["queue"] = (session) => deps.queue(session);
+	const queued = (session: Spent) => deps.queue({ ...session, branch });
 	// The tier picks how much review a change needs, so it is set before any reviewer runs.
 	const classified = await classify({
 		root,
@@ -2714,7 +2723,7 @@ interface Shared {
 	/** The branch's own prefix for its seats' diff directories, since other branches' reviews share `dir`. */
 	diffs: string;
 	env: NodeJS.ProcessEnv;
-	queued: ReviewDependencies["queue"];
+	queued: (session: Spent) => void;
 	signal: AbortSignal;
 }
 
@@ -2830,7 +2839,7 @@ async function reviewWith(shared: Shared, seat: Seat, responses: string | undefi
 		session ??= cli.failed;
 		throw error;
 	} finally {
-		if (session !== undefined) shared.queued({ harness, session, cwd: root, start: started });
+		if (session !== undefined) shared.queued({ harness, session, cwd: root, start: started, role: "reviewing" });
 		rmSync(readable, { recursive: true, force: true });
 	}
 	// Either turn that failed threw, so a session is open here.
