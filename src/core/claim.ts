@@ -5,7 +5,7 @@
 import type { RootContent } from "mdast";
 
 import { itemParts, markdown, rendered } from "./doc";
-import { MAINTAINER, type Wait, type WaitProblem, readWait } from "./waiting";
+import { MAINTAINER, type Wait, type WaitProblem, partylessProblems, readWait } from "./waiting";
 
 // The heading that hands a draft back to the maintainer.
 const HAND_BACK = /^waiting$/i;
@@ -73,20 +73,12 @@ function handBackItems(body: string): HandBackItem[] {
 				const read = readWait({ line, parts });
 				if (read.wait !== null) return { wait: read.wait, problems: read.problems };
 				const text = collapse(rendered(item)).replace(TASK, "");
+				const prose: Wait = { line, party: MAINTAINER, kind: "prose", text };
 				// A choice list under an unknown qualifier, such as `Maintainer (local):`, stays prose with a warning.
-				if (read.problems.length > 0)
-					return { wait: { line, party: MAINTAINER, kind: "prose", text }, problems: read.problems };
-				// An item that names no party is the maintainer's, so read it as theirs, choice list included.
-				const [lead, ...rest] = parts;
-				const named = readWait({
-					line,
-					parts:
-						typeof lead === "string" ? [`${MAINTAINER}: ${lead}`, ...rest] : [`${MAINTAINER}:`, ...parts],
-				});
-				return {
-					wait: named.wait ?? { line, party: MAINTAINER, kind: "prose", text },
-					problems: named.problems,
-				};
+				if (read.problems.length > 0) return { wait: prose, problems: read.problems };
+				// An item that names no party is the maintainer's prose; a marked list there may be a checklist,
+				// so it becomes a decision only once the writer adds `Maintainer:`, and until then it warns.
+				return { wait: prose, problems: partylessProblems(parts) };
 			});
 		if (items.length === 0)
 			items.push({

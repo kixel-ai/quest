@@ -260,6 +260,8 @@ function headings(found: Finding[], docs: Doc[], doc: Doc) {
 				line: entry.line,
 				message: `'## ${WAITING}' item must open with who acts, as '${MAINTAINER}: ...', '${MAINTAINER} (action): ...' for a step only they can take, '${MAINTAINER} (PC): ...' for one only at their computer, or '<party>: ...'`,
 			});
+			// An unknown qualifier's choice list is misplaced too, but fixing the qualifier comes first.
+			continue;
 		}
 		for (const problem of problems)
 			found.push({ path: doc.path, line: problem.line, message: `'## ${WAITING}' ${problem.message}` });

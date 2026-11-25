@@ -288,7 +288,7 @@ from your computers, and `--json` prints `{path, pr, dependents, ready, waits}`
 objects. Each wait is `{line, party, kind, text}`: a decision adds `choices:
 [{label, description, recommended}]` and leaves its choice list out of `text`,
 and an action adds `pc`. A draft's item that names no party is the
-maintainer's, and since `quest check` never reads PR bodies, a draft's
+maintainer's prose, warning when it holds a choice list, and since `quest check` never reads PR bodies, a draft's
 malformed choice list reads as prose with a warning. Drafts come from
 the upstream's open PRs, found as for `unblocked --unclaimed`; without the
 remote, off GitHub, or when GitHub cannot be read, it lists the tree's items

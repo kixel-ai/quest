@@ -494,7 +494,8 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"whose nested list marks one bullet (Recommended) is a decision, each bullet a choice written label or " +
 				"label - description; Maintainer (action): and Maintainer (PC): items are actions, steps only the maintainer " +
 				"can take, (PC) marking one only at their computers, such as a local login or a hardware check; every " +
-				"other item is prose. A draft's item without a party is the maintainer's prose; a draft's section " +
+				"other item is prose. A draft's item without a party is the maintainer's prose, with a warning when it " +
+				"holds a choice list, which needs Maintainer: to become a decision; a draft's section " +
 				"without items is one maintainer item holding its prose; a draft's malformed choice list reads as prose " +
 				"with a warning naming the PR and line, since quest check never reads PR bodies.\n\n" +
 				"Prints one line per item: dependents, ready or blocked (whether Required entries or a future " +

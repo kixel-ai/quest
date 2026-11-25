@@ -140,6 +140,14 @@ function misplaced(lists: NestedList[]): WaitProblem[] {
 	}));
 }
 
+/** Problems for a draft's item that names no party: its choice lists need `Maintainer:` to become a decision. */
+export function partylessProblems(parts: Part[]): WaitProblem[] {
+	return markedLists(parts, false).map((list) => ({
+		line: list.line,
+		message: `a choice list needs '${MAINTAINER}:' before its question to become a decision`,
+	}));
+}
+
 /**
  * Read one `## Waiting` item: its party, and the kind of answer it needs. An
  * item with a malformed choice list reads as prose beside its problems.

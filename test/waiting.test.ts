@@ -109,8 +109,6 @@ test("a decision is a Maintainer item with a marked choice list, from a quest an
 		problems: [],
 	});
 	expect(handBackWaits(`Work.\n\n## Waiting\n\n${item}`)).toEqual([decision]);
-	// A draft's item that names no party is the maintainer's, choice list included.
-	expect(handBackWaits(`Work.\n\n## Waiting\n\n${item.replace("Maintainer: ", "")}`)).toEqual([decision]);
 	expect(handBackProblems(`Work.\n\n## Waiting\n\n${item}`)).toEqual([]);
 });
 
@@ -168,6 +166,23 @@ test("an unmarked list, or a marker mid-sentence outside a decision, stays prose
 			},
 			problems: [],
 		},
+	]);
+});
+
+test("a draft's item that names no party stays prose, warning that a choice list needs 'Maintainer:'", () => {
+	const body =
+		"## Waiting\n\n- Verify the rollout.\n  - Review logs (Recommended)\n  - Confirm the release tag\n- Check these.\n  - DNS\n  - TLS\n";
+	expect(handBackWaits(body)).toEqual([
+		{
+			line: 3,
+			party: "Maintainer",
+			kind: "prose",
+			text: "Verify the rollout. Review logs (Recommended) Confirm the release tag",
+		},
+		{ line: 6, party: "Maintainer", kind: "prose", text: "Check these. DNS TLS" },
+	]);
+	expect(handBackProblems(body)).toEqual([
+		{ line: 4, message: "a choice list needs 'Maintainer:' before its question to become a decision" },
 	]);
 });
 
@@ -231,7 +246,7 @@ test("check rejects an unknown host and an empty hosts section", () => {
 
 test("check rejects a wait without a party and an empty section", () => {
 	const docs = tree({
-		"a.md": "\n## Waiting\n\n- pick a name\n- Maintainer (local): log in.\n",
+		"a.md": "\n## Waiting\n\n- pick a name\n- Maintainer (local): log in.\n  - A (Recommended)\n  - B\n",
 		"b.md": "\n## Waiting\n",
 	});
 	expect(check(docs, () => true).map((f) => `${f.path}:${f.line}: ${f.message}`)).toEqual([
