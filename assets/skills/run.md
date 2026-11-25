@@ -58,6 +58,7 @@ A `/quest-merge` pick covers the PR until it lands or needs the user: when `/que
 Order merges that would otherwise conflict.
 Where the queue runs a fixer, such as `quest land`, it hands back only a decision: ask the user, with its handback comment's diagnosis and recommendation.
 An `unanswered_signal`, which no fixer takes, holds the pick even with one: dispatch `/quest-iterate`.
+An `unreviewed`, a high head no `quest review` status covers, needs only a review: dispatch `/quest-review` on the PR, then run `/quest-merge` again, before asking for another pick.
 Without a fixer, after `merge_conflict`, `failed_checks`, `changes_requested`, or `unresolved_conversations` the pick holds, even from an earlier session: dispatch `/quest-iterate`. After `checks_timed_out`, run `/quest-merge` again once; a second timeout of the same head is the user's call.
 Any other reason, such as a person removing it, is the user's call.
 
