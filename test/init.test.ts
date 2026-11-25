@@ -19,7 +19,7 @@ import { expect, test } from "vitest";
 import { AUDITS, check, formatFinding, ready } from "../src/core";
 import { CONTEXT_LIMIT, hook } from "../src/cli/hooks";
 import { REFERENCE_LINE, init, stubFindings, uninstall } from "../src/cli/setup";
-import { SKILLS } from "../src/cli/skills";
+import { CONTEXT, SKILLS } from "../src/cli/skills";
 import { checkout, load } from "../src/cli/tree";
 import { tempDir } from "./fixture";
 
@@ -481,6 +481,24 @@ test("stub check flags missing, outdated, and edited stubs, and the session hook
 	expect(context()[0].length).toBeLessThanOrEqual(CONTEXT_LIMIT);
 });
 
+test("stub check asks for no audit stubs without a quest tree", () => {
+	const dir = tempDir();
+	init(dir);
+	rmSync(join(dir, "quest"), { recursive: true });
+	expect(stubFindings(dir)).toEqual([]);
+});
+
+test("the session hooks load the rules when the stub check cannot read the tree", () => {
+	const dir = tempDir();
+	mkdirSync(join(dir, ".git"));
+	init(dir);
+	symlinkSync("loop.md", join(dir, "quest/loop.md"));
+	const context = JSON.parse(hook({ hook_event_name: "SessionStart", cwd: dir })).hookSpecificOutput
+		.additionalContext as string;
+	expect(context.startsWith(CONTEXT)).toBe(true);
+	expect(context).toContain("Quest could not compare the stubs here");
+});
+
 test("stub check adds nothing in a repository that does not use Quest", () => {
 	const dir = tempDir();
 	mkdirSync(join(dir, ".git"));
@@ -613,7 +631,7 @@ test("stub check reports a held audit path beside the skill stub findings", () =
 	rmSync(join(dir, ".claude/skills/quest-start"), { recursive: true });
 	expect(stubFindings(dir)).toEqual([
 		".claude/skills/quest-start/SKILL.md: is missing; run the repository's pinned `quest init` and commit the result",
-		"quest/m1/audit-deps.md is in the way of the `deps` audit's stub, which no quest names; remove or rename it before running `quest init`",
+		"quest/m1/audit-deps.md is in the way of the `deps` audit's stub, which no quest names; move it, or, if the maintainer declines the audit, list `deps` under `## Skipped audits` in `quest/README.md`, before running `quest init`",
 	]);
 });
 
@@ -624,11 +642,16 @@ test("stub check flags a shipped audit without a stub until a quest names it or 
 	const stub = read(dir, "quest/m1/audit-instructions.md");
 	rmSync(join(dir, "quest/m1/audit-instructions.md"));
 	expect(stubFindings(dir)).toEqual([
-		"quest/m1/audit-instructions.md: is missing; run the repository's pinned `quest init` and commit the result, or list `instructions` under `## Skipped audits` in `quest/README.md`",
+		"quest/m1/audit-instructions.md: is missing; run the repository's pinned `quest init` and commit the result, or, if the maintainer declines the audit, list `instructions` under `## Skipped audits` in `quest/README.md`",
 	]);
 
 	write(dir, "quest/m1/audit-instructions.md", stub);
 	expect(stubFindings(dir)).toEqual([]);
+
+	// A heading `quest check` flags as non-literal still names the audit, so nothing would plant a second stub.
+	write(dir, "quest/m1/audit-instructions.md", stub.replace("## Audit\n", "Audit\n-----\n"));
+	expect(stubFindings(dir)).toEqual([]);
+	expect(init(dir)).toEqual([]);
 
 	rmSync(join(dir, "quest/m1/audit-instructions.md"));
 	write(dir, "quest/README.md", `${read(dir, "quest/README.md")}\n## Skipped audits\n\n- instructions\n`);

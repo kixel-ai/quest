@@ -200,7 +200,10 @@ export function planAudits(repo: Checkout): InitChange[] {
 		// No quest names the audit, so whatever sits here is other work, and its branch would nest a stub's.
 		for (const taken of [path, path.slice(0, -".md".length)])
 			if (repo.lstat(taken) !== null)
-				refuse(taken, `is in the way of the \`${audit.name}\` audit's stub, which no quest names`);
+				throw new InitRefused(
+					taken,
+					`${taken} is in the way of the \`${audit.name}\` audit's stub, which no quest names; move it, or, if the maintainer declines the audit, list \`${audit.name}\` under \`## Skipped audits\` in \`quest/README.md\`, before running \`quest init\``,
+				);
 		changes.push({ path, content: auditStub(audit, open.length > 0 ? after : null) });
 	}
 	return changes;
@@ -226,8 +229,8 @@ function auditStub(audit: Audit, after: number | null): string {
 /**
  * Every quest document's path under `quest/`, as `quest check` collects them (symlinked files are read,
  * symlinked directories skipped), and the documents an audit plan reads: the milestone READMEs and any
- * with a `## Audit` or `## Skipped audits` heading, which `quest check` requires written literally.
- * Parsing the rest would double the session hook's time for nothing.
+ * whose text holds either heading's name, however the heading is written. Parsing the rest would double
+ * the session hook's time for nothing.
  */
 function questDocs(repo: Checkout): { paths: string[]; docs: Doc[] } {
 	const paths: string[] = [];
@@ -239,7 +242,8 @@ function questDocs(repo: Checkout): { paths: string[]; docs: Doc[] } {
 			else if (isQuest(path) && repo.stat(path) === "file") {
 				paths.push(path);
 				const text = repo.read(path);
-				if (MILESTONE.test(path) || /^## (Audit|Skipped audits)\r?$/m.test(text)) docs.push(parse(path, text));
+				if (MILESTONE.test(path) || text.includes("Audit") || text.includes("Skipped audits"))
+					docs.push(parse(path, text));
 			}
 		}
 	};

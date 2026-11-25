@@ -257,6 +257,8 @@ function skillFindings(repo: Checkout): string[] {
 
 /** The stubs `quest init` would plant for shipped audits no quest names, not the milestone READMEs they sit in. */
 function auditFindings(repo: Checkout): string[] {
+	// Without a quest tree there are no audits to run, and init would recreate one the repository dropped.
+	if (repo.stat("quest/README.md") !== "file") return [];
 	let changes: ReturnType<typeof planAudits>;
 	try {
 		changes = planAudits(repo);
@@ -269,6 +271,6 @@ function auditFindings(repo: Checkout): string[] {
 		.filter(({ path }) => !path.endsWith("/README.md"))
 		.map(({ path }) => {
 			const name = path.slice(path.lastIndexOf("/audit-") + "/audit-".length, -".md".length);
-			return `${path}: is missing; ${FIX}, or list \`${name}\` under \`## Skipped audits\` in \`quest/README.md\``;
+			return `${path}: is missing; ${FIX}, or, if the maintainer declines the audit, list \`${name}\` under \`## Skipped audits\` in \`quest/README.md\``;
 		});
 }

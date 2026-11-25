@@ -240,7 +240,8 @@ repository on its next run. To opt out, list the audit in the root
 - deps - this repository vendors nothing and has no package manager
 ```
 
-`quest check` rejects an audit name Quest does not ship in either section, a
+`quest check` rejects an audit name Quest does not ship in either section
+(unless `--no-stubs`), a
 second name in one `## Audit`, and `## Skipped audits` outside the root.
 
 ## Find what waits on you
@@ -359,8 +360,9 @@ binary carries, and reports a missing, outdated, or retired one, and reports
 each audit its binary ships that no quest names and `## Skipped audits` does
 not list, so an upgrade that adds an audit asks for `quest init`. A job that
 checks a PR with a binary built from the base passes `--no-stubs`, since that
-binary's skills would reject a PR that changes a stub; the PR's own binary
-checks them in its own `quest check`. This repository's merge queue and
+binary's skills would reject a PR that changes a stub, and its audit list one
+that ships a new audit with its stub; with it, any audit name passes, and the
+PR's own binary checks them in its own `quest check`. This repository's merge queue and
 `quest merge` do so. It also reads the repository's [`RISK.md`](#risk-tiers),
 if any, and reports each `## High` or `## Automatic` item it cannot read,
 which would otherwise fail the next `quest review` on a branch from it.

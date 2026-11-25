@@ -338,11 +338,16 @@ export function hook(input: unknown, deps: HookDependencies = { env: process.env
 					typeof value.agent_id === "string" ? value.agent_id : null,
 					deps.env,
 				);
-			const stubs = stubFindings(root).length;
-			const context =
-				stubs === 0
-					? CONTEXT
-					: `${CONTEXT}\nQuest's skill and audit stubs here differ from what quest ${version} plants (\`quest check\` lists ${stubs}): in a PR, run \`quest init\` with the repository's pinned quest, bumping the pin first if it is older, or list an unwanted audit under \`## Skipped audits\` in \`quest/README.md\`.\n`;
+			// The rules load even when the stub comparison cannot read the tree, such as a quest removed mid-walk.
+			let note = "";
+			try {
+				const stubs = stubFindings(root).length;
+				if (stubs > 0)
+					note = `\nQuest's skill and audit stubs here differ from what quest ${version} plants (\`quest check\` lists ${stubs}): in a PR, run \`quest init\` with the repository's pinned quest, bumping the pin first if it is older. An audit the maintainer declines goes under \`## Skipped audits\` in \`quest/README.md\` instead.\n`;
+			} catch (error) {
+				note = `\nQuest could not compare the stubs here with quest ${version}'s (${error instanceof Error ? error.message : String(error)}); run \`quest check\` for its findings.\n`;
+			}
+			const context = `${CONTEXT}${note}`;
 			return JSON.stringify({ hookSpecificOutput: { hookEventName: event, additionalContext: context } });
 		}
 		case "PreToolUse": {
