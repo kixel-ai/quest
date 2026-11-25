@@ -202,6 +202,16 @@ function deps(world: World): GitHubDependencies {
 				if (query.includes("viewer")) return Response.json({ data: { viewer: { login: `${APP}[bot]` } } });
 				if (query.includes("defaultBranchRef"))
 					return Response.json({ data: { repository: { defaultBranchRef: { name: "main" } } } });
+				if (query.includes("query ReviewTiers"))
+					return Response.json({
+						data: {
+							repository: {
+								pullRequest: {
+									commits: { pageInfo: { hasPreviousPage: false, startCursor: null }, nodes: [] },
+								},
+							},
+						},
+					});
 				const pullOf = () => world.pulls.find((item) => `PR_${item.number}` === variables.id)!;
 				const aliases = [...query.matchAll(/\bp(\d+): pullRequest\(number: \d+\)/g)].map((m) => Number(m[1]));
 				if (aliases.length) {
@@ -411,19 +421,18 @@ function deps(world: World): GitHubDependencies {
 					world.origin && spawnSync("git", ["show", `refs/heads/${ref}:RISK.md`], { cwd: world.origin });
 				return risk && risk.status === 0 ? new Response(risk.stdout) : new Response("{}", { status: 404 });
 			}
-			const files = /^\/repos\/upstream\/project\/pulls\/(\d+)\/files$/.exec(path);
-			if (files) {
-				const pull = world.pulls.find((item) => item.number === Number(files[1]))!;
-				if (!world.origin) return Response.json([]);
-				const head = headOf(world, pull);
-				const from = git(world.origin, "merge-base", `refs/heads/${pull.base ?? "main"}`, head);
-				const changed = git(world.origin, "diff", "--name-only", "--no-renames", from, head);
-				return Response.json(
-					changed
-						.split("\n")
-						.filter(Boolean)
-						.map((filename) => ({ filename })),
-				);
+			const compared = /^\/repos\/upstream\/project\/compare\/([^/]+)\.\.\.(\w+)$/.exec(path);
+			if (compared) {
+				const [, base, head] = compared;
+				const from = world.origin ? git(world.origin, "merge-base", `refs/heads/${base}`, head!) : GROUP;
+				const changed = world.origin
+					? git(world.origin, "diff", "--name-only", "--no-renames", from, head!)
+					: "";
+				const files = changed
+					.split("\n")
+					.filter(Boolean)
+					.map((filename) => ({ filename }));
+				return Response.json({ merge_base_commit: { sha: from }, files });
 			}
 			const pullPath = /^\/repos\/upstream\/project\/pulls\/(\d+)$/.exec(path);
 			if (pullPath) {

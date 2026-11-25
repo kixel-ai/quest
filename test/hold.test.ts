@@ -75,8 +75,10 @@ class FakePull {
 	reads = 0;
 	/** The base's RISK.md, absent when null. */
 	risk: string | null = null;
-	/** The paths the PR changes, as GitHub lists its files. */
+	/** The paths the PR changes, as GitHub's compare lists them. */
 	files: string[] = [];
+	/** Each commit's diff from the base, by SHA; its SHA by default, so no two commits share one. */
+	diffs: Record<string, string> = {};
 	/** The `quest review` status on each commit, as GraphQL's `StatusContext` gives it. */
 	statuses: Record<string, ObjectValue> = {};
 	private clock = Date.parse("2026-10-21T12:00:00Z");
@@ -135,24 +137,25 @@ class FakePull {
 		if (url.pathname === "/repos/example/project/branches/main") return json(200, { protection: {} });
 		if (url.pathname === "/repos/example/project/actions/runs" && url.searchParams.get("head_sha") === this.head)
 			return json(200, { total_count: this.runs.length, workflow_runs: this.runs });
-		if (url.pathname === `/repos/example/project/compare/main...${this.head}`) {
-			this.comparisons.push(`${url.pathname}${url.search}`);
-			this.afterCompare?.();
+		const compared = /^\/repos\/example\/project\/compare\/main\.\.\.(\w+)$/.exec(url.pathname);
+		if (compared && new Headers(init.headers).get("Accept") === "application/vnd.github.diff")
+			return new Response(this.diffs[compared[1]!] ?? compared[1]);
+		if (compared) {
+			const files = this.files.map((filename) => ({ filename }));
+			// Only `quest merge`'s own check of the head against the base, which asks for one commit.
+			if (compared[1] === this.head && url.search === "?per_page=1") {
+				this.comparisons.push(`${url.pathname}${url.search}`);
+				this.afterCompare?.();
+			}
 			return json(200, {
-				status: this.comparison,
+				status: compared[1] === this.head ? this.comparison : "ahead",
 				base_commit: { sha: this.base },
 				merge_base_commit: { sha: FORK },
+				files,
 			});
 		}
-		if (url.pathname.startsWith("/repos/example/project/compare/main..."))
-			return json(200, { status: "ahead", base_commit: { sha: this.base }, merge_base_commit: { sha: FORK } });
 		if (url.pathname === "/repos/example/project/contents/RISK.md")
 			return this.risk === null ? json(404, { message: "Not Found" }) : new Response(this.risk);
-		if (url.pathname === "/repos/example/project/pulls/7/files")
-			return json(
-				200,
-				this.files.map((filename) => ({ filename })),
-			);
 		if (url.pathname === "/repos/example/project/collaborators/maintainer/permission")
 			return json(200, { permission: "write" });
 		if (url.pathname === "/repos/example/project/rules/branches/main") {
@@ -196,6 +199,21 @@ class FakePull {
 			}
 			return { data: { [name]: { clientMutationId: null } } };
 		}
+		if (query.includes("query ReviewTiers"))
+			return {
+				data: {
+					repository: {
+						pullRequest: {
+							commits: {
+								pageInfo: { hasPreviousPage: false, startCursor: null },
+								nodes: Object.entries(this.statuses).map(([oid, context]) => ({
+									commit: { oid, status: { context } },
+								})),
+							},
+						},
+					},
+				},
+			};
 		if (query.includes("query ReviewStatus")) {
 			const status = this.statuses[String(variables.sha)];
 			return {
@@ -1086,6 +1104,24 @@ describe("merge --land of a high head", () => {
 		pull.statuses[OLD]!.description = "Risk high: passed";
 		expect(await refused(land_(pull))).toContain(
 			`head ${HEAD} is high, since example/project#7's ## Review record does not count: its risk differs`,
+		);
+	});
+
+	test("lands a head whose diff is the one a high review covers, as after a clean base merge", async () => {
+		const pull = new FakePull();
+		review(pull, OLD, "high");
+		expect(await refused(land_(pull))).toContain("is high");
+		pull.diffs = { [OLD]: "diff", [HEAD]: "diff" };
+		await land_(pull);
+		expect(pull.writes).toEqual([`enablePullRequestAutoMerge ${HEAD} MERGE`]);
+	});
+
+	test("refuses a head an earlier commit's status rates high, whatever the body says", async () => {
+		const pull = new FakePull();
+		review(pull, OLD, "high");
+		pull.body = "Summary.";
+		expect(await refused(land_(pull))).toContain(
+			`head ${HEAD} is high, since the quest review status on ${OLD} rates it high`,
 		);
 	});
 

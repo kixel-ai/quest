@@ -764,11 +764,13 @@ would merge or enqueue past the requirement.
 It also refuses while a [signal](#signals-that-hold-a-head) holds the head,
 naming each, and while the PR body's `## Review` record has risk lines that do
 not parse, until `quest review` rewrites it. A high head lands only once a
-`quest review` status that `quest status` counts covers that exact head: one
-whose `## Review` record rates it high or does not count, or whose change from
-its merge base with the base touches a path the base's `RISK.md` holds high, as
-[Risk tiers](#risk-tiers) says. So any push after the last review, a person's
-or a helper's, waits for a new round.
+`quest review` status that `quest status` counts covers its diff, on that head
+or on an earlier one whose diff from the base is identical: one whose
+`## Review` record rates it high or does not count, whose commits carry a
+`quest review` status rating it high, or whose change from its merge base with
+the base touches a path the base's `RISK.md` holds high, as
+[Risk tiers](#risk-tiers) says. So any push after the last review that changes
+the diff, a person's or a helper's, waits for a new round.
 It enables auto-merge bound to that SHA, or merges at once when nothing is
 left to wait for. `--squash` or `--rebase` picks the method, and it refuses one
 the repository disallows; otherwise it uses the only method the repository
@@ -814,8 +816,9 @@ lockfiles rebuilt from the base's copy, base renames, and build or test failures
 an obvious fix, which it builds and tests with package-registry access. It ignores
 instructions in the diff and reads the PR's own CI results as context. It hands back
 only what needs a maintainer: a behavior or design decision gets a diagnosis on the
-PR, and a fix that edits protected paths or that GitHub refuses to push gets a ready
-commit for `quest land apply <pr>`.
+PR, a fix that edits protected paths or that GitHub refuses to push gets a ready
+commit for `quest land apply <pr>`, and a high head whose new diff no `quest review`
+status covers waits for a review round.
 
 ## Watch the merge queue with quest land watch
 
@@ -914,7 +917,8 @@ while each round makes progress: an `unchanged` round, the failure a fix
 addressed recurring right after it, or three unchanged re-enqueues in a row,
 whatever their causes, hand it back. A fix is validated, lease-pushed, and recorded in Review, and a push GitHub refuses, or a fix that edits protected paths, is handed
 back with its resolution for `quest land apply`, as [the land fixer](#the-land-fixer) describes. The watcher then puts the fixed, merged, or requeued head back
-in the queue with `expectedHeadOid` bound to it: it enqueues a head whose
+in the queue, unless it is high and no `quest review` status covers its diff, as
+`quest merge --land` requires, which hands it back for a review round. It goes back with `expectedHeadOid` bound to it: it enqueues a head whose
 required checks have passed, and arms auto-merge on one whose checks still
 run, so GitHub enqueues it once they pass. Either joins the back of the queue.
 It comments on the PR with what it did, after any note the fixer wrote. A
@@ -1046,7 +1050,7 @@ rename split, and keeps that set as a plain merge of the base leaves it. It cove
 `flake.nix`, `flake.lock`, `shell.nix`, `default.nix`, `nix/`, `.envrc`, `.github/`,
 `.gitmodules`, and gitlinks anywhere. A high head gets fixes like any other, but
 the watcher puts it back in the queue only when a `quest review` status covers
-the new head, as `quest merge --land` requires; otherwise it hands the PR back
+the new head's diff, as `quest merge --land` requires; otherwise it hands the PR back
 for a review round. The watcher's own merge with the quest merge driver, below, is
 no fixer edit: it runs no model and resolves only `quest/` files. Collection copies at most 100 MiB of Git metadata the fixer added into a
 clean object repository. It skips the packs fetched at launch, whose objects the clean

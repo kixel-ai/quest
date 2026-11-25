@@ -27,6 +27,7 @@ import { promisify } from "node:util";
 import {
 	type Class,
 	heldHigh,
+	highHits,
 	RISK_FILE,
 	SIZES,
 	type Size,
@@ -35,7 +36,6 @@ import {
 	branchQuest,
 	classesFor,
 	codeSpan,
-	matches,
 	parse,
 	parseRiskFile,
 	size as questSize,
@@ -2353,11 +2353,7 @@ export async function classify(input: Classifying): Promise<{ key: string; value
 	if (file !== null && file.problems.length > 0)
 		throw new ReviewInputError(`the base's ${RISK_FILE} cannot be read: ${file.problems.join("; ")}`);
 	const range = `${change.mergeBase}..${change.head}`;
-	const held = heldHigh(file);
-	const hits = changed.flatMap((path) => {
-		const rule = held.find((each) => matches(each.pattern, path));
-		return rule === undefined ? [] : [{ path, rule }];
-	});
+	const hits = highHits(heldHigh(file), changed);
 	if (hits.length > 0) {
 		const { path, rule } = hits[0]!;
 		const more = hits.length > 1 ? `, as are ${hits.length - 1} more of its paths` : "";

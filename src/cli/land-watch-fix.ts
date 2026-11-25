@@ -827,6 +827,9 @@ async function requeue(
 					typeof pull.body === "string" ? pull.body : "",
 				);
 	if (held.signals.length > 0 || unreviewed !== null) {
+		// A workflow may have queued the head while the checks above ran, so act on the PR as it is now.
+		pull = await readPull(github, id);
+		if (string(pull.headRefOid) !== head) throw new FixerRefusal("head moved before it was re-enqueued");
 		if (pull.mergeQueueEntry != null) {
 			await github.graphql("mutation($id: ID!) { dequeuePullRequest(input: { id: $id }) { clientMutationId } }", {
 				id,

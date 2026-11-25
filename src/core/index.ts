@@ -51,6 +51,7 @@ export {
 	TIERS,
 	type Tier,
 	heldHigh,
+	highHits,
 	matches,
 	parseRiskFile,
 	patternError,

@@ -7,12 +7,12 @@ import {
 	type Repository,
 	type Tier,
 	heldHigh,
-	matches,
+	highHits,
 	parseRiskFile,
 	recordedRisk,
 	reviewSection,
 } from "../core";
-import { GitHubDeadline, type GitHubReader, object, repositoryPath, string } from "./client";
+import { GitHubDeadline, type GitHubReader, array, object, repositoryPath, string } from "./client";
 
 /** The commit status context `quest review` sets on each head it records. */
 export const REVIEW_CONTEXT = "quest review";
@@ -76,14 +76,25 @@ export async function trustedReview(
 	return { body: "", head: null, localReview: false };
 }
 
-/** The most files GitHub's REST API lists for a PR. */
-const FILE_LIMIT = 3000;
+/** The most files GitHub's compare API lists. */
+const FILE_LIMIT = 300;
+
+/** The `quest review` status descriptions on a PR's commits, newest first, a page at a time. */
+const TIERS_QUERY = `query ReviewTiers($owner: String!, $repo: String!, $number: Int!, $before: String) {
+	repository(owner: $owner, name: $repo) { pullRequest(number: $number) {
+		commits(last: 100, before: $before) {
+			pageInfo { hasPreviousPage startCursor }
+			nodes { commit { oid status { context(name: "${REVIEW_CONTEXT}") { description } } } }
+		}
+	} }
+}`;
 
 /**
  * Why `sha`, the head of `pr` about to land, must wait for a new `quest review` round, or null when it may land.
- * A head `RISK.md` rates high lands only with a trusted record of `sha` itself, so any push after the last review,
- * whoever made it, waits for a new one. A head is high when `body`'s record rates it high, is malformed, or does not
- * count, or when its diff from its merge base with the base touches a path the base's risk file holds high.
+ * A head `RISK.md` rates high lands only with a trusted record whose reviewed diff is `sha`'s, so any push after the
+ * last review that changes the diff, whoever made it, waits for a new one. A head is high when `body`'s record rates
+ * it high, is malformed, or does not count, when a `quest review` status on any of the PR's commits rates it high, or
+ * when its diff from its merge base with the base touches a path the base's risk file holds high.
  */
 export async function unreviewedHigh(
 	github: GitHubReader,
@@ -95,9 +106,30 @@ export async function unreviewedHigh(
 	const trusted = await trustedReview(github, pr, body, (message) => {
 		distrust = message;
 	});
-	if (trusted.head === sha.toLowerCase()) return null;
-	const high = distrust ?? recordHigh(body) ?? (await pathHigh(github, pr));
+	const head = sha.toLowerCase();
+	if (trusted.head !== null && (trusted.head === head || (await sameDiff(github, pr, trusted.head, head))))
+		return null;
+	const high = distrust ?? recordHigh(body) ?? (await statusHigh(github, pr)) ?? (await pathHigh(github, pr, head));
 	return high === null ? null : `${sha} is high, since ${high}, and no quest review status covers it`;
+}
+
+/** Whether `a` and `b` have the same diff from their merge bases with the base. One GitHub cannot diff has none. */
+async function sameDiff(
+	github: GitHubReader,
+	pr: PullRequest & { base: string },
+	a: string,
+	b: string,
+): Promise<boolean> {
+	const diffs: string[] = [];
+	for (const sha of [a, b]) {
+		const response = await github.request(`${repositoryPath(pr)}/compare/${encodeURIComponent(pr.base)}...${sha}`, {
+			accept: "application/vnd.github.diff",
+			allow: [404, 406, 422],
+		});
+		if (!response.ok) return false;
+		diffs.push(await response.text());
+	}
+	return diffs[0] === diffs[1];
 }
 
 /** Why `body`'s risk record makes its PR high, or null. A malformed one does, since the PR's author writes the body. */
@@ -109,10 +141,33 @@ function recordHigh(body: string): string | null {
 }
 
 /**
- * Why `pr`'s diff from its merge base with the base makes it high, or null: it touches a path the base's risk file
+ * Why a `quest review` status on one of `pr`'s commits makes it high, or null. Only someone who can push sets one, and
+ * a high rating only holds a head back, so the body, which its author can edit, never lowers it.
+ */
+async function statusHigh(github: GitHubReader, pr: PullRequest): Promise<string | null> {
+	// GitHub lists at most 250 commits of a PR, so this reads at most three pages.
+	for (let before: string | null = null, more = true; more;) {
+		const data = await github.graphql(TIERS_QUERY, { owner: pr.owner, repo: pr.repo, number: pr.number, before });
+		const commits = object(object(object(data.repository).pullRequest).commits);
+		for (const node of array(commits.nodes)) {
+			const commit = object(node.commit);
+			const status = commit.status == null ? null : object(commit.status).context;
+			const description = status == null ? null : object(status).description;
+			if (typeof description === "string" && ATTESTED.exec(description)?.[1] === "high")
+				return `the ${REVIEW_CONTEXT} status on ${string(commit.oid)} rates it high`;
+		}
+		const page = object(commits.pageInfo);
+		more = page.hasPreviousPage === true;
+		before = more ? string(page.startCursor) : null;
+	}
+	return null;
+}
+
+/**
+ * Why `sha`'s diff from its merge base with the base makes it high, or null: it touches a path the base's risk file
  * holds high, on either side of a rename, as `quest review` classifies a head.
  */
-async function pathHigh(github: GitHubReader, pr: PullRequest & { base: string }): Promise<string | null> {
+async function pathHigh(github: GitHubReader, pr: PullRequest & { base: string }, sha: string): Promise<string | null> {
 	const path = repositoryPath(pr);
 	const risk = await github.request(`${path}/contents/${RISK_FILE}?ref=${encodeURIComponent(pr.base)}`, {
 		accept: "application/vnd.github.raw+json",
@@ -121,18 +176,20 @@ async function pathHigh(github: GitHubReader, pr: PullRequest & { base: string }
 	const file = risk.status === 404 ? null : parseRiskFile(await risk.text());
 	if (file !== null && file.problems.length > 0)
 		return `the base's ${RISK_FILE} cannot be read: ${file.problems.join("; ")}`;
-	const held = heldHigh(file);
-	const rows = await github.all(`${path}/pulls/${pr.number}/files?per_page=100`);
-	if (rows.length >= FILE_LIMIT) return `it changes at least ${FILE_LIMIT} files, more than GitHub lists`;
-	const changed = rows.flatMap((row) => [
-		string(row.filename),
-		...(typeof row.previous_filename === "string" ? [row.previous_filename] : []),
-	]);
-	for (const each of changed) {
-		const rule = held.find(({ pattern }) => matches(pattern, each));
-		if (rule !== undefined) return `it changes ${each}, which is always high: ${rule.reason}`;
-	}
-	return null;
+	// The compare of `sha` itself, since GitHub recomputes a PR's file list only some time after a push.
+	const compared = object(
+		await (await github.request(`${path}/compare/${encodeURIComponent(pr.base)}...${sha}`)).json(),
+	);
+	const files = array(compared.files);
+	if (files.length >= FILE_LIMIT) return `it changes at least ${FILE_LIMIT} files, more than GitHub lists`;
+	const hit = highHits(
+		heldHigh(file),
+		files.flatMap((row) => [
+			string(row.filename),
+			...(typeof row.previous_filename === "string" ? [row.previous_filename] : []),
+		]),
+	)[0];
+	return hit === undefined ? null : `it changes ${hit.path}, which is always high: ${hit.rule.reason}`;
 }
 
 /** Whether a writer's passing `quest review` status on `sha` attests `body`'s record, with a local reviewer or not, or why not. */
