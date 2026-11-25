@@ -372,10 +372,12 @@ fakes("a seat cancelled by its sibling's usage limit still queues the session it
 	git(s.repo, "commit", "-qam", "use Quest");
 	onGitHub(s.repo, []);
 	vi.stubEnv("FAKE_RISK", JSON.stringify({ tier: "high", reason: "It rewrites the wire format peers read." }));
-	// Opus hits its limit on its findings turn while Sol's first turn, past its thread, is still running.
+	// Opus hits its limit on its findings turn, once Sol has opened its thread and while its first turn is still running.
 	vi.stubEnv("FAKE_FAILS", "claude-opus-5-5");
 	vi.stubEnv("FAKE_LIMITED", "reset");
-	vi.stubEnv("FAKE_HANG_CODEX", "1");
+	const opened = join(s.bin, "..", "codex-thread");
+	execFileSync("mkfifo", [opened]);
+	vi.stubEnv("FAKE_HANG_CODEX", opened);
 	const queued: { harness: string; session: string }[] = [];
 	await review({ root: s.repo }, { env: process.env, queue: (session) => queued.push(session) }).catch(() => {});
 	expect(queued).toContainEqual(expect.objectContaining({ harness: "codex", session: "thread-1" }));

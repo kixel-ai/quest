@@ -85,7 +85,8 @@ const logged = (call) => {
  * reviewer fails while the next runs. FAKE_QUOTED fails Claude Code's findings
  * turn with a reply that only quotes a limit's message. FAKE_REPLY replaces the
  * findings reply. FAKE_HANG_CLAUDE hangs Claude Code's review turn until it is stopped, as a seat still
- * running when another's failure cancels it. FAKE_HANG_CODEX does the same to Codex's, after it opened its thread.
+ * running when another's failure cancels it. FAKE_HANG_CODEX, a FIFO's path, does the same to Codex's, after it opened its thread and
+ * signalled on the FIFO, which Claude Code's limit waits to read before failing, so the limit never lands first.
  */
 export const FAKES: Record<string, string> = {
 	claude: `
@@ -127,6 +128,8 @@ if (process.env.FAKE_QUOTED && argv.includes("--resume")) {
 }
 // The limit hits the findings turn, after the review turn passed.
 if (fake("FAKE_LIMITED") && argv.includes("--resume")) {
+	// A read of the FIFO blocks until Codex's thread is open, with nothing to poll.
+	if (process.env.FAKE_HANG_CODEX) fs.readFileSync(process.env.FAKE_HANG_CODEX);
 	if (fake("FAKE_LIMITED") !== "unknown") {
 		console.log(JSON.stringify({ type: "rate_limit_event", rate_limit_info: { status: "rejected", resetsAt: 1900000000 } }));
 	}
@@ -195,6 +198,7 @@ if (process.env.FAKE_HANG && !fs.existsSync(process.env.FAKE_HANG)) {
 const event = (value) => console.log(JSON.stringify(value));
 if (process.env.FAKE_HANG_CODEX) {
 	event({ type: "thread.started", thread_id: "thread-1" });
+	fs.writeFileSync(process.env.FAKE_HANG_CODEX, "");
 	setInterval(() => {}, 1000);
 	return;
 }
