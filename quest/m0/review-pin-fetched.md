@@ -16,11 +16,15 @@ at its MoQ track's tip ([branches as tracks](https://github.com/kixel-ai/kixel.a
 which waits on this). The round can then pin an older tip than it fetched,
 so the review diff includes the base's own newer commits.
 
-Recommended: `fetchBase` returns the fetched commit with its ref, read from
-that fetch's own output (`git fetch --porcelain` prints each updated ref's
-new object) rather than from `FETCH_HEAD`, which concurrent fetches in the
-clone share. The round pins that commit. `fetched: true` callers keep
-reading the ref, since nothing fetched for them.
+Recommended: the same fetch also writes the branch to a ref private to the
+round, such as `refs/quest/base/<pid>`, with a second refspec, so both refs
+take the one fetched object. The round pins that ref's commit and deletes
+it. This works on every Git `quest review` supports, unlike `git fetch
+--porcelain`, which needs Git 2.41 and reports an already current ref only
+with `--verbose`, and unlike `FETCH_HEAD`, which concurrent fetches in the
+clone share. `fetched: true` callers keep reading the tracking ref, since
+nothing fetched for them.
 
 Tests: a writer that moves the tracking ref after the fetch leaves the round
-pinned to the fetched commit.
+pinned to the fetched commit, both when the fetch updated the ref and when it
+was already current, and the private ref is gone after the round.
