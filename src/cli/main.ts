@@ -1770,7 +1770,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"The tier sets the seats, each on a vendor of its own and drawn from the run's rung as above: one on a low head, two on medium, and three on high. " +
 				"A seat the drawn rung has no vendor left for fills from the size's rung, then each rung outward, and the run is an outage only when a seat finds no vendor on any rung. " +
 				"A round that raises the tier seats the extra reviewers at once, in the same run; a run is saved whole or not at all, so one that fails there, as when no other vendor's reviewer can run, leaves the branch as it was, but for the raise, which goes to the PR's review record as a `- Held: high, <reason>` line that keeps the rest of the record, after a failing quest review status on the run's head and the head the record names. The record's tier, held or raised by its reviewers above the classifier's, holds the whole branch, whatever the head, until a run at that tier passes, so a retry from any clone seats as many, and every reader of the record sees that tier, while quest status counts no pass beside it; the classifier's own tier each run judges anew. A run reads the record and the PR's comments before any reviewer runs, so a forge it cannot reach fails the run. " +
-				"--override and --reason post the maintainer's tier for the branch as a PR comment, `Risk override: <tier> from <tier>, <reason>`, from an account that can push, the only place an override lives, so every clone reads the latest one, and only one whose author can push. It holds until the reviewed tier grows riskier than the one overridden, other than to the override's own tier, when the run posts `Risk override ended: <why>` so no later run revives it.\n\n" +
+				"--override and --reason post the maintainer's tier for the branch as a PR comment, `Risk override: <tier> from <tier>, <reason>`, from an account that can push, the only place an override lives, so every clone reads the latest one, and only one whose author can push. It holds until the reviewed tier grows riskier than the one overridden, other than to the override's own tier, when the run posts `Risk override ended: <url>, <why>`, linking it, so no later run revives it.\n\n" +
 				"Prints the size and where it came from, base, and head, its risk tier and reason, the classifier's tier, " +
 				"an overridden line with the tier the maintainer overrode, " +
 				"how it was set (model, paths, or default), and reason, a class line naming the class, and for a model a classifier line (harness, model, " +
@@ -1925,11 +1925,13 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 							),
 						override: (dir, base, branch, override) => postOverride(dir, base, branch, override, github),
 						// A contributor's run cannot end the maintainer's override, which a maintainer's run then ends.
-						ended: (dir, base, branch, why) =>
-							postOverride(dir, base, branch, { ended: why }, github).catch((error: unknown) =>
-								warn(
-									`the override was not ended, so a later run may apply it again: ${error instanceof Error ? error.message : String(error)}`,
-								),
+						ended: (dir, base, branch, url, why) =>
+							postOverride(dir, base, branch, { ended: url, why }, github).then(
+								() => {},
+								(error: unknown) =>
+									warn(
+										`the override was not ended, so a later run may apply it again: ${error instanceof Error ? error.message : String(error)}`,
+									),
 							),
 					},
 				);

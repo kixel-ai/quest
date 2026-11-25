@@ -2,8 +2,9 @@
 
 ## Goal
 
-Every agy turn quest runs, for `quest review --harness agy` and for the risk
-classifier when it falls through to agy, keeps the reviewer's reads to its
+Every agy turn quest runs, for a review seat the draw gives it or
+`--harness agy` names, and for the risk classifier when it falls through to
+agy, keeps the reviewer's reads to its
 turn's directory with an OS sandbox on Linux and macOS, rather than relying only on
 agy's own deny rules. The sandbox also covers a file created beside the turn
 directory's parents while the turn runs, and a Mac's default
@@ -14,7 +15,7 @@ it.
 
 ## Plan
 
-Decided 2026-11-23 (maintainer, [on kixel-ai/quest#838's review checkpoint](https://github.com/kixel-ai/quest/pull/838#issuecomment-7123306069)): ✅ keep this quest, widened to an OS read sandbox on both platforms: Seatbelt on macOS, bubblewrap or Landlock on Linux (rejected: drop it, leaving agy Linux-only). #838 itself landed without a sandbox, accepting the documented mid-turn gap, since agy then reviewed only when `--harness agy` named it. It has since joined the standard and deep rungs ([kixel-ai/quest#858](https://github.com/kixel-ai/quest/pull/858), as the maintainer placed Neon), so the gap applies to any review whose draw seats it, at any size, until this quest lands. Decided 2026-11-24 (maintainer, on #858's review checkpoint): ✅ keep Neon on those rungs and a high head's strict three-vendor outage, accepting the gap for drawn seats until this quest lands (rejected: gate drawn agy seats on this sandbox). The gap also applies whenever the risk classifier falls through to agy, after Claude and Codex cannot run.
+Decided 2026-11-23 (maintainer, [on kixel-ai/quest#838's review checkpoint](https://github.com/kixel-ai/quest/pull/838#issuecomment-7123306069)): ✅ keep this quest, widened to an OS read sandbox on both platforms: Seatbelt on macOS, bubblewrap or Landlock on Linux (rejected: drop it, leaving agy Linux-only). #838 itself landed without a sandbox, accepting the documented mid-turn gap, since agy then reviewed only when `--harness agy` named it. It has since joined the standard and deep rungs ([kixel-ai/quest#858](https://github.com/kixel-ai/quest/pull/858), as the maintainer placed Neon), so the gap applies to any review whose draw seats it, at any size, until this quest lands. Decided 2026-11-24 (maintainer, [on #858's review checkpoint](https://github.com/kixel-ai/quest/pull/858#issuecomment-7151981331)): ✅ keep Neon on those rungs and a high head's strict three-vendor outage, accepting the gap for drawn seats until this quest lands (rejected: gate drawn agy seats on this sandbox). The gap also applies whenever the risk classifier falls through to agy, after Claude and Codex cannot run.
 Until it lands, quest refuses agy on macOS's case-insensitive volume, so a high head there, which needs three vendors since #858, is an outage.
 
 What #838 found:

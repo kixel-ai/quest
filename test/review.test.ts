@@ -2811,12 +2811,17 @@ agyFakes(
 		try {
 			expect(await run("medium", 1)).toBe(1);
 			expect(await run("high", 2)).toBe(3);
+			const first = "https://github.com/acme/widget/pull/7#issuecomment-1";
 			expect(pull.comments!.at(-1)).toEqual({
 				login: "maintainer",
-				body: "Risk override ended: `a high change outgrew the override from medium`",
+				body: `Risk override ended: ${first}, \`a high change outgrew the override from medium\``,
 			});
 			expect(await run("medium", 3)).toBe(2);
 			expect(pull.comments).toHaveLength(2);
+			// An end names the override it ended, so one posted while that run ran, before its end, still counts.
+			pull.comments!.splice(1, 0, { login: "maintainer", body: "Risk override: low from medium, `Typo fix.`" });
+			expect(await run("medium", 5)).toBe(1);
+			pull.comments!.splice(1, 1);
 			// Posting the latest override again adds no comment.
 			pull.comments!.push({ login: "maintainer", body: "Risk override: low from medium, `Docs only.`" });
 			write(s.repo, "src/lib.ts", "export const x = 4;\n");
@@ -2833,6 +2838,133 @@ agyFakes(
 			);
 			expect(again.code, again.stderr).toBe(0);
 			expect(pull.comments).toHaveLength(3);
+		} finally {
+			vi.unstubAllGlobals();
+		}
+	},
+);
+
+agyFakes(
+	"a failed run holds no tier the classifier alone set, and a raising override's failure ends the record's pass with no Held line",
+	async () => {
+		const s = setup();
+		moveBase(s.repo, (dir) => write(dir, "RISK.md", riskFile([])));
+		const pull: FakePull = {
+			number: 7,
+			body: "Fixes averaging.\n\n## Models\n\n- Size: S\n- Implementer: Claude Code, claude-opus-5-5, high effort\n",
+		};
+		const writes = onGitHub(s.repo, [pull]);
+		vi.stubEnv("FAKE_REPLY", JSON.stringify({ score: 10, rationale: "Lands as is.", findings: [] }));
+		vi.stubEnv("FAKE_RISK", JSON.stringify({ tier: "low", reason: "Only a constant changes." }));
+		try {
+			const low = git(s.repo, "rev-parse", "HEAD");
+			expect((await quest("--root", s.repo, "review", ...OPUS)).code).toBe(0);
+			expect(pull.body).toContain(`- Head: ${low}\n`);
+			// A later head the classifier holds high fails for want of a third vendor: the record keeps its low pass.
+			write(s.repo, "src/lib.ts", "export const x = 7;\n");
+			git(s.repo, "commit", "-qam", "a wire change");
+			vi.stubEnv("FAKE_RISK", JSON.stringify({ tier: "high", reason: "It changes the wire format." }));
+			vi.stubEnv("FAKE_LIMITED", "reset");
+			vi.stubEnv("FAKE_FAILS", "claude-fable-5-2");
+			const before = pull.body;
+			const statuses = writes.statuses.length;
+			expect((await quest("--root", s.repo, "review", ...OPUS)).code).toBe(3);
+			expect(pull.body).toBe(before);
+			expect(writes.statuses).toHaveLength(statuses);
+			// The maintainer raises the low head to high, and the run cannot seat it: their comment holds the tier, and
+			// failing statuses end the low pass on both heads.
+			git(s.repo, "reset", "-q", "--hard", low);
+			git(s.repo, "commit", "--allow-empty", "-qm", "the same diff");
+			const later = git(s.repo, "rev-parse", "HEAD");
+			vi.stubEnv("FAKE_RISK", JSON.stringify({ tier: "low", reason: "Only a constant changes." }));
+			rmSync(join(s.repo, ".git", "quest"), { recursive: true, force: true });
+			const raised = await quest("--root", s.repo, "review", ...OPUS, "--override", "high", "--reason", "Ships.");
+			expect(raised.code).toBe(3);
+			expect(pull.body).not.toContain("- Held:");
+			expect(writes.statuses.slice(-2)).toMatchObject(
+				[later, low].map((sha) => ({ sha, state: "failure", description: "Risk high: short of vendors" })),
+			);
+		} finally {
+			vi.unstubAllGlobals();
+		}
+	},
+);
+
+agyFakes("a held raise stays through a run at its tier that leaves a finding open", async () => {
+	const s = setup();
+	moveBase(s.repo, (dir) => write(dir, "RISK.md", riskFile([])));
+	const pull: FakePull = {
+		number: 7,
+		body: "Fixes averaging.\n\n## Models\n\n- Size: S\n- Implementer: Claude Code, claude-opus-5-5, high effort\n",
+	};
+	onGitHub(s.repo, [pull]);
+	try {
+		// The low head's reviewer raises it to high, and the third vendor is out.
+		vi.stubEnv("FAKE_RISK", JSON.stringify({ tier: "low", reason: "Only a constant changes." }));
+		vi.stubEnv("FAKE_RAISE", "high");
+		vi.stubEnv("FAKE_LIMITED", "reset");
+		vi.stubEnv("FAKE_FAILS", "claude-fable-5-2");
+		expect((await quest("--root", s.repo, "review", ...OPUS)).code).toBe(3);
+		expect(pull.body).toContain("- Held: high, ");
+		// A later head the classifier itself holds high runs at high and leaves a finding open: the line stays.
+		vi.stubEnv("FAKE_RAISE", undefined);
+		vi.stubEnv("FAKE_LIMITED", undefined);
+		vi.stubEnv("FAKE_FAILS", undefined);
+		vi.stubEnv("FAKE_RISK", JSON.stringify({ tier: "high", reason: "It changes the wire format." }));
+		write(s.repo, "src/lib.ts", "export const x = 7;\n");
+		git(s.repo, "commit", "-qam", "a wire change");
+		const open = await quest("--root", s.repo, "review", ...OPUS);
+		expect(open.code, open.stderr).toBe(0);
+		expect(pull.body).toContain("- Held: high, ");
+		// So a smaller head the classifier calls low still seats three.
+		vi.stubEnv("FAKE_RISK", JSON.stringify({ tier: "low", reason: "Only a constant changes." }));
+		vi.stubEnv("FAKE_REPLY", JSON.stringify({ score: 10, rationale: "Lands as is.", findings: [] }));
+		write(s.repo, "src/lib.ts", "export const x = 8;\n");
+		git(s.repo, "commit", "-qam", "a smaller change");
+		write(s.repo, ".tmp/responses.md", "1. Fixed.\n2. Fixed.\n3. Fixed.\n");
+		const small = await quest(
+			"--root",
+			s.repo,
+			"review",
+			...OPUS,
+			"--responses",
+			join(s.repo, ".tmp", "responses.md"),
+		);
+		expect(small.code, small.stderr).toBe(0);
+		expect(reviewersOf(small.stdout)).toHaveLength(3);
+		expect(pull.body).not.toContain("- Held:");
+	} finally {
+		vi.unstubAllGlobals();
+	}
+});
+
+agyFakes(
+	"a --harness run after a drawn pass runs alone, and its failing status ends the pass it replaced",
+	async () => {
+		const s = setup();
+		const pull: FakePull = {
+			number: 7,
+			body: "Fixes averaging.\n\n## Models\n\n- Size: S\n- Implementer: Claude Code, claude-opus-5-5, high effort\n",
+		};
+		const writes = onGitHub(s.repo, [pull]);
+		vi.stubEnv("FAKE_REPLY", JSON.stringify({ score: 10, rationale: "Lands as is.", findings: [] }));
+		try {
+			const head = git(s.repo, "rev-parse", "HEAD");
+			expect(reviewersOf((await quest("--root", s.repo, "review", ...OPUS)).stdout)).toHaveLength(2);
+			expect(pull.body).toContain(`- Head: ${head}\n`);
+			// On the same head, the named reviewer's run is its own, not the drawn pass repeated.
+			const same = await quest("--root", s.repo, "review", "--harness", "codex");
+			expect(same.code, same.stderr).toBe(0);
+			expect(reviewersOf(same.stdout)).toHaveLength(1);
+			expect(same.stdout).not.toContain("\nunchanged ");
+			// A diff-identical later head's failing run ends the pass the record named too, so restoring it revives none.
+			expect((await quest("--root", s.repo, "review", ...OPUS)).code).toBe(0);
+			git(s.repo, "commit", "--allow-empty", "-qm", "the same diff");
+			const later = git(s.repo, "rev-parse", "HEAD");
+			expect((await quest("--root", s.repo, "review", "--harness", "codex")).code).toBe(0);
+			expect(writes.statuses.slice(-2)).toMatchObject(
+				[later, head].map((sha) => ({ sha, state: "failure", description: "Risk medium: short of vendors" })),
+			);
 		} finally {
 			vi.unstubAllGlobals();
 		}

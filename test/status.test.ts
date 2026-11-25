@@ -1061,13 +1061,15 @@ describe("the risk tier", () => {
 		expect((await risk(record(A.slice(0, 12)))).line).toBe("risk -");
 	});
 
-	test("names a riskier tier a failed run held, with its reason and no class", async () => {
+	test("counts no risk beside a riskier tier a failed run held, and a malformed held line is malformed", async () => {
 		const medium = record(A)
 			.replace("- Risk: high, `it rewrites the wire format`", "- Risk: medium, `it changes output`")
 			.replace("session `s-1`", "session `s-1`\n- Class: `docs`");
 		expect((await risk(medium)).risk).toMatchObject({ tier: "medium", class: "docs" });
-		const { risk: held } = await risk(medium.replace("- Head: ", `- Held: high, \`it drops a field\`\n- Head: `));
-		expect(held).toMatchObject({ tier: "high", reason: "it drops a field", classified: "medium", class: null });
+		// A failed raise sets a failing status, so no record counts beside it; the tier it folds in is risk.test.ts's.
+		const failing = { statuses: { [A]: reviewStatus("FAILURE", "Risk high: short of vendors", A) } };
+		const held = await risk(medium.replace("- Head: ", `- Held: high, \`it drops a field\`\n- Head: `), failing);
+		expect(held.line).toBe("risk -");
 		// A held line that does not parse holds nothing it could be read as, so the record is malformed.
 		expect((await risk(medium.replace("- Head: ", "- Held: severe\n- Head: "))).risk).toMatchObject({
 			state: "malformed",

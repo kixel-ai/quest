@@ -1908,8 +1908,11 @@ that raises the tier seats the extra reviewers at once, in the same run; a run
 is saved whole or not at all, so one that fails there, as when none can run,
 leaves the branch as it was, but for the raise. That goes to the PR's review
 record as a `- Held: high, <reason>` line that keeps the rest of the record,
-after a failing `quest review` status on the run's head and the head the record
-names, since the author can edit the body. The record's tier, held or raised by
+after a failing `quest review` status on the run's head and on the head the
+record names when the run's head descends from it, since the author can edit
+the body. Later runs keep the line until one at its tier passes, and a failing
+run sets the same two statuses, so a body restored to name an earlier head
+revives no pass. A tier the classifier alone set holds nothing. The record's tier, held or raised by
 its reviewers above the classifier's, holds the whole branch, whatever the
 head, until a run at that tier passes, so a retry from any clone seats as many,
 and every reader of the record, such as the land fixer and `quest usage`, sees
@@ -1936,9 +1939,13 @@ reviewed tier grows riskier than the one overridden, other than to the
 override's own tier, which agrees with it. So a raise to medium on a head
 overridden from low to high ends the override, and the next run on that head
 seats two reviewers, not three. The run that ends it posts `Risk override
-ended: <why>`, so no later, smaller change revives it; a token that cannot push
-only warns, and a maintainer's next run ends it. `--override` posts nothing
-when the latest override already says the same.
+ended: <url>, <why>`, linking the override's comment, so no later, smaller
+change revives it or any older one, while an override posted since still
+counts; a token that cannot push only warns, and a maintainer's next run ends
+it. `--override` posts nothing when the latest override already says the same.
+A run that fails at a tier the maintainer's override raised it to, past the
+record's, sets the same failing statuses, without a `- Held:` line, since the
+comment holds the tier.
 
 `--accept <reason>` records the maintainer's acceptance of the findings the
 head's last rounds left open, as when they side with the author against a

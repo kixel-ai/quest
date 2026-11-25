@@ -16,7 +16,7 @@ import { DRAWN, RUNG_NAMES } from "./models";
 import { recorded } from "./models-record";
 import { type ClaimDependencies, upstream } from "./claims";
 import { pullsFrom } from "../github/claims";
-import { type GitHub, object, repositoryPath } from "../github/client";
+import { type GitHub, object, repositoryPath, string } from "../github/client";
 import { REVIEW_CONTEXT, attestation, reviewTarget } from "../github/review-trust";
 import { OVERRIDE, canPush, readOverride } from "../github/signals";
 import { git } from "./git";
@@ -124,13 +124,17 @@ export function reviewRecord({
 	head,
 	base,
 	accepted,
-}: Pick<Reviewed, "rounds" | "tallies" | "risk" | "skipped" | "head" | "base" | "accepted">): string {
+	held,
+}: Pick<Reviewed, "rounds" | "tallies" | "risk" | "skipped" | "head" | "base" | "accepted" | "held">): string {
+	const ok = passes({ rounds, tallies, risk, accepted });
 	const lines = [
 		REVIEW_MARK,
 		"",
+		// A held raise stays until a run at its tier passes, though this run's tier already names it.
+		...(held && !ok ? [`- Held: ${held.tier}, ${code(held.reason)}`] : []),
 		// `quest status` counts a full SHA here as a review of that head, which only a run that passed it has.
 		`- Head: ${
-			passes({ rounds, tallies, risk, accepted })
+			ok
 				? head
 				: accepted === undefined && open({ rounds, tallies }) > 0
 					? `${head.slice(0, 12)}, named in full once no reviewer reports a finding`
@@ -514,26 +518,41 @@ export async function postOverride(
 	root: string,
 	baseRef: string,
 	branch: string,
-	override: Override | { ended: string },
+	override: Override | { ended: string; why: string },
 	deps: ClaimDependencies,
-): Promise<void> {
+): Promise<string> {
 	const pull = await openPull(root, baseRef, branch, deps);
 	if ("skipped" in pull) throw new ReviewInputError(`--override comments on the branch's PR: ${pull.skipped}`);
 	if (pull.github === null) throw new ReviewInputError("--override reads its comment back from GitHub only");
 	const { client, pull: ref } = pull.github;
-	const viewer = await (await deps.forge(ref)).viewer();
+	// The comment goes on this token, so its account is the one that must push.
+	const viewer = string(object((await client.graphql("query { viewer { login } }", {})).viewer).login);
 	if (!(await canPush(client, ref, viewer)))
 		throw new ReviewInputError(
 			`--override needs an account that can push to ${ref.owner}/${ref.repo}, not ${viewer}`,
 		);
-	if ("ended" in override) {
-		await pull.comment(`Risk override ended: ${code(override.ended)}`);
-		return;
-	}
+	if ("ended" in override) return pull.comment(`Risk override ended: ${override.ended}, ${code(override.why)}`);
 	const body = `Risk override: ${override.tier} from ${override.from}, ${code(override.reason)}`;
 	if (!OVERRIDE.test(body))
 		throw new ReviewInputError(`--reason cannot be written as an override: ${override.reason}`);
-	await pull.comment(body);
+	return pull.comment(body);
+}
+
+/**
+ * The heads a failing status ends a pass on: `head`, and the head `body`'s record names in full when `head` descends
+ * from it, so a body restored to name that head cannot revive its pass. A commit off the branch, as another PR's, the
+ * body may name is left alone.
+ */
+function revoked(root: string, body: string, head: string): string[] {
+	const section = reviewSection(body);
+	const named =
+		section === null
+			? undefined
+			: body
+					.slice(section.start, section.end)
+					.match(/\b[0-9a-f]{40}\b/g)
+					?.at(-1);
+	return named === undefined || named === head || !contains(root, named, head) ? [head] : [head, named];
 }
 
 /**
@@ -550,29 +569,18 @@ export async function recordHeld(root: string, raise: HeldRaise, deps: ClaimDepe
 	const section = reviewSection(pull.body);
 	const risk = recordedRisk(pull.body);
 	const valid = section !== null && risk !== null && !("malformed" in risk);
-	const named = valid
-		? pull.body
-				.slice(section.start, section.end)
-				.match(/\b[0-9a-f]{40}\b/g)
-				?.at(-1)
-		: undefined;
 	let status: Unattested | null = null;
-	for (const sha of new Set([raise.head, ...(named === undefined ? [] : [named])])) {
-		let from: string;
-		try {
-			from = git(root, ["merge-base", raise.base.sha, sha]);
-		} catch {
-			// A failing status's target is never read, so a head this clone lacks takes the base.
-			from = raise.base.sha;
-		}
+	for (const sha of revoked(root, pull.body, raise.head)) {
 		const set = await pull.attest({
 			head: sha,
-			from,
+			from: git(root, ["merge-base", raise.base.sha, sha]),
 			state: "failure",
 			description: attestation(raise.raised.tier, null, "short of vendors"),
 		});
 		status ??= set;
 	}
+	// The maintainer's comment holds the tier their override raised to.
+	if (raise.overridden) return status === null ? { url: pull.url } : { url: pull.url, status };
 	const body = valid
 		? pull.body
 		: withReview(
@@ -611,14 +619,18 @@ export async function recordRounds(root: string, reviewed: Reviewed, deps: Claim
 		: reviewed.accepted === undefined && open(reviewed) > 0
 			? "findings open"
 			: "short of vendors";
-	let status: Awaited<ReturnType<typeof pull.attest>>;
+	let status: Awaited<ReturnType<typeof pull.attest>> = null;
 	try {
-		status = await pull.attest({
-			head: reviewed.head,
-			from: git(root, ["merge-base", reviewed.base.sha, reviewed.head]),
-			state: ok ? "success" : "failure",
-			description: attestation(reviewed.risk.tier, reviewed.risk.classified.class, outcome),
-		});
+		// A failing run also ends the pass of the head the record named, which a diff-identical head carries.
+		for (const sha of ok ? [reviewed.head] : revoked(root, pull.body, reviewed.head)) {
+			const set = await pull.attest({
+				head: sha,
+				from: git(root, ["merge-base", reviewed.base.sha, sha]),
+				state: ok ? "success" : "failure",
+				description: attestation(reviewed.risk.tier, reviewed.risk.classified.class, outcome),
+			});
+			if (sha === reviewed.head) status = set;
+		}
 	} catch (error) {
 		// A record of open findings names no full SHA, so writing it still ends any earlier pass of this head.
 		if (!ok && next !== pull.body) await pull.edit(next);

@@ -13,8 +13,8 @@ diff is [its own quest](/quest/m0/classifier-attributes.md).
 the config hides (`--ignore-submodules=none`), so the tier and scopes see
 them. The diffs the reviewers read do not:
 
-- The commands the prompts name, such as `git diff <range>` in `scope()`
-  and `laterPrompt`, and Claude's `/code-review <mergeBase>...HEAD`, follow
+- The commands the prompts name, such as `git diff <range>` in `scope()`,
+  and Claude's `/code-review <mergeBase>...HEAD`, follow
   `diff.ignoreSubmodules` and a `.gitmodules` `ignore = all` from the head.
   So a head that hides a gitlink bump this way, and is held high for it,
   reaches its reviewers with that bump left out.

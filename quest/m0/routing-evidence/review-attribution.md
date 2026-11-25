@@ -19,9 +19,9 @@ so comparing the rungs' models and efforts reads true:
   - Today a fix is also credited to the latest run's reviewers when the
     head landed after changes no run reviewed.
 - A low finding stays open in the rollups when the PR landed without a
-  run that passed its head. Today, after a one-vendor `--harness` run,
-  such a finding counts as settled, though the run lacked the vendors
-  `next finish` needs.
+  run that passed its head. Today a merged PR whose last run left only low
+  findings open counts them settled, as `/quest-review` once settled them
+  before merge, even after a one-vendor `--harness` run.
 
 Non-goal: records written before reviewer rungs, which carry a shadow
 reviewer or a `, second` seat that now reads as named. Nothing reads them

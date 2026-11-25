@@ -212,8 +212,8 @@ export async function readSignals(
 /** The first line of a comment that overrides a PR's risk tier, naming the tier it replaces and why. */
 export const OVERRIDE = /^Risk override: (low|medium|high) from (low|medium|high), (`+) ?(.*?) ?\3$/;
 
-/** The first line of a comment that ends the override before it, once a change grew riskier than its tier. */
-export const OVERRIDE_ENDED = /^Risk override ended: (`+) ?(.*?) ?\1$/;
+/** The first line of a comment that ends the override whose comment it links, and every older one, and why. */
+export const OVERRIDE_ENDED = /^Risk override ended: (\S+), (`+) ?(.*?) ?\2$/;
 
 /** A maintainer's override of a PR's risk tier, from their comment on it. */
 export interface TierOverride {
@@ -245,22 +245,28 @@ export async function readOverride(
 		`/repos/${repository.owner}/${repository.repo}/issues/${number}/comments?per_page=100`,
 	);
 	const pushes = new Map<string, boolean>();
+	// An end names the override it ended, so one posted while a run that ended an older one ran still counts.
+	const ended = new Set<string>();
 	for (const comment of comments.reverse()) {
 		const first = String(comment.body ?? "")
 			.split("\n")[0]!
 			.trim();
 		const found = OVERRIDE.exec(first);
+		const end = OVERRIDE_ENDED.exec(first);
 		const user = comment.user == null ? null : object(comment.user);
-		if ((found === null && !OVERRIDE_ENDED.test(first)) || user === null || user.type === "Bot") continue;
+		if ((found === null && end === null) || user === null || user.type === "Bot") continue;
 		// An owner can push; a member or collaborator may only read; anyone else cannot.
 		const association = String(comment.author_association);
 		if (typeof user.login !== "string" || !["OWNER", "MEMBER", "COLLABORATOR"].includes(association)) continue;
 		if (!pushes.has(user.login))
 			pushes.set(user.login, association === "OWNER" || (await canPush(client, repository, user.login)));
 		if (!pushes.get(user.login)) continue;
-		return found === null
-			? null
-			: { tier: found[1] as Tier, from: found[2] as Tier, reason: found[4]!, url: string(comment.html_url) };
+		if (end !== null) {
+			ended.add(end[1]!);
+			continue;
+		}
+		const url = string(comment.html_url);
+		return ended.has(url) ? null : { tier: found![1] as Tier, from: found![2] as Tier, reason: found![4]!, url };
 	}
 	return null;
 }
