@@ -30,6 +30,8 @@ import {
 	type Size,
 	unblocked,
 	waiting,
+	waitLine,
+	handBackProblems,
 	InputError,
 	Refusal,
 } from "../core";
@@ -394,9 +396,9 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"Invalid trees fail before printing a ranking. Prints a count and path per line; --json prints an " +
 				"ordered array of {path, dependents, hosts, arm, models} objects, where hosts lists the operating systems " +
 				"(linux, macos, windows) under the quest's ## Hosts, empty when it runs anywhere, and models ranks the {harness, model, effort} " +
-				"entries that write the quest: its size's list, or the next size's while a Maintainer: item under its " +
-				"## Waiting leaves a decision open (quest models lists them). While the writer A/B runs, arm is A or B for " +
-				"a size that runs one, and null for M, XL, or a quest routed up for an open Maintainer: item, and models opens with that arm's entry; the agent that runs it " +
+				"entries that write the quest: its size's list, or the next size's while a Maintainer: item other than an " +
+				"action under its ## Waiting leaves a decision open (quest models lists them). While the writer A/B runs, arm is A or B for " +
+				"a size that runs one, and null for M, XL, or a quest routed up for an open decision, and models opens with that arm's entry; the agent that runs it " +
 				"records the arm on its Implementer line.\n\n" +
 				"--unclaimed ranks the fetched upstream default branch's tree instead of the checkout, then drops " +
 				"quests someone holds: a quest branch upstream, or an open PR from that branch in any repository. A " +
@@ -495,16 +497,23 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"transitive dependents as quest unblocked counts them, ready before blocked, then path order, with " +
 				"drafts after quests by PR number. A draft ranks as the quest its branch carries, or last when it " +
 				"carries none. Each item opens with who acts, Maintainer: or an outside party such as moq-dev/moq:, " +
-				"followed by the condition and how to check or advance it; Maintainer (PC): marks a step the maintainer " +
-				"can take only at one of their computers, such as a local login or a hardware check. A draft's item without a party is the " +
-				"maintainer's; a draft's section without items is one maintainer item " +
-				"holding its prose.\n\n" +
+				"followed by the condition and how to check or advance it. Each item has a kind: a Maintainer: item " +
+				"whose nested list marks one bullet (Recommended) is a decision, each bullet a choice written label or " +
+				"label - description; Maintainer (action): and Maintainer (PC): items are actions, steps only the maintainer " +
+				"can take, (PC) marking one only at their computers, such as a local login or a hardware check; every " +
+				"other item is prose. A draft's item without a party is the maintainer's prose, with a warning when it " +
+				"holds a choice list, which needs Maintainer: to become a decision; a draft's section " +
+				"without items is one maintainer item holding its prose; a draft's malformed choice list reads as prose " +
+				"with a warning naming the PR and line, since quest check never reads PR bodies.\n\n" +
 				"Prints one line per item: dependents, ready or blocked (whether Required entries or a future " +
-				"Scheduled date remain), the quest's path or the draft's URL, and the item. --json prints an ordered array of {path, pr, dependents, " +
-				"ready, waits: [{line, party, pc, text}]} objects, where pr is the draft's URL or null, path is the " +
-				"quest, the quest a draft carries, or null; an item opened Maintainer (PC): has party Maintainer and pc " +
-				"true. " +
-				"--maintainer keeps only the items the maintainer settles, and --no-pc drops the Maintainer (PC): ones, " +
+				"Scheduled date remain), the quest's path or the draft's URL, and the item with its qualifier and a " +
+				"decision's choices. --json prints an ordered array of {path, pr, dependents, " +
+				"ready, waits} objects, where pr is the draft's URL or null, path is the " +
+				"quest, the quest a draft carries, or null. Each wait is {line, party, kind, text}, with party " +
+				"Maintainer for an action; a decision adds choices: [{label, description, recommended}], description " +
+				"null when absent, and its text leaves out its choice list; an action adds pc, true for Maintainer (PC):, and prose " +
+				"carries pc: true for a draft's Maintainer (PC): item read as prose for its malformed choice list. " +
+				"--maintainer keeps only the items the maintainer settles, and --no-pc drops every item with pc, " +
 				"for a session away from the maintainer's computers; both filter before ranking, so order follows the items kept. " +
 				"Invalid trees fail before printing. Outside conditions are never checked, nor whether another " +
 				"session holds a draft.\n\n" +
@@ -516,13 +525,16 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		)
 		.option("--json", "Print a deterministic JSON array")
 		.option("--maintainer", "Only items waiting on the maintainer")
-		.option("--no-pc", "Skip the steps only the maintainer's computers can take, Maintainer (PC): items")
+		.option("--no-pc", "Skip the steps only the maintainer's computers can take, Maintainer (PC): actions")
 		.option("--limit <count>", "Maximum number of entries to print", positiveInteger("limit"))
 		.option("--remote <name>", "Remote whose upstream holds the draft PRs", "origin")
 		.action((options: { json?: boolean; maintainer?: boolean; pc: boolean; limit?: number; remote: string }) => {
 			const tree = checkout(root(), warn);
 			if (!valid(tree)) return;
 			settle(openDrafts(root(), options.remote, claimDependencies()), (drafts) => {
+				for (const draft of drafts)
+					for (const problem of handBackProblems(draft.body))
+						warn(`${draft.url}: line ${problem.line}: '## Waiting' ${problem.message}; read as prose`);
 				const found = waiting(tree.docs, today(), {
 					drafts,
 					maintainer: options.maintainer,
@@ -537,7 +549,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				for (const quest of found) {
 					for (const wait of quest.waits) {
 						print(
-							`${quest.dependents}\t${quest.ready ? "ready" : "blocked"}\t${quest.pr ?? quest.path}\t${wait.party}${wait.pc ? " (PC)" : ""}: ${wait.text}`,
+							`${quest.dependents}\t${quest.ready ? "ready" : "blocked"}\t${quest.pr ?? quest.path}\t${waitLine(wait)}`,
 						);
 					}
 				}
