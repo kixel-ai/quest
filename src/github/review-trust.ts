@@ -1,7 +1,18 @@
 // Whose `## Review` record `quest status` counts: only one a `quest review` commit status attests, set on the reviewed
 // head by a user with write access to the base repository, since anyone can write a SHA into their own PR's body.
-import { type PullRequest, REVIEW_MARK, type Repository, type Tier, recordedRisk, reviewSection } from "../core";
-import { GitHubDeadline, type GitHubReader, object, string } from "./client";
+import {
+	type PullRequest,
+	REVIEW_MARK,
+	RISK_FILE,
+	type Repository,
+	type Tier,
+	heldHigh,
+	highHits,
+	parseRiskFile,
+	recordedRisk,
+	reviewSection,
+} from "../core";
+import { GitHubDeadline, type GitHubReader, array, object, repositoryPath, string } from "./client";
 
 /** The commit status context `quest review` sets on each head it records. */
 export const REVIEW_CONTEXT = "quest review";
@@ -36,9 +47,10 @@ const STATUS_QUERY = `query ReviewStatus($owner: String!, $repo: String!, $sha: 
 	}
 }`;
 
-/** A PR body as `quest status` reads it, and whether the status attests a local reviewer's round. */
+/** A PR body as `quest status` reads it, the head its status attests, and whether it attests a local reviewer's round. */
 export interface Trusted {
 	body: string;
+	head: string | null;
 	localReview: boolean;
 }
 
@@ -57,11 +69,139 @@ export async function trustedReview(
 	// As `reviewRecord` reads it: only a section holding `quest review`'s record names a head, by its last full SHA.
 	const reviewed = text.includes(REVIEW_MARK) && text.match(/\b[0-9a-f]{40}\b/g)?.at(-1);
 	// A section naming no head, as a record with a finding open, counts for none, so its risk and class print as none.
-	if (!reviewed) return { body: section === null ? body : "", localReview: false };
+	if (!reviewed) return { body: section === null ? body : "", head: null, localReview: false };
 	const attested = await attestedOutcome(github, pr, body, reviewed);
-	if (typeof attested !== "string") return { body, localReview: attested.localReview };
+	if (typeof attested !== "string") return { body, head: reviewed, localReview: attested.localReview };
 	warn(`${pr.owner}/${pr.repo}#${pr.number}'s ## Review record does not count: ${attested}`);
-	return { body: "", localReview: false };
+	return { body: "", head: null, localReview: false };
+}
+
+/** The most files GitHub's compare API lists. */
+const FILE_LIMIT = 300;
+
+/** The `quest review` status descriptions on a PR's commits, newest first, a page at a time. */
+const TIERS_QUERY = `query ReviewTiers($owner: String!, $repo: String!, $number: Int!, $before: String) {
+	repository(owner: $owner, name: $repo) { pullRequest(number: $number) {
+		commits(last: 100, before: $before) {
+			pageInfo { hasPreviousPage startCursor }
+			nodes { commit { oid status { context(name: "${REVIEW_CONTEXT}") { description } } } }
+		}
+	} }
+}`;
+
+/**
+ * Why `sha`, the head of `pr` about to land, must wait for a new `quest review` round, or null when it may land.
+ * A head `RISK.md` rates high lands only with a trusted record whose reviewed diff is `sha`'s, so any push after the
+ * last review that changes the diff, whoever made it, waits for a new one. A head is high when `body`'s record rates
+ * it high, is malformed, or does not count, when a `quest review` status on any of the PR's commits rates it high, or
+ * when its diff from its merge base with the base touches a path the base's risk file holds high.
+ */
+export async function unreviewedHigh(
+	github: GitHubReader,
+	pr: PullRequest & { base: string },
+	sha: string,
+	body: string,
+): Promise<string | null> {
+	let distrust: string | undefined;
+	const trusted = await trustedReview(github, pr, body, (message) => {
+		distrust = message;
+	});
+	const head = sha.toLowerCase();
+	if (trusted.head === head) return null;
+	// A review of an earlier head carries to one with its diff, unless a round on this head has failed since.
+	if (trusted.head !== null && !(await failed(github, pr, head)) && (await sameDiff(github, pr, trusted.head, head)))
+		return null;
+	const high = distrust ?? recordHigh(body) ?? (await statusHigh(github, pr)) ?? (await pathHigh(github, pr, head));
+	return high === null ? null : `${sha} is high, since ${high}, and no quest review status covers it`;
+}
+
+/** Whether `sha` carries a `quest review` status that is not a pass. */
+async function failed(github: GitHubReader, pr: PullRequest, sha: string): Promise<boolean> {
+	const commit = object(
+		(await github.graphql(STATUS_QUERY, { owner: pr.owner, repo: pr.repo, sha })).repository,
+	).object;
+	const rollup = commit == null ? null : object(commit).status;
+	const status = rollup == null ? null : object(rollup).context;
+	return status != null && object(status).state !== "SUCCESS";
+}
+
+/** Whether `a` and `b` have the same diff from their merge bases with the base. One GitHub cannot diff has none. */
+async function sameDiff(
+	github: GitHubReader,
+	pr: PullRequest & { base: string },
+	a: string,
+	b: string,
+): Promise<boolean> {
+	const diffs: string[] = [];
+	for (const sha of [a, b]) {
+		const response = await github.request(`${repositoryPath(pr)}/compare/${encodeURIComponent(pr.base)}...${sha}`, {
+			accept: "application/vnd.github.diff",
+			allow: [404, 406, 422],
+		});
+		if (!response.ok) return false;
+		diffs.push(await response.text());
+	}
+	return diffs[0] === diffs[1];
+}
+
+/** Why `body`'s risk record makes its PR high, or null. A malformed one does, since the PR's author writes the body. */
+function recordHigh(body: string): string | null {
+	const risk = recordedRisk(body);
+	if (risk === null) return null;
+	if ("malformed" in risk) return risk.malformed;
+	return risk.tier === "high" ? "its review record rates it high" : null;
+}
+
+/**
+ * Why a `quest review` status on one of `pr`'s commits makes it high, or null. Only someone who can push sets one, and
+ * a high rating only holds a head back, so the body, which its author can edit, never lowers it.
+ */
+async function statusHigh(github: GitHubReader, pr: PullRequest): Promise<string | null> {
+	// GitHub lists at most 250 commits of a PR, so this reads at most three pages.
+	for (let before: string | null = null, more = true; more;) {
+		const data = await github.graphql(TIERS_QUERY, { owner: pr.owner, repo: pr.repo, number: pr.number, before });
+		const commits = object(object(object(data.repository).pullRequest).commits);
+		for (const node of array(commits.nodes)) {
+			const commit = object(node.commit);
+			const status = commit.status == null ? null : object(commit.status).context;
+			const description = status == null ? null : object(status).description;
+			if (typeof description === "string" && ATTESTED.exec(description)?.[1] === "high")
+				return `the ${REVIEW_CONTEXT} status on ${string(commit.oid)} rates it high`;
+		}
+		const page = object(commits.pageInfo);
+		more = page.hasPreviousPage === true;
+		before = more ? string(page.startCursor) : null;
+	}
+	return null;
+}
+
+/**
+ * Why `sha`'s diff from its merge base with the base makes it high, or null: it touches a path the base's risk file
+ * holds high, on either side of a rename, as `quest review` classifies a head.
+ */
+async function pathHigh(github: GitHubReader, pr: PullRequest & { base: string }, sha: string): Promise<string | null> {
+	const path = repositoryPath(pr);
+	const risk = await github.request(`${path}/contents/${RISK_FILE}?ref=${encodeURIComponent(pr.base)}`, {
+		accept: "application/vnd.github.raw+json",
+		allow: [404],
+	});
+	const file = risk.status === 404 ? null : parseRiskFile(await risk.text());
+	if (file !== null && file.problems.length > 0)
+		return `the base's ${RISK_FILE} cannot be read: ${file.problems.join("; ")}`;
+	// The compare of `sha` itself, since GitHub recomputes a PR's file list only some time after a push.
+	const compared = object(
+		await (await github.request(`${path}/compare/${encodeURIComponent(pr.base)}...${sha}`)).json(),
+	);
+	const files = array(compared.files);
+	if (files.length >= FILE_LIMIT) return `it changes at least ${FILE_LIMIT} files, more than GitHub lists`;
+	const hit = highHits(
+		heldHigh(file),
+		files.flatMap((row) => [
+			string(row.filename),
+			...(typeof row.previous_filename === "string" ? [row.previous_filename] : []),
+		]),
+	)[0];
+	return hit === undefined ? null : `it changes ${hit.path}, which is always high: ${hit.rule.reason}`;
 }
 
 /** Whether a writer's passing `quest review` status on `sha` attests `body`'s record, with a local reviewer or not, or why not. */
