@@ -23,6 +23,7 @@ import {
 	type Reached,
 	type Session,
 	fixBreakages,
+	currentNames,
 	fold,
 	heading,
 	key,
@@ -409,11 +410,12 @@ async function sendTo(
 	const active = [...groups.values()].flat();
 	if (active.length === 0) return false;
 	const since = Math.min(...active.map((q) => q.pending.start));
-	const exported = deps.sessions(new Date(since));
-	if (exported === null)
+	const read = deps.sessions(new Date(since));
+	if (read === null)
 		throw new Error(
 			"token-max is not installed, so no record can be priced; install it with `cargo install --locked token-max`",
 		);
+	const exported = await currentNames(client, read);
 	const { kept } = fold(exported);
 	const byId = new Map(kept.flatMap((s) => (s.id === null ? [] : [[`${s.harness}\0${s.id}`, s] as const])));
 	const waits = deps.waits(since);

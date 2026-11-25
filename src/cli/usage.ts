@@ -33,7 +33,7 @@ import { culpritOf, culprits } from "./breakage";
 import { fixes } from "./land-fixer";
 import { MERGER } from "./land-watch-fix";
 import { githubRepository, requireRemote } from "./github";
-import { type GitHub, type ObjectValue, link, object } from "../github/client";
+import { type GitHub, type GitHubReader, type ObjectValue, link, object } from "../github/client";
 import { type OnlineReview, readOnlineReviews } from "../github/online-review";
 import {
 	type Counts,
@@ -404,6 +404,24 @@ export function parseSessions(text: string): Session[] {
 				),
 			};
 		});
+}
+
+/**
+ * `sessions` with each repository named as the repository GitHub now serves under it, so a transfer or rename
+ * strips no PR of the sessions that worked on it before. Each distinct name is asked once; one GitHub no longer
+ * serves stays as recorded, since a deleted checkout's sessions have no other repository to name.
+ */
+export async function currentNames(client: GitHubReader, sessions: Session[]): Promise<Session[]> {
+	const now = new Map<string, string>();
+	for (const name of new Set(sessions.flatMap((session) => session.repositories ?? []))) {
+		const [owner, repo] = name.split("/") as [string, string];
+		now.set(name, (await client.currentName({ owner, repo })) ?? name);
+	}
+	return sessions.map((session) =>
+		session.repositories === null
+			? session
+			: { ...session, repositories: [...new Set(session.repositories.map((name) => now.get(name)!))] },
+	);
 }
 
 /**
@@ -1228,7 +1246,8 @@ export async function usage(root: string, options: UsageOptions, deps: UsageDepe
 	const allRows = pullRows(all, repository);
 	const rows = allRows.filter((row) => pulls.some((each) => each.number === row.number));
 	const byNumber = new Map(rows.map((row) => [row.number, row]));
-	const exported = deps.sessions(new Date(since), options.ssh ?? []);
+	const read = deps.sessions(new Date(since), options.ssh ?? []);
+	const exported = read === null ? null : await currentNames(client, read);
 	const { kept, dropped } = fold(exported ?? []);
 	let unattributed: Usage["unattributed"] = null;
 	let incomplete: Session[] = [];

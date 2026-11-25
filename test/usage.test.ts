@@ -848,6 +848,8 @@ describe("usage", () => {
 					ssh_url: "git@github.com:acme/proj.git",
 					fork: false,
 				});
+			// A transferred repository: GitHub redirects its former name to the current one.
+			if (url.pathname === "/repos/old/proj") return json({ owner: { login: "Acme" }, name: "proj" });
 			if (url.pathname === "/repos/acme/proj/pulls") return json(pulls);
 			if (url.pathname === "/repos/acme/proj/pulls/2")
 				return json(
@@ -881,6 +883,33 @@ describe("usage", () => {
 		});
 		return { root, deps, sessions, calls, requests };
 	}
+
+	test("counts sessions that recorded a transferred repository's former name under its current one", async () => {
+		const FORMER = "55555555-5555-5555-5555-555555555555";
+		const BORROWED = "66666666-6666-6666-6666-666666666666";
+		const cwd = removed();
+		const { root, deps, sessions, requests } = setup({
+			sessions: [
+				// Two Codex sessions naming the same former name, and a Claude one with no repository in their directory.
+				exported(FORMER, "gpt-6.2-sol", "high", 1, {
+					cwd,
+					repositories: ["https://github.com/old/proj.git", "https://github.com/acme/proj.git"],
+				}),
+				exported("77777777-7777-7777-7777-777777777777", "gpt-6.2-sol", "high", 1, {
+					cwd,
+					repositories: ["https://github.com/old/proj.git"],
+				}),
+				exported(BORROWED, "claude-opus-5-5", "high", 2, { cwd, repositories: null }),
+			],
+		});
+		const report = await usage(root, { since: "2026-11-05" }, deps(sessions));
+		const ten = report.pulls.find((p) => p.number === 10)!;
+		const on = ten.sessions.map((s) => s.session);
+		expect(on).toEqual(expect.arrayContaining([FORMER, BORROWED]));
+		expect(requests.filter((path) => path === "/repos/old/proj")).toHaveLength(1);
+		// A name GitHub does not serve stays as recorded, so another repository's branch of the same name is still no match.
+		expect(on).not.toContain(OTHER);
+	});
 
 	test("counts each session with no ID apart in the spend rollup", async () => {
 		const { root, deps, sessions } = setup();

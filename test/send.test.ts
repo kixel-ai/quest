@@ -115,7 +115,8 @@ function sender(
 		new Response(JSON.stringify(value), { headers: { "content-type": "application/json" } });
 	const github = async (input: string | URL | Request) => {
 		const url = new URL(String(input));
-		const named = /^\/repos\/acme\/(proj|other)$/.exec(url.pathname)?.[1];
+		// A transferred repository: GitHub redirects its former name to the current one.
+		const named = /^\/repos\/(?:acme|old)\/(proj|other)$/.exec(url.pathname)?.[1];
 		if (named)
 			return json({
 				owner: { login: "acme" },
@@ -229,6 +230,16 @@ test("the sender posts each queued session with its sub-agents, from its transcr
 		["sub", [7], "implementing", "quest/m0/a.md"],
 	]);
 	expect(pending(env)).toEqual([]);
+});
+
+test("a session that recorded a transferred repository's former name is sent on the PR its branch heads now", async () => {
+	const env = home();
+	const root = checkout();
+	queue(stopped(root), env);
+	const { deps, uploads } = sender(env, 200, [session("s1", "quest/m0/a", { repositories: ["old/proj"] })]);
+	await sendPass(deps);
+	const { records } = parseUpload(uploads[0]!.body);
+	expect(records.map((r) => [r.session, r.pulls])).toEqual([["s1", [7]]]);
 });
 
 test("a repository Kixel Quest does not serve is dropped, unsent and without token-max, and is said once", async () => {
