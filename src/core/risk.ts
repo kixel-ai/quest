@@ -48,12 +48,8 @@ export function recordedRun(body: string): Run | null {
 	const ran = blocks.filter((block) => latest > 0 && round(block) === latest);
 	const vendors = ran.map((block) => /^- Reviewer: (.+?), \S+, \S+ effort\b/.exec(block)?.[1]);
 	const parsed = risk !== null && !("malformed" in risk) && vendors.every((vendor) => vendor !== undefined);
-	// A raise a failed run held for the record's head outranks the tier the record's run passed it at.
-	const held = recordedHeld(body);
-	const raised =
-		parsed && held !== null && risk.head.startsWith(held.head) && riskier(held.tier, risk.tier) ? held.tier : null;
 	return {
-		tier: parsed ? (raised ?? risk.tier) : null,
+		tier: parsed ? heldTier(body, risk.tier) : null,
 		vendors: vendors.filter((vendor) => vendor !== undefined),
 		open: ran.reduce((sum, block) => sum + (block.match(/^ {2}- (?:High|Medium), /gm)?.length ?? 0), 0),
 	};
@@ -322,6 +318,15 @@ export interface Held {
 	head: string;
 	tier: Tier;
 	reason: string;
+}
+
+/**
+ * The tier `body`'s record holds: `tier`, or the riskier tier a `- Held:` line names. A failed run leaves that line,
+ * which is newer than the record's run, so it outranks the record's tier until a run rewrites the record.
+ */
+export function heldTier(body: string, tier: Tier): Tier {
+	const held = recordedHeld(body);
+	return held !== null && riskier(held.tier, tier) ? held.tier : tier;
 }
 
 /** The raise `body`'s `## Review` record holds for a head, as a failed run leaves it, or null without one. */

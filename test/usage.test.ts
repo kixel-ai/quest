@@ -447,10 +447,10 @@ describe("PR records", () => {
 		expect(classifierSessions(`## Review\n\n${classified}\n`)).toEqual(["k1"]);
 	});
 
-	test("a record written before tallies has none, and a Rounds line that does not add up or names no runs fails", () => {
+	test("a reviewer with no Rounds line, or one that does not add up or names no runs, fails", () => {
 		const record = reviewRecord({ ...at, rounds: [second], tallies: [tallies[1]!], risk, skipped: [] });
 		const older = `## Review\n\n${record.replace(/^- Rounds: .*\n/m, "")}\n`;
-		expect(parseReview(older)[0]!.tally).toBeNull();
+		expect(() => parseReview(older)).toThrow(/no Rounds line/);
 		// The settled count `quest usage` prints reads back.
 		const settled = "1, runs 2 to 2; findings 2 (low 2): fixed 1, refuted 0, settled 1, open 0";
 		expect(

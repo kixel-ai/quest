@@ -55,6 +55,7 @@ export {
 	parseRiskFile,
 	patternError,
 	type Held,
+	heldTier,
 	passed,
 	recordedHeld,
 	recordedRisk,

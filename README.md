@@ -1696,7 +1696,8 @@ stance; the base's `REVIEW.md` is optional, adds repo-specific rules, and takes
 precedence where they conflict.
 
 `--harness agy` reviews with Google's Antigravity CLI, `agy`, which only
-reviews, at its own draw or the model and effort named, as
+reviews, with its first listed entry, as any `--harness` names, or the model
+and effort named, as
 `--model gemini-4-neon --effort xhigh`. It runs `agy -p`
 on your own Antigravity login, wherever `agy` keeps it: the OS keyring, or over
 ssh its configuration directory, `~/.gemini/antigravity-cli`. Run `agy` to sign
@@ -1895,11 +1896,14 @@ that raises the tier seats the extra reviewers at once, in the same run; a run
 is saved whole or not at all, so one that fails there, as when none can run,
 leaves the branch as it was, but for the raise. That goes to the PR's review
 record, the only place a head's tier lives, as a `- Held: high on <head>,
-<reason>` line that keeps the rest of the record and no longer names the head in
-full, so a retry from any clone seats as many. A run reads a held raise, and a
-tier the record's reviewers raised, for its own head, but never the
-classifier's own tier, which it judges anew, and restores the maintainer's
-override from the record when its clone has none. When every model of a vendor a seat needs is
+<reason>` line that keeps the rest of the record and no longer names any head
+in full, so a retry from any clone seats as many, and `quest status` reports the
+held tier. A run reads a held raise, and a tier the record's reviewers raised,
+for its own head, but never the classifier's own tier, which it judges anew. It
+reads the record before any reviewer runs, so a forge it cannot reach fails the
+run. The maintainer's override that raises the tier holds from the record on
+any clone; one that lowers it holds only on the clone that set it, while the
+record still names it, since a PR's author can edit its body. When every model of a vendor a seat needs is
 avoided, as with no `## Models` record, which avoids every model of the harness
 running the command, the run fails as a usage error; when a seat finds no
 other vendor that can run on any rung, as an outage. So a host where `agy`
@@ -1992,8 +1996,8 @@ by size and implementer, which sums every reviewer's tally, so it counts
 every finding the reviewers caught before merge, and as first rounds those of the branch's first run alone, the measure of what the writer handed over: what later
 runs find, on later heads, counts in the findings and not there. Since a branch's tallies span every PR from it, only the
 PR whose record holds its latest tally, by the most rounds and then the newest,
-counts them, and a record written before tallies
-counts as unreviewed. An `Implementer:` line's own size, as
+counts them, and a record this version cannot read is reported on its PR
+as unread. An `Implementer:` line's own size, as
 `(iterate, XS)`, counts over the PR's. The writer A/B reports by size and arm,
 with the same outcomes and every session's spend, counting a sized PR only when
 each of its `Implementer:` lines names the same arm. Each implementer also carries its

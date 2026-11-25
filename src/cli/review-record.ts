@@ -195,10 +195,10 @@ export interface ReviewSummary {
 	sessions: string[];
 	/** The branch's run of its round, null when the latest run left it out. */
 	round: number | null;
-	/** Null when the latest run left it out, or on a record written before rounds were scored. */
+	/** Null when the latest run left it out. */
 	score: number | null;
-	/** Its findings across every round on the branch and the branch's runs of its first and latest, null on a record written before tallies. */
-	tally: Ran | null;
+	/** Its findings across every round on the branch, and the branch's runs of its first and latest. */
+	tally: Ran;
 	/** The severity of each finding its latest round left open. */
 	open: Tally["findings"];
 }
@@ -256,15 +256,9 @@ export function parseReview(body: string): ReviewSummary[] {
 		);
 		const tally = parseCounts(text);
 		// A reviewer the latest run left out has its tally, and its session with no round once tallies name it.
-		const session =
-			tally !== null && !/^- Session: /m.test(text)
-				? null
-				: match(
-						tally === null
-							? /^- Session: (`+) ?(.*?) ?\1, round (\d+)\r?$/m
-							: /^- Session: (`+) ?(.*?) ?\1(?:, round (\d+))?\r?$/m,
-					);
-		const score = /^- Score: (\d+)\/10,/m.exec(text);
+		const session = /^- Session: (`+) ?(.*?) ?\1(?:, round (\d+))?\r?$/m.exec(text);
+		// A round of the latest run is scored.
+		const score = session?.[3] === undefined ? null : Number(match(/^- Score: (\d+)\/10,/m)[1]);
 		const open = { high: 0, medium: 0, low: 0 };
 		for (const [, severity] of text.matchAll(/^  - (High|Medium|Low), /gm))
 			open[severity!.toLowerCase() as keyof typeof open]++;
@@ -282,7 +276,7 @@ export function parseReview(body: string): ReviewSummary[] {
 			session: session && session[2]!,
 			sessions: [...text.matchAll(/^- Session: (`+) ?(.*?) ?\1(?:, round \d+)?\r?$/gm)].map((found) => found[2]!),
 			round: session?.[3] === undefined ? null : Number(session[3]),
-			score: score ? Number(score[1]) : null,
+			score,
 			tally,
 			open,
 		};
@@ -295,10 +289,10 @@ export interface Ran extends Counts {
 	last: number;
 }
 
-/** A block's `Rounds:` line, or null without one; malformed or inconsistent counts fail. */
-function parseCounts(text: string): Ran | null {
+/** A block's `Rounds:` line; a missing, malformed, or inconsistent one fails. */
+function parseCounts(text: string): Ran {
 	const line = /^- Rounds: (.*?)\r?$/m.exec(text);
-	if (!line) return null;
+	if (!line) throw new Error("the ## Review record has a reviewer with no Rounds line");
 	const found =
 		/^(\d+), runs (\d+) to (\d+); (?:first round (\d+)(?: \(([^)]*)\))?; )?findings (\d+)(?: \(([^)]*)\))?: fixed (\d+), refuted (\d+)(?:, settled (\d+))?, open (\d+)$/.exec(
 			line[1]!,
@@ -419,8 +413,8 @@ export async function pullModels(
 
 /**
  * Hold `raise` in the record of the open PR from its branch: a `- Held:` line naming the head and the raised tier,
- * which the next run on that head reads, and the head no longer named in full, so a pass at a lower tier no longer
- * counts. The rest of the record, its reviewers' evidence, stays as it was, until a run rewrites it.
+ * which the next run on that head reads, and no head named in full, so a pass at a lower tier, of this head or one
+ * diff-identical to it, no longer counts. The rest of the record, its reviewers' evidence, stays as it was, until a run rewrites it.
  */
 export async function recordHeld(root: string, raise: HeldRaise, deps: ClaimDependencies): Promise<Recorded> {
 	const pull = await openPull(root, raise.base, raise.branch, deps);
@@ -437,7 +431,9 @@ export async function recordHeld(root: string, raise: HeldRaise, deps: ClaimDepe
 		.split("\n")
 		.filter((each) => !each.startsWith("- Held: "))
 		.join("\n")
-		.replaceAll(raise.head, short);
+		.replaceAll(raise.head, short)
+		// The record's head, even one the raised head is diff-identical to, no longer passes.
+		.replace(/^(- Head: [0-9a-f]{12})[0-9a-f]{28}\b/m, "$1");
 	const at = kept.search(/^- Head: /m);
 	const marked = at < 0 ? `${kept.trimEnd()}\n\n${line}\n` : `${kept.slice(0, at)}${line}\n${kept.slice(at)}`;
 	await pull.edit(`${pull.body.slice(0, section.start)}${marked}${pull.body.slice(section.end)}`);

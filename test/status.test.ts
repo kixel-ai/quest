@@ -866,6 +866,17 @@ describe("the review record", () => {
 		expect(await line(body, { diffs: { [A]: "new", [B]: "old" } })).toBe(`review-record stale ${B}`);
 	});
 
+	test("counts no pass once a failed run held a riskier tier, on any head", async () => {
+		// A low head's pass, then a run on a diff-identical later head that raised it to high and could not seat it.
+		const held = (body: string) =>
+			body.replace("- Head: ", `- Held: high on ${A.slice(0, 12)}, \`wire\`\n- Head: `);
+		expect(await line(held(low(B)), { diffs: { [A]: "same", [B]: "same" } })).toBe("review-record -");
+		// A held tier no riskier than the record's leaves its pass.
+		expect(await line(low(A).replace("- Head: ", `- Held: low on ${A.slice(0, 12)}, \`docs\`\n- Head: `))).toBe(
+			`review-record current ${A}`,
+		);
+	});
+
 	test("is unknown, with a warning, when GitHub cannot compare a head", async () => {
 		for (const status of [406, 403]) {
 			const warnings: string[] = [];
@@ -908,6 +919,17 @@ describe("the risk tier", () => {
 		// A record with an open finding names its head by 12 characters, and no full SHA.
 		expect((await risk(record(A.slice(0, 12)))).line).toBe("risk high current medium it rewrites the wire format");
 		expect((await risk(record(B.slice(0, 12)))).line).toBe("risk high stale medium it rewrites the wire format");
+	});
+
+	test("names a riskier tier a failed run held, with its reason and no class", async () => {
+		const medium = record(A)
+			.replace("- Risk: high, `it rewrites the wire format`", "- Risk: medium, `it changes output`")
+			.replace("session `s-1`", "session `s-1`\n- Class: `docs`");
+		expect((await risk(medium)).risk).toMatchObject({ tier: "medium", class: "docs" });
+		const { risk: held } = await risk(
+			medium.replace("- Head: ", `- Held: high on ${B.slice(0, 12)}, \`it drops a field\`\n- Head: `),
+		);
+		expect(held).toMatchObject({ tier: "high", reason: "it drops a field", classified: "medium", class: null });
 	});
 
 	test("carries to a later head as the review record does", async () => {

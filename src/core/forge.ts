@@ -135,11 +135,15 @@ export interface Status {
 	reviews: Review[];
 	/** The design checkpoints online reviewers put on the head. */
 	checkpoints: { reviewer: string; round: number; url: string }[];
-	/** Null when the `## Review` section holds no record `quest review` wrote, or it names no full SHA. */
+	/**
+	 * Null when the `## Review` section holds no record `quest review` wrote, it names no full SHA, or the run it
+	 * records did not pass that head: short of the vendors its tier seats, or with a finding open other than a low one.
+	 */
 	reviewRecord: ReviewRecord | null;
 	/**
-	 * The head's risk tier as the `## Review` record names it, and the classifier's own tier, lower when a reviewer
-	 * raised it; null when the record names none. `state` is the review record's, which a line after it carries to a
+	 * The head's risk tier as the `## Review` record names it, or the riskier tier a failed run held there with its
+	 * reason and no class, and the classifier's own tier, lower when a reviewer raised it; null when the record names
+	 * none. `state` is the review record's, which a line after it carries to a
 	 * later head, else `current` when the record names the head and `stale` when not. `class` is the risk file's
 	 * `## Automatic` class the classifier found the change in, or null. A record whose risk lines do not parse is
 	 * `malformed`, with why, which `quest merge` refuses.

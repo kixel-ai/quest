@@ -2575,51 +2575,55 @@ agyFakes("a high head whose vendors fail their status checks names each in its o
 	}
 });
 
-agyFakes("a failed run's raise unpublishes the head's pass at the lower tier", async () => {
-	const s = setup();
-	const pull = {
-		number: 7,
-		body: "Fixes averaging.\n\n## Models\n\n- Size: S\n- Implementer: Claude Code, claude-opus-5-5, high effort\n",
-	};
-	onGitHub(s.repo, [pull]);
-	vi.stubEnv("FAKE_REPLY", JSON.stringify({ score: 10, rationale: "Lands as is.", findings: [] }));
-	try {
-		// The medium head passes on its two vendors, so the record names it in full.
-		const head = git(s.repo, "rev-parse", "HEAD");
-		const passedRun = await quest("--root", s.repo, "review", ...OPUS);
-		expect(passedRun.code, passedRun.stderr).toBe(0);
-		expect(pull.body).toContain(`- Head: ${head}\n`);
-		// A fresh run on that head raises it to high, then cannot seat a third vendor.
-		vi.stubEnv("FAKE_RAISE", "high");
-		vi.stubEnv("FAKE_LIMITED", "reset");
-		vi.stubEnv("FAKE_FAILS", "claude-fable-5-2");
-		const failed = await quest("--root", s.repo, "review", ...OPUS, "--new");
-		expect(failed.code).toBe(3);
-		expect(failed.stderr).toBe("error: claude hit its usage limit; resets 2030-03-17T17:46:40Z\n");
-		// The record holds the raised tier for the head and no longer names it in full, so the two-vendor pass no longer
-		// counts, while its reviewers' evidence stays.
-		const short = head.slice(0, 12);
-		expect(pull.body).not.toContain(head);
-		expect(pull.body).toContain(
-			`- Held: high on ${short}, \`It rewrites the wire format peers read.\`\n- Head: ${short}\n`,
-		);
-		expect(pull.body).toContain("- Score: 10/10, `Lands as is.`");
-		expect(passed(recordedRun(pull.body)!)).toBe(false);
-		// A retry, from any clone, starts from the held tier, and its run's record drops the line.
-		vi.stubEnv("FAKE_RAISE", undefined);
-		vi.stubEnv("FAKE_LIMITED", undefined);
-		vi.stubEnv("FAKE_FAILS", undefined);
-		rmSync(join(s.repo, ".git", "quest"), { recursive: true, force: true });
-		const retry = await quest("--root", s.repo, "review", ...OPUS);
-		expect(retry.code, retry.stderr).toBe(0);
-		expect(retry.stdout).toContain("\nrisk high It rewrites the wire format peers read.\n");
-		expect(reviewersOf(retry.stdout)).toHaveLength(3);
-		expect(pull.body).not.toContain("- Held:");
-		expect(pull.body).toContain(`- Head: ${head}\n`);
-	} finally {
-		vi.unstubAllGlobals();
-	}
-});
+agyFakes(
+	"a failed run's raise unpublishes the pass at the lower tier, of its head or one diff-identical to it",
+	async () => {
+		const s = setup();
+		const pull = {
+			number: 7,
+			body: "Fixes averaging.\n\n## Models\n\n- Size: S\n- Implementer: Claude Code, claude-opus-5-5, high effort\n",
+		};
+		onGitHub(s.repo, [pull]);
+		vi.stubEnv("FAKE_REPLY", JSON.stringify({ score: 10, rationale: "Lands as is.", findings: [] }));
+		try {
+			// The medium head passes on its two vendors, so the record names it in full.
+			const head = git(s.repo, "rev-parse", "HEAD");
+			const passedRun = await quest("--root", s.repo, "review", ...OPUS);
+			expect(passedRun.code, passedRun.stderr).toBe(0);
+			expect(pull.body).toContain(`- Head: ${head}\n`);
+			// A run on a later head with the same diff raises it to high, then cannot seat a third vendor.
+			git(s.repo, "commit", "--allow-empty", "-qm", "the same diff");
+			const later = git(s.repo, "rev-parse", "HEAD");
+			vi.stubEnv("FAKE_RAISE", "high");
+			vi.stubEnv("FAKE_LIMITED", "reset");
+			vi.stubEnv("FAKE_FAILS", "claude-fable-5-2");
+			const failed = await quest("--root", s.repo, "review", ...OPUS);
+			expect(failed.code).toBe(3);
+			expect(failed.stderr).toBe("error: claude hit its usage limit; resets 2030-03-17T17:46:40Z\n");
+			// The record holds the raised tier for the later head and names no head in full, so the two-vendor pass no
+			// longer counts for either, while its reviewers' evidence stays.
+			expect(pull.body).not.toContain(head);
+			expect(pull.body).toContain(
+				`- Held: high on ${later.slice(0, 12)}, \`It rewrites the wire format peers read.\`\n- Head: ${head.slice(0, 12)}\n`,
+			);
+			expect(pull.body).toContain("- Score: 10/10, `Lands as is.`");
+			expect(passed(recordedRun(pull.body)!)).toBe(false);
+			// A retry, from any clone, starts from the held tier, and its run's record drops the line.
+			vi.stubEnv("FAKE_RAISE", undefined);
+			vi.stubEnv("FAKE_LIMITED", undefined);
+			vi.stubEnv("FAKE_FAILS", undefined);
+			rmSync(join(s.repo, ".git", "quest"), { recursive: true, force: true });
+			const retry = await quest("--root", s.repo, "review", ...OPUS);
+			expect(retry.code, retry.stderr).toBe(0);
+			expect(retry.stdout).toContain("\nrisk high It rewrites the wire format peers read.\n");
+			expect(reviewersOf(retry.stdout)).toHaveLength(3);
+			expect(pull.body).not.toContain("- Held:");
+			expect(pull.body).toContain(`- Head: ${later}\n`);
+		} finally {
+			vi.unstubAllGlobals();
+		}
+	},
+);
 
 agyFakes("a raise to high with no other vendor's model left is a usage error", async () => {
 	const s = setup();
@@ -2880,6 +2884,34 @@ agyFakes("the PR's record holds the branch's override and a raise, but not the c
 		expect(next.stdout).toContain("\nrisk high It ships tonight.\n");
 		expect(next.stdout).toContain("\noverridden medium by the maintainer\n");
 		expect(reviewersOf(next.stdout)).toHaveLength(3);
+
+		// An override that lowers the tier holds on the clone that set it while the record names it.
+		const commit = (value: number) => {
+			write(s.repo, "src/lib.ts", `export const x = ${value};\n`);
+			git(s.repo, "commit", "-qam", `constant ${value}`);
+		};
+		commit(10);
+		const lowered = await quest("--root", s.repo, "review", ...OPUS, "--override", "low", "--reason", "Docs only.");
+		expect(lowered.code, lowered.stderr).toBe(0);
+		expect(pull.body).toContain("- Risk: low, `Docs only.`\n- Overridden: from medium by the maintainer\n");
+		commit(11);
+		expect(reviewersOf((await quest("--root", s.repo, "review", ...OPUS)).stdout)).toHaveLength(1);
+		// A later override in the record, here one another clone raised, replaces this clone's.
+		const low = pull.body;
+		pull.body = low.replace("- Risk: low, `Docs only.`", "- Risk: high, `It ships tonight.`");
+		commit(12);
+		const raisedElsewhere = await quest("--root", s.repo, "review", ...OPUS);
+		expect(raisedElsewhere.stdout).toContain("\nrisk high It ships tonight.\n");
+		expect(reviewersOf(raisedElsewhere.stdout)).toHaveLength(3);
+		// A lowering override the record names, which the PR's author could have written, holds on no other clone.
+		pull.body = low;
+		rmSync(state, { recursive: true, force: true });
+		commit(13);
+		const elsewhere = await quest("--root", s.repo, "review", ...OPUS);
+		expect(elsewhere.code, elsewhere.stderr).toBe(0);
+		expect(elsewhere.stdout).toContain("\nrisk medium It changes the output.\n");
+		expect(reviewersOf(elsewhere.stdout)).toHaveLength(2);
+		expect(pull.body).not.toContain("- Overridden:");
 	} finally {
 		vi.unstubAllGlobals();
 	}

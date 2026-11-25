@@ -26,9 +26,11 @@ import {
 	type Thread,
 	REVIEW_MARK,
 	passed,
+	recordedHeld,
 	recordedRisk,
 	recordedRun,
 	reviewSection,
+	riskier,
 } from "../core";
 import { readHoldStatus } from "./hold";
 import { readSignals } from "./signals";
@@ -186,11 +188,14 @@ function risk(body: string, head: string, record: ReviewRecord | null): Status["
 	if (recorded === null) return null;
 	if ("malformed" in recorded) return { state: "malformed", error: recorded.malformed };
 	const state = record?.state ?? (head.startsWith(recorded.head) ? "current" : "stale");
+	// A failed run's raise outranks the record's tier, and its change is no longer the class it was.
+	const held = recordedHeld(body);
+	const raised = held !== null && riskier(held.tier, recorded.tier) ? held : null;
 	return {
-		tier: recorded.tier,
-		reason: recorded.reason,
+		tier: raised?.tier ?? recorded.tier,
+		reason: raised?.reason ?? recorded.reason,
 		classified: recorded.classified,
-		class: recorded.class,
+		class: raised ? null : recorded.class,
 		state,
 	};
 }

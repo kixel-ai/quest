@@ -2745,19 +2745,43 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 		head.startsWith(recorded.head) &&
 		riskier(recorded.overridden ?? recorded.tier, recorded.classified)
 	)
-		raises.push({ tier: recorded.overridden ?? recorded.tier, reason: recorded.reason });
+		raises.push(
+			recorded.overridden === null
+				? { tier: recorded.tier, reason: recorded.reason }
+				: // The Risk line holds the override's reason, not the one its reviewers raised the tier for.
+					{
+						tier: recorded.overridden,
+						reason: `its reviewers rated this head ${recorded.overridden} before the maintainer's override`,
+					},
+		);
 	const held = raises.reduce<Assessment | undefined>(
 		(top, each) => (top && !riskier(each.tier, top.tier) ? top : each),
 		undefined,
 	);
 	const before = settle(classified.value, onHead, held);
-	// The maintainer's override is the branch's, so the PR's record restores one this clone never saw.
-	const restored =
+	// The maintainer's override is the branch's, and the PR's record holds its latest. One that raises the tier holds
+	// from the record or this clone, the riskier first; one that lowers it holds only from the clone that set it, while
+	// the record still names it, since the PR's author can edit the body and a later override replaces it.
+	const restored: Override | undefined =
 		recorded?.overridden != null
 			? { tier: recorded.tier, reason: recorded.reason, from: recorded.overridden }
 			: undefined;
-	const override =
-		options.override === undefined ? (saved?.override ?? restored) : { ...options.override, from: before.tier };
+	const mine = saved?.override;
+	const upward = (each: Override) => riskier(each.tier, each.from);
+	const lowering =
+		mine !== undefined &&
+		!upward(mine) &&
+		(recorded === null || (restored?.tier === mine.tier && restored.from === mine.from))
+			? mine
+			: undefined;
+	const kept =
+		[restored, mine]
+			.filter((each): each is Override => each !== undefined && upward(each))
+			.reduce<Override | undefined>(
+				(top, each) => (top && !riskier(each.tier, top.tier) ? top : each),
+				undefined,
+			) ?? lowering;
+	const override = options.override === undefined ? kept : { ...options.override, from: before.tier };
 	const { usage: _, ...value } = classified.value;
 	// Every round the saved state held that `reviewed` leaves out, as of an earlier head or dropped by --new.
 	const past = (reviewed: State["reviewed"]) => [
@@ -2946,8 +2970,9 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 	} catch (error) {
 		// The run saves nothing, but every finished round's raise, even one whose peer then failed, goes to the PR's
 		// record, which keeps the rest of its evidence.
-		const raised = judged();
-		if (riskier(raised.tier, before.tier))
+		// Only a raise past the tier the run began at, the maintainer's override applied to both, is one.
+		const raised = overridden(judged(), override);
+		if (riskier(raised.tier, current.tier))
 			await deps.raised?.({ base: baseRef, branch, head, tier: raised.tier, reason: raised.reason });
 		throw error;
 	}

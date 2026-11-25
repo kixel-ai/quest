@@ -1710,8 +1710,8 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"each directory holding a changed path, never the checkout's, so a change cannot instruct its own " +
 				"reviewer, and is told to disregard other instructions and run no builds, tests, or quest commands. " +
 				"The base is fetched first, since the sandbox has no network.\n\n" +
-				"--harness agy reviews with Google's Antigravity CLI, which only reviews, at its " +
-				"own draw or the --model and --effort named, as gemini-4-neon and xhigh. It runs `agy -p` on the user's own Antigravity login, in the keyring or, over ssh, " +
+				"--harness agy reviews with Google's Antigravity CLI, which only reviews, with its first listed entry, as " +
+				"any --harness names, or the --model and --effort named, as gemini-4-neon and xhigh. It runs `agy -p` on the user's own Antigravity login, in the keyring or, over ssh, " +
 				"its configuration directory, with no ANTIGRAVITY_* or AGY_* variable, so no gateway, and GEMINI_API_KEY and " +
 				"GOOGLE_API_KEY never replace the login. Each turn and the status check, `agy models`, run in a new private " +
 				"directory outside any repository, since agy loads the agent configuration of each directory up to the " +
@@ -1746,7 +1746,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"needs a trailing / or /**, and a change that touches no path falls in no class. " +
 				"The tier sets the seats, each on a vendor of its own and drawn from the run's rung as above: one on a low head, two on medium, and three on high. " +
 				"A seat the drawn rung has no vendor left for fills from the size's rung, then each rung outward, and the run is an outage only when a seat finds no vendor on any rung. " +
-				"A round that raises the tier seats the extra reviewers at once, in the same run; a run is saved whole or not at all, so one that fails there, as when no other vendor's reviewer can run, leaves the branch as it was, but for the raise, which goes to the PR's review record, the only place a head's tier lives, as a `- Held: high on <head>, <reason>` line that leaves the rest of the record and no longer names the head in full, so a retry from any clone seats as many. A run reads a held raise, and a tier the record's reviewers raised, for its own head, but never the classifier's own tier, which it judges anew, and restores the maintainer's override from the record when this clone has none. " +
+				"A round that raises the tier seats the extra reviewers at once, in the same run; a run is saved whole or not at all, so one that fails there, as when no other vendor's reviewer can run, leaves the branch as it was, but for the raise, which goes to the PR's review record, the only place a head's tier lives, as a `- Held: high on <head>, <reason>` line that leaves the rest of the record and no longer names any head in full, so a retry from any clone seats as many, and `quest status` reports the held tier. A run reads a held raise, and a tier the record's reviewers raised, for its own head, but never the classifier's own tier, which it judges anew. It reads the record before any reviewer runs, so a forge it cannot reach fails the run. The maintainer's override that raises the tier holds from the record on any clone; one that lowers it holds only on the clone that set it, while the record still names it, since a PR's author can edit its body. " +
 				"--override and --reason record the maintainer's tier for the branch, which holds until the reviewed " +
 				"tier grows riskier than the one overridden, other than to the override's own tier.\n\n" +
 				"Prints the size and where it came from, base, and head, its risk tier and reason, the classifier's tier, " +

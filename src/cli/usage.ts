@@ -158,7 +158,7 @@ export interface AccuracyRow {
 	pulls: number;
 	merged: number;
 	handedBack: number;
-	/** PRs whose record tallies their reviews; a record written before tallies counts for none of what follows. */
+	/** PRs whose record tallies their reviews. */
 	reviewed: number;
 	/** The reviewers' latest rounds on the reviewed PRs that have a score, and the scores' sum. */
 	scored: number;
@@ -548,18 +548,15 @@ function settledOnMerge(reviews: ReviewSummary[], merged: boolean): ReviewSummar
 	// A finding carried over from an earlier run is listed under the round that kept it open and counted in its
 	// raiser's tally, so the open ones are matched across the reviewers, not within each.
 	const sum = (counts: number[]) => counts.reduce((total, count) => total + count, 0);
-	const tallied = reviews.filter((review) => review.tally !== null);
 	const settles =
 		merged &&
 		reviews.every(({ open }) => open.high === 0 && open.medium === 0) &&
-		(tallied.length === 0 ||
-			sum(tallied.map((review) => review.tally!.open)) === sum(reviews.map((review) => review.open.low)));
+		sum(reviews.map((review) => review.tally.open)) === sum(reviews.map((review) => review.open.low));
 	if (!settles) return reviews;
-	return reviews.map((review) =>
-		review.tally === null
-			? review
-			: { ...review, tally: { ...review.tally, settled: review.tally.settled + review.tally.open, open: 0 } },
-	);
+	return reviews.map((review) => ({
+		...review,
+		tally: { ...review.tally, settled: review.tally.settled + review.tally.open, open: 0 },
+	}));
 }
 
 /** Each PR's record, without its sessions yet. */
@@ -940,7 +937,7 @@ function outcome(row: ReturnType<typeof noOutcomes>, each: PullRow, latest: Set<
 	if (each.handedBack) row.handedBack++;
 	row.fixes += each.fixedBy.length;
 	row.landFixes += each.landFixes.filter((by) => by !== MERGER).length;
-	const counted = latest.has(each) ? each.review.filter((review) => review.tally !== null) : [];
+	const counted = latest.has(each) ? each.review : [];
 	if (counted.length === 0) return;
 	row.reviewed++;
 	for (const { score } of counted)
@@ -951,7 +948,7 @@ function outcome(row: ReturnType<typeof noOutcomes>, each: PullRow, latest: Set<
 	// Each run seats other models, so the PR's runs are the latest's number, not any one reviewer's rounds, and its
 	// first round is the branch's first run's, not each later model's first, which would count a finding kept open
 	// once per model.
-	const tallies = counted.map((review) => review.tally!);
+	const tallies = counted.map((review) => review.tally);
 	const debut = Math.min(...tallies.map((tally) => tally.debut));
 	count(
 		row,
@@ -968,10 +965,10 @@ function outcome(row: ReturnType<typeof noOutcomes>, each: PullRow, latest: Set<
  */
 function tallied(pulls: PullRow[], counts: (pull: PullRow) => boolean): Set<PullRow> {
 	const branch = (each: PullRow) => JSON.stringify([each.repository ?? each.number, each.branch]);
-	const rounds = (each: PullRow) => each.review.reduce((sum, review) => sum + (review.tally?.rounds ?? 0), 0);
+	const rounds = (each: PullRow) => each.review.reduce((sum, review) => sum + review.tally.rounds, 0);
 	const latest = new Map<string, PullRow>();
 	for (const each of pulls) {
-		if (!counts(each) || each.review.every((review) => review.tally === null)) continue;
+		if (!counts(each) || each.review.length === 0) continue;
 		const other = latest.get(branch(each));
 		if (
 			other === undefined ||
@@ -1077,12 +1074,12 @@ function reviewerRows(pulls: PullRow[]): ReviewerRow[] {
 			add(to, spent);
 		}
 		if (!latest.has(each)) continue;
-		for (const review of each.review.filter((review) => review.tally !== null)) {
+		for (const review of each.review) {
 			const to = row(each, review);
 			to.reviewed++;
 			// Only the latest run's reviewers saw the head that landed, so only they let its defects through.
 			if (review.round !== null) to.fixes += each.fixedBy.length;
-			count(to, [review.tally!]);
+			count(to, [review.tally]);
 		}
 	}
 	return [...rows.values()].sort((a, b) =>
@@ -1515,7 +1512,7 @@ export function usageLines(report: Usage): string[] {
 		if (row.unreadReview) lines.push(`  unread review: ${row.unreadReview}`);
 		for (const r of row.review)
 			lines.push(
-				`  review: ${r.harness}, ${r.model}, ${r.effort} effort, ${runged(r.rung)}; ${r.round === null ? "not in the latest run" : `round ${r.round}, score ${r.score ?? "-"}/10`}; ${r.tally === null ? "no tally" : `rounds ${r.tally.rounds}, ${findingsText(r.tally)}`}`,
+				`  review: ${r.harness}, ${r.model}, ${r.effort} effort, ${runged(r.rung)}; ${r.round === null ? "not in the latest run" : `round ${r.round}, score ${r.score ?? "-"}/10`}; rounds ${r.tally.rounds}, ${findingsText(r.tally)}`,
 			);
 		for (const o of row.online)
 			lines.push(`  online review: ${o.reviewer}, ${o.finalHead ? "" : "not "}at the final head; ${answers(o)}`);
