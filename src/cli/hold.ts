@@ -2,6 +2,7 @@
 // a time. It holds the `quest:active` label, and the ID of the timeline event
 // that added the label is its hold token, since sessions often share an account.
 // `quest merge` takes no label: the pinned auto-merge or merge-queue entry it creates is the queue signal.
+import { REVIEW_CONTEXT } from "../github/review-trust";
 import {
 	ACTIVE_LABEL,
 	formatFinding,
@@ -282,14 +283,18 @@ export async function land(pr: PullRequest, request: LandRequest, deps: GitHubDe
  * own queue's informational check, which reports how a past pick ended rather than the head.
  */
 async function passing(github: GitHub, pr: PullRequest, url: string, sha: string): Promise<void> {
-	const failing = (await currentChecks(github, pr, sha, await contexts(github, pr, sha))).checks
+	const failed = (await currentChecks(github, pr, sha, await contexts(github, pr, sha))).checks
 		.filter((context) => context.name !== QUEUE_CHECK)
 		.map(classifyCheck)
-		.filter(({ outcome }) => outcome === "failing")
-		.map(({ check }) => (check.url === null ? check.name : `${check.name} (${check.url})`));
+		.filter(({ outcome }) => outcome === "failing");
+	const failing = failed.map(({ check }) => (check.url === null ? check.name : `${check.name} (${check.url})`));
+	// A commit status cannot be rerun: a failing review needs another round or the maintainer's acceptance.
+	const reviewed = failed.some(({ check }) => check.name === REVIEW_CONTEXT)
+		? "; a failing quest review needs another quest review round or quest review --accept"
+		: "";
 	if (failing.length > 0)
 		throw new Refusal(
-			`${url} head ${sha} failed ${failing.length === 1 ? "a check" : "checks"}: ${failing.sort().join(", ")}; fix the PR or rerun the check, then land it again`,
+			`${url} head ${sha} failed ${failing.length === 1 ? "a check" : "checks"}: ${failing.sort().join(", ")}; fix the PR or rerun the check, then land it again${reviewed}`,
 		);
 }
 

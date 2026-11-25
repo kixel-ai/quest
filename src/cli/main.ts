@@ -677,14 +677,16 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		.summary("Print a pull request's current state on GitHub")
 		.description(
 			"Print a pull request's head, checks, merge state, reviews, reactions, and unresolved review threads " +
-				"in one call. It reports facts; it does not decide whether the PR is ready or whose review counts.\n\n" +
+				"in one call. It reports facts; it does not decide whether the PR is ready.\n\n" +
 				"Plain output prints one record per line, its type first and any free text (a check name or path) last: " +
 				"url, state, draft, head, mergeable, merge-state, review-decision, review-record, risk, class, auto-merge, merge-queue, " +
 				"landing-stopped, and checks, whose state and counts follow the checks that count, pending while an open PR's base requires a check or workflow nothing reports; review-record gives whether the PR body's ## Review record " +
 				"covers the head, as current, diff-identical (git diff <base>...<head> prints the same as for the head it names), " +
-				"stale, or unknown when GitHub cannot compare them, then the head it names last, or - when the section holds no record quest review wrote or it names no full SHA; risk gives the record's risk " +
+				"stale, or unknown when GitHub cannot compare them, or - when the section holds no record quest review wrote, then the head it names last, then local-review or no-local-review for whether a local reviewer's round passed it; " +
+				"it counts the record only when the latest quest review commit status on that head is success, set by a user with write access to the repository, " +
+				"targets the diff from the head's merge base with the PR's base, and attests the record's risk tier and class (else -, with a warning saying why, and risk and class print - too); risk gives the record's risk " +
 				"tier, the same state for its head, the tier its classifier set before any reviewer raised it, and the " +
-				"reason last, - when the record names none, or - malformed - and why when its risk lines do not parse; class gives the RISK.md ## Automatic class the record's classifier named, or -; auto-merge gives its method, who enabled it and when, and the head it was " +
+				"reason last, - when the record names none or does not count, or - malformed - and why when its risk lines do not parse; class gives the RISK.md ## Automatic class the record's classifier named, or -; auto-merge gives its method, who enabled it and when, and the head it was " +
 				"enabled on, which differs from head once a push follows, as GitHub keeps auto-merge across a writer's " +
 				"push (- when it cannot be told: a quest land pin names it, and otherwise the head branch's push " +
 				"activity, which GitHub lists up to minutes late); landing-stopped is the latest exit from the merge queue, auto-merge, or " +
@@ -1799,25 +1801,31 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"how it was set (model, paths, or default), and reason, a class line naming the class, and for a model a classifier line (harness, model, " +
 				"effort, session) and its usage line, a skipped line (harness, model, effort, reason) for each reviewer passed over, then for each reviewer its harness, model, and " +
 				"effort, followed by shadow for the shadow or second for the second reviewer, session, round, an " +
-				"unchanged line for a repeated round, a usage line per turn (input tokens, the " +
+				"unchanged line for a repeated round, or an accepted line for a round --accept repeats, a usage line per turn (input tokens, the " +
 				"part read from the prompt cache, and output), a score from 0 to 10 for how ready the head is to land with " +
 				"its one-sentence rationale, a raised line with the tier and reason when it raised the classifier's, the finding count, each finding by its number, then the last round's findings with " +
 				"their numbers and dispositions; then the `record` line below and a last `next` line naming the author's next step: " +
-				"`next finish` when every finding is low severity, to fix or refute them without another round, " +
 				"`next checkpoint` when a reviewer's every third round reports other findings, to compare the current approach " +
-				"with the best long-term approach worked out from first principles before fixing them, `next respond` to fix or refute the findings, or `next done`, which for a low head no reviewer ran says so. A reply without a valid score " +
+				"with the best long-term approach worked out from first principles before fixing them, `next respond` to fix or refute the findings, or `next done`, which for a low head no reviewer ran says so, and for --accept `next done` or `next stop`. A reply without a valid score " +
 				"fails as any malformed reply does. --json prints " +
-				"one object: `rounds`, one per reviewer, `tallies`, every reviewer's findings across the branch's rounds, `risk`, the head's tier with its classification, `skipped`, each reviewer passed over with its reason, `record`, and `next`.\n\n" +
+				"one object: `rounds`, one per reviewer, `tallies`, every reviewer's findings across the branch's rounds, `risk`, the head's tier with its classification, `skipped`, each reviewer passed over with its reason, `accepted`, the maintainer's reason under --accept or null, `record`, and `next`.\n\n" +
 				"After each round, it rewrites the `## Review` section of the branch's open PR into the base, the one from the repository the base's remote pushes to, else the only one from another repository whose pushed head `HEAD` contains, as the " +
 				"user the GitHub token names, keeping the rest of the body, and prints `record <url>`: the reviewed " +
 				"head, named in full only once no reviewer reports a finding, the base, the head's risk tier and reason, " +
 				"an `- Overridden:` line, the classifier's tier and who set it, a `- Class:` line, a `- Local review: none` line for a low head no reviewer ran on, a `- Skipped:` line for each reviewer passed over, and each reviewer, its Reviewer line ending in `, shadow` for the shadow or `, second` for the second reviewer, its " +
-				"session and round, score, the tier it raised the risk to and why, its tally of findings across the branch's rounds, and each finding with its disposition. With no " +
+				"session and round, score, the tier it raised the risk to and why, its tally of findings across the branch's rounds, and each finding with its disposition. " +
+				"On GitHub it then sets the `quest review` commit status on the head, on the same token, so push the head first: success once no finding is open, else failure, " +
+				"its description the head's risk tier and class and whether a local reviewer ran, its target the diff from the head's merge base with the PR's base, which `quest status` counts only from a user who can push. " +
+				"For a token that cannot push, it sets none and prints `; status skipped: <why>` after the record's URL; a status GitHub refuses otherwise prints `; status refused: <why>` and exits 1. " +
+				"--accept <reason> runs no reviewer or classifier: it repeats each reviewer's last round of the same head, base, and merge base, failing as a usage error " +
+				"when none classified and reviewed it, when a high head lacks its second reviewer's round, or when no finding is open; sets the status to success " +
+				"described `findings accepted`; then records the rounds with `- Accepted by the maintainer: <reason>` and their findings as accepted, naming the head " +
+				"in full, and prints `next done`. When no status is set, as for a token that cannot push, it records nothing, prints `next stop`, and exits 1. With no " +
 				"such PR, several from other repositories that `HEAD` contains, or a remote off GitHub, it prints `record skipped: <why>` and changes nothing.\n\n" +
 				"Exits 0 once the round finishes, whatever it found, 2 for invalid arguments " +
 				"or a checkout that cannot be reviewed, 3 when no eligible reviewer could run, each not installed, logged " +
 				"out, its login rejected, at its usage limit, or unable to run on this host, and 1 for other failures, including a PR GitHub will not show or a record it " +
-				"refuses. A malformed `## Models` field the round reads, such as a Size line naming no size or an " +
+				"refuses or a status it refuses. A malformed `## Models` field the round reads, such as a Size line naming no size or an " +
 				"Implementer line naming no model it can read, is a usage error, unless --size or --exclude-model replaces it. A usage limit of the only " +
 				"eligible reviewer prints one line, " +
 				"`error: <harness> hit its usage limit; resets <time>`, where <time> is the reset as an ISO 8601 UTC " +
@@ -1861,6 +1869,10 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 			).choices(TIERS),
 		)
 		.option("--reason <text>", "Why the maintainer overrode the tier, which --override requires")
+		.option(
+			"--accept <reason>",
+			"Accept the findings the head's last rounds left open, for the maintainer's reason, running no reviewer",
+		)
 		.option("--json", "Print one JSON object")
 		.action(
 			(options: {
@@ -1875,8 +1887,24 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				size?: Size;
 				responses?: string;
 				new?: boolean;
+				accept?: string;
 				json?: boolean;
 			}) => {
+				const accept = options.accept?.replace(/\s+/g, " ").trim();
+				if (accept === "") throw new UsageError("--accept needs the maintainer's reason");
+				// Accepting judges the rounds already run on the head, so it takes nothing that would run or reset one.
+				if (
+					accept !== undefined &&
+					(options.responses ??
+						options.override ??
+						options.harness ??
+						options.model ??
+						options.effort ??
+						options.new) !== undefined
+				)
+					throw new UsageError(
+						"--accept runs no reviewer, so it takes no --responses, --override, --harness, --model, --effort, or --new",
+					);
 				const responses =
 					options.responses === undefined
 						? undefined
@@ -1896,6 +1924,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 						responses,
 						fresh: options.new,
 						override,
+						accept,
 					},
 					{
 						...reviewDependencies(),
@@ -1913,6 +1942,15 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 						} catch (error) {
 							failure = error;
 						}
+						const status = record !== undefined && "url" in record ? record.status : undefined;
+						// An acceptance is the status alone, so one no status records has not happened.
+						const accepting = reviewed.accepted !== undefined;
+						const attested = failure === undefined && record !== undefined && "url" in record && !status;
+						const next = !accepting
+							? nextStep(rounds)
+							: attested
+								? "next done: the maintainer accepted the findings left open on this head"
+								: "next stop: an acceptance counts only once a maintainer's token sets the quest review status on the pushed head";
 						if (options.json)
 							print(
 								JSON.stringify({
@@ -1920,19 +1958,25 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 									tallies,
 									risk,
 									skipped,
+									accepted: reviewed.accepted ?? null,
 									record: record ?? null,
-									next: nextStep(rounds),
+									next,
 								}),
 							);
 						else {
 							for (const line of roundLines(reviewed)) print(line);
 							if (record !== undefined)
-								print("url" in record ? `record ${record.url}` : `record skipped: ${record.skipped}`);
-							print(nextStep(rounds));
+								print(
+									"url" in record
+										? `record ${record.url}${status === undefined ? "" : "skipped" in status ? `; status skipped: ${status.skipped}` : `; status refused: ${status.refused}`}`
+										: `record skipped: ${record.skipped}`,
+								);
+							print(next);
 						}
-						if (failure === undefined) return 0;
+						if (failure === undefined)
+							return (status !== undefined && "refused" in status) || (accepting && !attested) ? 1 : 0;
 						warn(
-							`the round finished, but recording it in the PR body failed: ${failure instanceof Error ? failure.message : String(failure)}`,
+							`the round finished, but recording it failed: ${failure instanceof Error ? failure.message : String(failure)}`,
 						);
 						return 1;
 					},

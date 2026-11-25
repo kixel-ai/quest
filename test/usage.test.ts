@@ -402,6 +402,21 @@ describe("PR records", () => {
 			},
 		});
 		expect(classifierSessions(`## Review\n\n${classified}\n`)).toEqual(["k1"]);
+		// Findings the maintainer accepted read back as settled, with the head named in full.
+		const accepted = reviewRecord({
+			...at,
+			rounds: [round, second],
+			tallies,
+			risk,
+			skipped: [],
+			accepted: "Kept.",
+		});
+		expect(accepted).toContain(`- Head: ${"b".repeat(40)}\n`);
+		expect(accepted).toContain("- Accepted by the maintainer: `Kept.`\n");
+		expect(accepted).toContain("- Findings, accepted by the maintainer:\n");
+		const [pick, , left] = parseReview(`## Review\n\n${accepted}\n`);
+		expect(pick).toMatchObject({ tally: { settled: 1, open: 0 }, open: { high: 0, medium: 0, low: 0 } });
+		expect(left).toMatchObject({ tally: { settled: 1, open: 0 } });
 	});
 
 	test("a record written before tallies has none, and a Rounds line that does not add up fails", () => {

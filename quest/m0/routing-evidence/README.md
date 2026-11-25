@@ -195,7 +195,13 @@ three hosts' saved review rounds:
     Astra xhigh on Fable's, never weaker than the writer), compare what Pullfrog still
     finds behind it per dollar, and recommend retiring it once
     [review seats](/quest/m0/review-seats.md)' one, two, or three vendor
-    seats match it, with its tally.
+    seats match it, with its tally. The gate retired first: on 2026-11-24
+    its review quota ran out, and the maintainer removed the `Pullfrog
+    approval` ruleset in
+    [kixel-ai/dotfiles#297](https://github.com/kixel-ai/dotfiles/pull/297), so only a maintainer's local `quest review` record
+    gates a merge. Where it still runs, its findings are suggestions like
+    any online reviewer's, and this comparison decides whether it keeps
+    running.
   - Replay bench? ✅ Not yet (rejected: build it in kixel.quest now). It
     would rerun merged L and XL quests from their base with each writer,
     paired, deciding in days for about $6k a comparison what a live arm

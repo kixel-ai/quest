@@ -18,15 +18,15 @@ A PR whose author lacks write access gets no local run: leave its checks to CI, 
 A check failure that reproduces unchanged in a checkout of the base branch is pre-existing rather than the PR's: record the command and both failures in the PR body's validation, go on to review and readiness, and add a follow-up for it unless an open PR already fixes it.
 Never alter the repository's harness to get a pass, such as by disabling a tool, unsetting its environment, or skipping a check, nor report an altered run as its checks.
 
-Run no new round when a review already counts for the committed head, as `/quest-merge` defines below, and leaves no finding unrefuted: go on to pushing and marking it ready.
+Run no new round when a review already counts for the committed head, as `/quest-merge` defines below, and leaves no finding unrefuted or unaccepted: go on to marking it ready.
 `quest status <pr>` reads the pushed head, so trust its `review-record` line only while its `head` line is the committed head.
 
-Otherwise, review the committed branch with `quest review --base <remote>/<base>`, in the foreground; a round takes minutes.
+Otherwise, push the committed branch unless GitHub already has its head, since each round's status goes on the head GitHub has, first disabling auto-merge with `gh pr merge <pr> --disable-auto` when `quest status <pr>` shows it enabled, since GitHub would land the pushed head unreviewed, then review it with `quest review --base <remote>/<base>`, in the foreground; a round takes minutes.
 It picks a reviewer other than the model that changed the branch last, at an effort the PR's size sets.
 It reads that model, and off a quest branch the size, from the PR body's `## Models` record: open the draft PR and write the record before the first round, as `Size: M` and `Implementer: Claude Code, claude-opus-5-5, high effort`.
 Pass `--exclude-model` or `--size` only for a PR whose body cannot hold the record.
 Where the repository's root instructions name other reviewers, pass them with `--harness`, `--model`, and `--effort`, which runs that reviewer alone.
-Each round rewrites the PR body's `## Review` section, so add context only after it; when it printed `record skipped`, run it again once the PR can take the record, since `quest status` counts only the record `quest review` writes.
+Each round rewrites the PR body's `## Review` section and, on GitHub, sets the head's `quest review` commit status, so add context only after it; when it printed `record skipped`, run it again once the PR can take the record, since `quest status` counts only the record `quest review` writes, and only from a maintainer's round: a contributor's own round prints `status skipped`. At `status refused`, fix what it names, such as pushing the head, and review it again.
 
 `quest review` sets the head's risk tier before any reviewer runs: a low head gets no local reviewer, only a record saying so, and a high one gets a second reviewer from another vendor on the high list, which a round that raises the tier runs at once; a head classified high also takes its pick from that list.
 When the user overrides the tier, pass it with `--override <tier> --reason <their reason>`.
@@ -34,7 +34,7 @@ When the user overrides the tier, pass it with `--override <tier> --reason <thei
 Each round ends with a `next` line: follow it until a round of the head reports no finding you have not refuted; never block on the score.
 Fix in the PR every review finding relevant to it that you do not refute and every gap the change exposes; in other code you read, fix easy findings and suggest the rest as follow-ups.
 Refute a finding only with evidence the reviewer cannot rebut: a `path:line`, a command's output, or a recorded maintainer decision.
-A finding the reviewer keeps against such a refutation is a decision for the user.
+A finding the reviewer keeps against such a refutation is a decision for the user: once they accept it, or pick merge as is at a checkpoint, run `quest review --accept <their reason>` on the pushed head, which records the open findings as accepted and passes the head without another round; otherwise fix or refute it.
 Write each round's `--responses` file in the checkout's `.tmp/`.
 
 At a `next checkpoint` line, which a reviewer's every third round prints when it reports findings, stop before fixing them and reconsider the approach; `quest status <pr>` prints a `checkpoint` line when an online reviewer's round is due the same way.
@@ -48,7 +48,7 @@ Once it exits 3, every eligible reviewer is out, an outage rather than a skip: s
 Its `## Waiting` item names each reviewer, its error, and the check, such as `Codex: out of quota until 2026-11-03 15:00 UTC; check that quest review runs`, with the reset time `quest review` prints; a logged-out or missing reviewer waits on `Maintainer (PC):`, with the login command `quest review` prints, since the login runs on the reviewer's host.
 Once the reset passes or the login is restored, the item has cleared: whoever finds it runs `/quest-review` on the PR.
 
-Push, resolve each `duplicate` line `quest status <pr>` then prints as the guide's Creation describes, then mark the PR ready for review: with `quest ready <pr> <token>`, which also drops its `## Waiting` section, or with `gh pr ready <pr>` for a draft you reviewed without a hold.
+Push any commit not yet pushed, resolve each `duplicate` line `quest status <pr>` then prints as the guide's Creation describes, then mark the PR ready for review: with `quest ready <pr> <token>`, which also drops its `## Waiting` section, or with `gh pr ready <pr>` for a draft you reviewed without a hold.
 
 Summarize the review, with its last round's score and rationale, and CI from `quest status <pr>`.
 Name any decisions the review raised without answering them, then ask the user for the pick with `/quest-merge`'s options.

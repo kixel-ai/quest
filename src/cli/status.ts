@@ -16,7 +16,7 @@ export function statusLines(status: Status): string[] {
 		`review-decision ${dash(status.reviewDecision)}`,
 		status.reviewRecord === null
 			? "review-record -"
-			: `review-record ${status.reviewRecord.state} ${status.reviewRecord.head}`,
+			: `review-record ${status.reviewRecord.state} ${status.reviewRecord.head} ${status.reviewRecord.localReview ? "local-review" : "no-local-review"}`,
 		status.risk === null
 			? "risk -"
 			: status.risk.state === "malformed"

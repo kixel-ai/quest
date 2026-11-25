@@ -74,8 +74,7 @@ person.
   such as a rename inside a module, a simplification, or a comment-only
   change
 - `chore` - a dependency or pin bump at any tier, or another change as
-  small that is not high, from any author, which lands once Pullfrog
-  approves its head
+  small that is not high, from any author
 
 ## High
 

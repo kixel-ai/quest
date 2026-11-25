@@ -473,6 +473,8 @@ export type ReviewOptions = BaseOptions & {
 	signal?: AbortSignal;
 	/** The maintainer's tier for the branch and their reason, which holds until its change grows riskier. */
 	override?: Assessment;
+	/** The maintainer's reason for accepting the findings the last rounds of the head left open, running no reviewer. */
+	accept?: string;
 };
 
 export interface ReviewDependencies {
@@ -522,6 +524,8 @@ export interface Reviewed {
 	head: string;
 	base: Round["base"];
 	sized: { size: Size; from: string };
+	/** The maintainer's reason for accepting the open findings of `rounds`, which repeat the head's last rounds. */
+	accepted?: string;
 }
 
 /**
@@ -1865,10 +1869,10 @@ const SCALE =
 	"after the findings are fixed, 4 to 6 needs rework, and 0 to 3 is the wrong approach. A head with no findings can " +
 	"still score below 10, such as a working change that is harder to maintain than it needs to be.";
 
-/** What each severity means; the author runs no further round after one whose findings are all low. */
+/** What each severity means. */
 const SEVERITY =
 	"Rate each finding high when it breaks behavior, security, or data in a case users will hit, medium when it is " +
-	"wrong in a narrower case or misses a case the change should cover, and low when it would not block landing, " +
+	"wrong in a narrower case or misses a case the change should cover, and low when it is minor, " +
 	"such as naming, wording, or an unlikely edge case.";
 
 const REPORT =
@@ -2373,6 +2377,8 @@ interface Classifying {
 	env: NodeJS.ProcessEnv;
 	signal?: AbortSignal;
 	saved?: State["classified"];
+	/** Refuse rather than run a classifier when no saved classification fits, as accepting reviewed rounds does. */
+	savedOnly?: true;
 }
 
 /**
@@ -2387,6 +2393,10 @@ export async function classify(input: Classifying): Promise<{ key: string; value
 	// The paths too, since they set the tier and the offered classes along with the risk file.
 	const key = digest(JSON.stringify([change.mergeBase, change.head, text, changed]));
 	if (input.saved?.key === key) return { key, value: { ...input.saved.value, usage: [] } };
+	if (input.savedOnly)
+		throw new ReviewInputError(
+			`no round classified ${change.head} from this base; review it before accepting its findings`,
+		);
 	const set = (value: Omit<Classified, "usage">) => ({ key, value: { ...value, usage: [] } });
 	const file = text === null ? null : parseRiskFile(text);
 	if (file !== null && file.problems.length > 0)
@@ -2612,7 +2622,8 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 	const record = needed ? await deps.models?.(root, baseRef, branch) : undefined;
 	const sized = reviewSize(root, baseSha, options.sizeBranch ?? branch, options.size, recordedSize(record, options));
 	const avoided = authored(options, deps.env, recordedLatest(record, options));
-	let candidates = rankedReviewers(sized.size, options, avoided);
+	// Accepting runs no reviewer, so it picks none.
+	let candidates = options.accept === undefined ? rankedReviewers(sized.size, options, avoided) : [];
 	// A named reviewer runs without the shadow, as for a repository whose instructions name its own.
 	const auto = options.harness === undefined;
 
@@ -2656,7 +2667,7 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 
 	// The first candidate's seats are checked before the classifier spends a turn.
 	let at = 0;
-	let planned = plan(candidates[0]!);
+	if (options.accept === undefined) plan(candidates[0]!);
 
 	const head = git(root, ["rev-parse", "HEAD"]);
 	let mergeBase: string;
@@ -2695,6 +2706,7 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 		env: deps.env,
 		signal: options.signal,
 		saved: options.fresh ? undefined : saved?.classified,
+		...(options.accept !== undefined && { savedOnly: true as const }),
 	});
 
 	const shared = {
@@ -2735,6 +2747,35 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 	const settling =
 		options.responses !== undefined || sessions.some((session) => session.rounds.at(-1)!.findings.length > 0);
 	const low = overridden(before, override);
+	// Accepting runs no reviewer: it repeats each reviewer's last round of this diff, whose open findings it accepts.
+	if (options.accept !== undefined) {
+		const last = sessions
+			// The status binds the reviewed diff alone, so later edits to the base's instructions do not void it.
+			.filter((session) => session.rounds.at(-1)!.mergeBase === mergeBase && session.last.base.ref === baseRef)
+			.map((session) => session.last)
+			.filter((round) => round.head === head);
+		if (last.length === 0)
+			throw new ReviewInputError(
+				`no round reviewed ${head} against ${baseRef} from ${mergeBase}; review it before accepting its findings`,
+			);
+		if (low.tier === "high" && !last.some((round) => round.second))
+			throw new ReviewInputError(
+				`a high-risk head needs its second reviewer's round before its findings are accepted; review it again`,
+			);
+		if (last.every((round) => round.findings.length === 0))
+			throw new ReviewInputError(`no finding is open on ${head}, so there is nothing to accept`);
+		return {
+			rounds: last.map((round) => ({ ...round, usage: [], unchanged: true })),
+			tallies,
+			risk: low,
+			skipped: [],
+			branch,
+			head,
+			base,
+			sized,
+			accepted: options.accept,
+		};
+	}
 	if (!named && !settling && low.tier === "low") {
 		save(statePath, state(sessions, tallies, low));
 		return { rounds: [], tallies, risk: low, skipped: [], branch, head, base, sized };
@@ -2783,7 +2824,7 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 		return secondTo(routed);
 	};
 	let second = secondFor(candidates[0]!);
-	planned = plan(candidates[0]!, second);
+	let planned = plan(candidates[0]!, second);
 	let done: Seated[];
 	for (;;) {
 		try {
@@ -3287,19 +3328,15 @@ async function open(
 
 /**
  * The author's next step after a run's `rounds`, printed last so each step of the
- * procedure arrives when it applies: handling findings that are all low
- * severity without another round, the design checkpoint when a reviewer's
- * every third round reports others, else answering them, or nothing left to do.
+ * procedure arrives when it applies: the design checkpoint when a reviewer's
+ * every third round reports findings, else answering them, or nothing left to do.
  */
 export function nextStep(rounds: Round[]): string {
-	if (rounds.length === 0) return "next done: the head is low risk, so the online reviewer alone reviews it";
-	const findings = rounds.flatMap((round) => round.findings);
-	if (findings.length === 0) return "next done: no findings remain on this head";
-	if (findings.every((finding) => finding.severity === "low"))
-		return "next finish: fix or refute each finding, commit, rerun the checks, then add a line after the PR body's review record naming the new head's full SHA and each finding's disposition; run no further round";
+	if (rounds.length === 0) return "next done: the head is low risk, so no local reviewer ran";
+	if (rounds.every((round) => round.findings.length === 0)) return "next done: no findings remain on this head";
 	if (rounds.some((round) => round.findings.length > 0 && round.round % 3 === 0))
 		return "next checkpoint: before fixing these findings, step back: work out the best long-term approach from first principles, compare it with the current one, and let the user decide, as /quest-review describes";
-	return "next respond: fix each finding or refute it with evidence the reviewer cannot rebut, commit, rerun the checks, then run the next round with --responses, one response per finding by its number";
+	return "next respond: fix each finding or refute it with evidence the reviewer cannot rebut, commit, rerun the checks, push, then run the next round with --responses, one response per finding by its number";
 }
 
 /** Model text on one line, for a report line's free text. */
@@ -3311,7 +3348,7 @@ const flat = (text: string) => text.replace(/\s+/g, " ").trim();
  * each reviewer's round, one record per line, and its findings, numbered across the reviewers in order, each with its
  * body indented.
  */
-export function roundLines({ rounds, risk, skipped, head, base, sized }: Reviewed): string[] {
+export function roundLines({ rounds, risk, skipped, head, base, sized, accepted }: Reviewed): string[] {
 	const { classified } = risk;
 	const by = classified.by;
 	const lines = [
@@ -3333,9 +3370,11 @@ export function roundLines({ rounds, risk, skipped, head, base, sized }: Reviewe
 			`reviewer ${round.reviewer} ${round.model} ${round.effort}${round.shadow ? " shadow" : round.second ? " second" : ""}`,
 			`session ${round.session}`,
 			`round ${round.round}`,
-			...(round.unchanged
-				? [`unchanged round ${round.round} reviewed this head and found nothing; no reviewer ran`]
-				: []),
+			...(accepted !== undefined
+				? [`accepted round ${round.round} of this head, for the maintainer's reason; no reviewer ran`]
+				: round.unchanged
+					? [`unchanged round ${round.round} reviewed this head and found nothing; no reviewer ran`]
+					: []),
 			...round.usage.map((u) => `usage ${u.turn} input ${u.input} cached ${u.cached} output ${u.output}`),
 			`score ${round.score} ${flat(round.rationale)}`,
 			...(round.raised ? [`raised ${round.raised.tier} ${flat(round.raised.reason)}`] : []),

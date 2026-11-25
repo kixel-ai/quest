@@ -5,6 +5,7 @@ import { recorded } from "./models-record";
 import { type ClaimDependencies, upstream } from "./claims";
 import { pullsFrom } from "../github/claims";
 import { object, repositoryPath } from "../github/client";
+import { REVIEW_CONTEXT, attestation, reviewTarget } from "../github/review-trust";
 import { git } from "./git";
 import { contains } from "./land";
 import { requireRemote } from "./github";
@@ -57,7 +58,7 @@ export interface Counts {
 	findings: Tally["findings"];
 	fixed: number;
 	refuted: number;
-	/** Open findings of a merged PR's last all-low round, which the review rule fixes or refutes before merge. */
+	/** Findings the maintainer accepted, or open ones of a merged PR's last all-low round, which the review rule once settled before merge. */
 	settled: number;
 	open: number;
 }
@@ -96,10 +97,8 @@ function classifiedBy({ by }: Risk["classified"]): string {
  * reviewer the run skipped since it could not run, then every tally on the branch, each round's reviewer's beside its
  * round, and a reviewer the run left out on its own.
  */
-export function reviewRecord({ rounds, tallies, risk, skipped, head, base }: Reviewed): string {
-	// A reviewer the run left out may still hold open findings, which keep the head from passing too.
-	const clean =
-		rounds.every((round) => round.findings.length === 0) && tallies.every((tally) => counted(tally).open === 0);
+export function reviewRecord({ rounds, tallies, risk, skipped, head, base, accepted }: Reviewed): string {
+	const clean = passed({ rounds, tallies, accepted });
 	const lines = [
 		REVIEW_MARK,
 		"",
@@ -110,7 +109,8 @@ export function reviewRecord({ rounds, tallies, risk, skipped, head, base }: Rev
 		...(risk.overridden ? [`- Overridden: from ${risk.overridden} by the maintainer`] : []),
 		`- Classified: ${risk.classified.tier} by ${classifiedBy(risk.classified)}`,
 		...(risk.classified.class === null ? [] : [`- Class: \`${risk.classified.class}\``]),
-		...(rounds.length === 0 ? [`- Local review: none, since a low-risk head needs only the online reviewer`] : []),
+		...(rounds.length === 0 ? [`- Local review: none, since the head is low risk`] : []),
+		...(accepted === undefined ? [] : [`- Accepted by the maintainer: ${code(accepted)}`]),
 		// Outside the Reviewer blocks, which `parseReview` reads as reviewers that ran.
 		...skipped.map(
 			(skip) => `- Skipped: ${HARNESSES[skip.harness]}, ${skip.model}, ${skip.effort} effort: ${skip.reason}`,
@@ -128,7 +128,12 @@ export function reviewRecord({ rounds, tallies, risk, skipped, head, base }: Rev
 		if (tally === undefined) throw new Error(`no tally for ${round.reviewer}'s round`);
 		lines.push(`- Rounds: ${tally.rounds}; ${findingsText(counted(tally))}`);
 		if (round.findings.length === 0) lines.push("- Findings: none");
-		else lines.push("- Findings, open until the next round settles them:");
+		else
+			lines.push(
+				accepted === undefined
+					? "- Findings, open until the next round settles them:"
+					: "- Findings, accepted by the maintainer:",
+			);
 		for (const finding of round.findings)
 			lines.push(`  - ${capitalized(finding.severity)}, ${code(located(finding))}: ${code(finding.title)}`);
 		const settled = round.earlier?.findings ?? [];
@@ -208,6 +213,8 @@ export function parseReview(body: string): ReviewSummary[] {
 	const all = body.slice(section.start, section.end);
 	const at = all.indexOf(REVIEW_MARK);
 	if (at < 0) return [];
+	// Findings the maintainer accepted are settled, not open.
+	const accepted = /^- Accepted by the maintainer: /m.test(all);
 	// Each reviewer's block starts at its Reviewer line.
 	const blocks = all
 		.slice(at)
@@ -220,7 +227,9 @@ export function parseReview(body: string): ReviewSummary[] {
 			return found;
 		};
 		const reviewer = match(/^- Reviewer: (.+?), (\S+), (\S+) effort(?:(, shadow)|(, second))?\r?$/m);
-		const tally = parseCounts(text);
+		const counts = parseCounts(text);
+		const tally =
+			accepted && counts !== null ? { ...counts, settled: counts.settled + counts.open, open: 0 } : counts;
 		// A reviewer the latest run left out has its tally, and its session with no round once tallies name it.
 		const session =
 			tally !== null && !/^- Session: /m.test(text)
@@ -232,8 +241,9 @@ export function parseReview(body: string): ReviewSummary[] {
 					);
 		const score = /^- Score: (\d+)\/10,/m.exec(text);
 		const open = { high: 0, medium: 0, low: 0 };
-		for (const [, severity] of text.matchAll(/^  - (High|Medium|Low), /gm))
-			open[severity!.toLowerCase() as keyof typeof open]++;
+		if (!accepted)
+			for (const [, severity] of text.matchAll(/^  - (High|Medium|Low), /gm))
+				open[severity!.toLowerCase() as keyof typeof open]++;
 		return {
 			harness: reviewer[1]!,
 			model: reviewer[2]!,
@@ -303,8 +313,19 @@ export function withReview(body: string, record: string): string {
 	return `${body.slice(0, start)}\n\n${record}\n${end < body.length ? "\n" : ""}${body.slice(end)}`;
 }
 
-/** Where a round's record went: the PR whose body holds it, or why no body changed. */
-export type Recorded = { url: string } | { skipped: string };
+/** Whether a run passed its head: no finding open, including a reviewer's the run left out, or the maintainer accepted them. */
+const passed = ({ rounds, tallies, accepted }: Pick<Reviewed, "rounds" | "tallies" | "accepted">) =>
+	accepted !== undefined ||
+	(rounds.every((round) => round.findings.length === 0) && tallies.every((tally) => counted(tally).open === 0));
+
+/**
+ * Where a round's record went: the PR whose body holds it, and why its status was not set, skipped for a token that
+ * cannot push, whose status would count for nothing, else refused; or why no body changed.
+ */
+export type Recorded = { url: string; status?: Unattested } | { skipped: string };
+
+/** Why `quest review` set no status on the head it recorded. */
+type Unattested = { skipped: string } | { refused: string };
 
 /**
  * The open PR from `branch` into the base `<remote>/<branch>` names, or why there is none: the one from the repository
@@ -316,7 +337,21 @@ async function openPull(
 	baseRef: string,
 	branch: string,
 	deps: ClaimDependencies,
-): Promise<{ url: string; body: string; edit(body: string): Promise<void> } | { skipped: string }> {
+): Promise<
+	| {
+			url: string;
+			body: string;
+			edit(body: string): Promise<void>;
+			/** Set the `quest review` status on `head`, for its diff from the merge base `from`, or say why not. */
+			attest(status: {
+				head: string;
+				from: string;
+				state: "success" | "failure";
+				description: string;
+			}): Promise<Unattested | null>;
+	  }
+	| { skipped: string }
+> {
 	// The checkout's top level: a subdirectory would look for the quest tree below it.
 	const top = git(root, ["rev-parse", "--show-toplevel"]);
 	const { remote, branch: base } = parseBase(top, baseRef);
@@ -354,6 +389,29 @@ async function openPull(
 		url: pull.url,
 		body,
 		edit: (body) => hosting.writes().edit({ ...repository, number: pull.number }, { title: null, body }),
+		// The status goes on the person's own token, which `quest status` counts only when it can push. Another forge
+		// has no commit statuses here, and decides on its own which record counts.
+		attest: async ({ head: sha, from, state, description }) => {
+			if (up.github === null) return null;
+			const { client } = up.github;
+			const response = await client.request(`${repositoryPath(repository)}/statuses/${sha}`, {
+				body: { state, context: REVIEW_CONTEXT, description, target_url: reviewTarget(repository, from, sha) },
+				allow: [403, 404, 422],
+				// The latest status per context wins, so setting it again leaves the same state.
+				repeat: true,
+			});
+			if (response.ok) return null;
+			const message = String(object(await response.json()).message);
+			if (response.status === 422)
+				return { refused: `GitHub refused the status on ${sha}: ${message}; push it, then review it again` };
+			const name = `${repository.owner}/${repository.repo}`;
+			const permissions = object(await (await client.request(repositoryPath(repository))).json()).permissions;
+			return permissions != null && object(permissions).push === true
+				? {
+						refused: `GitHub refused the status (HTTP ${response.status}: ${message}); the token needs write access to ${name}'s commit statuses`,
+					}
+				: { skipped: `you cannot push to ${name}, so only a maintainer's round counts` };
+		},
 	};
 }
 
@@ -369,11 +427,37 @@ export async function pullModels(
 	return recorded(pull.body);
 }
 
-/** Record a run in the `## Review` section of its branch's open PR. The edit is the token's user's, which `/quest-merge` counts only when that user wrote the PR. */
+/**
+ * Attest a run with a `quest review` status on its head, which `quest status` counts only when the token's user can
+ * push, and record it in the `## Review` section of its branch's open PR.
+ */
 export async function recordRounds(root: string, reviewed: Reviewed, deps: ClaimDependencies): Promise<Recorded> {
 	const pull = await openPull(root, reviewed.base.ref, reviewed.branch, deps);
 	if ("skipped" in pull) return pull;
 	const next = withReview(pull.body, reviewRecord(reviewed));
-	if (next !== pull.body) await pull.edit(next);
-	return { url: pull.url };
+	const ok = passed(reviewed);
+	const outcome = !ok
+		? "findings open"
+		: reviewed.accepted !== undefined
+			? "findings accepted"
+			: reviewed.rounds.length === 0
+				? "passed with no local reviewer"
+				: "passed";
+	let status: Awaited<ReturnType<typeof pull.attest>>;
+	try {
+		status = await pull.attest({
+			head: reviewed.head,
+			from: git(root, ["merge-base", reviewed.base.sha, reviewed.head]),
+			state: ok ? "success" : "failure",
+			description: attestation(reviewed.risk.tier, reviewed.risk.classified.class, outcome),
+		});
+	} catch (error) {
+		// A record of open findings names no full SHA, so writing it still ends any earlier pass of this head.
+		if (!ok && next !== pull.body) await pull.edit(next);
+		throw error;
+	}
+	// The status goes first, so a body edit that fails cannot leave an earlier pass standing for a failed head; an
+	// acceptance no status records is written nowhere.
+	if (next !== pull.body && !(status !== null && reviewed.accepted !== undefined)) await pull.edit(next);
+	return status === null ? { url: pull.url } : { url: pull.url, status };
 }

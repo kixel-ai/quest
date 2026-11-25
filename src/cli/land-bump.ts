@@ -249,7 +249,7 @@ export function contained(checkout: string): void {
 	}
 }
 
-/** The bump PR's body, with a `## Waiting` item for findings, and the recorded review skip. */
+/** The bump PR's body, with a `## Waiting` item for findings. */
 export function bumpBody(options: {
 	source: Repository;
 	input: string;
@@ -286,9 +286,7 @@ export function bumpBody(options: {
 		);
 	lines.push(
 		"",
-		"## Review",
-		"",
-		"Skipped: pin bump, no repository code changed; CI's quest check is the gate.",
+		"The watcher lands it with no review once CI's quest check passes, since no repository code changed; a maintainer's fix on this branch needs a `quest review` round.",
 		"",
 		"Opened by `quest land watch`, which replaces this branch with each newer bump.",
 	);

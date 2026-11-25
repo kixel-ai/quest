@@ -1,10 +1,14 @@
 // A fake GitHub for `quest status`: recorded GraphQL answers and the REST reads around them.
 import { expect } from "vitest";
 
+import { recordedRisk } from "../src/core";
 import { type GitHubReadDependencies } from "../src/github/client";
+import { attestation, reviewTarget } from "../src/github/review-trust";
 
 export const A = "a".repeat(40);
 export const B = "b".repeat(40);
+/** Where every head branched from `main`. */
+export const MERGE_BASE = "e".repeat(40);
 export const pr = { owner: "example", repo: "project", number: 1 };
 export const URL_ = "https://github.com/example/project/pull/1";
 
@@ -127,6 +131,15 @@ export function setup(
 		runs?: Node[];
 		/** The open PRs as the duplicate read lists them, and each `<head>:<path>` blob's text. */
 		open?: { pulls: Node[]; blobs?: Record<string, string>; files?: Record<number, Node[]> };
+		/**
+		 * The latest `quest review` status on each commit, or null for a commit GitHub does not have; by default, the
+		 * maintainer's passing status attesting the body's risk on the head alone.
+		 */
+		statuses?: Record<string, Node | null>;
+		/** The status GitHub refuses every merge-base compare with, instead of naming `MERGE_BASE`. */
+		mergeBase?: number;
+		/** Each login's permission on the repository, or the status GitHub refuses it with; by default `maintainer` is an admin. */
+		permissions?: Record<string, string | number>;
 	} = {},
 ) {
 	const queries: Record<string, unknown>[] = [];
@@ -137,6 +150,8 @@ export function setup(
 	const eventPages = [...(options.eventPages ?? [])];
 	const activityPages = [...(options.activity ?? [])];
 	const activityRequests: string[] = [];
+	const statusQueries: string[] = [];
+	const permissionRequests: string[] = [];
 	const deps: GitHubReadDependencies = {
 		readToken: "test-token",
 		quota: "wait",
@@ -162,6 +177,16 @@ export function setup(
 					: Response.json({ protection: { enabled: false } });
 			if (path.pathname === "/repos/example/project/rules/branches/main")
 				return Response.json(options.rules ?? []);
+			const permission = /^\/repos\/example\/project\/collaborators\/([^/]+)\/permission$/.exec(path.pathname);
+			if (permission) {
+				const login = decodeURIComponent(permission[1]!);
+				permissionRequests.push(login);
+				const value = (options.permissions ?? { maintainer: "admin" })[login];
+				if (value === undefined) return Response.json({ message: "Not Found" }, { status: 404 });
+				return typeof value === "number"
+					? Response.json({ message: "Must have push access" }, { status: value })
+					: Response.json({ permission: value, user: { login } });
+			}
 			const changed = /^\/repos\/example\/project\/pulls\/(\d+)\/files$/.exec(path.pathname);
 			if (changed) return Response.json(options.open?.files?.[Number(changed[1])] ?? []);
 			if (path.pathname === "/repos/example/project/actions/runs") {
@@ -169,8 +194,11 @@ export function setup(
 				return Response.json({ total_count: options.runs.length, workflow_runs: options.runs });
 			}
 			const compare = /^\/repos\/example\/project\/compare\/main\.\.\.([0-9a-f]{40})$/.exec(path.pathname);
+			if (compare && new Headers(init?.headers).get("Accept") !== "application/vnd.github.diff")
+				return options.mergeBase === undefined
+					? Response.json({ merge_base_commit: { sha: MERGE_BASE } })
+					: Response.json({ message: "refused" }, { status: options.mergeBase });
 			if (compare) {
-				expect(new Headers(init?.headers).get("Accept")).toBe("application/vnd.github.diff");
 				const diff = options.diffs?.[compare[1]!];
 				if (diff === undefined) throw new Error("unexpected compare request");
 				return typeof diff === "number"
@@ -221,6 +249,28 @@ export function setup(
 					},
 				});
 			}
+			if (request.query.includes("query ReviewStatus(")) {
+				const sha = String(request.variables.sha);
+				statusQueries.push(sha);
+				// By default the maintainer's passing status on the head attests whatever the body's record says.
+				const pull = last?.data.repository.pullRequest;
+				const body = String(pull?.body ?? "");
+				const recorded = recordedRisk(body);
+				const status =
+					options.statuses !== undefined
+						? options.statuses[sha]
+						: sha !== pull?.headRefOid
+							? undefined
+							: reviewStatus(
+									"SUCCESS",
+									recorded === null || "malformed" in recorded
+										? "Risk low: passed"
+										: attestation(recorded.tier, recorded.class, "passed"),
+									sha,
+								);
+				const object = status === null ? null : { status: status === undefined ? null : { context: status } };
+				return Response.json({ data: { repository: { object } } });
+			}
 			if (request.query.includes("query HoldOwnership(")) {
 				holdQueries.push(request.variables);
 				if (!last) throw new Error("ownership read before PR state");
@@ -246,5 +296,14 @@ export function setup(
 			return Response.json(body);
 		},
 	};
-	return { deps, queries, texts, holdQueries, eventRequests, activityRequests };
+	return { deps, queries, texts, holdQueries, eventRequests, activityRequests, statusQueries, permissionRequests };
+}
+
+/**
+ * A `quest review` status on `sha` as GitHub's GraphQL `StatusContext` gives it, its target the diff from
+ * `MERGE_BASE`, set by `login` of GraphQL type `kind`.
+ */
+export function reviewStatus(state: string, description: string, sha: string, login = "maintainer", kind = "User") {
+	const targetUrl = reviewTarget({ owner: "example", repo: "project" }, MERGE_BASE, sha);
+	return { state, description, targetUrl, creator: { __typename: kind, login } };
 }
