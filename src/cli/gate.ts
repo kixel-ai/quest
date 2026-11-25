@@ -159,8 +159,19 @@ function cgroupStat(group: string, key: string): number {
 	}
 }
 
-/** Count reclaimable host cache and the headroom of every enclosing memory cgroup. */
-export function linuxMemory(proc = "/proc", cgroups = "/sys/fs/cgroup"): { total: number; available: number } {
+/** The user manager's slice that gate scopes run in (see `background`). */
+const BACKGROUND_SLICE = "background.slice";
+
+/**
+ * Count reclaimable host cache and the headroom of every enclosing memory cgroup, and of the
+ * slice `uid`'s gate scopes run in, so a slice at its cap reads as full however much the host
+ * and the caller's own cgroups have free.
+ */
+export function linuxMemory(
+	proc = "/proc",
+	cgroups = "/sys/fs/cgroup",
+	uid = process.getuid?.(),
+): { total: number; available: number } {
 	const meminfo = readFileSync(join(proc, "meminfo"), "utf8");
 	const bytes = (key: string) => {
 		const value = meminfo.match(new RegExp(`^${key}:\\s+(\\d+) kB$`, "m"))?.[1];
@@ -169,12 +180,8 @@ export function linuxMemory(proc = "/proc", cgroups = "/sys/fs/cgroup"): { total
 	};
 	let total = bytes("MemTotal");
 	let available = bytes("MemAvailable");
-	for (const line of readFileSync(join(proc, "self/cgroup"), "utf8").trim().split("\n")) {
-		const [, controllers, path] = line.match(/^\d+:([^:]*):(.*)$/) ?? [];
-		if (controllers === undefined || path === undefined) throw new Error("gate cannot read Linux memory cgroups");
-		const unified = controllers === "";
-		if (!unified && !controllers?.split(",").includes("memory")) continue;
-		const root = resolve(cgroups, unified ? "" : "memory");
+	/** Bound both by the limits of the cgroup at `path` under hierarchy `root` and of each ancestor. */
+	const bound = (root: string, path: string, unified: boolean) => {
 		const usage = unified ? "memory.current" : "memory.usage_in_bytes";
 		// Usage includes inactive file cache, which the kernel reclaims without
 		// swapping; subtract it, as container runtimes do for their working set.
@@ -189,7 +196,7 @@ export function linuxMemory(proc = "/proc", cgroups = "/sys/fs/cgroup"): { total
 		const start = resolve(root, `.${path}`);
 		// A cgroup namespace shows a cgroup outside it as `/..`, which is not mounted.
 		const inside = relative(root, start);
-		if (inside === ".." || inside.startsWith(`..${sep}`)) continue;
+		if (inside === ".." || inside.startsWith(`..${sep}`)) return;
 		for (let group = start; ; group = dirname(group)) {
 			for (const file of limits) {
 				try {
@@ -208,7 +215,20 @@ export function linuxMemory(proc = "/proc", cgroups = "/sys/fs/cgroup"): { total
 			}
 			if (group === root || group === dirname(group)) break;
 		}
+	};
+	for (const line of readFileSync(join(proc, "self/cgroup"), "utf8").trim().split("\n")) {
+		const [, controllers, path] = line.match(/^\d+:([^:]*):(.*)$/) ?? [];
+		if (controllers === undefined || path === undefined) throw new Error("gate cannot read Linux memory cgroups");
+		const unified = controllers === "";
+		if (!unified && !controllers?.split(",").includes("memory")) continue;
+		bound(resolve(cgroups, unified ? "" : "memory"), path, unified);
 	}
+	// The slice need not enclose the caller, as for a login session outside the user manager.
+	// Only the unified hierarchy has systemd's scopes, and the slice does not exist until one
+	// runs in it, when nothing counts against its cap.
+	const slice = `/user.slice/user-${uid}.slice/user@${uid}.service/${BACKGROUND_SLICE}`;
+	if (uid !== undefined && existsSync(join(cgroups, "cgroup.controllers")) && existsSync(join(cgroups, slice)))
+		bound(resolve(cgroups), slice, true);
 	return { total, available };
 }
 
@@ -814,7 +834,7 @@ function background(unit: string, enclosing: string | null): Measuring {
 			env,
 			cancel,
 			within: enclosing,
-			slice: "background.slice",
+			slice: BACKGROUND_SLICE,
 		});
 		used = cpu === null ? null : Math.round(cpu / 1000);
 		return status;

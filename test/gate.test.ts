@@ -753,6 +753,37 @@ test.each(["v1", "v2"])("Linux memory counts reclaimable cache and bounds %s con
 	expect(linuxMemory(proc, cgroups).available).toBe(0);
 });
 
+test("Linux memory counts the background slice's headroom wherever the caller runs", () => {
+	const proc = tempDir();
+	const cgroups = tempDir();
+	mkdirSync(join(proc, "self"));
+	writeFileSync(join(proc, "meminfo"), `MemTotal: ${(64 * GiB) / 1024} kB\nMemAvailable: ${(24 * GiB) / 1024} kB\n`);
+	// A login session, outside the user manager and so outside the slice.
+	writeFileSync(join(proc, "self/cgroup"), "0::/user.slice/user-1000.slice/session-3.scope\n");
+	writeFileSync(join(cgroups, "cgroup.controllers"), "memory\n");
+	const slice = join(cgroups, "user.slice/user-1000.slice/user@1000.service/background.slice");
+	mkdirSync(slice, { recursive: true });
+	writeFileSync(join(slice, "memory.max"), "max");
+	writeFileSync(join(slice, "memory.high"), "max");
+	writeFileSync(join(slice, "memory.current"), String(30 * GiB));
+	// An uncapped slice leaves the host's answer.
+	expect(linuxMemory(proc, cgroups, 1000)).toEqual({ total: 64 * GiB, available: 24 * GiB });
+	// One at its cap queues the next command while the host has room.
+	writeFileSync(join(slice, "memory.high"), String(32 * GiB));
+	expect(linuxMemory(proc, cgroups, 1000)).toEqual({ total: 32 * GiB, available: 2 * GiB });
+	// Its inactive file cache is reclaimable, so it counts as free.
+	writeFileSync(join(slice, "memory.stat"), `inactive_file ${10 * GiB}\n`);
+	expect(linuxMemory(proc, cgroups, 1000).available).toBe(12 * GiB);
+	writeFileSync(join(slice, "memory.stat"), "inactive_file 0\n");
+	writeFileSync(join(slice, "memory.max"), String(30 * GiB));
+	expect(linuxMemory(proc, cgroups, 1000).available).toBe(0);
+	// Another user's slice, or none yet, is not this caller's.
+	expect(linuxMemory(proc, cgroups, 1001)).toEqual({ total: 64 * GiB, available: 24 * GiB });
+	// The slice's own memory.high bounds a gate that runs inside the user manager too.
+	writeFileSync(join(proc, "self/cgroup"), "0::/user.slice/user-1000.slice/user@1000.service/background.slice\n");
+	expect(linuxMemory(proc, cgroups, 1000).available).toBe(0);
+});
+
 test("Linux memory reads the container cgroup mounted as the root", () => {
 	const proc = tempDir();
 	const cgroups = tempDir();
