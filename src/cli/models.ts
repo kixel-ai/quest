@@ -24,9 +24,8 @@ const sonnet = (effort: string): Model => ({ harness: "claude", model: "claude-s
 /**
  * Each size's writers, ranked: a spawn starts the quest on the first that can
  * run, falling through only while nothing is written, since the model that
- * writes a PR runs all its iterates. Claude comes first, then Codex's Sol, then Gemini's Neon at the
- * same effort, so a quest starts on the next vendor instead of waiting for Claude's reset;
- * a review of what Sol or Neon wrote still crosses to another model. XS runs Sonnet rather
+ * writes a PR runs all its iterates. Claude comes first, then Codex's Sol, then Gemini's Neon, each at
+ * the effort the size sets, so a quest starts on the next vendor instead of waiting for Claude's reset. XS runs Sonnet rather
  * than the cheaper Haiku, whose surcharge past 100k input tokens leads users
  * to cap its compaction window there, barely above an agent's fixed load of
  * prompt, context, and skill. No size runs Opus at low, which misses too much.
@@ -44,12 +43,12 @@ export const WRITERS: Record<Size, readonly Model[]> = {
 /**
  * The land fixer's harnesses and models, ranked: the first that can run fixes, past any whose CLI is missing,
  * whose wrapper supplied no credentials, or that is logged out or at its usage limit. Its effort is the
- * daemon's `--fixer-effort`, the same for each.
+ * daemon's `--fixer-effort`, the same for each. Gemini is not here: `agy` runs only on a login, which the
+ * fixer's container, where the PRs' own code runs, must not hold.
  */
-export const FIXERS: readonly Pick<Model, "harness" | "model">[] = [
+export const FIXERS: readonly (Pick<Model, "model"> & { harness: "claude" | "codex" })[] = [
 	{ harness: "claude", model: "claude-opus-5-5" },
 	{ harness: "codex", model: "gpt-6.2-sol" },
-	{ harness: "agy", model: "gemini-4-neon" },
 ];
 
 /**

@@ -1,25 +1,13 @@
 // Untrusted agent side. The host wrapper supplies only a model endpoint and its client key; the agent holds no
 // GitHub credential, and the daemon posts the comments it writes into its result.
 import { spawn, spawnSync } from "node:child_process";
-import {
-	constants,
-	closeSync,
-	existsSync,
-	fstatSync,
-	mkdtempSync,
-	openSync,
-	readFileSync,
-	rmSync,
-	writeFileSync,
-} from "node:fs";
-import { tmpdir } from "node:os";
+import { constants, closeSync, existsSync, fstatSync, openSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import { StringDecoder } from "node:string_decoder";
 import prompt from "../../assets/land-fix.md";
-import { type HarnessName, LOGINS } from "./agent";
+import { LINE_LIMIT, boundedLines, readerFor } from "./agent";
 import { discoveryEnv } from "./git";
-import { AGY_LIMIT, LIMIT } from "./limit";
-import { FIXERS, type Model } from "./models";
+import { FIXERS } from "./models";
 import { programEnvironment, requireProgram } from "./program";
 
 export class FixerAgentError extends Error {
@@ -291,16 +279,17 @@ class Unavailable extends Error {}
 /** How much of an agent's output is kept to tell a spent limit or a rejected login from another failure. */
 const TAIL = 64 * 1024;
 
+/** The agent CLIs the fixer runs. */
+type Harness = (typeof FIXERS)[number]["harness"];
+
 /** One run of one agent: its program, arguments, environment, and the text on its stdin. */
 interface Attempt {
-	harness: HarnessName;
+	harness: Harness;
 	program: string;
 	argv: string[];
 	env: NodeJS.ProcessEnv;
 	/** The prompt and data as the CLI reads them on stdin. */
 	stdin: (data: string) => string;
-	/** The directory it runs in. */
-	cwd: string;
 	/** The model its command line names, if any. */
 	named?: string;
 }
@@ -311,10 +300,9 @@ interface Attempt {
  * the harness needs, or its CLI is not on PATH.
  */
 function attempt(
-	harness: HarnessName,
+	harness: Harness,
 	model: string | undefined,
 	effort: string,
-	root: string,
 	agent: string | undefined,
 	args: string[] | undefined,
 ): Attempt {
@@ -344,7 +332,6 @@ function attempt(
 		return {
 			harness,
 			program,
-			cwd: root,
 			named: model,
 			stdin: args ? together : (data) => data,
 			env: {
@@ -385,106 +372,78 @@ function attempt(
 			],
 		};
 	}
-	if (harness === "codex") {
-		if (!args && (!process.env.OPENAI_BASE_URL || !process.env.OPENAI_API_KEY))
-			throw new Unavailable(
-				"fix needs OPENAI_BASE_URL and OPENAI_API_KEY from the container wrapper to run codex",
-			);
-		return {
-			harness,
-			program: find(agent ?? "codex"),
-			cwd: root,
-			named: model,
-			stdin: together,
-			env: {
-				...base,
-				OPENAI_BASE_URL: process.env.OPENAI_BASE_URL,
-				OPENAI_API_KEY: process.env.OPENAI_API_KEY,
-				CODEX_API_KEY: process.env.OPENAI_API_KEY,
-			},
-			argv: args ?? [
-				"exec",
-				"--ephemeral",
-				"--ignore-user-config",
-				"--ignore-rules",
-				"--dangerously-bypass-approvals-and-sandbox",
-				"-c",
-				"project_doc_max_bytes=0",
-				"-c",
-				'model_provider="quest-fixer"',
-				"-c",
-				'model_providers.quest-fixer.name="Host model proxy"',
-				"-c",
-				`model_providers.quest-fixer.base_url=${JSON.stringify(process.env.OPENAI_BASE_URL)}`,
-				"-c",
-				'model_providers.quest-fixer.env_key="OPENAI_API_KEY"',
-				"-c",
-				'model_providers.quest-fixer.wire_api="responses"',
-				// Without this, Codex runs the proxy's model with no reasoning at all ("reasoning effort: none").
-				"-c",
-				`model_reasoning_effort=${JSON.stringify(effort)}`,
-				...(model ? ["--model", model] : []),
-				"-",
-			],
-		};
-	}
-	// agy runs on its own login, which the wrapper may expose in the container's HOME. It loads the agent
-	// configuration of the directory it runs in and each above it, so it runs in an empty one beside the checkout,
-	// which its prompt names, rather than in the PRs' code.
+	if (!args && (!process.env.OPENAI_BASE_URL || !process.env.OPENAI_API_KEY))
+		throw new Unavailable("fix needs OPENAI_BASE_URL and OPENAI_API_KEY from the container wrapper to run codex");
 	return {
 		harness,
-		program: find(agent ?? "agy"),
-		cwd: mkdtempSync(join(tmpdir(), "quest-fixer-")),
+		program: find(agent ?? "codex"),
 		named: model,
-		stdin: (data) =>
-			`${JSON.stringify({
-				event: "user",
-				message: {
-					role: "user",
-					content: `${together(data)}\nThe repository root is ${root}: run every command there, and write ${FIX_RESULT} there.\n`,
-				},
-			})}\n`,
-		env: base,
+		stdin: together,
+		env: {
+			...base,
+			OPENAI_BASE_URL: process.env.OPENAI_BASE_URL,
+			OPENAI_API_KEY: process.env.OPENAI_API_KEY,
+			CODEX_API_KEY: process.env.OPENAI_API_KEY,
+		},
 		argv: args ?? [
-			"-p",
-			"",
-			"--input-format",
-			"stream-json",
-			"--output-format",
-			"stream-json",
-			"--dangerously-skip-permissions",
-			"--effort",
-			effort,
+			"exec",
+			// Its events name a spent limit or a rejected login apart from what the agent's commands print.
+			"--json",
+			"--ephemeral",
+			"--ignore-user-config",
+			"--ignore-rules",
+			"--dangerously-bypass-approvals-and-sandbox",
+			"-c",
+			"project_doc_max_bytes=0",
+			"-c",
+			'model_provider="quest-fixer"',
+			"-c",
+			'model_providers.quest-fixer.name="Host model proxy"',
+			"-c",
+			`model_providers.quest-fixer.base_url=${JSON.stringify(process.env.OPENAI_BASE_URL)}`,
+			"-c",
+			'model_providers.quest-fixer.env_key="OPENAI_API_KEY"',
+			"-c",
+			'model_providers.quest-fixer.wire_api="responses"',
+			// Without this, Codex runs the proxy's model with no reasoning at all ("reasoning effort: none").
+			"-c",
+			`model_reasoning_effort=${JSON.stringify(effort)}`,
 			...(model ? ["--model", model] : []),
+			"-",
 		],
 	};
 }
 
-/** Run `agent` to its end, failing `Unavailable` when its output shows a spent limit or a rejected login. */
-async function run(agent: Attempt, data: string): Promise<Init> {
+/**
+ * Run `agent` to its end in `root`, failing `Unavailable` when its CLI's own result or stderr shows a spent usage
+ * limit or a rejected login. Its commands' output never counts: only the events the CLI reports its own failure in.
+ */
+async function run(agent: Attempt, data: string, root: string): Promise<Init> {
 	const init = new Init();
-	let output = "";
+	const reader = readerFor(agent.harness);
+	let stderr = "";
+	const lines = boundedLines(LINE_LIMIT, (line) => reader.line(line));
 	try {
 		await new Promise<void>((done, reject) => {
 			// Relay the agent's output through pipes of its own rather than letting it inherit ours. Once Bun writes
 			// to a pipe it marks that pipe non-blocking, and an inheriting child shares the flag: an agent then fails
 			// with EAGAIN as soon as one command's output outruns the host's reader.
 			const child = spawn(agent.program, agent.argv, {
-				cwd: agent.cwd,
+				cwd: root,
 				env: agent.env,
 				stdio: ["pipe", "pipe", "pipe"],
 			});
-			const keep = (chunk: Buffer) => {
-				output = (output + chunk.toString("utf8")).slice(-TAIL);
-			};
 			child.stdout.pipe(process.stdout, { end: false });
 			child.stderr.pipe(process.stderr, { end: false });
-			child.stderr.on("data", keep);
+			child.stderr.on("data", (chunk: Buffer) => {
+				stderr = (stderr + chunk.toString("utf8")).slice(-TAIL);
+			});
 			let refused: Error | undefined;
-			child.stdout.on("data", (chunk: Buffer) => {
-				keep(chunk);
+			child.stdout.setEncoding("utf8");
+			child.stdout.on("data", (chunk: string) => {
+				lines.data(chunk);
 				if (agent.harness !== "claude") return;
-				init.read(chunk);
+				init.read(Buffer.from(chunk));
 				// Fail loud rather than let a renamed or re-enabled built-in feed the agent the checkout's instructions.
 				if (!refused && init.plugins.some((plugin) => /agents-md/i.test(plugin))) {
 					refused = new Error("fixer agent loaded a plugin that injects the checkout's AGENTS.md");
@@ -500,14 +459,26 @@ async function run(agent: Attempt, data: string): Promise<Init> {
 		});
 	} catch (error) {
 		if (!(error instanceof FixerAgentError)) throw error;
-		const login = LOGINS[agent.harness].unauthorized.test(output);
-		if (login || LIMIT.test(output) || (agent.harness === "agy" && AGY_LIMIT.test(output)))
+		lines.end();
+		const result = reader.result(stderr);
+		if (result.unauthorized || result.limited)
 			throw new Unavailable(
-				`${agent.harness} ${login ? "is logged out or its login was rejected" : "is at its usage limit"}`,
+				`${agent.harness} ${result.unauthorized ? "is logged out or its login was rejected" : "is at its usage limit"}`,
 			);
 		throw error;
 	}
 	return init;
+}
+
+/** What the fixers share: the checkout's `HEAD`, tracked changes, and each PR branch, which a fixer that ran may have moved. */
+function snapshot(root: string, refs: string[]): string {
+	const git = (...args: string[]) =>
+		spawnSync("git", args, { cwd: root, encoding: "utf8", env: discoveryEnv() }).stdout;
+	return [
+		git("rev-parse", "HEAD"),
+		git("status", "--porcelain", "--untracked-files=no"),
+		...refs.map((ref) => git("rev-parse", ref)),
+	].join("\n");
 }
 
 /**
@@ -547,26 +518,36 @@ export async function fix(
 	});
 	const data = `Failure log: ${JSON.stringify(log)}\nPRs:\n${prs.join("\n")}\n${flaky.length ? `Known flaky tests: ${JSON.stringify(flaky)}\n` : ""}`;
 	const custom = agent !== undefined || args !== undefined;
-	const entries: Pick<Model, "harness" | "model">[] = custom
+	const entries: { harness: Harness; model: string }[] = custom
 		? [{ harness: "claude", model: model as string }]
 		: FIXERS.map((entry, index) => (index === 0 && model ? { ...entry, model } : entry));
+	const before = snapshot(
+		root,
+		numbers.map((number) => `refs/heads/pr-${number}`),
+	);
 	const skipped: string[] = [];
 	for (const entry of entries) {
 		rmSync(join(root, FIX_RESULT), { force: true });
 		let init: Init;
-		let ran: Attempt | undefined;
+		let ran: Attempt;
 		try {
-			ran = attempt(entry.harness, entry.model, effort, root, agent, args);
-			init = await run(ran, data);
+			ran = attempt(entry.harness, entry.model, effort, agent, args);
+			init = await run(ran, data, root);
 		} catch (error) {
 			if (!(error instanceof Unavailable)) throw error;
+			// A fixer that changed the checkout before it stopped leaves work the next would build on without knowing.
+			const changed =
+				snapshot(
+					root,
+					numbers.map((number) => `refs/heads/pr-${number}`),
+				) !== before;
+			if (changed)
+				throw new Error(`${error.message} after changing the checkout, so no other fixer ran on its work`);
 			skipped.push(error.message);
 			continue;
-		} finally {
-			if (ran !== undefined && ran.cwd !== root) rmSync(ran.cwd, { recursive: true, force: true });
 		}
 		const results = parseFixResult(readFixResult(root), numbers, flaky);
-		const { argv, program } = ran as Attempt;
+		const { argv, program } = ran;
 		const index = argv.findIndex((arg) => arg === "-m" || arg === "--model");
 		const named = index >= 0 ? argv[index + 1] : argv.find((arg) => arg.startsWith("--model="))?.slice(8);
 		const identity = {

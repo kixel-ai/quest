@@ -140,6 +140,10 @@ if (process.env.FAKE_MODE === "logged-out") {
 	result({ status: "ERROR", error: "authentication failed or timed out" });
 	process.exit(1);
 }
+if (process.env.FAKE_MODE === "denied") {
+	result({ status: "SUCCESS", response: "partial", denied_actions: [{ action: "command" }] });
+	return;
+}
 result({ status: "SUCCESS", response: "final reply" });
 `,
 };
@@ -259,7 +263,8 @@ async function quest(...args: string[]): Promise<{ code: number; stdout: string;
 	return { code, stdout, stderr };
 }
 
-const launch = (harness: string) => [
+const MODE = "dangerously-skip-permissions";
+const launch = (harness: string, mode = "auto") => [
 	"--harness",
 	harness,
 	"--model",
@@ -267,7 +272,7 @@ const launch = (harness: string) => [
 	"--effort",
 	"high",
 	"--permission-mode",
-	"auto",
+	mode,
 ];
 
 test("the agent environment holds no session credentials or harness state", () => {
@@ -449,7 +454,7 @@ test("a logged-out claude exits 4 and names its login command", async () => {
 
 test("agy writes on its own login: the prompt is a stream-json user event, and its conversation resumes", async () => {
 	const s = setup();
-	const started = await quest("agent", "start", ...launch("agy"), s.worktree, "/quest-start quest/m0/a.md");
+	const started = await quest("agent", "start", ...launch("agy", MODE), s.worktree, "/quest-start quest/m0/a.md");
 	expect(started).toEqual({
 		code: 0,
 		stdout: "session conversation-1\noutcome finished\n\nfinal reply\n",
@@ -477,22 +482,35 @@ test("agy writes on its own login: the prompt is a stream-json user event, and i
 		CODEX_HOME: process.env.CODEX_HOME,
 		QUEST_WORKTREE_HOME: process.env.QUEST_WORKTREE_HOME,
 	});
-	const resumed = await quest("agent", "resume", ...launch("agy"), s.worktree, "conversation-1", "go on");
+	const resumed = await quest("agent", "resume", ...launch("agy", MODE), s.worktree, "conversation-1", "go on");
 	expect(resumed.code).toBe(0);
 	expect(s.calls()[1].argv).toEqual([...(call.argv as string[]), "--conversation", "conversation-1"]);
+});
+
+test("agy refuses a permission mode it cannot enforce", async () => {
+	const s = setup();
+	const refused = await quest("agent", "start", ...launch("agy"), s.worktree, "go");
+	expect(refused.code).toBe(2);
+	expect(refused.stderr).toContain("agy has no sandbox or permission modes");
+	expect(s.calls()).toEqual([]);
 });
 
 test("agy at its quota exits 3, and logged out exits 4 naming its login command", async () => {
 	const s = setup();
 	vi.stubEnv("FAKE_MODE", "limited");
-	const limited = await quest("agent", "start", ...launch("agy"), s.worktree, "go");
+	const limited = await quest("agent", "start", ...launch("agy", MODE), s.worktree, "go");
 	expect(limited.code).toBe(3);
 	expect(limited.stdout).toContain("outcome limited\n");
 	vi.stubEnv("FAKE_MODE", "logged-out");
-	const out = await quest("agent", "start", ...launch("agy"), s.worktree, "go");
+	const out = await quest("agent", "start", ...launch("agy", MODE), s.worktree, "go");
 	expect(out.code).toBe(4);
 	expect(out.stdout).toContain("outcome logged-out\n");
 	expect(out.stderr).toBe("quest: agy is logged out; run `agy`\n");
+	// A denied action ends a print-mode turn early though it reports success.
+	vi.stubEnv("FAKE_MODE", "denied");
+	const denied = await quest("agent", "start", ...launch("agy", MODE), s.worktree, "go");
+	expect(denied.code).toBe(1);
+	expect(denied.stdout).toContain("outcome failed\n");
 });
 
 posix("codex runs on its own login and reports its thread, last message, limit, and logout", async () => {

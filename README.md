@@ -987,14 +987,14 @@ It supplies a fresh HOME, `ANTHROPIC_BASE_URL` (the proxy's Anthropic Messages
 endpoint, without `/v1`) and `ANTHROPIC_API_KEY` (the gate's proxy client key).
 When Claude Code cannot run, it may also supply `OPENAI_BASE_URL` (the
 OpenAI-compatible Responses endpoint, including `/v1`) and `OPENAI_API_KEY` for
-Codex, and an Antigravity login in HOME for Gemini's `agy`.
+Codex.
 The daemon never supplies these or any Git/GitHub credential, and the wrapper
 must keep every other credential out of the container. Its network must reach the
 model proxy and, so the fixer can run the repository's checks on its fix, the
 package registries and `github.com`/`codeload.github.com` that the repository's
 dependencies come from.
 The prompt allows only those dependency fetches: no GitHub API, no push, no other
-host. The Claude and Codex logins stay on the proxy.
+host. The Claude and Codex logins stay on the proxy, and no Antigravity login enters the container.
 The wrapper waits for the payload, returns its exit status, and tears down its
 container on exit or SIGTERM. A fixer gets 60 minutes from its start. A wrapper
 that queues for a shared launcher prints `quest land fixer: admitted <unix-seconds>`
@@ -1012,12 +1012,11 @@ missing, not executable, or fails to launch. The line stays beside the log as
 `<job>.error`. On timeout the daemon sends SIGTERM, allows at
 least 10 seconds for container cleanup, then sends SIGKILL on a later collection. The payload defaults
 to the first of `claude -p` in bare mode (loading no user or checkout configuration, hooks,
-skills, or MCP servers, and limited to the shell and file tools), then `codex exec` on the proxy, then `agy -p`
-(`claude-opus-5-5`, `gpt-6.2-sol`, `gemini-4-neon`, each at `--effort`) that can run: one whose CLI is missing, whose
-variables the wrapper left out, or that is logged out or at its usage limit passes the fix to the next, and
-the error names why each could not run when none can. `agy` runs in an empty directory outside the checkout,
-since it loads the agent configuration of where it runs, and is told where the repository root is. Any other
-failure ends the round. `--agent <executable>` and repeatable `--agent-arg <argument>`
+skills, or MCP servers, and limited to the shell and file tools), then `codex exec` on the proxy
+(`claude-opus-5-5`, `gpt-6.2-sol`, each at `--effort`) that can run: one whose CLI is missing, whose
+variables the wrapper left out, or whose own result or error events report it logged out or at its usage limit passes the fix to the
+next, unless it changed the checkout first, which ends the round, and the error names why each could not run when none can.
+Any other failure ends the round. `--agent <executable>` and repeatable `--agent-arg <argument>`
 run one Claude Code entry in their place, at that executable or with those arguments. It writes `<cwd>/quest-land-result.json`: an array of
 `{number, action:"requeue", reason}`, `{number, action:"fixed", head, reason}`, or
 `{number, action:"handback", diagnosis, recommendation}`, with no extra fields
@@ -1466,7 +1465,7 @@ as the agent.
 `quest` ranks the harnesses, models, and efforts that write work of each size,
 the same for every repository unless its `AGENTS.md` names others. Claude
 Code writes first; when it cannot run, Codex does, then Antigravity's Gemini,
-each at the same effort:
+each at the effort its size sets:
 
 | Size | Writer | Then Codex | Then Gemini (`agy`) |
 |---|---|---|---|
@@ -2356,8 +2355,9 @@ with the user's environment minus the coordinating session's harness variables
 and credentials (keeping `CLAUDE_CONFIG_DIR` and `CODEX_HOME`), secret-manager
 tokens, and any `quest gate` admission or priority, so it uses the CLI's stored
 login rather than the session's. `--permission-mode` is Claude Code's
-permission mode, or Codex's sandbox mode, which `agy` ignores since it skips its
-permission prompts; the agent cannot prompt. Each
+permission mode, or Codex's sandbox mode; `agy` has neither and runs with its
+permission prompts skipped, so it takes only `--permission-mode
+dangerously-skip-permissions`, and nothing confines it to the worktree; the agent cannot prompt. Each
 repository's running agents are recorded in a user-only directory under
 `$XDG_RUNTIME_DIR` (or the temporary directory), which `quest agent stop --all`
 deletes after stopping them.

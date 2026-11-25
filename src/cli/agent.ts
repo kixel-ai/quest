@@ -41,7 +41,7 @@ export interface Launch {
 	harness: HarnessName;
 	model: string;
 	effort: string;
-	/** Claude Code's `--permission-mode`, or Codex's sandbox mode; `agy` has neither and skips its permission prompts. */
+	/** Claude Code's `--permission-mode`, or Codex's sandbox mode; `agy` has neither, and takes only `AGY_MODE`. */
 	permissionMode: string;
 	worktree: string;
 }
@@ -103,7 +103,7 @@ interface Harness {
 	input?(prompt: string): string;
 }
 
-interface Reader {
+export interface Reader {
 	/** Read one line of stdout, returning the session id if the line announces it. */
 	line(line: string): string | undefined;
 	/** The run's result, given the tail of its stderr. */
@@ -264,7 +264,14 @@ const agy: Harness = {
 			},
 			result(stderr) {
 				const reply = text(result?.response);
-				const error = result?.status === "SUCCESS" ? undefined : (text(result?.error) ?? "");
+				// A denied action ends a print-mode turn early, though it reports success.
+				const denied = Array.isArray(result?.denied_actions) ? result.denied_actions.length : 0;
+				const error =
+					result?.status !== "SUCCESS"
+						? (text(result?.error) ?? "")
+						: denied > 0
+							? `agy denied ${denied} action(s), which ended the turn`
+							: undefined;
 				const failure = `${error ?? ""}\n${stderr}`;
 				return {
 					session: text(result?.conversation_id) || session,
@@ -278,7 +285,14 @@ const agy: Harness = {
 	},
 };
 
+/** The only permission mode `agy` runs in, named so a launch that asks for a restricted one is refused, not ignored. */
+export const AGY_MODE = "dangerously-skip-permissions";
+
 function agyFlags(launch: Launch): string[] {
+	if (launch.permissionMode !== AGY_MODE)
+		throw new AgentInputError(
+			`agy has no sandbox or permission modes and runs with its permission prompts skipped: pass --permission-mode ${AGY_MODE}`,
+		);
 	return [
 		"-p",
 		"",
@@ -295,6 +309,9 @@ function agyFlags(launch: Launch): string[] {
 }
 
 const HARNESS: Record<HarnessName, Harness> = { claude, codex, agy };
+
+/** A reader for one run of `harness`, which tells a spent usage limit or a rejected login from its own output. */
+export const readerFor = (harness: HarnessName): Reader => HARNESS[harness].reader();
 
 /** A mistake in the arguments or environment, reported as a usage error. */
 export class AgentInputError extends Error {}

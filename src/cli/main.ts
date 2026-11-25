@@ -819,7 +819,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 	landCommand
 		.command("fix")
 		.description(
-			"Run a mechanical agent fix inside the credential-free fixer container; write quest-land-result.json, whose optional comments the daemon posts. Runs the first of Claude Code with no user or project configuration (model endpoint and client key: ANTHROPIC_BASE_URL and ANTHROPIC_API_KEY), then Codex (OPENAI_BASE_URL and OPENAI_API_KEY), then Antigravity's agy (the login in HOME) that can run: one whose CLI is missing, whose variables the wrapper left out, or that is logged out or at its usage limit passes the fix to the next.",
+			"Run a mechanical agent fix inside the credential-free fixer container; write quest-land-result.json, whose optional comments the daemon posts. Runs the first of Claude Code with no user or project configuration (model endpoint and client key: ANTHROPIC_BASE_URL and ANTHROPIC_API_KEY), then Codex (OPENAI_BASE_URL and OPENAI_API_KEY) that can run: one whose CLI is missing, whose variables the wrapper left out, or that is logged out or at its usage limit passes the fix to the next.",
 		)
 		.argument("<log>", "Full failure log exposed by the wrapper")
 		.argument("<prs...>", "PR numbers with pr-<n> branches")
@@ -1291,7 +1291,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 			.requiredOption("--effort <level>", "Reasoning effort the agent runs at, never max", effortLevel)
 			.requiredOption(
 				"--permission-mode <mode>",
-				"Claude Code's --permission-mode, or Codex's sandbox mode, which agy ignores, since it skips its permission prompts; the agent cannot prompt",
+				"Claude Code's --permission-mode, or Codex's sandbox mode, or dangerously-skip-permissions for agy, which has no sandbox; the agent cannot prompt",
 			);
 	type LaunchOptions = Omit<Launch, "worktree">;
 	const launch = (worktree: string, prompt: string, session: string | undefined, options: LaunchOptions) => {
