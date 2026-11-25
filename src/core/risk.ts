@@ -23,16 +23,32 @@ export interface HighPath {
 }
 
 /**
- * The paths every repository holds high, whatever its risk file says: only the risk file itself. Workflows and
- * actions are not among them, since their mistakes fail the repository's own checks before they reach a user; a
- * repository whose workflows ship to users lists them under its own `## High`.
+ * The paths every repository holds high, whatever its risk file says: the risk file itself, and the workflows and
+ * actions that run on a PR's own branch with the repository's secrets, which a mistake can leak before any check
+ * catches it.
  */
 export const ALWAYS_HIGH: readonly HighPath[] = [
 	{ pattern: RISK_FILE, reason: "it sets the tier of every later change" },
+	{ pattern: ".github/workflows/", reason: "workflows run with the repository's secrets" },
+	{ pattern: ".github/actions/", reason: "actions run in workflows with the repository's secrets" },
 ];
 
 /** The paths a base with risk file `file`, or none, holds high: {@link ALWAYS_HIGH} and its `## High` list. */
 export const heldHigh = (file: RiskFile | null): HighPath[] => [...ALWAYS_HIGH, ...(file?.high ?? [])];
+
+/**
+ * The automatic classes every repository offers, whatever its risk file says: plans under `quest/`, the same tree in
+ * every quest repository. A risk file's class of the same name replaces one.
+ */
+export const DEFAULT_CLASSES: readonly Class[] = [
+	{ name: "quest", scope: ["quest/**"], rule: "only plans under `quest/` change, which no user reads" },
+];
+
+/** The classes a base with risk file `file`, or none, offers: {@link DEFAULT_CLASSES} it does not replace, then its own. */
+export const offeredClasses = (file: RiskFile | null): Class[] => {
+	const own = file?.classes ?? [];
+	return [...DEFAULT_CLASSES.filter(({ name }) => !own.some((each) => each.name === name)), ...own];
+};
 
 /** Each of `paths` a pattern in `held` matches, with the first such pattern, in `paths`' order. */
 export function highHits(held: readonly HighPath[], paths: readonly string[]): { path: string; rule: HighPath }[] {

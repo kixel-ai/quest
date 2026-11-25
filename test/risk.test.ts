@@ -70,11 +70,11 @@ test("a pattern is a path from the root whose * stays in a segment and whose ** 
 		expect(patternError(pattern), pattern).toContain(why);
 });
 
-test("the built-in high paths hold only the risk file, never a workflow", () => {
+test("the built-in high paths hold the risk file, workflows, and actions", () => {
 	const held = (path: string) => ALWAYS_HIGH.some((rule) => matches(rule.pattern, path));
 	expect(held("RISK.md")).toBe(true);
-	expect(held(".github/workflows/ci.yml")).toBe(false);
-	expect(held(".github/actions/setup/action.yml")).toBe(false);
+	expect(held(".github/workflows/ci.yml")).toBe(true);
+	expect(held(".github/actions/setup/action.yml")).toBe(true);
 	expect(held(".github/dependabot.yml")).toBe(false);
 	expect(held("docs/RISK.md")).toBe(false);
 });

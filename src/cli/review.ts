@@ -15,7 +15,9 @@ import { dirname, join, posix } from "node:path";
 import { promisify } from "node:util";
 
 import {
+	ALWAYS_HIGH,
 	type Class,
+	DEFAULT_CLASSES,
 	heldHigh,
 	highHits,
 	RISK_FILE,
@@ -26,6 +28,7 @@ import {
 	branchQuest,
 	classesFor,
 	codeSpan,
+	offeredClasses,
 	parse,
 	parseRiskFile,
 	size as questSize,
@@ -1682,7 +1685,7 @@ const DIFF_BUDGET = 200_000;
  */
 export function classifyPrompt(
 	change: Change,
-	file: { sha: string; text: string },
+	file: { sha: string; text: string | null },
 	diff: { stat: string; patch: string | null; file: string; size: number },
 	classes: readonly Class[] = [],
 ): string {
@@ -1692,7 +1695,9 @@ export function classifyPrompt(
 	const shown = whole ? `${stat}\n\n${patch}` : stat.slice(0, DIFF_BUDGET);
 	return [
 		scope(change),
-		`The repository's risk file, read from ${RISK_FILE} at the base branch's tip ${file.sha}:\n\n<risk-file>\n${file.text}\n</risk-file>`,
+		file.text === null
+			? `The repository has no risk file: the base branch's tip ${file.sha} holds no ${RISK_FILE}.`
+			: `The repository's risk file, read from ${RISK_FILE} at the base branch's tip ${file.sha}:\n\n<risk-file>\n${file.text}\n</risk-file>`,
 		whole
 			? `The change, \`git diff --stat --patch ${range}\`:`
 			: `The diff is ${stat.length + size} bytes or holds binary data, which this prompt does not hold, so only its stat ` +
@@ -1707,7 +1712,7 @@ export function classifyPrompt(
 			? [
 					"Also report as `class` the one class below whose rule every changed file meets, judged by what the " +
 						"diff does rather than its title or description, or null when no single class covers the whole " +
-						"change or you are unsure. These are the risk file's `## Automatic` classes whose path scope, the " +
+						"change or you are unsure. These are the classes, built in or the risk file's `## Automatic` ones, whose path scope, the " +
 						"parentheses between a class's name and ` - ` where it has one, already holds every changed path, " +
 						"so judge only the rule for a scoped class; for one with no scope, no path was checked, so judge " +
 						"from the rule whether each changed path belongs. A class lets a low change land without a " +
@@ -1997,9 +2002,10 @@ interface Classifying {
 
 /**
  * Set the head's risk tier before any reviewer runs, from the change alone: high when it touches a path
- * {@link heldHigh} names from the base's risk file, medium when the base has no risk file, and otherwise as the
- * first of {@link CLASSIFIERS} that can run judges the diff against the file. The last classification is reused while
- * the change and the file are the same, which `key` names.
+ * {@link heldHigh} names from the base's risk file, medium when the base has no risk file and offers the change no
+ * default class, and otherwise as the first of {@link CLASSIFIERS} that can run judges the diff against the file, if
+ * any. The last classification is reused while the change, the file, and the built-in defaults are the same, which
+ * `key` names.
  */
 export async function classify(input: Classifying): Promise<{ key: string; value: Classified }> {
 	const { root, baseSha, change, changed } = input;
@@ -2009,9 +2015,11 @@ export async function classify(input: Classifying): Promise<{ key: string; value
 	const riskFile = git(root, ["ls-tree", baseSha, "--", RISK_FILE]).split(/\s/)[2] ?? null;
 	const text = riskFile === null ? null : git(root, ["cat-file", "blob", riskFile]);
 	// The paths too, since they set the tier and the offered classes along with the risk file.
-	// And the diff's form, so a tier set from a diff the head's attributes could shape is set again.
+	// And the diff's form, so a tier set from a diff the head's attributes could shape is set again, and the built-in
+	// defaults, so a release that changes them classifies every head again.
 	const { empty } = change;
-	const key = digest(JSON.stringify([change.mergeBase, change.head, text, changed, empty, DIFF_FLAGS]));
+	const defaults = [ALWAYS_HIGH, DEFAULT_CLASSES];
+	const key = digest(JSON.stringify([change.mergeBase, change.head, text, changed, empty, DIFF_FLAGS, defaults]));
 	if (input.saved?.key === key) return { key, value: { ...input.saved.value, riskFile, usage: [] } };
 	if (input.savedOnly)
 		throw new ReviewInputError(
@@ -2029,12 +2037,12 @@ export async function classify(input: Classifying): Promise<{ key: string; value
 		const reason = `it changes ${path}, which is always high${more}: ${rule.reason}`;
 		return set({ tier: "high", reason, by: { kind: "paths" }, class: null });
 	}
-	if (text === null) {
+	// Only the classes whose scope holds every changed path, so the classifier cannot widen one.
+	const offered = classesFor(offeredClasses(file), changed);
+	if (text === null && offered.length === 0) {
 		const reason = `the base has no ${RISK_FILE} to name what is always high or customer-facing, so every change is medium`;
 		return set({ tier: "medium", reason, by: { kind: "default" }, class: null });
 	}
-	// Only the classes whose scope holds every changed path, so the classifier cannot widen one.
-	const offered = classesFor(file!.classes, changed);
 	const classes = offered.map((each) => each.name);
 
 	// With no attributes and every file as text, so the head can hide none of its hunks by marking them binary.

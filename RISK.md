@@ -38,8 +38,8 @@ it:
 
 Everything else that changes behavior is medium, which is most changes: a new
 or changed command or option, a bug fix, an export or field that existing
-consumers keep parsing, this repository's own agent instructions, its CI and
-workflows but the one that publishes, and a dependency or pin bump. A bug agents act on while its
+consumers keep parsing, this repository's own agent instructions, its CI scripts, and a dependency
+or pin bump; its workflows and actions are high, as every repository's are. A bug agents act on while its
 release is live is a risk every one of them carries.
 
 Tests, plans under `quest/`, and documentation change nothing others rely
@@ -57,8 +57,6 @@ person.
 - `test` (`test/**`, `scripts/*.test.sh`, `scripts/*-bench.sh`) - only
   tests, their fixtures, or benchmarks change; the other check scripts stay
   out, since the release workflows run them before or after publishing
-- `quest` (`quest/**`) - only plans under `quest/` change, which no user or
-  other repository reads
 - `refactor` - code changes that keep every behavior and output the same,
   such as a rename inside a module, a simplification, or a comment-only
   change
@@ -76,5 +74,3 @@ person.
 - `scripts/installer.sh` - users pipe it to a shell, and a release
   publishes it as it is
 - `scripts/release-plan.sh` - it decides which merges publish a release
-- `.github/workflows/release.yml` - it publishes each release, before any
-  check installs it

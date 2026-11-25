@@ -709,7 +709,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"it counts the record only when the latest quest review commit status on that head is success, set by a user with write access to the repository, " +
 				"targets the diff from the head's merge base with the PR's base, and attests the record's risk tier, class, and risk file (else -, with a warning saying why, and risk and class print - too); risk gives the record's risk " +
 				"tier, the same state for its head, the tier its classifier set, and the " +
-				"reason last, - when the record names none or does not count, or - malformed - and why when its risk lines do not parse; class gives the RISK.md ## Automatic class the record's classifier named, or -; auto-merge gives its method, who enabled it and when, and the head it was " +
+				"reason last, - when the record names none or does not count, or - malformed - and why when its risk lines do not parse; class gives the built-in or RISK.md ## Automatic class the record's classifier named, or -; auto-merge gives its method, who enabled it and when, and the head it was " +
 				"enabled on, which differs from head once a push follows, as GitHub keeps auto-merge across a writer's " +
 				"push (- when it cannot be told: a quest land pin names it, and otherwise the head branch's push " +
 				"activity, which GitHub lists up to minutes late); landing-stopped is the latest exit from the merge queue, auto-merge, or " +
@@ -1765,17 +1765,19 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"The base is fetched first, since the sandbox has no network.\n\n" +
 				"Before the reviewers run, the head gets a risk tier, low, medium, or high, from its change alone, never " +
 				"from who wrote it: who is hurt if it is wrong, and whether anything catches it first. A changed path, " +
-				"either side of a rename, that a pattern holds makes it high: RISK.md, and each pattern the `## High` list of the base's " +
+				"either side of a rename, that a pattern holds makes it high: RISK.md, .github/workflows/, .github/actions/, and each pattern the `## High` list of the base's " +
 				"RISK.md names, read from the base's tip so a change cannot lower its own tier. Each item of that list is a " +
 				"backticked path from the repository's root, where `*` and `?` stay within one segment and a whole `**` " +
 				"segment spans any number, then ` - ` and why its change is high; a RISK.md that cannot be read is a usage " +
-				"error. A base with no RISK.md makes every other change medium. Otherwise a classifier, " +
-				`${classifiers}, reads the diff and the base's RISK.md, which says what is customer-facing, ` +
+				"error. A base with no RISK.md makes every other change medium unless a built-in class's scope holds every " +
+				"changed path. Otherwise a classifier, " +
+				`${classifiers}, reads the diff and the base's RISK.md, if any, which says what is customer-facing, ` +
 				"in one read-only turn and replies with a tier and its reason. One that is logged out, whose login the " +
 				"API rejects, or at its usage limit passes the turn to the next; when none is left, the run fails on the " +
-				"limit that resets first if every one whose CLI is installed hit its own, else as a usage error naming why each failed. A later round on the same head and base " +
-				"RISK.md reuses the tier unless --new. Reviewers never judge it. " +
-				"The classifier also names the class of RISK.md's ## Automatic list every changed file falls in, or none, " +
+				"limit that resets first if every one whose CLI is installed hit its own, else as a usage error naming why each failed. A later round on the same head, base " +
+				"RISK.md, and built-in defaults reuses the tier unless --new. Reviewers never judge it. " +
+				"The classifier also names the class every changed file falls in, or none: the built-in `quest` (`quest/**`), " +
+				"for plans alone, unless RISK.md lists a class by that name, which replaces it, and RISK.md's ## Automatic list, " +
 				"offered only the classes whose scope, backticked patterns in parentheses after the class's name, holds " +
 				"every changed path, either side of a rename: each path must match one pattern whole, so a directory " +
 				"needs a trailing / or /**, and a change that touches no path falls in no class. " +
