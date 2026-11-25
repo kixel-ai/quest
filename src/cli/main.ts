@@ -86,8 +86,8 @@ import { canonicalModel } from "./models-record";
 import {
 	ReviewInputError,
 	ReviewOutageError,
+	type Started,
 	ReviewerUnavailableError,
-	processDependencies as reviewDependencies,
 	ask,
 	review,
 	nextStep,
@@ -108,7 +108,7 @@ import { CHECKED_CONTEXT, USER_ASKED, questRoot } from "./rules";
 import { checkoutRepository, messageLines, messages } from "./messages";
 import { logWait, pullWaitKind, readWaits } from "./waits";
 import { readCalls } from "./calls";
-import { SEND_INTERVAL, background, parseInstant, reportIncident, runSender } from "./send";
+import { SEND_INTERVAL, background, parseInstant, queue, reportIncident, runSender } from "./send";
 import { installSender, uninstallSender } from "./service";
 import { heal, init, stubFindings, uninstall } from "./setup";
 import { describe, notUpstream, releaseQuest, startQuest } from "./start";
@@ -1910,6 +1910,21 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				const override =
 					options.override === undefined ? undefined : { tier: options.override, reason: reason! };
 				const github = claimDependencies();
+				// Queued once the round's record names its sessions, so the sender never reads one as ordinary work.
+				const started: Started[] = [];
+				const queueStarted = (): void => {
+					for (const session of started.splice(0)) {
+						// Only the dashboard loses a session that is not queued, so it never fails the round.
+						try {
+							for (const notice of queue(session, process.env).notices)
+								warn(notice.replace(/^quest: /, ""));
+						} catch (error) {
+							warn(
+								`cannot queue this session's record: ${error instanceof Error ? error.message : String(error)}`,
+							);
+						}
+					}
+				};
 				// Decided once, before the round: a PR's own build never records its own review, whatever it finds.
 				const own = runsFromCheckout(root(), out.entry);
 				const run = review(
@@ -1924,8 +1939,9 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 						own,
 					},
 					{
-						...reviewDependencies(),
+						env: process.env,
 						models: (dir, base, branch) => pullModels(dir, base, branch, github),
+						queue: (session) => started.push(session),
 					},
 				);
 				pending = run.then(
@@ -1939,6 +1955,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 						} catch (error) {
 							failure = error;
 						}
+						queueStarted();
 						const status = record !== undefined && "url" in record ? record.status : undefined;
 						// An acceptance is the status alone, so one no status records has not happened.
 						const accepting = reviewed.accepted !== undefined;
@@ -1980,7 +1997,10 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 						);
 						return 1;
 					},
-					(error) => reviewFailure(error),
+					(error) => {
+						queueStarted();
+						return reviewFailure(error);
+					},
 				);
 			},
 		);

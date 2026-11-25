@@ -84,7 +84,10 @@ const logged = (call) => {
  * FAKE_LIMITED to the harnesses and models it lists, comma-separated, so one
  * reviewer fails while the next runs. FAKE_QUOTED fails Claude Code's findings
  * turn with a reply that only quotes a limit's message. FAKE_REPLY replaces the
- * findings reply.
+ * findings reply. FAKE_HANG_CLAUDE, a FIFO's path, hangs Claude Code's review turn until it is stopped, as a seat still
+ * running when another's failure cancels it, after signalling on the FIFO, which Codex's limit waits to read before
+ * failing, so the limit never lands before that turn starts. FAKE_HANG_CODEX, a FIFO's path, does the same to Codex's, after it opened its thread and
+ * signalled on the FIFO, which Claude Code's limit waits to read before failing, so the limit never lands first.
  */
 export const FAKES: Record<string, string> = {
 	claude: `
@@ -105,6 +108,11 @@ const provider = Object.entries(process.env).some(([k, v]) => k.startsWith("CLAU
 const loggedIn = !fake("FAKE_LOGGED_OUT") || credential || provider;
 if (argv[0] === "auth") process.exit(loggedIn ? 0 : 1);
 const at = (flag) => argv[argv.indexOf(flag) + 1];
+if (process.env.FAKE_HANG_CLAUDE && argv.includes("--session-id") && !argv.includes("--json-schema")) {
+	fs.writeFileSync(process.env.FAKE_HANG_CLAUDE, "");
+	setInterval(() => {}, 1000);
+	return;
+}
 const result = (fields) => console.log(JSON.stringify({ type: "result", is_error: false, ...fields }));
 const rejected = fake("FAKE_REJECTED") ?? (loggedIn ? undefined : "status");
 if (rejected) {
@@ -125,6 +133,8 @@ if (process.env.FAKE_QUOTED && argv.includes("--resume")) {
 }
 // The limit hits the findings turn, after the review turn passed.
 if (fake("FAKE_LIMITED") && argv.includes("--resume")) {
+	// A read of the FIFO blocks until Codex's thread is open, with nothing to poll.
+	if (process.env.FAKE_HANG_CODEX) fs.readFileSync(process.env.FAKE_HANG_CODEX);
 	if (fake("FAKE_LIMITED") !== "unknown") {
 		console.log(JSON.stringify({ type: "rate_limit_event", rate_limit_info: { status: "rejected", resetsAt: 1900000000 } }));
 	}
@@ -191,6 +201,12 @@ if (process.env.FAKE_HANG && !fs.existsSync(process.env.FAKE_HANG)) {
 	return;
 }
 const event = (value) => console.log(JSON.stringify(value));
+if (process.env.FAKE_HANG_CODEX) {
+	event({ type: "thread.started", thread_id: "thread-1" });
+	fs.writeFileSync(process.env.FAKE_HANG_CODEX, "");
+	setInterval(() => {}, 1000);
+	return;
+}
 const loggedIn = !fake("FAKE_LOGGED_OUT") || process.env.CODEX_API_KEY || process.env.CODEX_ACCESS_TOKEN;
 const rejected = fake("FAKE_REJECTED") ?? (loggedIn ? undefined : "turn");
 if (rejected === "turn") {
@@ -205,6 +221,8 @@ if (rejected) {
 	process.exit(1);
 }
 if (fake("FAKE_LIMITED")) {
+	// A read of the FIFO blocks until Claude's review turn is running, with nothing to poll.
+	if (process.env.FAKE_HANG_CLAUDE) fs.readFileSync(process.env.FAKE_HANG_CLAUDE);
 	const message = fake("FAKE_LIMITED") === "retried"
 		? "exceeded retry limit, last status: 429 Too Many Requests"
 		: fake("FAKE_LIMITED") === "unknown"
