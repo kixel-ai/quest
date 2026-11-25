@@ -173,6 +173,17 @@ export class GitHubReader {
 	}
 
 	/**
+	 * The lowercase `owner/name` that `repository` is served under now, as GitHub's redirect from a transferred or
+	 * renamed repository's former name answers; null when it serves none there, or the read token cannot see it.
+	 */
+	async currentName(repository: Repository): Promise<string | null> {
+		const response = await this.request(repositoryPath(repository), { allow: [403, 404, 451] });
+		if (!response.ok) return null;
+		const body = object(await response.json());
+		return `${string(object(body.owner).login)}/${string(body.name)}`.toLowerCase();
+	}
+
+	/**
 	 * A cache operation's result, or undefined once it fails: the cache only saves quota, so a full
 	 * or unwritable disk warns once and leaves the client reading GitHub uncached.
 	 */

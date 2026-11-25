@@ -280,7 +280,7 @@ export function bumpBody(options: {
 			"",
 			"## Waiting",
 			"",
-			"- Maintainer: `quest check` with the new quest reports findings `--fix` cannot resolve. Fix them on this branch and land it; the next bump replaces this branch's tree.",
+			"- Maintainer (action): `quest check` with the new quest reports findings `--fix` cannot resolve. Fix them on this branch and land it; the next bump replaces this branch's tree.",
 			"",
 			`<pre>${excerpt(options.findings.trimEnd())}</pre>`,
 		);

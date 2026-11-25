@@ -30,6 +30,8 @@ import {
 	type Size,
 	unblocked,
 	waiting,
+	waitLine,
+	handBackProblems,
 	InputError,
 	Refusal,
 } from "../core";
@@ -394,9 +396,9 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"Invalid trees fail before printing a ranking. Prints a count and path per line; --json prints an " +
 				"ordered array of {path, dependents, hosts, arm, models} objects, where hosts lists the operating systems " +
 				"(linux, macos, windows) under the quest's ## Hosts, empty when it runs anywhere, and models ranks the {harness, model, effort} " +
-				"entries that write the quest: its size's list, or the next size's while a Maintainer: item under its " +
-				"## Waiting leaves a decision open (quest models lists them). While the writer A/B runs, arm is A or B for " +
-				"a size that runs one, and null for M, XL, or a quest routed up for an open Maintainer: item, and models opens with that arm's entry; the agent that runs it " +
+				"entries that write the quest: its size's list, or the next size's while a Maintainer: item other than an " +
+				"action under its ## Waiting leaves a decision open (quest models lists them). While the writer A/B runs, arm is A or B for " +
+				"a size that runs one, and null for M, XL, or a quest routed up for an open decision, and models opens with that arm's entry; the agent that runs it " +
 				"records the arm on its Implementer line.\n\n" +
 				"--unclaimed ranks the fetched upstream default branch's tree instead of the checkout, then drops " +
 				"quests someone holds: a quest branch upstream, or an open PR from that branch in any repository. A " +
@@ -495,16 +497,23 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"transitive dependents as quest unblocked counts them, ready before blocked, then path order, with " +
 				"drafts after quests by PR number. A draft ranks as the quest its branch carries, or last when it " +
 				"carries none. Each item opens with who acts, Maintainer: or an outside party such as moq-dev/moq:, " +
-				"followed by the condition and how to check or advance it; Maintainer (PC): marks a step the maintainer " +
-				"can take only at one of their computers, such as a local login or a hardware check. A draft's item without a party is the " +
-				"maintainer's; a draft's section without items is one maintainer item " +
-				"holding its prose.\n\n" +
+				"followed by the condition and how to check or advance it. Each item has a kind: a Maintainer: item " +
+				"whose nested list marks one bullet (Recommended) is a decision, each bullet a choice written label or " +
+				"label - description; Maintainer (action): and Maintainer (PC): items are actions, steps only the maintainer " +
+				"can take, (PC) marking one only at their computers, such as a local login or a hardware check; every " +
+				"other item is prose. A draft's item without a party is the maintainer's prose, with a warning when it " +
+				"holds a choice list, which needs Maintainer: to become a decision; a draft's section " +
+				"without items is one maintainer item holding its prose; a draft's malformed choice list reads as prose " +
+				"with a warning naming the PR and line, since quest check never reads PR bodies.\n\n" +
 				"Prints one line per item: dependents, ready or blocked (whether Required entries or a future " +
-				"Scheduled date remain), the quest's path or the draft's URL, and the item. --json prints an ordered array of {path, pr, dependents, " +
-				"ready, waits: [{line, party, pc, text}]} objects, where pr is the draft's URL or null, path is the " +
-				"quest, the quest a draft carries, or null; an item opened Maintainer (PC): has party Maintainer and pc " +
-				"true. " +
-				"--maintainer keeps only the items the maintainer settles, and --no-pc drops the Maintainer (PC): ones, " +
+				"Scheduled date remain), the quest's path or the draft's URL, and the item with its qualifier and a " +
+				"decision's choices. --json prints an ordered array of {path, pr, dependents, " +
+				"ready, waits} objects, where pr is the draft's URL or null, path is the " +
+				"quest, the quest a draft carries, or null. Each wait is {line, party, kind, text}, with party " +
+				"Maintainer for an action; a decision adds choices: [{label, description, recommended}], description " +
+				"null when absent, and its text leaves out its choice list; an action adds pc, true for Maintainer (PC):, and prose " +
+				"carries pc: true for a draft's Maintainer (PC): item read as prose for its malformed choice list. " +
+				"--maintainer keeps only the items the maintainer settles, and --no-pc drops every item with pc, " +
 				"for a session away from the maintainer's computers; both filter before ranking, so order follows the items kept. " +
 				"Invalid trees fail before printing. Outside conditions are never checked, nor whether another " +
 				"session holds a draft.\n\n" +
@@ -516,13 +525,16 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		)
 		.option("--json", "Print a deterministic JSON array")
 		.option("--maintainer", "Only items waiting on the maintainer")
-		.option("--no-pc", "Skip the steps only the maintainer's computers can take, Maintainer (PC): items")
+		.option("--no-pc", "Skip the steps only the maintainer's computers can take, Maintainer (PC): actions")
 		.option("--limit <count>", "Maximum number of entries to print", positiveInteger("limit"))
 		.option("--remote <name>", "Remote whose upstream holds the draft PRs", "origin")
 		.action((options: { json?: boolean; maintainer?: boolean; pc: boolean; limit?: number; remote: string }) => {
 			const tree = checkout(root(), warn);
 			if (!valid(tree)) return;
 			settle(openDrafts(root(), options.remote, claimDependencies()), (drafts) => {
+				for (const draft of drafts)
+					for (const problem of handBackProblems(draft.body))
+						warn(`${draft.url}: line ${problem.line}: '## Waiting' ${problem.message}; read as prose`);
 				const found = waiting(tree.docs, today(), {
 					drafts,
 					maintainer: options.maintainer,
@@ -537,7 +549,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				for (const quest of found) {
 					for (const wait of quest.waits) {
 						print(
-							`${quest.dependents}\t${quest.ready ? "ready" : "blocked"}\t${quest.pr ?? quest.path}\t${wait.party}${wait.pc ? " (PC)" : ""}: ${wait.text}`,
+							`${quest.dependents}\t${quest.ready ? "ready" : "blocked"}\t${quest.pr ?? quest.path}\t${waitLine(wait)}`,
 						);
 					}
 				}
@@ -688,9 +700,9 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"url, state, draft, head, mergeable, merge-state, review-decision, review-record, risk, class, auto-merge, merge-queue, " +
 				"landing-stopped, and checks, whose state and counts follow the checks that count, pending while an open PR's base requires a check or workflow nothing reports; review-record gives whether the PR body's ## Review record " +
 				"covers the head, as current, diff-identical (git diff <base>...<head> prints the same as for the head it names), " +
-				"stale, or unknown when GitHub cannot compare them, or - when the section holds no record quest review wrote, then the head it names last, then local-review or no-local-review for whether a local reviewer's round passed it; " +
+				"stale, also once the PR is open and RISK.md at the base's tip is not the file the record names, with a warning, since its tier decided how much review the head got, or unknown when GitHub cannot compare them, or - when the section holds no record quest review wrote, then the head it names last, then local-review or no-local-review for whether a local reviewer's round passed it; " +
 				"it counts the record only when the latest quest review commit status on that head is success, set by a user with write access to the repository, " +
-				"targets the diff from the head's merge base with the PR's base, and attests the record's risk tier and class (else -, with a warning saying why, and risk and class print - too); risk gives the record's risk " +
+				"targets the diff from the head's merge base with the PR's base, and attests the record's risk tier, class, and risk file (else -, with a warning saying why, and risk and class print - too); risk gives the record's risk " +
 				"tier, the same state for its head, the tier its classifier set, and the " +
 				"reason last, - when the record names none or does not count, or - malformed - and why when its risk lines do not parse; class gives the RISK.md ## Automatic class the record's classifier named, or -; auto-merge gives its method, who enabled it and when, and the head it was " +
 				"enabled on, which differs from head once a push follows, as GitHub keeps auto-merge across a writer's " +
@@ -1787,10 +1799,10 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"After each round, it rewrites the `## Review` section of the branch's open PR into the base, the one from the repository the base's remote pushes to, else the only one from another repository whose pushed head `HEAD` contains, as the " +
 				"user the GitHub token names, keeping the rest of the body, and prints `record <url>`: the reviewed " +
 				"head, named in full only once no reviewer reports a finding, the base, the head's risk tier and reason, " +
-				"an `- Overridden:` line, the classifier's tier and who set it, a `- Class:` line, a `- Local review: none` line for a low head no reviewer ran on, a `- Skipped:` line for each reviewer passed over, and each reviewer, its Reviewer line ending in `, second` for the second reviewer, its " +
+				"an `- Overridden:` line, the classifier's tier and who set it, a `- Class:` line, a `- Risk file:` line naming the base's RISK.md it read by its blob's first 12 characters or none, a `- Local review: none` line for a low head no reviewer ran on, a `- Skipped:` line for each reviewer passed over, and each reviewer, its Reviewer line ending in `, second` for the second reviewer, its " +
 				"session and round, score, a `- Recommendation:` line with the approach it would build instead, its tally of findings across the branch's rounds, each finding with its disposition, and its notes. " +
 				"On GitHub it then sets the `quest review` commit status on the head, on the same token, so push the head first: success once no finding is open, else failure, " +
-				"its description the head's risk tier and class and whether a local reviewer ran, its target the diff from the head's merge base with the PR's base, which `quest status` counts only from a user who can push. " +
+				"its description the head's risk tier, class, and risk file and whether a local reviewer ran, its target the diff from the head's merge base with the PR's base, which `quest status` counts only from a user who can push. " +
 				"For a token that cannot push, it sets none and prints `; status skipped: <why>` after the record's URL; a status GitHub refuses otherwise prints `; status refused: <why>` and exits 1. " +
 				"--accept <reason> runs no reviewer or classifier: it repeats each reviewer's last round of the same head, base, and merge base, failing as a usage error " +
 				"when none classified and reviewed it, when a high head lacks its second reviewer's round, or when no finding is open; sets the status to success " +

@@ -247,16 +247,31 @@ second name in one `## Audit`, and `## Skipped audits` outside the root.
 ## Find what waits on you
 
 A quest waiting outside the tree says so in a `## Waiting` section, one item
-per condition, each opening with who acts: `Maintainer:` for a decision or
-action only the maintainer can take, `Maintainer (PC):` for one they can take
-only at one of their computers, such as a local login or a hardware check, or
-the outside party, such as `moq-dev/moq:`. `quest check` rejects an item that
-names nobody, and a maintainer qualifier other than `(PC)`.
+per condition, each opening with who acts and saying what kind of answer it
+needs:
+
+- `Maintainer:` with a nested choice list, one bullet marked `(Recommended)`,
+  is a **decision**; each bullet is a choice, `label` or `label - description`.
+- `Maintainer (action):` is an **action**, a step only the maintainer can take,
+  and `Maintainer (PC):` one they can take only at one of their computers, such
+  as a local login or a hardware check.
+- Every other item, the outside party's such as `moq-dev/moq:` and a
+  `Maintainer:` item without a choice list, is **prose**.
+
+`quest check` rejects an item that names nobody, a maintainer qualifier other
+than `(action)` or `(PC)`, and a malformed choice list: one outside a plain
+`Maintainer:` item, with fewer than two choices, without exactly one
+`(Recommended)` ending a label, with an empty or repeated label, or a second
+one in the same item. Only that marker makes a nested list a choice list, so
+checklists and detail lists stay prose.
 
 ```markdown
 ## Waiting
 
-- Maintainer: open a Hetzner account; `GET /server` on the Robot API answers 200
+- Maintainer: which runner builds the Windows suite? GitHub-hosted runners bill per minute, and a self-hosted one needs a machine.
+  - GitHub-hosted (Recommended) - no machine to keep up
+  - Self-hosted - free minutes, but a Windows host to maintain
+- Maintainer (action): open a Hetzner account; `GET /server` on the Robot API answers 200
 - Maintainer (PC): plug in the capture card; `v4l2-ctl --list-devices` lists it
 - moq-dev/moq: a release carries the VA-API bindings
 ```
@@ -268,11 +283,15 @@ body.
 milestone and the same downstream impact `quest unblocked` counts; a draft
 ranks as the quest its branch carries. Each line gives the dependents, whether
 the quest is otherwise ready or still blocked, its path or the draft's URL, and
-the item; `--maintainer` keeps only the maintainer's, `--no-pc` drops the
-`Maintainer (PC):` ones for a session away from your computers, and `--json`
-prints `{path, pr, dependents, ready, waits}` objects, each wait's `pc` marking
-those. A draft's item that names no
-party is the maintainer's. Drafts come from
+the item with a decision's choices; `--maintainer` keeps only the
+maintainer's, `--no-pc` drops the `Maintainer (PC):` ones for a session away
+from your computers, and `--json` prints `{path, pr, dependents, ready, waits}`
+objects. Each wait is `{line, party, kind, text}`: a decision adds `choices:
+[{label, description, recommended}]` and leaves its choice list out of `text`,
+and an action adds `pc`. A draft's item that names no party is the
+maintainer's prose, warning when it holds a choice list, and since `quest check` never reads PR bodies, a draft's
+malformed choice list reads as prose with a warning, keeping `pc: true`
+under `Maintainer (PC):` so `--no-pc` still drops it. Drafts come from
 the upstream's open PRs, found as for `unblocked --unclaimed`; without the
 remote, off GitHub, or when GitHub cannot be read, it lists the tree's items
 and warns that drafts were skipped. `/quest-run` walks you through them.
@@ -586,12 +605,12 @@ comes last, and a missing value prints as `-`:
 | --- | --- |
 | `url`, `state`, `draft`, `head` | The PR URL; `open`, `closed`, or `merged`; `true` or `false`; the head SHA. |
 | `mergeable`, `merge-state`, `review-decision` | GitHub's values, lowercased. |
-| `review-record` | Whether the PR body's [`## Review` record](#review-locally) still covers the head, and the head it names last: `current` when it is the head, `diff-identical` when `git diff <base>...<head>` prints the same as for it, `stale` otherwise, or `unknown` when GitHub cannot compare them, such as a diff too large; then `local-review`, or `no-local-review` for a low head no local reviewer ran on, as the status below attests; `-` when the section holds no record `quest review` wrote or it names no full SHA, or, with a warning saying why, when no passing [`quest review` commit status](#review-locally) attests it: the latest one on the head it names must be `success`, set by a user with write access to the base repository, its target the diff from the head's merge base with the PR's base, and its description must name the record's risk tier and class. So a record a contributor or a bot wrote, or edited to name another head, base, or tier, counts for nothing. Reading the setter's permission takes a token that can push to the repository; any other sees every record as untrusted. |
-| `risk` | The record's [risk tier](#risk-tiers), `low`, `medium`, or `high`; the same state as `review-record` for the head it names; the tier its classifier set; and the reason. `-` when the record names none or does not count, and `- malformed -` with why when its risk lines do not parse, which `quest merge` refuses. |
+| `review-record` | Whether the PR body's [`## Review` record](#review-locally) still covers the head, and the head it names last: `current` when it is the head, `diff-identical` when `git diff <base>...<head>` prints the same as for it, `stale` otherwise, and also, with a warning, for an open PR once `RISK.md` at the base's tip is not the file the record names, since the tier that file set decided how much review the head got, or `unknown` when GitHub cannot compare them, such as a diff too large; then `local-review`, or `no-local-review` for a low head no local reviewer ran on, as the status below attests; `-` when the section holds no record `quest review` wrote or it names no full SHA, or, with a warning saying why, when no passing [`quest review` commit status](#review-locally) attests it: the latest one on the head it names must be `success`, set by a user with write access to the base repository, its target the diff from the head's merge base with the PR's base, and its description must name the record's risk tier, class, and risk file. So a record a contributor or a bot wrote, or edited to name another head, base, or tier, counts for nothing. Reading the setter's permission takes a token that can push to the repository; any other sees every record as untrusted. |
+| `risk` | The record's [risk tier](#risk-tiers), `low`, `medium`, or `high`; the same state as `review-record` for the head it names, so `stale` once the base's `RISK.md` changes, since that base may no longer hold the tier or offer the class; the tier its classifier set; and the reason. `-` when the record names none or does not count, and `- malformed -` with why when its risk lines do not parse, which `quest merge` refuses. |
 | `class` | The `## Automatic` class of the base's `RISK.md` the record's classifier found the change in, or `-`. |
 | `auto-merge` | Method, who enabled it, when, and the head it was enabled on. |
 | `merge-queue` | Queue state, position, and when it was enqueued. |
-| `landing-stopped` | The reason the latest merge-queue entry, auto-merge, or [`quest land`](#the-watchers-own-queue) queue entry ended (such as `merge_conflict`, `failed_checks`, `manual`, `manually_disabled`, or `merged`), who ended it, and when; `-` once the PR has entered the merge queue or auto-merge again since. |
+| `landing-stopped` | The reason the latest merge-queue entry, auto-merge, or [`quest land`](#the-watchers-own-queue) queue entry ended (such as `merge_conflict`, `failed_checks`, `unreviewed`, `manual`, `manually_disabled`, or `merged`), who ended it, and when; `-` once the PR has entered the merge queue or auto-merge again since. |
 | `checks` | `failure` if any check fails, else `pending` if any is pending or a requirement is unreported, else `success`, and `passed=`, `failing=`, `pending=` counts, all from the checks that count; `-` when the head has no checks and the base requires none. |
 | `check` | `failing` or `pending`, `required` or `optional`, the result, details URL, and name. A required check or required workflow nothing reports yet prints as `pending required expected -` with its name, followed by `(from app <id>)` when the requirement names an app, or the workflow's repository and path, as `owner/name:path`. |
 | `review` | `current` or `stale` against the head, state, reviewer, time, and URL of each reviewer's latest review. |
@@ -774,9 +793,10 @@ base with the base touches a path the base's `RISK.md` holds high, as
 [Risk tiers](#risk-tiers) says, or reaches GitHub's 300-file compare limit. A
 high head lands only once a `quest review` status that `quest status` counts
 covers its diff, on that head or on an earlier one whose diff from the base is
-identical, unless the head itself carries a `quest review` status that is not
-a pass. So any push after the last review that changes the diff, a person's or
-a helper's, waits for a new round.
+identical, and its record names the base's current `RISK.md`, unless the head
+itself carries a `quest review` status that is not a pass. So any push after
+the last review that changes the diff, a person's or a helper's, and any change
+to the base's `RISK.md` since, waits for a new round.
 It enables auto-merge bound to that SHA, or merges at once when nothing is
 left to wait for. `--squash` or `--rebase` picks the method, and it refuses one
 the repository disallows; otherwise it uses the only method the repository
@@ -924,7 +944,7 @@ addressed recurring right after it, or three unchanged re-enqueues in a row,
 whatever their causes, hand it back. A fix is validated, lease-pushed, and recorded in Review, and a push GitHub refuses, or a fix that edits protected paths, is handed
 back with its resolution for `quest land apply`, as [the land fixer](#the-land-fixer) describes. The watcher then puts the fixed, merged, or requeued head back
 in the queue, unless it is high and no `quest review` status covers its diff, as
-`quest merge --land` requires, which hands it back for a review round. It goes back with `expectedHeadOid` bound to it: it enqueues a head whose
+`quest merge --land` requires, which hands it back for a review round, marked `unreviewed` in `quest status`. It goes back with `expectedHeadOid` bound to it: it enqueues a head whose
 required checks have passed, and arms auto-merge on one whose checks still
 run, so GitHub enqueues it once they pass. Either joins the back of the queue.
 It comments on the PR with what it did, after any note the fixer wrote. A
@@ -1057,7 +1077,7 @@ rename split, and keeps that set as a plain merge of the base leaves it. It cove
 `.gitmodules`, and gitlinks anywhere. A high head gets fixes like any other, but
 the watcher puts it back in the queue only when a `quest review` status covers
 the new head's diff, as `quest merge --land` requires; otherwise it hands the PR back
-for a review round. The watcher's own merge with the quest merge driver, below, is
+for a review round, marked `unreviewed` in `quest status`. The watcher's own merge with the quest merge driver, below, is
 no fixer edit: it runs no model and resolves only `quest/` files. Collection copies at most 100 MiB of Git metadata the fixer added into a
 clean object repository. It skips the packs fetched at launch, whose objects the clean
 repository borrows from the daemon's own. It ignores fixer configuration and never
@@ -1495,8 +1515,8 @@ it:
 | XL | Claude Code `claude-opus-5-5` xhigh |
 
 `quest unblocked --json` lists each ready quest's ranked `models`: its size's
-list, or the next size's while a `Maintainer:` item under its `## Waiting`
-leaves a decision open, since settling it is part of the work; an XL stays
+list, or the next size's while a `Maintainer:` item under its `## Waiting`,
+other than an action, leaves a decision open, since settling it is part of the work; an XL stays
 XL. `/quest-run` starts a quest on the first entry that can run, and falls
 to the next only while nothing is written: when the CLI is missing or logged
 out, or the agent stops at its usage limit with nothing beyond the claim
@@ -1772,8 +1792,9 @@ and prints `record skipped: <why>`. It edits as the user the GitHub token names
 (`GH_TOKEN`, `GITHUB_TOKEN`, or `gh auth token`), then on GitHub sets the
 `quest review` commit status on the head on the same token, so push the head
 first: `success` once no finding is open, else `failure`, described by the
-head's risk tier and class and whether a local reviewer ran, as `Risk low,
-class test: passed with no local reviewer`, or `findings accepted` after
+head's risk tier, class, and risk file and whether a local reviewer ran, as
+`Risk low, class test, risk file 3f9c2a7b1e04: passed with no local
+reviewer`, or `findings accepted` after
 `--accept`, its target the diff from the
 head's merge base with the PR's base. `quest status` counts a record only
 through that status, set by someone who can push, so a contributor's own record
@@ -1855,8 +1876,9 @@ class every changed file falls in, or none. It is offered only the classes
 whose scope holds every changed path, either side of a rename, checked
 before it runs so it judges just the rule and cannot widen a scope; a change
 that touches no path falls in none. The scope is checked when the head is
-classified, so a record keeps its class after the base narrows that scope
-until a review classifies the head again. It runs as Claude Code
+classified, so once the base's `RISK.md` changes, `quest status` reads an
+open PR's review record, tier, and class as `stale` until a review
+classifies the head again. It runs as Claude Code
 `claude-haiku-5-5` at low effort, then Codex `gpt-6.2-sol` at low when Claude Code is
 missing, logged out, has its login rejected, or hits its usage limit. When none can
 run, the review fails on the limit that resets first if every one whose CLI is
@@ -1871,10 +1893,13 @@ sessions, so a later round on the same head and base `RISK.md` reuses it, and
 ```markdown
 - Risk: medium, `It changes the record format quest status parses.`
 - Classified: medium by Claude Code, claude-haiku-5-5, low effort, session `5b0e6c1a-27d4-4f8e-9a51-3c2d7e8f9b10`
+- Risk file: 3f9c2a7b1e04
 ```
 
 `Classified:` names `the always-high paths` or `default` when no model set the
-tier. A `- Class:` line follows when the classifier named a class.
+tier. A `- Class:` line follows when the classifier named a class, then
+`- Risk file:`, the base's `RISK.md` the tier was set against by its blob's
+first 12 characters, or `none`.
 
 A low head with no finding left to settle runs no local reviewer, unless
 `--harness`, `--model`, or `--effort` names one: the record names the head in

@@ -275,7 +275,12 @@ export interface RecordedRisk {
 	class: string | null;
 	/** The tier before the maintainer overrode it to `tier`, or null when they did not. */
 	overridden: Tier | null;
+	/** The base's risk file the classifier read, as {@link riskFileId} names it, or null when the record does not say. */
+	riskFile: string | null;
 }
+
+/** How a record names the base's risk file: its blob's first 12 characters, or `none` where the base has none. */
+export const riskFileId = (blob: string | null): string => (blob === null ? "none" : blob.slice(0, 12));
 
 /** A `## Review` record whose risk lines `quest review` did not write, and what is wrong with them. */
 export interface MalformedRisk {
@@ -293,7 +298,7 @@ export function recordedRisk(body: string): RecordedRisk | MalformedRisk | null 
 	if (section === null) return null;
 	const text = body.slice(section.start, section.end);
 	// Any risk line makes a record, so a line that misses its pattern, such as `- Risk:dire`, is malformed, not absent.
-	if (!/^- (?:Risk|Classified|Class|Overridden):/m.test(text)) return null;
+	if (!/^- (?:Risk|Classified|Class|Overridden|Risk file):/m.test(text)) return null;
 	const line = /^- Risk:(.*?)\r?$/m.exec(text);
 	if (line === null) return { malformed: "the ## Review record's risk is malformed: it has no - Risk: line" };
 	// Model text is an inline code span, as long a run of backticks as it needs, padded when it starts or ends with one.
@@ -306,8 +311,13 @@ export function recordedRisk(body: string): RecordedRisk | MalformedRisk | null 
 	const session = /, session (`+) ?(.*?) ?\1$/.exec(by);
 	const named = /^- Class: `([a-z0-9-]+)`\r?$/m.exec(text);
 	const overridden = /^- Overridden: from (low|medium|high) by the maintainer\r?$/m.exec(text);
-	if (/^- Class:/m.test(text) !== (named !== null) || /^- Overridden:/m.test(text) !== (overridden !== null))
-		return { malformed: "the ## Review record's class or override is malformed" };
+	const file = /^- Risk file: ([0-9a-f]{12}|none)\r?$/m.exec(text);
+	if (
+		/^- Class:/m.test(text) !== (named !== null) ||
+		/^- Overridden:/m.test(text) !== (overridden !== null) ||
+		/^- Risk file:/m.test(text) !== (file !== null)
+	)
+		return { malformed: "the ## Review record's class, override, or risk file is malformed" };
 	return {
 		tier: risk[1] as Tier,
 		reason: risk[3]!,
@@ -317,6 +327,7 @@ export function recordedRisk(body: string): RecordedRisk | MalformedRisk | null 
 		head: head[1]!,
 		class: named ? named[1]! : null,
 		overridden: overridden ? (overridden[1] as Tier) : null,
+		riskFile: file ? file[1]! : null,
 	};
 }
 

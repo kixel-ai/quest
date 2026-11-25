@@ -33,7 +33,7 @@ import { culpritOf, culprits } from "./breakage";
 import { fixes } from "./land-fixer";
 import { MERGER } from "./land-watch-fix";
 import { githubRepository, requireRemote } from "./github";
-import { type GitHub, type ObjectValue, link, object } from "../github/client";
+import { type GitHub, type GitHubReader, type ObjectValue, link, object } from "../github/client";
 import { type OnlineReview, readOnlineReviews } from "../github/online-review";
 import {
 	type Counts,
@@ -404,6 +404,42 @@ export function parseSessions(text: string): Session[] {
 				),
 			};
 		});
+}
+
+/**
+ * A lookup of the lowercase `owner/repo` that GitHub serves under `name` now, asking once per distinct name through
+ * `client`, its failure too, so the lookup fails fast for every caller. A name GitHub no longer serves at all stays as recorded, since a deleted checkout's sessions have no other
+ * repository to name.
+ */
+export function currentNamer(client: GitHubReader): (name: string) => Promise<string> {
+	const asked = new Map<string, Promise<string>>();
+	return (name) => {
+		let now = asked.get(name);
+		if (now === undefined) {
+			const [owner, repo] = name.split("/") as [string, string];
+			now = client.currentName({ owner, repo }).then((current) => current ?? name);
+			asked.set(name, now);
+		}
+		return now;
+	};
+}
+
+/**
+ * `sessions` with each repository named as `current` says it is now, so a transfer or rename strips no PR of the
+ * sessions that worked on it before.
+ */
+export async function currentNames(
+	current: (name: string) => Promise<string>,
+	sessions: Session[],
+): Promise<Session[]> {
+	const now = new Map<string, string>();
+	for (const name of new Set(sessions.flatMap((session) => session.repositories ?? [])))
+		now.set(name, await current(name));
+	return sessions.map((session) =>
+		session.repositories === null
+			? session
+			: { ...session, repositories: [...new Set(session.repositories.map((name) => now.get(name)!))] },
+	);
 }
 
 /**
@@ -1250,7 +1286,8 @@ export async function usage(root: string, options: UsageOptions, deps: UsageDepe
 	const allRows = pullRows(all, repository);
 	const rows = allRows.filter((row) => pulls.some((each) => each.number === row.number));
 	const byNumber = new Map(rows.map((row) => [row.number, row]));
-	const exported = deps.sessions(new Date(since), options.ssh ?? []);
+	const read = deps.sessions(new Date(since), options.ssh ?? []);
+	const exported = read === null ? null : await currentNames(currentNamer(client), read);
 	const { kept, dropped } = fold(exported ?? []);
 	let unattributed: Usage["unattributed"] = null;
 	let incomplete: Session[] = [];

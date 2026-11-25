@@ -25,6 +25,8 @@ import {
 	type Reviewed,
 	type Session,
 	fixBreakages,
+	currentNamer,
+	currentNames,
 	fold,
 	heading,
 	key,
@@ -422,19 +424,22 @@ async function sendTo(
 	const active = [...groups.values()].flat();
 	if (active.length === 0) return false;
 	const since = Math.min(...active.map((q) => q.pending.start));
-	const exported = deps.sessions(new Date(since));
-	if (exported === null)
+	const listed = deps.sessions(new Date(since));
+	if (listed === null)
 		throw new Error(
 			"token-max is not installed, so no record can be priced; install it with `cargo install --locked token-max`",
 		);
-	const { kept } = fold(exported);
-	const byId = new Map(kept.flatMap((s) => (s.id === null ? [] : [[`${s.harness}\0${s.id}`, s] as const])));
+	const current = currentNamer(client);
 	const waits = deps.waits(since);
 	const calls = deps.calls(since);
 	for (const [id, group] of groups) {
 		const { origin } = group[0]!.pending;
 		const roots = new Set(group.map((q) => q.pending.root));
 		try {
+			// Looked up here, so a repository GitHub fails to answer for holds back only the groups it fails for.
+			const exported = await currentNames(current, listed);
+			const { kept } = fold(exported);
+			const byId = new Map(kept.flatMap((s) => (s.id === null ? [] : [[`${s.harness}\0${s.id}`, s] as const])));
 			const repository = bases.get(id)!;
 			// PRs are read from the last upload's read, if earlier, so a fix that merged after its sessions were sent,
 			// as through the merge queue, still reaches the store with the next session. A resend reads from its earlier
@@ -471,12 +476,13 @@ async function sendTo(
 						: [],
 				),
 			);
-			const repositories = new Set([origin, key(repository)]);
+			const here = await current(origin);
+			const repositories = new Set([here, key(repository)]);
 			// A sub-agent stops without the stop hook naming it, so each queued session brings its own, routed as its
 			// own checkout routes it, found from the nearest folder still there: a checkout must be a queued one's, or
 			// name the same origin. With no checkout left, every repository token-max resolved for it
 			// must be this group's.
-			const routed = (s: Session): boolean => {
+			const routed = async (s: Session): Promise<boolean> => {
 				// Repositories token-max resolved that are none of this group's, as for a deleted nested clone of
 				// another, rule it out whatever checkout now holds its folder.
 				if (
@@ -491,7 +497,7 @@ async function sendTo(
 					if (roots.has(own)) return true;
 					const remote = readRemote(own, "origin");
 					const named = remote === null ? null : remoteRepository(remote).repository;
-					return named !== null && key(named) === origin;
+					return named !== null && (await current(key(named))) === here;
 				}
 				return (
 					s.repositories !== null &&
@@ -503,7 +509,13 @@ async function sendTo(
 				grew = false;
 				for (const s of kept) {
 					const parent = s.parent === null ? undefined : byId.get(`${s.harness}\0${s.parent}`);
-					if (s.id !== null && !emit.has(s) && parent !== undefined && emit.has(parent) && routed(s)) {
+					if (
+						s.id !== null &&
+						!emit.has(s) &&
+						parent !== undefined &&
+						emit.has(parent) &&
+						(await routed(s))
+					) {
 						emit.add(s);
 						grew = true;
 					}
@@ -552,6 +564,7 @@ async function sendTo(
 				records: [...records.values()],
 				breakages: await fixBreakages({ client, repository, pulls }),
 			};
+			const due = await resendsDue(deps.env, id, pulls, group, current);
 			const endpoint = `${url}/records`;
 			const response = await post(deps.fetch, endpoint, token, upload);
 			if (response.status === 401 || response.status === 403) {
@@ -562,7 +575,8 @@ async function sendTo(
 				throw new Error(`${endpoint} answered ${response.status}: ${(await response.text()).slice(0, 500)}`);
 			clearBackoff(deps.env, id);
 			remember(deps.env, id, { group, emit, byId, from, waiting: unheaded([...emit], exported, pulls, pins) });
-			resendDue(deps.env, id, pulls, group);
+			for (const path of due.forget) rmSync(path, { force: true });
+			for (const pending of due.resend) enqueue(deps.env, { ...pending, queued: randomUUID() });
 			// Only once every resend these PRs call for is queued, so a pass that fails before then reads them again.
 			writeCursor(deps.env, id, read);
 			for (const q of group) settle(q);
@@ -825,13 +839,21 @@ function forget(env: NodeJS.ProcessEnv, id: string, pending: Pending): boolean {
 }
 
 /**
- * Queue again each session group `id` remembers once a PR among `pulls` heads one of its waiting branches, so the
- * group's next pass rebuilds its tree, and forget each whose transcript is gone. The group's sessions in `sent` were
- * just rebuilt, so they are left as `remember` decided.
+ * What group `id`'s remembered sessions call for once `pulls` are read: each whose PR now heads one of its waiting
+ * branches, to queue again so the group's next pass rebuilds its tree, and each whose transcript is gone, to forget.
+ * The group's sessions in `sent` were just rebuilt, so they are left as `remember` decides. Read before the upload, so
+ * a failed lookup fails before the store has the records, not after.
  */
-function resendDue(env: NodeJS.ProcessEnv, id: string, pulls: Pull[], sent: { pending: Pending }[]): void {
+async function resendsDue(
+	env: NodeJS.ProcessEnv,
+	id: string,
+	pulls: Pull[],
+	sent: { pending: Pending }[],
+	current: (name: string) => Promise<string>,
+): Promise<{ forget: string[]; resend: Pending[] }> {
+	const due = { forget: [] as string[], resend: [] as Pending[] };
 	const dir = rememberedDir(env, id);
-	if (!existsSync(dir)) return;
+	if (!existsSync(dir)) return due;
 	const fresh = new Set(sent.map((q) => rememberedPath(env, id, q.pending)));
 	const heads = heading(pulls);
 	for (const name of readdirSync(dir)) {
@@ -839,9 +861,22 @@ function resendDue(env: NodeJS.ProcessEnv, id: string, pulls: Pull[], sent: { pe
 		if (!name.endsWith(".json") || fresh.has(path)) continue;
 		const kept = readRemembered(path);
 		// An unreadable file loses only the resend of a record already sent once, so it never blocks the group.
-		if (kept === null || !kept.files.some((file) => existsSync(file))) rmSync(path, { force: true });
-		else if (kept.waiting.some(heads)) enqueue(env, { ...kept.pending, queued: randomUUID() });
+		if (kept === null || !kept.files.some((file) => existsSync(file))) due.forget.push(path);
+		else {
+			// A branch remembered before its repository moved names the old one, which GitHub's PRs no longer do.
+			const waiting = await Promise.all(
+				kept.waiting.map(async (reached) => ({
+					...reached,
+					repositories:
+						reached.repositories === null
+							? null
+							: [...new Set(await Promise.all(reached.repositories.map(current)))],
+				})),
+			);
+			if (waiting.some(heads)) due.resend.push(kept.pending);
+		}
 	}
+	return due;
 }
 
 function readRemembered(path: string): Remembered | null {

@@ -2,15 +2,16 @@
 // head by a user with write access to the base repository, since anyone can write a SHA into their own PR's body.
 import {
 	type PullRequest,
+	type RecordedRisk,
 	REVIEW_MARK,
 	RISK_FILE,
 	type Repository,
-	type Tier,
 	heldHigh,
 	highHits,
 	parseRiskFile,
 	recordedRisk,
 	reviewSection,
+	riskFileId,
 } from "../core";
 import { GitHubDeadline, type GitHubReader, array, object, repositoryPath, string } from "./client";
 
@@ -20,9 +21,14 @@ export const REVIEW_CONTEXT = "quest review";
 /** A run's outcome as its status names it, including whether a local reviewer ran, which a standing pick needs. */
 export type Outcome = "passed" | "passed with no local reviewer" | "findings accepted" | "findings open";
 
-/** The status description `quest review` sets: the head's risk and class, which the body's record must match, and its outcome. */
-export function attestation(tier: Tier, kind: string | null, outcome: Outcome): string {
-	return `Risk ${tier}${kind === null ? "" : `, class ${kind}`}: ${outcome}`;
+/**
+ * The status description `quest review` sets: the head's risk, class, and the base's risk file they were set against,
+ * which the body's record must match, and its outcome.
+ */
+export function attestation(risk: Pick<RecordedRisk, "tier" | "class" | "riskFile">, outcome: Outcome): string {
+	const kind = risk.class === null ? "" : `, class ${risk.class}`;
+	const file = risk.riskFile === null ? "" : `, risk file ${risk.riskFile}`;
+	return `Risk ${risk.tier}${kind}${file}: ${outcome}`;
 }
 
 /**
@@ -34,7 +40,7 @@ export function reviewTarget(repository: Repository, from: string, sha: string):
 }
 
 const ATTESTED =
-	/^Risk (low|medium|high)(?:, class ([a-z0-9-]+))?: (passed|passed with no local reviewer|findings accepted|findings open)$/;
+	/^Risk (low|medium|high)(?:, class ([a-z0-9-]+))?(?:, risk file ([0-9a-f]{12}|none))?: (passed|passed with no local reviewer|findings accepted|findings open)$/;
 
 /** Repository permissions that can push. */
 const WRITE = ["admin", "maintain", "write"];
@@ -91,9 +97,10 @@ const TIERS_QUERY = `query ReviewTiers($owner: String!, $repo: String!, $number:
 
 /**
  * Why `sha`, the head of `pr` about to land, must wait for a new `quest review` round, or null when it may land.
- * A head `RISK.md` rates high lands only with a trusted record whose reviewed diff is `sha`'s, so any push after the
- * last review that changes the diff, whoever made it, waits for a new one. A head is high when `body`'s record rates
- * it high, is malformed, or does not count, when a `quest review` status on any of the PR's commits rates it high, or
+ * A head `RISK.md` rates high lands only with a trusted record whose reviewed diff is `sha`'s and that was classified
+ * against the base's current risk file, so any push after the last review that changes the diff, whoever made it,
+ * and any change to the base's risk file since, waits for a new one. A head is high when `body`'s record rates it
+ * high, is malformed, or does not count, when a `quest review` status on any of the PR's commits rates it high, or
  * when its diff from its merge base with the base touches a path the base's risk file holds high.
  */
 export async function unreviewedHigh(
@@ -107,12 +114,54 @@ export async function unreviewedHigh(
 		distrust = message;
 	});
 	const head = sha.toLowerCase();
-	if (trusted.head === head) return null;
+	const risk = await baseRisk(github, pr);
+	// A record classified against another risk file may hold a tier the base no longer gives, so it covers nothing.
+	const recorded = recordedRisk(body);
+	const covers =
+		recorded !== null && !("malformed" in recorded) && recorded.riskFile === riskFileId(risk?.blob ?? null);
+	if (covers && trusted.head === head) return null;
 	// A review of an earlier head carries to one with its diff, unless a round on this head has failed since.
-	if (trusted.head !== null && !(await failed(github, pr, head)) && (await sameDiff(github, pr, trusted.head, head)))
+	if (
+		covers &&
+		trusted.head !== null &&
+		!(await failed(github, pr, head)) &&
+		(await sameDiff(github, pr, trusted.head, head))
+	)
 		return null;
-	const high = distrust ?? recordHigh(body) ?? (await statusHigh(github, pr)) ?? (await pathHigh(github, pr, head));
+	const high =
+		distrust ??
+		recordHigh(body) ??
+		(await statusHigh(github, pr)) ??
+		(await pathHigh(github, pr, head, risk?.text ?? null));
 	return high === null ? null : `${sha} is high, since ${high}, and no quest review status covers it`;
+}
+
+const BASE_RISK_QUERY = `query BaseRisk($owner: String!, $repo: String!, $expression: String!) {
+	repository(owner: $owner, name: $repo) {
+		object(expression: $expression) { oid ... on Blob { text isBinary isTruncated } }
+	}
+}`;
+
+/**
+ * The base branch's risk file and its blob SHA, read together, as `quest review` reads them from Git: a symlink's own
+ * blob, BOM and all. Null where it has none.
+ */
+async function baseRisk(
+	github: GitHubReader,
+	pr: PullRequest & { base: string },
+): Promise<{ text: string; blob: string } | null> {
+	const data = await github.graphql(BASE_RISK_QUERY, {
+		owner: pr.owner,
+		repo: pr.repo,
+		// Fully qualified, so a tag of the same name is never read instead.
+		expression: `refs/heads/${pr.base}:${RISK_FILE}`,
+	});
+	const found = object(data.repository).object;
+	if (found == null) return null;
+	const blob = object(found);
+	if (blob.isBinary !== false || blob.isTruncated !== false || typeof blob.text !== "string")
+		throw new Error(`${pr.owner}/${pr.repo}'s ${RISK_FILE} on ${pr.base} is not a text file GitHub returns whole`);
+	return { text: blob.text, blob: string(blob.oid) };
 }
 
 /** Whether `sha` carries a `quest review` status that is not a pass. */
@@ -176,16 +225,17 @@ async function statusHigh(github: GitHubReader, pr: PullRequest): Promise<string
 }
 
 /**
- * Why `sha`'s diff from its merge base with the base makes it high, or null: it touches a path the base's risk file
+ * Why `sha`'s diff from its merge base with the base makes it high, or null: it touches a path `risk`, the base's risk file,
  * holds high, on either side of a rename, as `quest review` classifies a head.
  */
-async function pathHigh(github: GitHubReader, pr: PullRequest & { base: string }, sha: string): Promise<string | null> {
+async function pathHigh(
+	github: GitHubReader,
+	pr: PullRequest & { base: string },
+	sha: string,
+	risk: string | null,
+): Promise<string | null> {
 	const path = repositoryPath(pr);
-	const risk = await github.request(`${path}/contents/${RISK_FILE}?ref=${encodeURIComponent(pr.base)}`, {
-		accept: "application/vnd.github.raw+json",
-		allow: [404],
-	});
-	const file = risk.status === 404 ? null : parseRiskFile(await risk.text());
+	const file = risk === null ? null : parseRiskFile(risk);
 	if (file !== null && file.problems.length > 0)
 		return `the base's ${RISK_FILE} cannot be read: ${file.problems.join("; ")}`;
 	// The compare of `sha` itself, since GitHub recomputes a PR's file list only some time after a push.
@@ -251,13 +301,16 @@ async function attestedOutcome(
 	// The status lives in this repository, so its target's diff binds it, whatever name the reader's remote gives it.
 	if (!String(targetUrl).toLowerCase().endsWith(`/compare/${from}...${sha}`))
 		return `the ${REVIEW_CONTEXT} status on ${sha} attests another diff than ${pr.base}'s, from ${from}: ${String(targetUrl)}`;
-	// The tier and class gate a standing pick, so the body's must be the ones attested.
+	// The tier, class, and risk file gate a standing pick, so the body's must be the ones attested.
 	const attested = ATTESTED.exec(typeof description === "string" ? description : "");
 	if (attested === null) return `the ${REVIEW_CONTEXT} status on ${sha} names no risk: ${String(description)}`;
 	const risk = recordedRisk(body);
 	if (risk === null) return `it names no risk, which the ${REVIEW_CONTEXT} status on ${sha} attests`;
 	// A malformed risk is left for `quest status` to print and `quest merge` to refuse.
-	if (!("malformed" in risk) && (risk.tier !== attested[1] || risk.class !== (attested[2] ?? null)))
+	if (
+		!("malformed" in risk) &&
+		(risk.tier !== attested[1] || risk.class !== (attested[2] ?? null) || risk.riskFile !== (attested[3] ?? null))
+	)
 		return `its risk differs from the ${REVIEW_CONTEXT} status on ${sha}: ${String(description)}`;
-	return { localReview: attested[3] !== "passed with no local reviewer" };
+	return { localReview: attested[4] !== "passed with no local reviewer" };
 }

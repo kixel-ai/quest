@@ -1,5 +1,6 @@
 // `quest iterate`, `ready`, `merge`, and `release`, against a PR replayed in memory.
 
+import { createHash } from "node:crypto";
 import { describe, expect, test, vi } from "vitest";
 
 import type { GitHubDependencies, ObjectValue } from "../src/github/client";
@@ -154,8 +155,6 @@ class FakePull {
 				files,
 			});
 		}
-		if (url.pathname === "/repos/example/project/contents/RISK.md")
-			return this.risk === null ? json(404, { message: "Not Found" }) : new Response(this.risk);
 		if (url.pathname === "/repos/example/project/collaborators/maintainer/permission")
 			return json(200, { permission: "write" });
 		if (url.pathname === "/repos/example/project/rules/branches/main") {
@@ -214,6 +213,12 @@ class FakePull {
 					},
 				},
 			};
+		if (query.includes("query BaseRisk")) {
+			if (variables.expression !== "refs/heads/main:RISK.md") throw new Error("read RISK.md off another ref");
+			const risk = this.risk;
+			const found = risk === null ? null : { oid: blobId(risk), text: risk, isBinary: false, isTruncated: false };
+			return { data: { repository: { object: found } } };
+		}
 		if (query.includes("query ReviewStatus")) {
 			const status = this.statuses[String(variables.sha)];
 			return {
@@ -1051,14 +1056,22 @@ test("iterate and release exit 0 when stdout returns a value", async () => {
 	}
 });
 
+/** A blob's SHA as Git names it. */
+const blobId = (text: string) =>
+	createHash("sha1")
+		.update(`blob ${Buffer.byteLength(text)}\0${text}`)
+		.digest("hex");
+
 describe("merge --land of a high head", () => {
 	const OLD = "c".repeat(40);
 	/** A `## Review` record of `head` at `tier`, and the passing status a maintainer's round sets on it. */
 	const review = (pull: FakePull, head: string, tier: string) => {
-		pull.body = `Summary.\n\n## Review\n\n${REVIEW_MARK}\n\n- Head: ${head}\n- Risk: ${tier}, \`why\`\n- Classified: ${tier} by codex\n`;
+		// Classified against the base's risk file as it is now.
+		const file = pull.risk === null ? "none" : blobId(pull.risk).slice(0, 12);
+		pull.body = `Summary.\n\n## Review\n\n${REVIEW_MARK}\n\n- Head: ${head}\n- Risk: ${tier}, \`why\`\n- Risk file: ${file}\n- Classified: ${tier} by codex\n`;
 		pull.statuses[head] = {
 			state: "SUCCESS",
-			description: `Risk ${tier}: passed`,
+			description: `Risk ${tier}, risk file ${file}: passed`,
 			targetUrl: reviewTarget({ owner: "example", repo: "project" }, FORK, head),
 			creator: { __typename: "User", login: "maintainer" },
 		};
@@ -1070,6 +1083,28 @@ describe("merge --land of a high head", () => {
 		pull.risk = "# Risk\n\n## High\n\n- `assets/` - every agent loads it\n";
 		pull.files = ["assets/a.md"];
 		review(pull, HEAD, "high");
+		await land_(pull);
+		expect(pull.writes).toEqual([`enablePullRequestAutoMerge ${HEAD} MERGE`]);
+	});
+
+	test("refuses one a review covers once the base's RISK.md changed, until it touches no high path", async () => {
+		const pull = new FakePull();
+		pull.risk = "# Risk\n";
+		pull.files = ["assets/a.md"];
+		review(pull, HEAD, "low");
+		pull.risk = "# Risk\n\n## High\n\n- `assets/` - every agent loads it\n";
+		expect(await refused(land_(pull))).toContain(`head ${HEAD} is high, since it changes assets/a.md`);
+		// The same review of a head with the same diff covers it no more.
+		pull.risk = "# Risk\n";
+		review(pull, OLD, "high");
+		pull.diffs = { [OLD]: "diff", [HEAD]: "diff" };
+		pull.risk = "# Risk\n\n## High\n\n- `docs/` - published\n";
+		expect(await refused(land_(pull))).toContain("since its review record rates it high");
+		expect(pull.writes).toEqual([]);
+		// A low record and no high path still lands, as with no review at all.
+		review(pull, OLD, "low");
+		pull.risk = null;
+		pull.files = ["src/a.ts"];
 		await land_(pull);
 		expect(pull.writes).toEqual([`enablePullRequestAutoMerge ${HEAD} MERGE`]);
 	});

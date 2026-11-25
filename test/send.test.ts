@@ -115,7 +115,8 @@ function sender(
 		new Response(JSON.stringify(value), { headers: { "content-type": "application/json" } });
 	const github = async (input: string | URL | Request) => {
 		const url = new URL(String(input));
-		const named = /^\/repos\/acme\/(proj|other)$/.exec(url.pathname)?.[1];
+		// A transferred repository: GitHub redirects its former name to the current one.
+		const named = /^\/repos\/(?:acme|old)\/(proj|other)$/.exec(url.pathname)?.[1];
 		if (named)
 			return json({
 				owner: { login: "acme" },
@@ -275,6 +276,16 @@ test("a session `quest review` queued is sent on the PR it reviewed, as the role
 	]);
 	// It waits for a PR on the branch it reviewed, not its checkout's.
 	expect(remembered(env)).toEqual(["early"]);
+});
+
+test("a session that recorded a transferred repository's former name is sent on the PR its branch heads now", async () => {
+	const env = home();
+	const root = checkout();
+	queue(stopped(root), env);
+	const { deps, uploads } = sender(env, 200, [session("s1", "quest/m0/a", { repositories: ["old/proj"] })]);
+	await sendPass(deps);
+	const { records } = parseUpload(uploads[0]!.body);
+	expect(records.map((r) => [r.session, r.pulls])).toEqual([["s1", [7]]]);
 });
 
 test("a repository Kixel Quest does not serve is dropped, unsent and without token-max, and is said once", async () => {
@@ -908,6 +919,52 @@ test("a session sent before its branch's PR opened is resent with the PR on its 
 	expect(pending(env)).toEqual([]);
 	// s2 stays remembered, as main heads no PR either.
 	expect(remembered(env)).toEqual(["s2"]);
+});
+
+test("a session remembered under a repository's former name is resent once a PR opens on its branch there", async () => {
+	const env = home();
+	const root = checkout();
+	queue(stopped(root), env);
+	const first = session("s1", "fix/x", { files: [transcript()] });
+	await sendPass(sender(env, 200, [first]).deps);
+	// The record was remembered before the repository moved, so it names the repository's former name.
+	const dir = join(env.XDG_STATE_HOME!, "quest", "records", "remembered");
+	for (const group of readdirSync(dir))
+		for (const name of readdirSync(join(dir, group))) {
+			const path = join(dir, group, name);
+			writeFileSync(path, readFileSync(path, "utf8").replaceAll("acme/proj", "old/proj"));
+		}
+	const s2 = later(env, root, "s2");
+	const next = sender(env, 200, [first, s2], () => {}, [opened(9, "fix/x", "2026-11-06T13:30:00Z")]);
+	next.clock.now = Date.parse("2026-11-06T14:00:00Z");
+	await sendPass(next.deps);
+	expect(pending(env)).toHaveLength(1);
+});
+
+test("a remembered repository GitHub fails to answer for holds the group's upload back, not repeats it", async () => {
+	const env = home();
+	const root = checkout();
+	queue(stopped(root), env);
+	const first = session("s1", "fix/x", { files: [transcript()] });
+	await sendPass(sender(env, 200, [first]).deps);
+	const dir = join(env.XDG_STATE_HOME!, "quest", "records", "remembered");
+	for (const group of readdirSync(dir))
+		for (const name of readdirSync(join(dir, group))) {
+			const path = join(dir, group, name);
+			writeFileSync(path, readFileSync(path, "utf8").replaceAll("acme/proj", "broken/proj"));
+		}
+	const s2 = later(env, root, "s2");
+	const next = sender(env, 200, [first, s2]);
+	const github = next.deps.github;
+	next.deps.github = () => ({
+		...github(),
+		fetch: (async (input: string | URL | Request, init?: RequestInit) =>
+			new URL(String(input)).pathname === "/repos/broken/proj"
+				? new Response("down", { status: 500 })
+				: (github().fetch as typeof fetch)(input, init)) as typeof fetch,
+	});
+	await expect(sendPass(next.deps)).rejects.toThrow("broken/proj");
+	expect(next.uploads).toEqual([]);
 });
 
 test("a pass that fails before its resends are queued reads their PRs again, even ones older than its sessions", async () => {

@@ -1,6 +1,6 @@
 // `quest review` rewrites the `## Review` section of its branch's open PR after each round, so the head
 // it reviewed counts without an agent copying the round into the body by hand.
-import { DEFAULT, PATHS, REVIEW_MARK, codeSpan, reviewSection } from "../core";
+import { DEFAULT, PATHS, REVIEW_MARK, codeSpan, reviewSection, riskFileId } from "../core";
 import { recorded } from "./models-record";
 import { type ClaimDependencies, upstream } from "./claims";
 import { pullsFrom } from "../github/claims";
@@ -108,6 +108,8 @@ export function reviewRecord({ rounds, tallies, risk, skipped, head, base, accep
 		...(risk.overridden ? [`- Overridden: from ${risk.overridden} by the maintainer`] : []),
 		`- Classified: ${risk.classified.tier} by ${classifiedBy(risk.classified)}`,
 		...(risk.classified.class === null ? [] : [`- Class: \`${risk.classified.class}\``]),
+		// By 12 characters, since `quest status` reads the section's last full SHA as the reviewed head.
+		`- Risk file: ${riskFileId(risk.classified.riskFile)}`,
 		...(rounds.length === 0 ? [`- Local review: none, since the head is low risk`] : []),
 		...(accepted === undefined ? [] : [`- Accepted by the maintainer: ${code(accepted)}`]),
 		// Outside the Reviewer blocks, which `parseReview` reads as reviewers that ran.
@@ -446,7 +448,14 @@ export async function recordRounds(root: string, reviewed: Reviewed, deps: Claim
 			head: reviewed.head,
 			from: git(root, ["merge-base", reviewed.base.sha, reviewed.head]),
 			state: ok ? "success" : "failure",
-			description: attestation(reviewed.risk.tier, reviewed.risk.classified.class, outcome),
+			description: attestation(
+				{
+					tier: reviewed.risk.tier,
+					class: reviewed.risk.classified.class,
+					riskFile: riskFileId(reviewed.risk.classified.riskFile),
+				},
+				outcome,
+			),
 		});
 	} catch (error) {
 		// A record of open findings names no full SHA, so writing it still ends any earlier pass of this head.
