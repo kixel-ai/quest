@@ -1986,6 +1986,14 @@ fakes(
 		expect(nul.stdin).not.toContain("\0");
 		expect(nul.stdin).toContain("or holds binary data");
 		expect(Object.values(nul.readable!)[0]).toContain("+export const y = 1;\0");
+		// Bytes that are not UTF-8 and hold no NUL would decode to far more characters, so they go down the file path too.
+		writeFileSync(join(s.repo, "src/bin.ts"), Buffer.alloc(150_000, 0xff));
+		git(s.repo, "add", ".");
+		git(s.repo, "commit", "-qm", "plant invalid UTF-8");
+		expect((await quest("--root", s.repo, "review")).code).toBe(0);
+		const bin = classifying(s.calls()).at(-1)!;
+		expect(bin.stdin).not.toContain("\uFFFD");
+		expect(bin.stdin).toContain("or holds binary data");
 		// Past the budget, the prompt holds the stat and names a file of the attribute-free diff, which the turn may read.
 		write(s.repo, "src/big.ts", `${"export const z = 1;\n".repeat(11_000)}`);
 		git(s.repo, "add", ".");

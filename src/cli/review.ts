@@ -2043,6 +2043,15 @@ export const CLASSIFY_INSTRUCTIONS =
  */
 const DIFF_FLAGS = ["--text", "--no-ext-diff", "--no-textconv", "--no-color", "--ignore-submodules=none"];
 
+/** The bytes as UTF-8 text, or null when they are not valid UTF-8, which decoding would swell with U+FFFD. */
+function text8(bytes: Buffer): string | null {
+	try {
+		return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+	} catch {
+		return null;
+	}
+}
+
 /** The name of the classifier's whole diff in its scratch directory. */
 const DIFF_PATCH = "diff.patch";
 
@@ -2401,9 +2410,10 @@ export async function classify(input: Classifying): Promise<{ key: string; value
 		const patchFile = join(scratch, DIFF_PATCH);
 		diff(["--patch", `--output=${patchFile}`]);
 		const size = statSync(patchFile).size;
-		// A NUL byte means a binary, whose raw bytes tokenize far past their length, so it goes down the file path too.
+		// A NUL byte or bytes that are not UTF-8 mean a binary, whose raw bytes tokenize, or decode to U+FFFD, far past
+		// their length, so it goes down the file path too.
 		const bytes = stat.length + size <= DIFF_BUDGET ? readFileSync(patchFile) : null;
-		const patch = bytes && !bytes.includes(0) ? bytes.toString("utf8") : null;
+		const patch = bytes && !bytes.includes(0) ? text8(bytes) : null;
 		const prompt = classifyPrompt(change, { sha: baseSha, text }, { stat, patch, file: patchFile, size }, offered);
 		answer = await ask(CLASSIFIERS, {
 			readable: scratch,

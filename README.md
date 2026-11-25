@@ -1879,8 +1879,8 @@ logged out, have their login rejected, or hit their usage limit. When none can
 run, the review fails on the limit that resets first if every one whose CLI is
 installed hit its own, and otherwise as a usage error naming why each failed. Its diff ignores the head's
 `.gitattributes` and treats every file as text, so a head cannot hide hunks by
-marking them binary. A diff past 200,000 characters gives it only the
-stat and a file of the whole diff in a scratch directory, which Claude Code is
+marking them binary. A diff past 200,000 characters, or one holding a NUL byte or bytes that are not
+UTF-8, gives it only the stat and a file of the whole diff in a scratch directory, which Claude Code is
 let read and which is removed once it answers. The tier is kept with the reviewers'
 sessions, so a later round on the same head and base `RISK.md` reuses it, and
 `--new` classifies again. The record names it after the base:
