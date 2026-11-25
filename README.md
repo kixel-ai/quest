@@ -196,7 +196,8 @@ under it: `quest unblocked` leaves them out, `quest unblocked <path>` names the
 parking, `quest start` refuses them, and `quest waiting` lists none of their
 `## Waiting` items, though a draft PR handed back for one is still listed.
 Unlike a date, parking never clears on its own; delete the section to unpark.
-`quest check` rejects a second item.
+`quest check` rejects a second item, one opening with a link (a quest the work
+waits on goes under `## Required`), and parking the root README.
 
 ## Run recurring audits
 

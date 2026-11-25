@@ -232,14 +232,18 @@ function headings(found: Finding[], docs: Doc[], doc: Doc, auditNames: boolean) 
 	});
 
 	// A blank item would park the work with no reason; one reason to resume is
-	// what a reader weighs, and a second only splits it.
+	// what a reader weighs, and a second only splits it. An item opening with a
+	// link would read as a list entry, which `quest rm` and the merge driver
+	// treat as removable and mergeable: a quest the work waits on is `Required`.
 	entries(doc, PARKED).forEach((entry, index) => {
 		const message =
 			entry.text === ""
 				? `'## ${PARKED}' item must say why and when to resume`
-				: index > 0
-					? `'## ${PARKED}' holds one item, saying why and when to resume; merge the others into it`
-					: null;
+				: entry.target !== null
+					? `'## ${PARKED}' item must not open with a link; list a quest the work waits on under '## Required'`
+					: index > 0
+						? `'## ${PARKED}' holds one item, saying why and when to resume; merge the others into it`
+						: null;
 		if (message !== null) found.push({ path: doc.path, line: entry.line, message });
 	});
 
@@ -258,6 +262,13 @@ function headings(found: Finding[], docs: Doc[], doc: Doc, auditNames: boolean) 
 
 	// Only the root's list stops `quest init` from planting an audit.
 	for (const heading of doc.headings) {
+		// Parking the root would hold back the whole tree with nothing to show why.
+		if (heading.text === PARKED && doc.path === ROOT)
+			found.push({
+				path: doc.path,
+				line: heading.line,
+				message: `'## ${PARKED}' parks a quest, epic, or milestone, not the whole tree in ${ROOT}`,
+			});
 		if (heading.text === SKIPPED && doc.path !== ROOT)
 			found.push({
 				path: doc.path,

@@ -879,6 +879,18 @@ describe("parked", () => {
 			.rejects("quest/m0/epic/one.md:9: '## Parked' item must say why and when to resume");
 	});
 
+	test("an item opening with a link is rejected", () => {
+		tree()
+			.append("quest/m0/epic/one.md", "\n## Parked\n\n- [Two](/quest/m0/epic/two.md) - resume once it lands\n")
+			.rejects("quest/m0/epic/one.md:9: '## Parked' item must not open with a link");
+	});
+
+	test("the root is not parked", () => {
+		tree()
+			.append("quest/README.md", "\n## Parked\n\n- until spring\n")
+			.rejects("'## Parked' parks a quest, epic, or milestone");
+	});
+
 	test("an empty section is rejected and parks nothing", () => {
 		const t = tree().append("quest/m0/epic/one.md", "\n## Parked\n");
 		t.rejects("'## Parked' is empty");
