@@ -81,17 +81,22 @@ Recommended, for the implementer to confirm:
   - Queue each `quest advise` session with its branch, PR, and `role: "advising"`
     (just as `quest review` queues review sessions via `src/cli/send.ts`), and
     surface advising invocation counts and spend in `quest usage`.
-  - Because `token-max` only reads Codex and Claude transcripts, persist the
-    token usage and cost reported by `agy` in the advisor turn record under
-    `.git/quest/advise/` (or `quest` state) and read that persisted usage in
-    both `quest usage` and `quest send` so Neon sessions are never dropped from
-    local spend or Kixel Quest uploads.
+  - Because `token-max` only reads Codex and Claude transcripts and the restored
+    `agy` reader returns `input`, `cached`, and `output` token counts without a
+    dollar cost, persist `agy`'s reported token counts in the advisor turn
+    record under `.git/quest/advise/` (or `quest` state), compute dollar spend
+    in `quest usage` and `quest send` from API list-rate pricing for the
+    recorded model (input, cached-input, and output rates), and mark spend
+    incomplete (`complete: false`) when no rate is defined for a model so Neon
+    sessions are never silently dropped or zero-priced.
 - **Checkpoint contract & skills (`src/cli/review.ts`, `README.md`, `assets/skills/advise.md`, `assets/skills/review.md`, `assets/skills/iterate.md`, `assets/AGENTS.md`):**
   - Update `nextStep()`'s `next decide` output in `src/cli/review.ts`, its CLI
-    help, and `README.md` alongside the skills so headless authors are told they
-    may run one `quest advise` escalation before handing the PR back, while
-    still requiring the maintainer's pick for scope or architecture pivots or
-    dropping the PR.
+    help, and `README.md` alongside the skills so headless authors are told the
+    complete exception: they may run one `quest advise` escalation, and when the
+    enclosing task already authorizes PR edits and the advice fits the quest's
+    Goal and settled decisions, they may apply it, post a `Design change:` PR
+    comment, and run `quest review --new`; scope changes, architecture pivots,
+    and dropping the PR still stop for the maintainer's pick.
   - Ship `/quest-advise` (installed by `quest init` like the other skills) with
     generic guidance: call `quest advise` when stuck (such as failing review
     convergence, repeated findings, or non-converging implementation loops),
@@ -109,9 +114,10 @@ Recommended, for the implementer to confirm:
 
 Tests: unit tests for `ADVISORS` fall-through (missing/logged-out/limited/sandbox-unsupported),
 hard 1-call-per-branch cap and `--force` override, read-only invocation flags
-for `agy`/`codex`/`claude`, persisted `agy` usage feeding both `quest usage` and
-`quest send`, `"advising"` role attribution and spend rollup, `next decide`
-wording, and `quest init` installing the `/quest-advise` stub.
+for `agy`/`codex`/`claude`, persisted `agy` token counts priced at API list
+rates (and marked `complete: false` when a rate is missing) feeding both
+`quest usage` and `quest send`, `"advising"` role attribution and spend rollup,
+`next decide` wording, and `quest init` installing the `/quest-advise` stub.
 Add an `advise` sandbox case alongside `just review-sandbox` verifying no write
 or untrusted code execution.
 

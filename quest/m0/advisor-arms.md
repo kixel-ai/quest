@@ -47,12 +47,14 @@ Recommended, for the implementer to confirm:
     `advisor_tool_result` cleanly; if the gateway strips or rejects the header,
     file the follow-up in `kixel-ai/dotfiles` before enabling the arms live.
 - **Records, usage, and cost attribution (`src/cli/models-record.ts`, `src/cli/usage.ts`, `src/cli/records.ts`):**
-  - Record the advisor model in `Implementer:` lines (or routing metadata once
-    [Telemetry sessions](/quest/m0/telemetry/sessions.md) lands) and include the
-    advisor model (or a distinct advisor trial cohort key) in `quest usage`'s
-    arms rollup so advised PRs never mix with the legacy unadvised `S` arm B
-    (`sonnet(high)`, `arm B`), and iterates on an advisor-armed PR stay on the
-    same executor + advisor pair.
+  - Require an explicit trial cohort identifier (such as `cohort advisor-2026-11`)
+    recorded on **both** arms (`arm A` and `arm B`) in `Implementer:` lines (or
+    routing metadata once [Telemetry sessions](/quest/m0/telemetry/sessions.md)
+    lands), alongside the advisor model when present. Key `quest usage`'s arms
+    rollup and readouts by `(cohort, size, arm)`—never by the advisor model
+    alone—so unchanged `XS` (`sonnet(high)`) and `S` (`opus(medium)`) arm-A
+    controls never mix with legacy unadvised controls, and iterates stay on the
+    same cohort, executor, and advisor pair.
   - Verify `src/cli/usage.ts` (and `token-max`) counts advisor model tokens and
     cost from Claude Code transcripts (`advisor_message` iterations /
     `advisor_tool_result` usage blocks) under the advisor model's pricing so

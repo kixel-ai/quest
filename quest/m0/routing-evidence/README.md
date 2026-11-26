@@ -185,9 +185,11 @@ three hosts' saved review rounds:
     starts a separate advisor-trial cohort across `XS`–`XL` testing Claude's
     built-in `--advisor` tool (`XS`/`S`/`M` against `sonnet(high) + advisor opus`;
     `L` against `opus(high) + advisor fable`; `XL` against `opus(xhigh) + advisor fable`),
-    keyed separately from the legacy unadvised `XS`/`S` writer A/B below (whose
-    `2026-12-01` schedule covers only the legacy cohort) so legacy `S` arm B
-    (`sonnet(high)`) PRs never mix with advised `S` PRs.
+    recording an explicit cohort identifier on both `arm A` and `arm B` and
+    keying rollups and readouts by `(cohort, size, arm)` so neither legacy `S`
+    arm B (`sonnet(high)`) nor legacy `XS`/`S` arm-A controls mix with the new
+    trial (whose readout schedule stays separate from the legacy `2026-12-01`
+    cohort below).
     [Stuck-agent advisor](/quest/m0/advise.md) tracks read-only frontier
     advisor escalations separately under `role: "advising"`.
   - Cost metric? ✅ Mean spend per merged PR, every session's, plus the
