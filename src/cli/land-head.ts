@@ -400,7 +400,16 @@ export async function mergePinned(
 			await github.pause(500 * 2 ** attempt);
 			continue;
 		}
-		return { reason: "merge_refused", detail };
+		// Right after the gate's own push, GitHub can refuse a merge it is still recomputing, and the read
+		// above follows the refusal, so it may already show settled mergeability. Retry it, but a refusal
+		// that lasts, such as a disabled merge method, is real: eject it rather than throw, which would
+		// retry it every round.
+		if (previous !== head && response.status === 405 && attempt < SETTLE_RETRIES) {
+			await github.pause(500 * 2 ** attempt);
+			continue;
+		}
+		const state = `mergeable ${String(pull.mergeable)}, mergeable_state ${String(pull.mergeable_state)}`;
+		return { reason: "merge_refused", detail: `${detail} (${state})` };
 	}
 }
 
