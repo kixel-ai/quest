@@ -31,7 +31,8 @@ import {
 	riskFileId,
 } from "../core";
 import { readHoldStatus } from "./hold";
-import { readSignals } from "./signals";
+import { readSignals, requiredPosters } from "./signals";
+import { login } from "./online-review";
 import { duplicateQuests } from "./duplicates";
 import { trustedReview } from "./review-trust";
 
@@ -195,6 +196,13 @@ export async function pullRequestStatus(
 	if (signaled.head !== first!.headRefOid)
 		throw new Error("the PR head changed while reading its signals; rerun quest status");
 	status.signals = signaled.signals;
+	// An optional reviewer's findings are suggestions, so only a reviewer the base requires stops iteration.
+	if (status.checkpoints.length > 0) {
+		const required = await requiredPosters(github, pr, pr.number, first!.headRefOid);
+		status.checkpoints = status.checkpoints.filter((due) =>
+			required.has(login({ __typename: "Bot", login: due.reviewer })!),
+		);
+	}
 	const duplicates = first!.state === "OPEN" ? await duplicateQuests(github, pr) : [];
 	return { ...status, holds: ownership.holds, starterHold: ownership.starter, duplicates };
 }
@@ -531,7 +539,8 @@ function summarize(
 
 /**
  * The design checkpoint `/quest-review` takes every third round, put on the head by an online reviewer: a bot that
- * approves or requests changes, such as one whose approval the base requires, whose latest review is of the head
+ * approves or requests changes, which `quest status` keeps only when the base requires it as it does a finding's
+ * reviewer, whose latest review is of the head
  * and whose latest verdict on the head, ignoring plain comments, is not an approval or a dismissal, in its third,
  * sixth, ... round. A dismissed review was an approval or a change
  * request, so it shows the bot gates too, as when a push dismisses its approval. A round is one commit it reviewed;

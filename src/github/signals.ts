@@ -203,7 +203,7 @@ const REQUIRED = `query RequiredPosters($owner: String!, $name: String!, $number
  * GitHub Actions workflow posts as `github-actions[bot]`, so a reviewer posting as that account is required wherever
  * any Actions job is, and one posting as its own bot from a required workflow is not.
  */
-async function requiredPosters(
+export async function requiredPosters(
 	client: GitHubReader,
 	repository: Repository,
 	number: number,

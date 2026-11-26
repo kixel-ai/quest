@@ -1140,17 +1140,21 @@ describe("checkpoint", () => {
 		commit: { oid: commit },
 		reactions: { nodes: [] },
 	});
-	const line = async (reviews: Node[]) =>
+	// Both bots post a check the base requires unless a test names fewer.
+	const line = async (reviews: Node[], requiredBy = ["pullfrog[bot]", "other[bot]"]) =>
 		statusLines(
 			await pullRequestStatus(
 				pr,
-				setup([
-					pull({
-						checks: null,
-						reviews: page(reviews),
-						threads: page([]),
-					}),
-				]).deps,
+				setup(
+					[
+						pull({
+							checks: null,
+							reviews: page(reviews),
+							threads: page([]),
+						}),
+					],
+					{ requiredBy },
+				).deps,
 			),
 		).filter((entry) => entry.startsWith("checkpoint "));
 
@@ -1192,6 +1196,15 @@ describe("checkpoint", () => {
 			`checkpoint pullfrog round 3 ${URL_}#pullrequestreview-3`,
 			`checkpoint other round 3 ${URL_}#pullrequestreview-7`,
 		]);
+	});
+
+	test("ignores a reviewer the base does not require", async () => {
+		const rounds = [B, C, A].map((commit, index) => bot("pullfrog", "CHANGES_REQUESTED", commit, index + 1));
+		const other = [B, C, A].map((commit, index) => bot("other", "CHANGES_REQUESTED", commit, index + 5));
+		expect(await line([...rounds, ...other], ["other[bot]"])).toEqual([
+			`checkpoint other round 3 ${URL_}#pullrequestreview-7`,
+		]);
+		expect(await line(rounds, [])).toEqual([]);
 	});
 
 	test("ignores reviewers that only comment, and people", async () => {
