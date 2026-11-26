@@ -25,20 +25,23 @@ gate's own serial queue:
   ejected at 05:00:10Z with `GitHub refused /repos/kixel-ai/dotfiles/pulls/358:
   Pull Request is not mergeable`. Re-queueing the same head landed it.
 
-`mergePinned` in `src/cli/land-head.ts` retries after the gate's push only
-when the PR still shows the old head, when its mergeability is a stale
-conflict or `null`, or when the message says the base branch was modified. A
-405 whose PR already shows the pushed head, with mergeability neither `null`
-nor a conflict, falls through to `merge_refused`.
+`mergePinned` in `src/cli/land-head.ts` retries a refusal only when the PR
+still shows the old head after the gate's push, when its mergeability is a
+stale conflict after that push, when `mergeable` is `null`, or when the
+message says the base branch was modified. A 405 whose PR already shows the
+pushed head, with mergeability neither `null` nor a conflict, falls through
+to `merge_refused`. The PR is read after the refused merge, so it can show
+mergeability GitHub settled after refusing it.
 
 Recommended, for the implementer to confirm:
 
 - After the gate's own push (`previous !== head`), treat a 405 whose PR shows
-  `head` as still settling while `mergeable_state` is `unknown`, `blocked` or
-  `unstable`. Retry it under the existing `SETTLE_RETRIES` backoff. When the
+  `head`, and no conflict, as still settling, whatever its `mergeable_state`:
+  the read follows the refusal, so it can already show `clean`. Retry it
+  under the existing `SETTLE_RETRIES` backoff (about 15 s in all). When the
   retries run out, eject it as `merge_refused`, not throw as the other
-  settling branches do: a `blocked` that lasts is a real refusal, and a
-  throw would retry it every round.
+  settling branches do: a refusal that lasts, such as a disabled merge
+  method, is real, and a throw would retry it every round.
 - Put `mergeable` and `mergeable_state` in the ejection's detail, so the next
   refusal shows what GitHub reported. Neither refusal tonight recorded it.
 - Test with a mocked GitHub that answers 405 for one or two rounds after the
