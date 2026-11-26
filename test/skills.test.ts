@@ -37,22 +37,23 @@ test.each(SKILLS.map((skill) => [skill.name, skill] as const))("%s loads nothing
  * renamed here without its stub fails rather than going unused.
  */
 test.each(SKILL_DIRS)("the repository's %s stubs are current", (path) => {
+	// This repository's flake pins the dev shell's quest, so its stubs fall back to it.
 	const dir = join(import.meta.dirname, "..", path);
 	expect(readdirSync(dir).sort()).toEqual(SKILLS.map((skill) => skill.installed));
 	for (const skill of SKILLS) {
 		expect(
 			readFileSync(join(dir, skill.installed, "SKILL.md"), "utf8"),
 			`${skill.name} stub is stale; regenerate it with \`quest init\``,
-		).toBe(skill.stubs[path]);
+		).toBe(skill.stubs("nix develop --command")[path]);
 	}
 });
 
 test("Claude Code's stub inlines the skill and pre-approves only its own call, in either shell", () => {
 	const start = skill("start")!;
-	expect(start.stubs[".claude/skills"]).toMatch(
+	expect(start.stubs()[".claude/skills"]).toMatch(
 		/^---\nname: quest-start\ndescription: Start work on a quest\.\nallowed-tools: Bash\(quest skill start\) PowerShell\(quest skill start\)\n---\n\n!`quest skill start; echo "[^"`$]*SETUP\.md[^"`$]*"`\n$/,
 	);
-	expect(start.stubs[".agents/skills"]).toContain("Run `quest skill start` and follow its output.");
+	expect(start.stubs()[".agents/skills"]).toContain("Run `quest skill start` and follow its output.");
 });
 
 test("a skill prints its own instructions first, then what it builds on, each once", () => {
@@ -73,7 +74,7 @@ test("a skill prints its own instructions first, then what it builds on, each on
 
 /** Claude Code inlines the stub's whole output: the composed skill, then the setup line it echoes. */
 test.each(SKILLS.map((skill) => [skill.name, skill] as const))("%s fits inline in Claude Code", (_, skill) => {
-	const echoed = /; echo "([^"]*)"`/.exec(skill.stubs[".claude/skills"])![1]!;
+	const echoed = /; echo "([^"]*)"`/.exec(skill.stubs()[".claude/skills"])![1]!;
 	expect(skill.instructions.length + echoed.length + 1).toBeLessThanOrEqual(INLINE_LIMIT);
 });
 

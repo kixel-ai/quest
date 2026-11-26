@@ -71,10 +71,34 @@ export interface Checkout {
 	real(path: string): string;
 }
 
-/** One skill as a repository installs it: its directory name and the `SKILL.md` each skill directory gets. */
+/**
+ * One skill as a repository installs it: its directory name and the `SKILL.md`
+ * each skill directory gets, given the command the repository's tool manager
+ * runs its pinned `quest` with, if any.
+ */
 export interface Stub {
 	installed: string;
-	stubs: Readonly<Record<SkillDir, string>>;
+	stubs(launcher?: string): Readonly<Record<SkillDir, string>>;
+}
+
+/** How a repository pins Quest: the file that names it and the command that runs the pinned binary. */
+const LAUNCHERS = [
+	["flake.nix", "nix develop --command"],
+	["mise.toml", "mise exec --"],
+	[".mise.toml", "mise exec --"],
+] as const;
+
+/**
+ * The command that runs the `quest` the repository's own tool manager pins,
+ * such as `nix develop --command`, for an agent whose shell has not loaded it;
+ * undefined when no file a tool manager reads names Quest's flake or release.
+ */
+export function launcher(repo: Checkout): string | undefined {
+	for (const [file, command] of LAUNCHERS) {
+		checkPath(repo, file, "file");
+		if (repo.stat(file) === "file" && repo.read(file).includes("github:kixel-ai/quest")) return command;
+	}
+	return undefined;
 }
 
 /** One file the plan sets to `content`, or, with null content, a retired stub it deletes along with its directory once empty. */
@@ -107,11 +131,12 @@ function refuse(path: string, why: string): never {
  */
 export function planInit(repo: Checkout, stubs: readonly Stub[], options: { goal?: string } = {}): InitChange[] {
 	const dirs = skillDirs(repo);
+	const runner = launcher(repo);
 	const written = dirs.flatMap(({ skills, shared }) =>
 		stubs.flatMap((skill): InitChange[] => {
 			const dir = `${skills}/${skill.installed}`;
 			const path = `${dir}/SKILL.md`;
-			const stub = skill.stubs[shared || sharedSkill(repo, skill.installed) ? PORTABLE : skills];
+			const stub = skill.stubs(runner)[shared || sharedSkill(repo, skill.installed) ? PORTABLE : skills];
 			checkPath(repo, path, "file");
 			if (repo.stat(path) === "file") {
 				if (!isStub(repo, path, skill.installed)) refuse(path, "is not a Quest stub");
@@ -291,15 +316,16 @@ function sharedSkill(repo: Checkout, installed: string): boolean {
 
 /**
  * Any version's stub: frontmatter naming the skill, then either the pointer
- * to `quest skill` or Claude Code's inline call of it. Descriptions and the
- * setup link change between versions, so only these shapes identify a file
- * Quest wrote. A pointer's frontmatter has only ever held `name` and
+ * to `quest skill`, with the setup link or the repository's launcher for
+ * when `quest` is missing, or Claude Code's inline call of it. Descriptions,
+ * the setup link, and the launcher change between versions and repositories,
+ * so only these shapes identify a file Quest wrote. A pointer's frontmatter has only ever held `name` and
  * `description`, and an inline stub's also exactly the one `allowed-tools`
  * line its call needs, so any other field marks an edited stub. Each capture
  * names the skill.
  */
 const STUBS = [
-	/^---\nname: (\S+)\n(?:(?:name|description): .*\n)*---\n\nRun `quest skill (\S+)` and follow its output\.\nIf `quest` is not installed, follow \S+ first\.\n$/,
+	/^---\nname: (\S+)\n(?:(?:name|description): .*\n)*---\n\nRun `quest skill (\S+)` and follow its output\.\nIf `quest` is not (?:installed, follow \S+ first|on `PATH`, run `[^`\n]+ quest skill (\S+)` instead, and prefix later `quest` commands with `[^`\n]+`)\.\n$/,
 	/^---\nname: (\S+)\n(?:(?:name|description): .*\n)*allowed-tools: Bash\(quest skill (\S+)\) PowerShell\(quest skill (\S+)\)\n---\n\n!`quest skill (\S+); echo "[^"`\n]*"`\n$/,
 ];
 
@@ -312,7 +338,9 @@ function isStub(repo: Checkout, path: string, installed: string): boolean {
 	return STUBS.some((shape) => {
 		const match = shape.exec(content);
 		return (
-			match !== null && match[1] === installed && match.slice(2).every((name) => `${PREFIX}${name}` === installed)
+			match !== null &&
+			match[1] === installed &&
+			match.slice(2).every((name) => name === undefined || `${PREFIX}${name}` === installed)
 		);
 	});
 }

@@ -44,6 +44,46 @@ test("init creates the layout and is idempotent", () => {
 	expect(init(dir)).toEqual([]);
 });
 
+test.each([
+	["flake.nix", 'inputs.quest.url = "github:kixel-ai/quest/v1.0.0";\n', "nix develop --command"],
+	["mise.toml", '[tools]\n"github:kixel-ai/quest" = "v1.0.0"\n', "mise exec --"],
+	[".mise.toml", '[tools]\n"github:kixel-ai/quest" = "v1.0.0"\n', "mise exec --"],
+])("init points stubs at the quest %s pins, and switches them when the pin moves", (file, pin, launcher) => {
+	const dir = tempDir();
+	const start = SKILLS.find((skill) => skill.name === "start")!;
+	init(dir);
+	expect(read(dir, ".agents/skills/quest-start/SKILL.md")).toContain("SETUP.md");
+
+	writeFileSync(join(dir, file), pin);
+	expect(stubFindings(dir)).toContain(
+		".agents/skills/quest-start/SKILL.md: is outdated; run the repository's pinned `quest init` and commit the result",
+	);
+	init(dir);
+	expect(stubFindings(dir)).toEqual([]);
+	expect(read(dir, ".agents/skills/quest-start/SKILL.md")).toBe(start.stubs(launcher)[".agents/skills"]);
+	expect(read(dir, ".agents/skills/quest-start/SKILL.md")).toContain(
+		`If \`quest\` is not on \`PATH\`, run \`${launcher} quest skill start\` instead, and prefix later \`quest\` commands with \`${launcher}\`.`,
+	);
+	expect(read(dir, ".claude/skills/quest-start/SKILL.md")).toBe(start.stubs(launcher)[".claude/skills"]);
+	expect(read(dir, ".claude/skills/quest-start/SKILL.md")).toContain(`run ${launcher} quest skill start and follow`);
+
+	rmSync(join(dir, file));
+	init(dir);
+	expect(read(dir, ".agents/skills/quest-start/SKILL.md")).toBe(start.stubs()[".agents/skills"]);
+	writeFileSync(join(dir, file), pin);
+	init(dir);
+	uninstall(dir);
+	expect(existsSync(join(dir, ".claude"))).toBe(false);
+	expect(existsSync(join(dir, ".agents"))).toBe(false);
+});
+
+test("init keeps the setup pointer when a tool manager's file does not name Quest", () => {
+	const dir = tempDir();
+	writeFileSync(join(dir, "flake.nix"), 'inputs.nixpkgs.url = "github:NixOS/nixpkgs";\n');
+	init(dir);
+	expect(read(dir, ".agents/skills/quest-start/SKILL.md")).toContain("SETUP.md");
+});
+
 test("init refuses a skill that is not a stub", () => {
 	const dir = tempDir();
 	mkdirSync(join(dir, ".claude/skills/quest-start"), { recursive: true });
@@ -219,7 +259,7 @@ test.skipIf(process.platform === "win32")("existing linked skills install once a
 	expect(changed.filter((path) => path.endsWith("SKILL.md"))).toHaveLength(SKILLS.length);
 	// Claude Code and other agents read the same file, so it gets the stub every agent follows.
 	const start = SKILLS.find((skill) => skill.name === "start")!;
-	expect(read(dir, ".claude/skills/quest-start/SKILL.md")).toBe(start.stubs[".agents/skills"]);
+	expect(read(dir, ".claude/skills/quest-start/SKILL.md")).toBe(start.stubs()[".agents/skills"]);
 	expect(init(dir)).toEqual([]);
 	uninstall(dir);
 	expect(existsSync(join(dir, ".claude"))).toBe(false);
@@ -286,9 +326,9 @@ test("init removes stubs of retired skills and refreshes older stubs of current 
 	]);
 	expect(existsSync(join(dir, ".claude/skills/quest-ready"))).toBe(false);
 	expect(existsSync(join(dir, ".agents/skills/quest-ready"))).toBe(false);
-	expect(read(dir, ".claude/skills/quest-import/SKILL.md")).toBe(imported.stubs[".claude/skills"]);
+	expect(read(dir, ".claude/skills/quest-import/SKILL.md")).toBe(imported.stubs()[".claude/skills"]);
 	expect(read(dir, ".agents/skills/quest-import/SKILL.md")).toBe(
-		imported.stubs[".agents/skills"].replaceAll("\n", "\r\n"),
+		imported.stubs()[".agents/skills"].replaceAll("\n", "\r\n"),
 	);
 	expect(init(dir)).toEqual([]);
 });
@@ -340,11 +380,11 @@ test("init refreshes an inline stub, and moves each directory to its own kind", 
 	write(dir, ".claude/skills/quest-import/SKILL.md", OLD_INLINE_IMPORT_STUB);
 	write(dir, ".agents/skills/quest-import/SKILL.md", OLD_INLINE_IMPORT_STUB);
 	init(dir);
-	expect(read(dir, ".claude/skills/quest-import/SKILL.md")).toBe(imported.stubs[".claude/skills"]);
-	expect(read(dir, ".agents/skills/quest-import/SKILL.md")).toBe(imported.stubs[".agents/skills"]);
+	expect(read(dir, ".claude/skills/quest-import/SKILL.md")).toBe(imported.stubs()[".claude/skills"]);
+	expect(read(dir, ".agents/skills/quest-import/SKILL.md")).toBe(imported.stubs()[".agents/skills"]);
 	write(dir, ".claude/skills/quest-import/SKILL.md", OLD_IMPORT_STUB);
 	expect(init(dir)).toEqual([".claude/skills/quest-import/SKILL.md"]);
-	expect(read(dir, ".claude/skills/quest-import/SKILL.md")).toBe(imported.stubs[".claude/skills"]);
+	expect(read(dir, ".claude/skills/quest-import/SKILL.md")).toBe(imported.stubs()[".claude/skills"]);
 });
 
 for (const [layout, link] of [
@@ -372,7 +412,7 @@ for (const [layout, link] of [
 			mkdirSync(join(dir, ".agents/skills"), { recursive: true });
 			link(dir);
 			expect(init(dir)).toContain(".claude/skills/quest-import/SKILL.md");
-			expect(read(dir, ".agents/skills/quest-import/SKILL.md")).toBe(imported.stubs[".agents/skills"]);
+			expect(read(dir, ".agents/skills/quest-import/SKILL.md")).toBe(imported.stubs()[".agents/skills"]);
 			expect(init(dir)).toEqual([]);
 		},
 	);

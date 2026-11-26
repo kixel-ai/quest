@@ -112,16 +112,26 @@ export class Skill {
 	 * It runs the command through Bash, or PowerShell where Bash is missing,
 	 * so the stub pre-approves it in both. A failed command would abort the
 	 * skill, and PowerShell refuses to pre-approve a command chained with
-	 * `||`, so the stub always echoes the setup pointer after it instead,
-	 * which also keeps a missing `quest`'s error. Other agents, and a skill
-	 * both directories read through a link, get a pointer to run the command
+	 * `||`, so the stub always echoes a fallback after it instead, which also
+	 * keeps a missing `quest`'s error. The fallback is `launcher`, the command
+	 * the repository's tool manager runs its pinned `quest` with, when it has
+	 * one, and the setup guide otherwise. Other agents, and a skill both
+	 * directories read through a link, get a pointer to run the command
 	 * themselves.
 	 */
-	get stubs(): Readonly<Record<SkillDir, string>> {
-		const pointer = `Run \`quest skill ${this.name}\` and follow its output.\nIf \`quest\` is not installed, follow ${SETUP} first.\n`;
-		const inline = `!\`quest skill ${this.name}; echo "If quest skill ${this.name} printed an error instead of instructions, install quest as ${SETUP} describes, then run quest skill ${this.name} and follow its output."\`\n`;
+	stubs(launcher?: string): Readonly<Record<SkillDir, string>> {
+		const call = `quest skill ${this.name}`;
+		const pointer =
+			launcher === undefined
+				? `Run \`${call}\` and follow its output.\nIf \`quest\` is not installed, follow ${SETUP} first.\n`
+				: `Run \`${call}\` and follow its output.\nIf \`quest\` is not on \`PATH\`, run \`${launcher} ${call}\` instead, and prefix later \`quest\` commands with \`${launcher}\`.\n`;
+		const fallback =
+			launcher === undefined
+				? `install quest as ${SETUP} describes, then run ${call} and follow its output.`
+				: `run ${launcher} ${call} and follow its output, prefixing later quest commands with ${launcher}.`;
+		const inline = `!\`${call}; echo "If ${call} printed an error instead of instructions, ${fallback}"\`\n`;
 		const head = `---\nname: ${this.installed}\ndescription: ${this.description}\n`;
-		const allowed = `allowed-tools: Bash(quest skill ${this.name}) PowerShell(quest skill ${this.name})\n`;
+		const allowed = `allowed-tools: Bash(${call}) PowerShell(${call})\n`;
 		return {
 			".claude/skills": `${head}${allowed}---\n\n${inline}`,
 			".agents/skills": `${head}---\n\n${pointer}`,

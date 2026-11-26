@@ -47,9 +47,11 @@ quest init
 Init writes a stub per skill under both `.claude/skills/` and `.agents/skills/`
 without creating symbolic links. Claude Code's stub inlines `quest skill <name>`
 when the skill is invoked, pre-approving only that command in Bash and
-PowerShell, and follows it with a setup pointer for when `quest` is missing; the
+PowerShell, and follows it with a fallback for when `quest` is missing; the
 `.agents/skills/` stub, which a skill both directories read through a link
-gets, asks the agent to run it. Init also creates `quest/README.md` when missing,
+gets, asks the agent to run it. When `flake.nix`, `mise.toml`, or `.mise.toml`
+names `github:kixel-ai/quest`, the fallback runs the pinned binary through
+`nix develop --command` or `mise exec --`; otherwise it points here. Init also creates `quest/README.md` when missing,
 plants a stub for each audit Quest ships that no quest names and the root
 `quest/README.md` does not skip (see `quest audit`), and appends a line
 starting with `Quests: ` to the root `AGENTS.md`, or `CLAUDE.md` when only that

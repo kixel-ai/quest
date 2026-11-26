@@ -105,6 +105,7 @@ export {
 	type SkillDir,
 	type Stub,
 	installedStubs,
+	launcher,
 	lines,
 	newline,
 	planAudits,
