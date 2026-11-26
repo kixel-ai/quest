@@ -212,7 +212,7 @@ export function broken(call: ToolCall, env: NodeJS.ProcessEnv = process.env): st
 	return (Object.keys(RULES) as Rule[])
 		.filter((key) => found.has(key))
 		.map((key) =>
-			key === "rewrite"
+			key === "rewrite" || key === "nextest"
 				? RULES[key] + ASKED
 				: key === "kixel" && state.instead
 					? `${RULES[key]} Run \`${state.instead}\` instead.`
@@ -470,7 +470,8 @@ function shell(
 		else if (["pkill", "killall"].includes(basename(name!))) {
 			if (!args.some((arg) => arg === "--help" || arg === "-h")) found.add("pkill");
 		} else if (["cargo", "mbx"].includes(basename(name!))) {
-			if (!elsewhere && !moved && libtest(args) && nextestConfigured(check.cwd)) found.add("nextest");
+			const manifest = !elsewhere && !moved && !asked ? libtest(args) : null;
+			if (manifest !== null && nextestKills(check.cwd, manifest)) found.add("nextest");
 		} else if (name === "git") git(args, asked, input, check);
 		else if (name === "gh") {
 			const command = ghCommand(args);
@@ -514,34 +515,46 @@ function mktemp(args: string[], env: ReadonlySet<string>, check: Check) {
 const CARGO_VALUE_OPTIONS = new Set(["--config", "-Z", "--color"]);
 
 /**
- * Whether `cargo`'s or `mbx`'s arguments run tests under libtest: `test`, unless it only builds, runs doctests,
- * which nextest cannot, or asks for help. `-C` and `--manifest-path` name another workspace, whose configuration is
- * unknown.
+ * When `cargo`'s or `mbx`'s arguments run tests under libtest, the manifest they name with `--manifest-path`, or
+ * undefined for the working directory's; null when they run no such tests: not `test`, or `test` that only builds,
+ * runs doctests, which nextest cannot, or asks for help. `-C` runs it from another directory: null, since its
+ * workspace is unknown.
  */
-function libtest(args: string[]): boolean {
+function libtest(args: string[]): string | undefined | null {
 	let i = 0;
 	while (i < args.length && /^[-+]/.test(args[i]!)) {
-		if (/^-C/.test(args[i]!)) return false;
+		if (/^-C/.test(args[i]!)) return null;
 		i += CARGO_VALUE_OPTIONS.has(args[i]!) ? 2 : 1;
 	}
-	if (args[i] !== "test" && args[i] !== "t") return false;
+	if (args[i] !== "test" && args[i] !== "t") return null;
 	const rest = args.slice(i + 1);
 	const end = rest.indexOf("--");
 	const own = end === -1 ? rest : rest.slice(0, end);
-	return !own.some((arg) => ["--doc", "--no-run", "--help", "-h"].includes(arg) || /^--manifest-path(=|$)/.test(arg));
+	if (own.some((arg) => ["--doc", "--no-run", "--help", "-h"].includes(arg))) return null;
+	return values(own, ["--manifest-path"]).at(-1);
 }
 
 /**
- * Whether the nearest nextest configuration from `cwd` up to its checkout's root kills hung tests: by default
- * nextest's slow-timeout only warns, so plain `cargo test` loses nothing there.
+ * Whether the Cargo workspace a test run builds, from `manifest` or else `cwd`, has a nextest configuration that
+ * kills hung tests: by default nextest's slow-timeout only warns, so plain `cargo test` loses nothing there. The
+ * workspace is the package's own manifest when it declares `[workspace]`, else the nearest one above it that does,
+ * within the checkout, as Cargo finds it; a run with no manifest or an expanded one is let through.
  */
-function nextestConfigured(cwd: string): boolean {
+function nextestKills(cwd: string, manifest: string | undefined): boolean {
+	if (manifest?.endsWith(OPAQUE)) return false;
 	const root = checkoutRoot(cwd);
-	for (let dir = cwd; ; dir = dirname(dir)) {
-		const config = read(dir, join(".config", "nextest.toml"));
-		if (config !== undefined) return /\bterminate-after\b/.test(config);
-		if (dir === root || dirname(dir) === dir) return false;
-	}
+	const up = (dir: string) => (dir === root || dirname(dir) === dir ? undefined : dirname(dir));
+	let start: string | undefined = manifest === undefined ? resolve(cwd) : dirname(resolve(cwd, manifest));
+	while (start !== undefined && read(start, "Cargo.toml") === undefined) start = up(start);
+	if (start === undefined) return false;
+	let workspace = start;
+	for (let dir: string | undefined = start; dir !== undefined; dir = up(dir))
+		if (/^\s*\[workspace\]/m.test(read(dir, "Cargo.toml") ?? "")) {
+			workspace = dir;
+			break;
+		}
+	// An uncommented `terminate-after` setting, under `slow-timeout` in any profile or override.
+	return /^[^#\n]*\bterminate-after\s*=/m.test(read(workspace, join(".config", "nextest.toml")) ?? "");
 }
 
 /** Options of `git` itself that take the next word. */

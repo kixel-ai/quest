@@ -322,17 +322,20 @@ test("pkill and killall are blocked, while --help and pid-based kill pass", () =
 	expect(bash("kill -TERM 12345")).toEqual([]);
 });
 
-test("plain cargo test is denied where nextest is configured, while doctests, builds, and nextest pass", () => {
-	expect(bash("cargo test -p moq-net -- lost_group")).toEqual([]);
+test("plain cargo test is denied where the workspace's nextest kills hung tests", () => {
+	const DENIED = `${RULES.nextest} If the user asked for this in their own words, prefix the command with \`${USER_ASKED}\`.`;
+	const KILLS = '[profile.default]\nslow-timeout = { period = "30s", terminate-after = 2 }\n';
+	const workspace = (dir: string, nextest?: string) => {
+		mkdirSync(join(dir, ".config"), { recursive: true });
+		writeFileSync(join(dir, "Cargo.toml"), '[workspace]\nmembers = ["crates/*"]\n');
+		if (nextest !== undefined) writeFileSync(join(dir, ".config", "nextest.toml"), nextest);
+	};
 	mkdirSync(join(cwd, ".git"));
-	mkdirSync(join(cwd, ".config"));
-	// A config that never kills a hung test loses nothing to plain cargo test.
-	writeFileSync(join(cwd, ".config", "nextest.toml"), "[profile.default]\nretries = 0\n");
+	expect(bash("cargo test -p moq-net -- lost_group")).toEqual([]);
+	// A config that never kills a hung test, even with the setting commented out, loses nothing to plain cargo test.
+	workspace(cwd, '[profile.default]\n# slow-timeout = { period = "30s", terminate-after = 2 }\nretries = 0\n');
 	expect(bash("cargo test")).toEqual([]);
-	writeFileSync(
-		join(cwd, ".config", "nextest.toml"),
-		'[profile.default]\nslow-timeout = { period = "30s", terminate-after = 2 }\n',
-	);
+	workspace(cwd, KILLS);
 	for (const command of [
 		"cargo test -p moq-net -- lost_group",
 		"cargo +nightly --locked test --workspace",
@@ -340,25 +343,32 @@ test("plain cargo test is denied where nextest is configured, while doctests, bu
 		"mbx test -p clients --bin load subscribe::tests > .tmp/load.log 2>&1",
 		"quest gate nix develop -c cargo test -p clients",
 		"bash -c 'cargo test'",
+		"cargo test --manifest-path Cargo.toml",
 	])
-		expect(bash(command), command).toEqual([RULES.nextest]);
+		expect(bash(command), command).toEqual([DENIED]);
 	for (const command of [
 		"cargo nextest run -p moq-net lost_group",
 		"cargo test --doc -p moq-net",
 		"cargo test --no-run",
 		"cargo test --help",
 		"cargo -C ../other test",
-		"cargo test --manifest-path ../other/Cargo.toml",
 		"cd ../other && cargo test",
+		"cargo test --manifest-path $DIR/Cargo.toml",
 		"cargo build --tests",
 		"just test",
+		`${USER_ASKED} cargo test -p moq-net --lib`,
 	])
 		expect(bash(command), command).toEqual([]);
-	// From a crate below the workspace root, the root's configuration still applies.
+	// A member crate below the workspace root takes the root's configuration.
 	mkdirSync(join(cwd, "crates", "a"), { recursive: true });
-	expect(broken({ tool: "Bash", input: { command: "cargo test" }, cwd: join(cwd, "crates", "a") })).toEqual([
-		RULES.nextest,
-	]);
+	writeFileSync(join(cwd, "crates", "a", "Cargo.toml"), '[package]\nname = "a"\n');
+	const at = (dir: string, command: string) => broken({ tool: "Bash", input: { command }, cwd: dir });
+	expect(at(join(cwd, "crates", "a"), "cargo test")).toEqual([DENIED]);
+	// A workspace of its own inside the checkout takes its own, and a manifest selects the workspace it names.
+	workspace(join(cwd, "standalone"));
+	expect(at(join(cwd, "standalone"), "cargo test")).toEqual([]);
+	expect(at(join(cwd, "standalone"), "cargo test --manifest-path ../Cargo.toml")).toEqual([DENIED]);
+	expect(bash("cargo test --manifest-path=standalone/Cargo.toml")).toEqual([]);
 });
 
 test("docs/context.md is the rules `quest context` prints, for agents without the CLI", () => {

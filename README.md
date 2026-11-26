@@ -2688,9 +2688,10 @@ as the reason:
 - a scratch file written under `/tmp`, outside the checkout, by a redirection,
   `tee`, `mkdir`, `mktemp`, `git clone` or `worktree add`, or a file edit;
 - killing processes by name with `pkill` or `killall`, which can hit sibling agents;
-- `cargo test` or `mbx test`, other than `--doc` or `--no-run`, in a checkout
-  whose `.config/nextest.toml` kills hung tests with `terminate-after`, since
-  plain `cargo test` skips it;
+- `cargo test` or `mbx test`, other than `--doc` or `--no-run`, in a Cargo
+  workspace whose `.config/nextest.toml` kills hung tests with
+  `terminate-after`, since plain `cargo test` skips it, unless the command
+  starts with `QUEST_USER_ASKED=1` because the user asked for it;
 - in a checkout whose origin is on [Kixel Quest](#work-on-a-repository-kixel-quest-hosts),
   a `gh pr` or `gh api` call aimed at that repository, which `gh` cannot reach:
   one naming no repository, through `--repo`, `GH_REPO`, a PR URL, or an
