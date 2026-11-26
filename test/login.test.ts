@@ -126,15 +126,17 @@ test("a token file an earlier quest wrote is copied once, uploading no transcrip
 	const env = user();
 	const old = join(dirname(tokensPath(env)), "records.json");
 	mkdirSync(dirname(old), { recursive: true });
-	writeFileSync(old, JSON.stringify({ [KIXEL]: "pasted" }));
+	writeFileSync(old, JSON.stringify({ [KIXEL]: "pasted", "https://kixel.quest": "theirs" }));
 	expect(tokenFor(KIXEL, env)).toBe("pasted");
 	expect(JSON.parse(readFileSync(tokensPath(env), "utf8"))).toEqual({
 		[KIXEL]: { token: "pasted", transcripts: false },
+		"https://kixel.quest": { token: "theirs", transcripts: false },
 	});
-	// Read once: signing out leaves the earlier quest's file, and reads no token from it again.
-	expect(existsSync(old)).toBe(true);
+	// Read once, and left for an earlier quest still running, until signing out removes the token from it too.
+	expect(JSON.parse(readFileSync(old, "utf8"))).toEqual({ [KIXEL]: "pasted", "https://kixel.quest": "theirs" });
 	expect(logout(env).removed).toBe(true);
 	expect(tokenFor(KIXEL, env)).toBeNull();
+	expect(JSON.parse(readFileSync(old, "utf8"))).toEqual({ "https://kixel.quest": "theirs" });
 });
 
 test("a malformed sign-ins file fails, naming it", () => {

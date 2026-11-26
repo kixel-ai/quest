@@ -59,13 +59,20 @@ export function saveLogin(url: string, login: Login, env: NodeJS.ProcessEnv = pr
 	write(tokensPath(env), { ...readLogins(env), [url]: login });
 }
 
-/** Forget the sign-in to `url`, returning whether there was one. */
+/** Forget the sign-in to `url`, and its token in an earlier quest's file, returning whether there was one. */
 export function removeLogin(url: string, env: NodeJS.ProcessEnv = process.env): boolean {
 	const logins = readLogins(env);
 	if (!(url in logins)) return false;
 	delete logins[url];
 	// Kept when empty, so an earlier quest's file is not read again.
 	write(tokensPath(env), logins);
+	// A sender started before the upgrade still reads the old file, and must post with the token no more.
+	const old = oldPath(env);
+	if (existsSync(old)) {
+		const tokens = readObject(old);
+		delete tokens[url];
+		write(old, tokens);
+	}
 	return true;
 }
 
@@ -93,7 +100,7 @@ function readLogins(env: NodeJS.ProcessEnv): Record<string, Login> {
  * quest still running, such as a sender started before the upgrade, which would drop its queue without it.
  */
 function copyTokens(env: NodeJS.ProcessEnv): Record<string, Login> {
-	const old = join(configDirectory(env), "records.json");
+	const old = oldPath(env);
 	if (!existsSync(old)) return {};
 	const logins: Record<string, Login> = {};
 	for (const [url, token] of Object.entries(readObject(old))) {
@@ -103,6 +110,8 @@ function copyTokens(env: NodeJS.ProcessEnv): Record<string, Login> {
 	write(tokensPath(env), logins);
 	return logins;
 }
+
+const oldPath = (env: NodeJS.ProcessEnv) => join(configDirectory(env), "records.json");
 
 function readObject(path: string): Record<string, unknown> {
 	let parsed: unknown;
@@ -116,10 +125,10 @@ function readObject(path: string): Record<string, unknown> {
 	return parsed as Record<string, unknown>;
 }
 
-/** Write `logins` whole, readable only by the user, then rename, so no reader sees half a file. */
-function write(path: string, logins: Record<string, Login>): void {
+/** Write `tokens` whole, readable only by the user, then rename, so no reader sees half a file. */
+function write(path: string, tokens: Record<string, unknown>): void {
 	mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
 	const next = `${path}.${process.pid}.new`;
-	writeFileSync(next, `${JSON.stringify(logins, null, "\t")}\n`, { mode: 0o600 });
+	writeFileSync(next, `${JSON.stringify(tokens, null, "\t")}\n`, { mode: 0o600 });
 	renameSync(next, path);
 }
