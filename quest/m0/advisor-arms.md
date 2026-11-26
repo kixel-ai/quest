@@ -48,9 +48,11 @@ Recommended, for the implementer to confirm:
     file the follow-up in `kixel-ai/dotfiles` before enabling the arms live.
 - **Records, usage, and cost attribution (`src/cli/models-record.ts`, `src/cli/usage.ts`, `src/cli/records.ts`):**
   - Record the advisor model in `Implementer:` lines (or routing metadata once
-    [Telemetry sessions](/quest/m0/telemetry/sessions.md) lands) so iterates on
-    an advisor-armed PR stay on the same executor + advisor pair and `quest usage`
-    arms rollups separate `arm A` vs `arm B` cleanly.
+    [Telemetry sessions](/quest/m0/telemetry/sessions.md) lands) and include the
+    advisor model (or a distinct advisor trial cohort key) in `quest usage`'s
+    arms rollup so advised PRs never mix with the legacy unadvised `S` arm B
+    (`sonnet(high)`, `arm B`), and iterates on an advisor-armed PR stay on the
+    same executor + advisor pair.
   - Verify `src/cli/usage.ts` (and `token-max`) counts advisor model tokens and
     cost from Claude Code transcripts (`advisor_message` iterations /
     `advisor_tool_result` usage blocks) under the advisor model's pricing so
@@ -60,9 +62,9 @@ Recommended, for the implementer to confirm:
     through `quest agent` (passing `--advisor <model>`) rather than a native
     harness subagent or T3 `delegate_task` until T3 Code exposes `advisorModel`.
 - **Readout ([Routing evidence](/quest/m0/routing-evidence/README.md)):**
-  - Update the readout table and schedule in `routing-evidence/README.md` to
-    track the five advisor arms on first-round findings, review rounds,
-    hand-backs, `## Caused by` escapes, and mean/median spend per merged PR.
+  - Give the advisor trial its own recorded cohort and readout schedule in
+    `routing-evidence/README.md`, keeping the legacy `2026-12-01` XS/S readout
+    separate so legacy unadvised PRs are never counted toward the advisor trial.
 
 Tests: unit tests for `ARMS` and `questWriters` across `XS`–`XL`, `quest agent`
 passing `--advisor` to Claude and refusing it on Codex, `Implementer:` parsing

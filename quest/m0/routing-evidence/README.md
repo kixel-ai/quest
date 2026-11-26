@@ -182,10 +182,13 @@ three hosts' saved review rounds:
     second reviewer took $976 of $1,430 of review spend, at $82 a PR
     against Sol xhigh's $8, for 23 high findings against 44.
   - Amended 2026-11-26 (maintainer, `/quest-plan`): [Routine advisor A/B](/quest/m0/advisor-arms.md)
-    replaces the XS/S arms and adds M/L/XL arms testing Claude's built-in
-    `--advisor` tool (`XS`/`S`/`M` against `sonnet(high) + advisor opus`;
+    starts a separate advisor-trial cohort across `XS`–`XL` testing Claude's
+    built-in `--advisor` tool (`XS`/`S`/`M` against `sonnet(high) + advisor opus`;
     `L` against `opus(high) + advisor fable`; `XL` against `opus(xhigh) + advisor fable`),
-    and [Stuck-agent advisor](/quest/m0/advise.md) tracks read-only frontier
+    keyed separately from the legacy unadvised `XS`/`S` writer A/B below (whose
+    `2026-12-01` schedule covers only the legacy cohort) so legacy `S` arm B
+    (`sonnet(high)`) PRs never mix with advised `S` PRs.
+    [Stuck-agent advisor](/quest/m0/advise.md) tracks read-only frontier
     advisor escalations separately under `role: "advising"`.
   - Cost metric? ✅ Mean spend per merged PR, every session's, plus the
     spend of later PRs that name it under `## Caused by`, with a bootstrap
@@ -265,7 +268,7 @@ Baseline from the 2026-11-11 audit, at API list price:
 
 ## Scheduled
 
-- 2026-12-01 - the XS and S writer arms reach 26 and 115 first-round PRs each
+- 2026-12-01 - legacy XS and S writer A/B cohort reaches 26 and 115 first-round PRs each (separate from [Routine advisor A/B](/quest/m0/advisor-arms.md)'s advisor-trial cohort)
 
 ## Related
 

@@ -31,11 +31,14 @@ Decided 2026-11-26 (maintainer, `/quest-plan`):
   and pre-review loops as examples, with every call and its cost tracked by
   `quest` (rejected: `next decide` only; review-only without pre-review escape
   hatch).
-- After receiving advice? ✅ Auto-iterate when the advice fits the quest's Goal
-  and settled decisions (record a `Design change:` PR comment and review with
-  `quest review --new`); stop and ask the maintainer when the advisor recommends
-  changing scope/architecture or dropping the PR (rejected: always stop and ask;
-  split behavior between `/quest-afk` and interactive `/quest-run`).
+- After receiving advice? ✅ Standalone `/quest-advise` only returns its
+  recommendation without editing code or writing to GitHub; when an enclosing
+  task (`/quest-start`, `/quest-iterate`, `/quest-run`) already authorizes edits
+  and pushes, auto-iterate when the advice fits the quest's Goal and settled
+  decisions (record a `Design change:` PR comment and review with
+  `quest review --new`), and stop and ask the maintainer when the advisor
+  recommends changing scope/architecture or dropping the PR (rejected: always
+  stop and ask; split behavior between `/quest-afk` and interactive `/quest-run`).
 - Model order and harnesses? ✅ `gemini-4-neon` (`high`) via `agy` →
   `gpt-6.2-astra` (`high`) via `codex` → `claude-fable-5-2` (`medium`) via
   `claude`, restoring `agy` in `quest` solely for `quest advise` (rejected:
@@ -66,8 +69,10 @@ Recommended, for the implementer to confirm:
     caller's summary of what it tried and where it is stuck. Ask the advisor to
     start from scratch, compare 2–3 approaches (including patching vs
     simplifying/redesigning vs dropping), and recommend one without editing code.
-  - Fall through `ADVISORS` on missing CLI, logged-out CLI, or usage limit,
-    exiting 3 when every eligible advisor is unavailable.
+  - Fall through `ADVISORS` on missing CLI, logged-out CLI, usage limit, or
+    sandbox incompatibility (such as `agy` refusing to run on macOS's default
+    case-insensitive filesystem), exiting 3 only when every eligible advisor is
+    unavailable.
   - Persist per-branch invocation history under `.git/quest/advise/` (matching
     `.git/quest/review/`); refuse a second call on the same branch without
     `--force`, printing the prior advice timestamp and model.
@@ -76,11 +81,25 @@ Recommended, for the implementer to confirm:
   - Queue each `quest advise` session with its branch, PR, and `role: "advising"`
     (just as `quest review` queues review sessions via `src/cli/send.ts`), and
     surface advising invocation counts and spend in `quest usage`.
-- **Skills (`assets/skills/advise.md`, `assets/skills/review.md`, `assets/skills/iterate.md`, `assets/AGENTS.md`):**
+  - Because `token-max` only reads Codex and Claude transcripts, persist the
+    token usage and cost reported by `agy` in the advisor turn record under
+    `.git/quest/advise/` (or `quest` state) and read that persisted usage in
+    both `quest usage` and `quest send` so Neon sessions are never dropped from
+    local spend or Kixel Quest uploads.
+- **Checkpoint contract & skills (`src/cli/review.ts`, `README.md`, `assets/skills/advise.md`, `assets/skills/review.md`, `assets/skills/iterate.md`, `assets/AGENTS.md`):**
+  - Update `nextStep()`'s `next decide` output in `src/cli/review.ts`, its CLI
+    help, and `README.md` alongside the skills so headless authors are told they
+    may run one `quest advise` escalation before handing the PR back, while
+    still requiring the maintainer's pick for scope or architecture pivots or
+    dropping the PR.
   - Ship `/quest-advise` (installed by `quest init` like the other skills) with
     generic guidance: call `quest advise` when stuck (such as failing review
     convergence, repeated findings, or non-converging implementation loops),
-    not for routine work or infra/environment failures.
+    not for routine work or infra/environment failures. A standalone
+    `/quest-advise` invocation returns only its recommendation and makes no
+    edits or GitHub writes; automatic iteration applies only when invoked inside
+    a task (`/quest-start`, `/quest-iterate`, `/quest-run`) that already
+    authorizes editing and pushing to the PR.
   - In `/quest-review` and `/quest-iterate`, note that at `next decide` (or
     repeated findings across rounds) the agent may run `quest advise` once before
     handing back to the user, auto-applying advice that stays within the quest's
@@ -88,12 +107,17 @@ Recommended, for the implementer to confirm:
     and handing back with the advisor's options when it recommends a scope or
     architecture pivot or dropping the PR.
 
-Tests: unit tests for `ADVISORS` fall-through (missing/logged-out/limited),
+Tests: unit tests for `ADVISORS` fall-through (missing/logged-out/limited/sandbox-unsupported),
 hard 1-call-per-branch cap and `--force` override, read-only invocation flags
-for `agy`/`codex`/`claude`, `"advising"` role attribution and spend rollup in
-`quest usage` / `records`, and `quest init` installing the `/quest-advise` stub.
+for `agy`/`codex`/`claude`, persisted `agy` usage feeding both `quest usage` and
+`quest send`, `"advising"` role attribution and spend rollup, `next decide`
+wording, and `quest init` installing the `/quest-advise` stub.
 Add an `advise` sandbox case alongside `just review-sandbox` verifying no write
 or untrusted code execution.
+
+## Waiting
+
+- kixel-ai/kixel.quest: [Accept and display advising session role telemetry](https://github.com/kixel-ai/kixel.quest/blob/main/quest/m0/insight/advising-role.md) is deployed so the Worker accepts `role: "advising"` session records without rejecting batches with HTTP 400. Check that the quest file is gone from `kixel-ai/kixel.quest`'s tree.
 
 ## Related
 
