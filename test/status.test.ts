@@ -101,13 +101,24 @@ test("reports checks by requiredness, each reviewer's latest review against the 
 	]);
 });
 
-test("lists the signals that hold the head: unanswered online findings and newer maintainer decisions", async () => {
+test("lists the signals that hold the head: required reviewers' unanswered findings and newer maintainer decisions", async () => {
 	const body = pull({ checks: null, reviews: page([]), threads: page([]) });
 	const decision = `${URL_}#issuecomment-9`;
+	const review = (id: string, login: string, finding: string) => ({
+		id,
+		url: `${URL_}#pullrequestreview-${id}`,
+		author: { __typename: "Bot", login },
+		body: finding,
+		submittedAt: "2026-10-16T00:30:00Z",
+		commit: { oid: body.data.repository.pullRequest.headRefOid },
+	});
 	const status = await pullRequestStatus(
 		pr,
 		setup([body], {
+			// Only frog posts a check the base requires; rabbit's finding is a suggestion.
+			requiredBy: ["frog[bot]"],
 			signals: {
+				reviews: page([review("1", "rabbit", "[P2] Rename it"), review("2", "frog", "[P1] Drops a frame")]),
 				comments: page([
 					{
 						author: { __typename: "User", login: "kixelated" },
@@ -120,9 +131,10 @@ test("lists the signals that hold the head: unanswered online findings and newer
 			},
 		}).deps,
 	);
-	expect(statusLines(status)).toContain(
+	expect(statusLines(status).filter((line) => line.startsWith("signal "))).toEqual([
+		`signal finding ${URL_}#pullrequestreview-2 frog[bot]: drops a frame`,
 		`signal decision ${decision} kixelated: Maintainer decision: raise the timeout.`,
-	);
+	]);
 });
 
 test("a queued PR with auto-merge and no checks reports both, and JSON is deterministic", async () => {

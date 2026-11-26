@@ -1294,10 +1294,17 @@ to merge. Nothing waits for a reviewer: a signal the queue reads before the
 merge ends the pick. There are two kinds:
 
 - `finding`: an online reviewer's (a bot's, or a review whose body opens
-  `Automated review by <name>`) on the head. A review thread it opened holds
-  until it is resolved or a writer other than the reviewer replies. A `[P<n>]`
-  line in its latest review over the head, counting one that only opens
-  threads, holds until a writer's later comment links that review.
+  `Automated review by <name>`) on the head, when the base requires that
+  reviewer: GitHub reports a check it posts on the head, a check run from its
+  app or a commit status it created, as required for the PR. A review thread
+  it opened holds until it is resolved or a writer other than the reviewer
+  replies. A `[P<n>]` line in its latest review over the head, counting one
+  that only opens threads, holds until a writer's later comment links that
+  review. Any other online reviewer, such as CodeRabbit on a base that
+  requires none of its checks, is optional: its findings are suggestions and
+  hold nothing. A named reviewer posting under a person's account is never
+  required this way. GitHub's own review decision and conversation-resolution
+  rule still apply to every reviewer they count.
 - `decision`: a writer's comment that opens with `Maintainer decision`, not in
   a quote or code block, posted after the head's commit, which therefore cannot apply it. A
   newer commit answers it, as does a writer's later comment that links it.

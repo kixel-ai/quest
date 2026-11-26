@@ -76,7 +76,7 @@ export interface ReviewRecord {
 
 /** One signal on a PR's head that holds it from landing until it is fixed or answered. */
 export interface Signal {
-	/** `finding`: an online reviewer's, on the head. `decision`: a marked comment newer than the head's commit. */
+	/** `finding`: on the head, from an online reviewer the base requires. `decision`: a marked comment newer than the head's commit. */
 	kind: "finding" | "decision";
 	/** The review, thread, or comment that raised it. */
 	url: string;
@@ -156,7 +156,7 @@ export interface Status {
 	reactions: Reaction[];
 	/** Unresolved review threads, oldest first. */
 	threads: Thread[];
-	/** What holds the head from landing: online reviewers' unanswered findings on it and newer maintainer decisions. */
+	/** What holds the head from landing: unanswered findings on it from online reviewers the base requires, and newer maintainer decisions. */
 	signals: Signal[];
 	holds: HoldFact[];
 	starterHold: StarterHold | null;

@@ -136,6 +136,8 @@ export function setup(
 		diffs?: Record<string, string | number>;
 		/** The PR's reviews, threads, and comments as the signal reader reads them; none by default. */
 		signals?: Node;
+		/** The accounts that post a commit status the base requires on the head; none by default. */
+		requiredBy?: string[];
 		/** The base's active ruleset rules. */
 		rules?: Node[];
 		/** The base branch is gone, so reading it fails. */
@@ -261,6 +263,17 @@ export function setup(
 						},
 					},
 				});
+			}
+			if (request.query.includes("query RequiredPosters(")) {
+				const nodes = (options.requiredBy ?? []).map((login) => ({
+					__typename: "StatusContext",
+					isRequired: true,
+					creator: login.endsWith("[bot]")
+						? { __typename: "Bot", login: login.slice(0, -5) }
+						: { __typename: "User", login },
+				}));
+				const contexts = { pageInfo: { hasNextPage: false, endCursor: null }, nodes };
+				return Response.json({ data: { repository: { object: { statusCheckRollup: { contexts } } } } });
 			}
 			if (request.query.includes("query ReviewStatus(")) {
 				const sha = String(request.variables.sha);

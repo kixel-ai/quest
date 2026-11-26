@@ -335,11 +335,11 @@ async function enqueueArmed(
 }
 
 /**
- * Take each queued or armed PR whose head draws a signal, an online reviewer's unanswered finding or a newer
- * maintainer decision, out of the merge queue and disarm its auto-merge, so neither it nor {@link enqueueArmed} lands
- * it, and say why on it once per pick and head. Nothing waits for a reviewer: a signal that arrives before the merge
- * ends the pick until a writer fixes or answers it and picks the PR again. A pull is read again just before, so a
- * head pushed since is left for the next pass.
+ * Take each queued or armed PR whose head draws a signal, an unanswered finding from an online reviewer the base
+ * requires or a newer maintainer decision, out of the merge queue and disarm its auto-merge, so neither it nor
+ * {@link enqueueArmed} lands it, and say why on it once per pick and head. Nothing waits for a reviewer: a signal that
+ * arrives before the merge ends the pick until a writer fixes or answers it and picks the PR again. A pull is read
+ * again just before, so a head pushed since is left for the next pass.
  */
 async function dequeueSignaled(
 	github: GitHub,

@@ -51,7 +51,7 @@ Push any commit not yet pushed, resolve each `duplicate` line `quest status <pr>
 
 Summarize the review, with its last round's score and rationale, any reviewer's recommended approach with your take on it, and CI from `quest status <pr>`.
 Name any decisions the review raised without answering them, then ask the user for the pick with `/quest-merge`'s options.
-Recommend `/quest-merge` when the PR is landable as it defines, or will be once fixed with no decision left for the user, such as failing checks or unaddressed automated review findings, since `/quest-merge` runs `/quest-iterate` first; recommend `/quest-iterate` when the review raised significant issues or decisions.
+Recommend `/quest-merge` when the PR is landable as it defines, or will be once fixed with no decision left for the user, such as failing checks or a required online reviewer's unaddressed findings, since `/quest-merge` runs `/quest-iterate` first; recommend `/quest-iterate` when the review raised significant issues or decisions.
 
 While its required checks are still running, report that instead of asking; `/quest-run` asks once they finish.
 

@@ -1,5 +1,7 @@
-// What holds a PR's head from landing besides its checks: an online reviewer's finding on the head that no writer has
-// answered, and a maintainer decision recorded in a comment after the head was committed that nothing has answered.
+// What holds a PR's head from landing besides its checks: a finding on the head that no writer has answered, from an
+// online reviewer the base requires, and a maintainer decision recorded in a comment after the head was committed that
+// nothing has answered. An optional reviewer's findings, such as CodeRabbit's on a base that requires none of its
+// checks, are suggestions and hold nothing.
 import type { Repository, Signal } from "../core";
 import { type GitHubReader, type ObjectValue, array, object, string } from "./client";
 import { type Activity, bodyFindings, isBot, login, readActivity, reviewerOf } from "./online-review";
@@ -39,7 +41,8 @@ const links = (body: string, url: string) =>
 		.some((rest) => !/^[\w-]/.test(rest));
 
 /**
- * The signals holding `pull`'s head, given which accounts can push to its repository. A finding is an online
+ * The signals on `pull`'s head, given which accounts can push to its repository, before {@link readSignals} drops
+ * those of reviewers the base does not require. A finding is an online
  * reviewer's, from its latest pass over the head: a review thread it opened that is unresolved with no writer's reply,
  * or a `[P<n>]` line of that pass's body that no writer's later comment links. A
  * decision is a writer's comment opening with {@link DECISION}, posted after the head was committed, that no writer's
@@ -166,7 +169,66 @@ async function writersOf(
 	return writers;
 }
 
-/** The signals on each PR's current head, by number, with the head they were read for, and those `carried` carries. */
+/** The head's check contexts, each with whether the PR's base requires it and the account that posts it. */
+const REQUIRED = `query RequiredPosters($owner: String!, $name: String!, $number: Int!, $oid: GitObjectID!, $after: String) {
+	repository(owner: $owner, name: $name) { object(oid: $oid) { ... on Commit { statusCheckRollup {
+		contexts(first: 100, after: $after) {
+			pageInfo { hasNextPage endCursor }
+			nodes {
+				__typename
+				... on CheckRun { isRequired(pullRequestNumber: $number) checkSuite { app { slug } } }
+				... on StatusContext { isRequired(pullRequestNumber: $number) creator { __typename login } }
+			}
+		}
+	} } } }
+}`;
+
+/**
+ * The accounts that post a check `number`'s base requires on `head`, as GitHub judges it for the PR: a check run's app
+ * as its bot, and a commit status's creator. An online reviewer among them is one the base requires.
+ */
+async function requiredPosters(
+	client: GitHubReader,
+	repository: Repository,
+	number: number,
+	head: string,
+): Promise<Set<string>> {
+	const posters = new Set<string>();
+	for (let after: string | null = null; ;) {
+		const data = await client.graphql(REQUIRED, {
+			owner: repository.owner,
+			name: repository.repo,
+			number,
+			oid: head,
+			after,
+		});
+		const commit = object(data.repository).object;
+		if (commit === null || commit === undefined) throw new Error(`commit ${head} of PR #${number} is missing`);
+		const rollup = object(commit).statusCheckRollup;
+		if (rollup === null || rollup === undefined) return posters;
+		const page = object(object(rollup).contexts);
+		for (const context of array(page.nodes)) {
+			if (context.isRequired !== true) continue;
+			const app = object(object(context.checkSuite ?? {}).app ?? {});
+			const poster =
+				context.__typename === "CheckRun"
+					? typeof app.slug === "string"
+						? `${app.slug}[bot]`
+						: null
+					: login(context.creator);
+			if (poster !== null) posters.add(poster);
+		}
+		const info = object(page.pageInfo);
+		if (info.hasNextPage !== true) return posters;
+		after = string(info.endCursor);
+	}
+}
+
+/**
+ * The signals on each PR's current head, by number, with the head they were read for, and those `carried` carries.
+ * A finding holds only when its reviewer posts a check the base requires on the head; an optional reviewer's are left
+ * out.
+ */
 export async function readSignals(
 	client: GitHubReader,
 	repository: Repository,
@@ -187,12 +249,19 @@ export async function readSignals(
 		),
 	]);
 	const writers = await writersOf(client, repository, actors);
-	return new Map(
-		[...pulls].map(([number, pull]) => [
-			number,
-			{ head: pull.head, signals: signals(pull, writers, carried?.get(number)) },
-		]),
-	);
+	const read = new Map<number, { head: string; signals: Signal[] }>();
+	for (const [number, pull] of pulls) {
+		const found = signals(pull, writers, carried?.get(number));
+		// Only a PR with findings pays for reading which reviewers its base requires.
+		const required = found.some((signal) => signal.kind === "finding")
+			? await requiredPosters(client, repository, number, pull.head)
+			: new Set<string>();
+		read.set(number, {
+			head: pull.head,
+			signals: found.filter((signal) => signal.kind !== "finding" || required.has(signal.author)),
+		});
+	}
+	return read;
 }
 
 /** Signals as one line each, for a refusal or a comment. */

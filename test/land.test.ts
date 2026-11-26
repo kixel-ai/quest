@@ -828,17 +828,27 @@ describe.skipIf(process.platform === "win32")("quest land", () => {
 		expect(plan.waiting?.map(({ number }) => number)).toEqual([2, 4]);
 	});
 
-	test("ejects a pick whose head draws an unanswered online finding", async () => {
+	test("ejects a pick whose head draws an unanswered finding from a reviewer the base requires", async () => {
 		const forge = new Forge();
-		const runs = [{ name: "test", conclusion: "SUCCESS", url: "u" }];
+		forge.repo.required!.push("Rabbit");
+		const runs = [
+			{ name: "test", conclusion: "SUCCESS", url: "u" },
+			{ name: "Rabbit", conclusion: "SUCCESS", url: "r", context: true, poster: "rabbit[bot]" },
+		];
 		forge.pull("Ready", { "1.txt": "1\n" }, { pull: { runs } });
 		forge.pull(
 			"Found",
 			{ "2.txt": "2\n" },
 			{ pull: { runs, reviews: [{ state: "COMMENTED", author: "rabbit[bot]", body: "[P1] Drops a frame" }] } },
 		);
+		// No check of its reviewer's is required, so its finding is a suggestion.
+		forge.pull(
+			"Suggested",
+			{ "3.txt": "3\n" },
+			{ pull: { runs, reviews: [{ state: "COMMENTED", author: "frog[bot]", body: "[P2] Rename it" }] } },
+		);
 		const plan = await resolveQueue(REPOSITORY, { base: "main", method: "squash" }, await forge.deps());
-		expect(plan.queue.map((entry) => entry.number)).toEqual([1]);
+		expect(plan.queue.map((entry) => entry.number)).toEqual([1, 3]);
 		expect(plan.eject.map((ejected) => [ejected.number, ejected.reason])).toEqual([[2, "unanswered_signal"]]);
 		expect(plan.eject[0]!.detail).toContain("finding by rabbit[bot]: drops a frame");
 	});
@@ -2791,6 +2801,12 @@ describe.skipIf(process.platform === "win32")("the watcher's own queue", () => {
 		const finished = eventFile(queue.state, (name) => name.endsWith(".exit"));
 		expect(await pass(0, fix)).toEqual(["removed 1", "fixing 1"]);
 		await finished;
+		// The reviewer posts a check the base requires, so its finding holds.
+		forge.repo.required!.push("Rabbit");
+		one.runs = [
+			...(one.runs ?? []),
+			{ name: "Rabbit", conclusion: "SUCCESS", url: "r", context: true, poster: "rabbit[bot]" },
+		];
 		one.reviews = [{ state: "COMMENTED", author: "rabbit[bot]", body: "[P1] Drops a frame" }];
 		expect(await pass(0, fix)).toEqual(["handback 1"]);
 		expect(one.landing).toBeFalsy();

@@ -76,6 +76,8 @@ interface Pull {
 	labels?: string[];
 	/** Its reviews, threads, and comments as the signal reader reads them; none by default. */
 	activity?: Record<string, unknown>;
+	/** The accounts that post a commit status its base requires on its head; none by default. */
+	requiredBy?: string[];
 }
 interface Job {
 	id: number;
@@ -247,6 +249,19 @@ function deps(world: World): GitHubDependencies {
 							),
 						},
 					});
+				}
+				if (query.includes("query RequiredPosters(")) {
+					const pull = world.pulls.find((item) => item.number === variables.number)!;
+					expect(variables.oid).toBe(headOf(world, pull));
+					const nodes = (pull.requiredBy ?? []).map((login) => ({
+						__typename: "StatusContext",
+						isRequired: true,
+						creator: login.endsWith("[bot]")
+							? { __typename: "Bot", login: login.slice(0, -5) }
+							: { __typename: "User", login },
+					}));
+					const contexts = { nodes, pageInfo: { hasNextPage: false, endCursor: null } };
+					return Response.json({ data: { repository: { object: { statusCheckRollup: { contexts } } } } });
 				}
 				if (query.includes("statusCheckRollup")) {
 					expect(variables.id).toMatch(/^PR_\d+$/);
@@ -865,7 +880,7 @@ test("an armed pick GitHub never queued is enqueued once ready, only at the head
 	expect(github.mutations).toHaveLength(2);
 });
 
-test("a queued or armed pick that draws an online finding leaves the queue, once, and is not enqueued again, unless retargeted", async () => {
+test("a queued or armed pick that draws a required reviewer's finding leaves the queue, once, and is not enqueued again, unless retargeted", async () => {
 	const state = tempDir();
 	const page = (nodes: object[]) => ({ pageInfo: { hasNextPage: false, endCursor: null }, nodes });
 	const finding = {
@@ -889,10 +904,40 @@ test("a queued or armed pick that draws an online finding leaves the queue, once
 			armed: at(2),
 			queued: at(2),
 			activity: finding,
+			requiredBy: ["rabbit[bot]"],
 		},
-		{ number: 31, head: HEAD, enqueues: [], removals: [], armed: at(2), mergeState: "BLOCKED", activity: finding },
+		{
+			number: 31,
+			head: HEAD,
+			enqueues: [],
+			removals: [],
+			armed: at(2),
+			mergeState: "BLOCKED",
+			activity: finding,
+			requiredBy: ["rabbit[bot]"],
+		},
 		// Retargeted after the list read: another base's watcher owns it now.
-		{ number: 33, head: HEAD, enqueues: [], removals: [], armed: at(2), base: "release", activity: finding },
+		{
+			number: 33,
+			head: HEAD,
+			enqueues: [],
+			removals: [],
+			armed: at(2),
+			base: "release",
+			activity: finding,
+			requiredBy: ["rabbit[bot]"],
+		},
+		// The base requires only another account's check, so the reviewer is optional and its finding a suggestion.
+		{
+			number: 34,
+			head: HEAD,
+			enqueues: [{ createdAt: at(2), actor: "maintainer" }],
+			removals: [],
+			armed: at(2),
+			queued: at(2),
+			activity: finding,
+			requiredBy: ["ci[bot]"],
+		},
 		// Nothing holds it.
 		{
 			number: 32,
@@ -920,6 +965,7 @@ test("a queued or armed pick that draws an online finding leaves the queue, once
 	expect(github.mutations).toHaveLength(2);
 	expect(github.comments[31]).toHaveLength(1);
 	expect(github.comments[33]).toBeUndefined();
+	expect(github.comments[34]).toBeUndefined();
 });
 
 test("a signaled pick leaves the queue even when GitHub refuses its comment, which a later pass posts", async () => {
@@ -932,6 +978,7 @@ test("a signaled pick leaves the queue even when GitHub refuses its comment, whi
 				removals: [],
 				armed: at(2),
 				queued: at(2),
+				requiredBy: ["rabbit[bot]"],
 				activity: {
 					reviews: {
 						pageInfo: { hasNextPage: false, endCursor: null },
@@ -1486,6 +1533,7 @@ describe.skipIf(process.platform === "win32")("the watcher's land fixer", () => 
 				],
 			},
 		};
+		pull.requiredBy = ["rabbit[bot]"];
 		github.now = Date.parse(at(10));
 		expect(await watchPass(REPOSITORY, { state }, deps(github), context)).toEqual(["handback 5"]);
 		expect(github.mutations).toEqual([]);
@@ -1544,6 +1592,7 @@ describe.skipIf(process.platform === "win32")("the watcher's land fixer", () => 
 				],
 			},
 		};
+		pull.requiredBy = ["rabbit[bot]"];
 		github.now = Date.parse(at(10));
 		expect(await watchPass(REPOSITORY, { state }, deps(github), context)).toEqual(["handback 5"]);
 		// Leaving the queue disarmed it, so nothing asks GitHub to disarm a request that is gone.
@@ -1587,6 +1636,7 @@ describe.skipIf(process.platform === "win32")("the watcher's land fixer", () => 
 				],
 			},
 		};
+		pull.requiredBy = ["rabbit[bot]"];
 		github.now = Date.parse(at(12));
 		expect(await watchPass(REPOSITORY, { state }, deps(github), context)).toEqual([
 			`dequeued 5 ${fixed()} 1 signals`,
