@@ -21,7 +21,3 @@ Tests: the sender's hourly heartbeat counts the sessions that ended; `culprits()
 ## Waiting
 
 - kixel-ai/kixel.quest: its [sessions](https://github.com/kixel-ai/kixel.quest/blob/main/quest/m0/insight/sessions.md) and [finder](https://github.com/kixel-ai/kixel.quest/blob/main/quest/m0/insight/finder.md) quests are deployed. Check that both files are gone from that repository's tree.
-
-## Required
-
-- [Login](/quest/m0/telemetry/login.md) - the token that names a record's host

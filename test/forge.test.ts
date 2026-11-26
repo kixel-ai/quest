@@ -1,7 +1,7 @@
 // The forge reads answer the same through GitHub and through Kixel Quest. The fake Kixel Quest serves each read by
 // running the GitHub backend on a fake GitHub, as its index's fallthrough does, so an answer that differs is the
 // wire's doing: a field lost, reordered, or retyped between the two.
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -24,6 +24,7 @@ import { type ForgeDependencies, forgeFor, KixelQuest, KixelQuestForge } from ".
 import { waitForActivity, WaitTimeout } from "../src/cli/wait";
 import { type GitHubReadDependencies } from "../src/github/client";
 import { GitHubForge } from "../src/github/forge";
+import { writeTokens } from "./kixel-fakes";
 import * as status from "./status-fakes";
 import * as wait from "./wait-fakes";
 
@@ -101,8 +102,7 @@ function dependencies(
 ): ForgeDependencies {
 	config = mkdtempSync(join(tmpdir(), "quest-forge-"));
 	if (token) {
-		mkdirSync(join(config, "quest"));
-		writeFileSync(join(config, "quest", "records.json"), JSON.stringify({ [URL_]: TOKEN }));
+		writeTokens({ XDG_CONFIG_HOME: config }, { [URL_]: TOKEN });
 	}
 	return {
 		env: { XDG_CONFIG_HOME: config, XDG_CACHE_HOME: join(config, "cache"), ...env },
@@ -535,7 +535,7 @@ describe("choosing the forge", () => {
 		const deps = dependencies(server.fetch, unreachable, { QUEST_KIXEL_URL: "http://localhost:8787" });
 		// The token file pairs the token with kixel.quest only, so the local one gets none and reads go to GitHub.
 		await expect(forgeFor(repository, deps)).rejects.toThrow("read GitHub");
-		writeFileSync(join(config!, "quest", "records.json"), JSON.stringify({ "http://localhost:8787": TOKEN }));
+		writeTokens({ XDG_CONFIG_HOME: config! }, { "http://localhost:8787": TOKEN });
 		expect(await forgeFor(repository, deps)).toBeInstanceOf(KixelQuestForge);
 		expect(server.requests.map((request) => new URL(request.path, "http://localhost:8787").pathname)).toEqual([
 			"/forge",
@@ -553,7 +553,7 @@ describe("choosing the forge", () => {
 		);
 		const refused = kixelQuest(unreachable);
 		const deps = dependencies(refused.fetch, unreachable);
-		writeFileSync(join(config!, "quest", "records.json"), JSON.stringify({ [URL_]: "revoked" }));
+		writeTokens({ XDG_CONFIG_HOME: config! }, { [URL_]: "revoked" });
 		await expect(forgeFor(repository, deps)).rejects.toThrow(`it refused the token`);
 		await expect(forgeFor(repository, deps)).rejects.toThrow(override);
 		const malformed = kixelQuest(unreachable, { answer: { value: [], asOf: null, extra: true } });

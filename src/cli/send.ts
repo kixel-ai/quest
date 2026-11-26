@@ -35,7 +35,7 @@ import {
 	unheaded,
 	updatedPulls,
 } from "./usage";
-import { kixelUrl, tokenFor, tokensPath } from "./tokens";
+import { kixelUrl, notSignedIn, requireToken, tokenFor } from "./tokens";
 import { type LoggedWait } from "./waits";
 import type { CallLine } from "./calls";
 
@@ -144,10 +144,7 @@ export function queue(stopped: Stopped, env: NodeJS.ProcessEnv = process.env): Q
 	const url = kixelUrl(env);
 	const token = tokenFor(url, env);
 	if (token === null)
-		return said(
-			`token:${url}`,
-			`quest: ${tokensPath(env)} holds no token for ${url}, so this host sends it no session records.`,
-		);
+		return said(`token:${url}`, `quest: ${notSignedIn(url)}, so it sends no session records until then.`);
 	if (existsSync(refusal(env, url, token))) return { notices, queued: false };
 	let start: number;
 	let reviewed: Reviewed | undefined;
@@ -388,7 +385,7 @@ async function sendTo(
 		for (const q of queued) settle(q);
 		for (const q of queued) clearBackoff(deps.env, groupId(q.pending));
 		notes.push(
-			`${url} refused this host's token (${status}), so it is sent no more session records until the token changes`,
+			`${url} refused this host's token (${status}), so it is sent no more session records until \`quest login\` signs in again`,
 		);
 		sent.push({ endpoint: `${url}/records`, repository, records, breakages, refused: true });
 	};
@@ -642,8 +639,7 @@ export async function reportIncident(
 	const root = questRoot(resolve(incident.cwd));
 	if (root === null) throw new Error(`${incident.cwd} is not in a checkout that uses Quest`);
 	const url = kixelUrl(deps.env);
-	const token = tokenFor(url, deps.env);
-	if (token === null) throw new Error(`${tokensPath(deps.env)} holds no token for ${url}`);
+	const token = requireToken(url, deps.env);
 	const remote = readRemote(root, "origin");
 	const origin = remote === null ? null : remoteRepository(remote).repository;
 	if (origin === null) throw new Error("origin is not on GitHub");

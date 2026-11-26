@@ -17,7 +17,3 @@ Decided in the [epic](/quest/m0/telemetry/README.md): ✅ `## Review` moves out 
 - Update the guide, `assets/CONTEXT.md`, and the review, iterate, and merge skills where they describe the `## Review` record; this decision is the maintainer's request for that work.
 
 Tests: a round posts each finding with its location; a `--responses` round posts each finding's outcome; a low head posts its classification alone; and the PR body is left unchanged.
-
-## Required
-
-- [Login](/quest/m0/telemetry/login.md) - the token each post carries

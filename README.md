@@ -680,19 +680,27 @@ Agents polling `quest status`, `quest wait`, and `quest unblocked --unclaimed`
 can spend a person's whole hourly GitHub quota. Where
 [Kixel Quest](https://kixel.quest) serves the repository, those reads, and the
 claim and draft reads of `quest start` and `quest waiting`, go to its index of
-GitHub's webhooks instead. It serves only people its allow-list gives a token,
-which `quest` takes from `$XDG_CONFIG_HOME/quest/records.json`, paired with
-`https://kixel.quest`:
+GitHub's webhooks instead. It serves only hosts signed in with `quest login`:
 
-```json
-{ "https://kixel.quest": "<token>" }
+```console
+$ quest login
+Upload this host's agent transcripts with its session records? A transcript holds everything a session saw, which can include pasted secrets and file contents, and the maintainers of the repository it worked on can read it. [y/N] n
+Open https://kixel.quest/login, sign in with GitHub, and enter the code BCDF-GHJK.
+Waiting for its approval; the code expires in 10 minutes.
+signed in to https://kixel.quest as workstation, not uploading transcripts
 ```
 
-Without a token, or for a repository Kixel Quest does not serve, reads go to
+Kixel Quest issues the host a token named after its hostname, which `quest`
+keeps in `$XDG_CONFIG_HOME/quest/login.json` (`~/.config`), readable only by
+the user, with the answer about transcripts; only a `y` or `yes` uploads them.
+Signing in again replaces the host's token. `quest logout` removes it from the
+host; Kixel Quest takes it until it is revoked on its Tokens page.
+
+Without a sign-in, or for a repository Kixel Quest does not serve, reads go to
 GitHub as above; the output is the same either way. When Kixel Quest fails, the
 command fails too, naming `QUEST_FORGE=github`, which reads GitHub instead.
-`QUEST_KIXEL_URL` names another Kixel Quest, such as one running locally, whose
-token the same file pairs with its URL.
+`QUEST_KIXEL_URL` names another Kixel Quest, such as one running locally, which
+`quest login` signs in to separately.
 
 A read that must not lag the index, such as `quest pr view`, `quest pr list`,
 or the open-PR checks of `quest start`, goes to Kixel Quest's `pulls`, `files`,
@@ -718,7 +726,8 @@ A repository can move off GitHub with Kixel Quest as its whole forge. Its
 remote is then a Kixel Quest URL, `https://kixel.quest/<owner>/<repo>.git`,
 and its PRs are `https://kixel.quest/<owner>/<repo>/pull/<number>`; that alone
 tells `quest` the repository lives there, so every read and write goes to
-Kixel Quest, with the token `records.json` pairs with it, and never to GitHub.
+Kixel Quest, with the token `quest login` stored for it, and never to GitHub;
+without one, they fail naming `quest login`.
 `QUEST_FORGE=github` cannot reach such a repository, and a failure there names
 no override. `quest start` claims with a draft PR there, `quest iterate`,
 `ready`, and `release` take and give back holds that Kixel Quest records rather
@@ -2201,16 +2210,15 @@ quote no message.
 
 Records go to [Kixel Quest](https://kixel.quest), the same one the
 [forge reads](#read-through-kixel-quest) use, at its `/records`, with the token
-`$XDG_CONFIG_HOME/quest/records.json` (`~/.config`) pairs with its URL. No
-repository commits a config file: a record names its repository by `owner/repo`
+`quest login` stored for its URL. No repository commits a config file: a record names its repository by `owner/repo`
 from its checkout's `origin` (the repository its PRs open on, for a fork), and
 the token is sent only to the URL the user's own file pairs it with. The URL is
 `https://kixel.quest`, or HTTPS (HTTP to `localhost`) `QUEST_KIXEL_URL` for
 another Kixel Quest, such as one running locally, as the stop hook's environment names it.
-A user holding no token for it sends nothing, and the hook says so once as a system message.
+A host not signed in to it sends nothing, and the hook says once, as a system message, to run `quest login`.
 The hook queues each record with that URL, and the sender sends it there with that URL's token whatever
 its own environment names, so one queue can serve several Kixel Quests; it drops a record only when the
-person removed that token or its Kixel Quest refused it.
+host signed out of that Kixel Quest or it refused the token.
 
 No hook runs in a reviewer, so `quest review` queues each Claude Code and Codex session it starts or resumes
 the same way, its classifier's and each reviewer's, once the round's record names them, so reviewer spend reaches Kixel Quest
