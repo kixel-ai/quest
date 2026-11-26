@@ -456,8 +456,9 @@ export function forgeJson(value: unknown): string {
 
 // Kixel Quest follows quest's main, so it and a repository's pinned client may each run a quest the other predates.
 // Answers therefore drop fields the client does not know, and fill each field added since the wire's first release
-// (quest v0.22.0), when absent, with a default that fails closed. Requests stay strict: a field the server does not
-// know may carry intent, such as how to land a pick, that must not be dropped.
+// (quest v0.22.0), when absent, with a default that fails closed. A new value of a known field, such as another
+// review state, still fails an older client, so carry new facts in new fields. Requests stay strict: a field the
+// server does not know may carry intent, such as how to land a pick, that must not be dropped.
 
 /** A `GET /forge` answer, dropping unknown fields and failing on any missing or ill-typed one. */
 export function parseForgeInfo(value: unknown): ForgeInfo {
