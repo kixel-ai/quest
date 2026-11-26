@@ -36,13 +36,18 @@ export default defineConfig({
 			CODEX_THREAD_ID: "",
 		},
 		...(live
-			? { include: ["test/live/**/*.test.ts"], testTimeout: 30 * 60_000, hookTimeout: 60_000 }
+			? {
+					include: ["test/live/**/*.test.ts"],
+					setupFiles: ["test/state.ts"],
+					testTimeout: 30 * 60_000,
+					hookTimeout: 60_000,
+				}
 			: {
 					include: ["test/**/*.test.ts"],
 					exclude: [...configDefaults.exclude, "test/live/**"],
 					// A test's CPU budget (test/budget.ts) bounds how slow it may be; this wall-clock
 					// limit only catches a test awaiting what never comes, so a loaded host never reaches it.
-					setupFiles: ["test/budget.ts", "test/state.ts"],
+					setupFiles: ["test/state.ts", "test/budget.ts"],
 					globalSetup: ["test/scopes.ts"],
 					testTimeout: 5 * 60_000,
 					hookTimeout: 5 * 60_000,
