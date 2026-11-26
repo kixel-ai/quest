@@ -151,12 +151,19 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 	const warn = (line: string): void => {
 		out.stderr(`quest: ${line}\n`);
 	};
+	// A run may choose its forge several times, such as for each claim `quest start` reads.
+	const forgeWarned = new Set<string>();
 	const forgeDependencies = (quota?: GitHubDependencies["quota"]): ForgeDependencies => ({
 		env: process.env,
 		fetch: globalThis.fetch,
 		now: Date.now,
 		sleep,
 		github: () => gitHubDependencies(warn, quota),
+		warn: (line) => {
+			if (forgeWarned.has(line)) return;
+			forgeWarned.add(line);
+			warn(line);
+		},
 	});
 	const claimDependencies = (): ClaimDependencies => ({
 		github: () => gitHubDependencies(warn),
@@ -187,7 +194,8 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 	const FORGE_READS =
 		"Where Kixel Quest serves the repository and $XDG_CONFIG_HOME/quest/records.json pairs a token with it, " +
 		"these reads go to Kixel Quest's index instead, sparing the GitHub quota, and its failure fails the command; " +
-		"QUEST_FORGE=github reads GitHub, and QUEST_KIXEL_URL names another Kixel Quest. A repository Kixel Quest " +
+		"QUEST_FORGE=github reads GitHub, on your quota, to rerun a command Kixel Quest failed, and QUEST_KIXEL_URL " +
+		"names another Kixel Quest. A repository Kixel Quest " +
 		"hosts, named by a Kixel Quest PR URL or origin remote, is read there alone. ";
 
 	const program = new Command("quest")

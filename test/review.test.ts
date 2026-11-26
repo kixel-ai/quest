@@ -2186,7 +2186,10 @@ fakes(
 
 		// The same head again reuses every session without a turn, so nothing new is queued.
 		const again = await quest("--root", s.repo, "review");
-		expect(again.stderr).toBe("");
+		// The override reads GitHub where the paired token could have read Kixel Quest, which a run says once.
+		expect(again.stderr).toBe(
+			"quest: QUEST_FORGE=github spends your GitHub quota on reads Kixel Quest (https://kixel.example) may serve; set it only to rerun a command Kixel Quest failed\n",
+		);
 		expect(queued()).toEqual(sessions);
 
 		// A new head resumes both seats, which spent tokens again, so each is queued once more under its same session.

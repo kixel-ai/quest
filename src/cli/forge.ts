@@ -40,6 +40,10 @@ import { kixelUrl, tokenFor, tokensPath } from "./tokens";
 /** The variable that, set to `github`, reads GitHub even where Kixel Quest serves the repository. */
 export const FORGE = "QUEST_FORGE";
 
+// Worded for one command: agents took `set QUEST_FORGE=github` as a setting for the whole session, and drained the
+// GitHub quota they share with every other session on the host.
+const REMEDY = `rerun this command with ${FORGE}=github; leave it unset otherwise, since it spends your GitHub quota`;
+
 /** What choosing a forge needs from its host. */
 export interface ForgeDependencies {
 	env: NodeJS.ProcessEnv;
@@ -48,7 +52,9 @@ export interface ForgeDependencies {
 	sleep(milliseconds: number): Promise<unknown>;
 	/** Called only once a read goes to GitHub, so Kixel Quest's reads need no GitHub token. */
 	github(): GitHubDependencies;
-	/** What a Kixel Quest failure tells the person to do; by default, to read GitHub instead. */
+	/** Tells the person something on stderr; a run prints the same line once. */
+	warn(line: string): void;
+	/** What a Kixel Quest failure tells the person to do; by default, to rerun the command on GitHub. */
 	remedy?: string;
 }
 
@@ -57,10 +63,16 @@ export function kixelQuest(deps: ForgeDependencies): KixelQuest | null {
 	const forced = deps.env[FORGE];
 	if (forced !== undefined && forced !== "" && forced !== "github")
 		throw new Error(`${FORGE} is ${forced}; set it to github to read GitHub, or leave it unset`);
-	if (forced === "github") return null;
 	const url = kixelUrl(deps.env);
 	const token = tokenFor(url, deps.env);
-	return token === null ? null : new KixelQuest(url, token, deps, false);
+	if (token === null) return null;
+	if (forced !== "github") return new KixelQuest(url, token, deps, false);
+	// Without the override this person's reads would ask Kixel Quest; telling them costs no request, unlike asking
+	// Kixel Quest whether it serves the repository, which the override skips.
+	deps.warn(
+		`${FORGE}=github spends your GitHub quota on reads Kixel Quest (${url}) may serve; set it only to rerun a command Kixel Quest failed`,
+	);
+	return null;
 }
 
 /** Kixel Quest's backend for `repository`, which it hosts, failing without the person's token for it. */
@@ -160,7 +172,7 @@ export class KixelQuest {
 	constructor(
 		readonly url: string,
 		private readonly token: string,
-		private readonly deps: ForgeDependencies,
+		private readonly deps: Omit<ForgeDependencies, "warn">,
 		private readonly hosted: boolean,
 	) {}
 
@@ -209,7 +221,7 @@ export class KixelQuest {
 
 	/** A failed request, naming the setting that reads GitHub instead where Kixel Quest does not host the repository. */
 	#failed(method: string, path: string, why: string): Error {
-		const instead = this.hosted ? "" : `; ${this.deps.remedy ?? `set ${FORGE}=github to read GitHub`}`;
+		const instead = this.hosted ? "" : `; ${this.deps.remedy ?? REMEDY}`;
 		return new Error(`Kixel Quest (${this.url}) failed ${method} ${path}: ${why}${instead}`);
 	}
 

@@ -690,7 +690,10 @@ which `quest` takes from `$XDG_CONFIG_HOME/quest/records.json`, paired with
 
 Without a token, or for a repository Kixel Quest does not serve, reads go to
 GitHub as above; the output is the same either way. When Kixel Quest fails, the
-command fails too, naming `QUEST_FORGE=github`, which reads GitHub instead.
+command fails too, saying to rerun just that command with `QUEST_FORGE=github`,
+which reads GitHub instead. Leave it unset otherwise: it spends the GitHub
+quota Kixel Quest spares, and a command run with it while a token is paired
+says so on stderr.
 `QUEST_KIXEL_URL` names another Kixel Quest, such as one running locally, whose
 token the same file pairs with its URL.
 
@@ -708,7 +711,11 @@ Its read API lives under `/forge`, with the token as a bearer token:
 and the lowercase `owner/repo` of each repository served to them, and
 `POST /forge/<read>` takes one of `status`, `pulls`, `files`, `held`, `watch`, or `view` and
 answers `{"value", "asOf"}`, the read's value and the time of the newest
-webhook behind it. A 400 with `{"error"}` refuses a bad argument, such as a
+webhook behind it. Kixel Quest and a repository's pinned `quest` may each be
+newer than the other, so a client ignores answer fields it does not know and
+reads a field added since v0.22.0 that an answer lacks as the value permitting
+the least, such as no counting local review; a request with a field the server
+does not know is refused. A 400 with `{"error"}` refuses a bad argument, such as a
 malformed `--since`, which `quest` reports as a usage error. `quest/core` exports each read's types and their parsers;
 `quest/github`'s `GitHubForge` answers the same reads from GitHub.
 
