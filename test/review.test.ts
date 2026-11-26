@@ -1784,6 +1784,16 @@ fakes(
 		}
 		expect(classifying(s.calls())).toHaveLength(2);
 
+		// Adding a plan is medium with no model, for the plan rather than the missing risk file.
+		git(s.repo, "checkout", "-qB", "plans", "origin/main");
+		write(s.repo, "quest/m0/new.md", "# [S] New\n");
+		git(s.repo, "add", ".");
+		git(s.repo, "commit", "-qm", "new plan");
+		const added = await quest("--root", s.repo, "review");
+		expect(added.code, added.stderr).toBe(0);
+		expect(added.stdout).toContain("\nrisk medium it adds to plans under quest/, which agents start");
+		expect(classifying(s.calls())).toHaveLength(2);
+
 		// A workflow is high by its path, with no model.
 		for (const path of [".github/workflows/ci.yml", ".github/actions/setup/action.yml"]) {
 			git(s.repo, "checkout", "-qB", "ci", "origin/main");

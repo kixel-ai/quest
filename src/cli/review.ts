@@ -1609,7 +1609,7 @@ export function reportPrompt(head: string, earlier: Finding[] = [], first = 1): 
 /** What each tier means, as the classifier reads it: who a mistake in the change reaches, and how soon they would know. */
 const TIER_SCALE =
 	"Risk is blast radius: who is hurt if the change is wrong, and whether anything catches it first. A change is low " +
-	"when no one outside the repository could tell it apart, such as tests, documentation, plans, comments, or a " +
+	"when no one outside the repository could tell it apart, such as tests, documentation, removed plans, comments, or a " +
 	"refactor that changes no behavior. It is high when a mistake in it reaches the users or customers of what the " +
 	"repository ships, or other repositories that build on it, before a check or a revert would catch it, such as " +
 	"the core of a wire protocol or data path, a public API others build against, billing, a security boundary, or a " +
@@ -1687,7 +1687,7 @@ const modelDiff = (root: string, empty: string, args: string[]) =>
  * diff so the head's attributes cannot hide one.
  */
 function addedPlans(root: string, empty: string, range: string): string[] {
-	return modelDiff(root, empty, ["--numstat", "--no-renames", "-z", range])
+	return modelDiff(root, empty, ["--numstat", "--no-renames", "-z", range, "--", PLANS])
 		.split("\0")
 		.flatMap((line) => {
 			const [, added, path] = /^(\d+)\t\d+\t([\s\S]+)$/.exec(line) ?? [];
@@ -2082,7 +2082,10 @@ export async function classify(input: Classifying): Promise<{ key: string; value
 	// Only the classes whose scope holds every changed path, so the classifier cannot widen one.
 	const offered = floor === "low" ? classesFor(offeredClasses(file), changed) : [];
 	if (text === null && offered.length === 0) {
-		const reason = `the base has no ${RISK_FILE} to name what is always high or customer-facing, so every change is medium`;
+		const reason =
+			planned.length > 0
+				? `it adds to plans under ${PLANS}, which agents start without a person reading them`
+				: `the base has no ${RISK_FILE} to name what is always high or customer-facing, so every change is medium`;
 		return set({ tier: "medium", reason, by: { kind: "default" }, class: null });
 	}
 	const classes = offered.map((each) => each.name);

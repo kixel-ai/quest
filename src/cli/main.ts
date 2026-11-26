@@ -1776,7 +1776,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"API rejects, or at its usage limit passes the turn to the next; when none is left, the run fails on the " +
 				"limit that resets first if every one whose CLI is installed hit its own, else as a usage error naming why each failed. A later round on the same head, base " +
 				"RISK.md, and built-in defaults reuses the tier unless --new. Reviewers never judge it. " +
-				"A change that adds a line under quest/, as a new quest or work added to one, is at least medium whatever " +
+				"A change that adds or changes a line under quest/, a new quest or a move included, is at least medium whatever " +
 				"RISK.md says, since agents start that work unattended: the classifier may answer only medium or high and is offered no class. " +
 				"The classifier also names the class every changed file falls in, or none: the built-in `quest` (`quest/**`), " +
 				"for a change that only removes or cuts plans, unless RISK.md lists a class by that name, which replaces it, and RISK.md's ## Automatic list, " +

@@ -37,8 +37,8 @@ export const ALWAYS_HIGH: readonly HighPath[] = [
 export const heldHigh = (file: RiskFile | null): HighPath[] => [...ALWAYS_HIGH, ...(file?.high ?? [])];
 
 /**
- * The quest tree, the same in every quest repository. A change adding a line under it, as a new quest or work added
- * to one, is at least medium whatever the risk file says, since agents start that work with no person reading it.
+ * The quest tree, the same in every quest repository. A change adding or changing a line under it, a new quest or a
+ * move included, is at least medium whatever the risk file says, since agents start that work with no person reading it.
  */
 export const PLANS = "quest/";
 

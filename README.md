@@ -1903,8 +1903,8 @@ from the base's tip, so a change cannot lower its own tier, and fails on one
 it cannot read, which the repository's own `quest check`
 reports first.
 
-A change that adds a line under `quest/`, as a new quest or work added to
-one, is at least `medium` in every repository, whatever its `RISK.md` says:
+A change that adds or changes a line under `quest/`, a new quest or a move
+included, is at least `medium` in every repository, whatever its `RISK.md` says:
 agents start a quest's work with no person reading it first, so a plan that
 lands unreviewed cascades into everything built from it. The classifier is
 told which plans it adds and may answer only `medium` or `high`, and is
