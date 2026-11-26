@@ -42,6 +42,7 @@ import { runsFromCheckout, runsFromHead } from "../src/cli/own-build";
 import { withReview } from "../src/cli/review-record";
 import { implementer, recorded, sameModel } from "../src/cli/models-record";
 import { tempDir } from "./fixture";
+import { writeTokens } from "./kixel-fakes";
 import {
 	CLAUDE_LOGGED_OUT,
 	CODEX_LOGGED_OUT,
@@ -2116,8 +2117,7 @@ fakes("each session a round starts is queued with the PR its record went to, or 
 	vi.stubEnv("XDG_CONFIG_HOME", config);
 	vi.stubEnv("QUEST_KIXEL_URL", "https://kixel.example");
 	vi.stubEnv("QUEST_FORGE", "github");
-	mkdirSync(join(config, "quest"));
-	writeFileSync(join(config, "quest", "records.json"), JSON.stringify({ "https://kixel.example": "secret" }));
+	writeTokens({ XDG_CONFIG_HOME: config }, { "https://kixel.example": "secret" });
 	mkdirSync(join(state, "quest", "records"), { recursive: true });
 	writeFileSync(join(state, "quest", "records", "sender.pid"), String(process.pid));
 	const pending = join(state, "quest", "records", "pending");
@@ -2159,8 +2159,7 @@ fakes(
 		vi.stubEnv("QUEST_KIXEL_URL", "https://kixel.example");
 		// The token is for the sender; the forge stays GitHub.
 		vi.stubEnv("QUEST_FORGE", "github");
-		mkdirSync(join(config, "quest"));
-		writeFileSync(join(config, "quest", "records.json"), JSON.stringify({ "https://kixel.example": "secret" }));
+		writeTokens({ XDG_CONFIG_HOME: config }, { "https://kixel.example": "secret" });
 		// A sender that runs, so the person is told nothing.
 		mkdirSync(join(state, "quest", "records"), { recursive: true });
 		writeFileSync(join(state, "quest", "records", "sender.pid"), String(process.pid));

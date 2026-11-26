@@ -2,8 +2,9 @@
 
 import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, readFileSync, realpathSync } from "node:fs";
-import { homedir } from "node:os";
+import { homedir, hostname } from "node:os";
 import { join, relative, resolve, sep } from "node:path";
+import { createInterface } from "node:readline";
 
 import { Argument, Command, CommanderError, InvalidArgumentError, Option } from "commander";
 
@@ -114,6 +115,7 @@ import { SEND_INTERVAL, background, parseInstant, queue, reportIncident, runSend
 import { installSender, uninstallSender } from "./service";
 import { heal, init, stubFindings, uninstall } from "./setup";
 import { describe, notUpstream, releaseQuest, startQuest } from "./start";
+import { login, logout } from "./login";
 import { KIXEL_QUEST_URL, kixelUrl, tokensPath } from "./tokens";
 import { CONTEXT, GUIDE, GUIDE_SECTIONS, SKILLS, guideSections, sectionHeading, skill } from "./skills";
 import { CONTEXT_PACKS, contextPack, contextPacks } from "./context";
@@ -189,14 +191,14 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 	const FORGE_WRITES =
 		"On GitHub, uses GH_TOKEN, GITHUB_TOKEN, or gh auth token. On a repository Kixel Quest hosts, named by a " +
 		"Kixel Quest PR URL (<url>/<owner>/<repo>/pull/<number>) or an origin remote there (<url>/<owner>/<repo>.git), " +
-		"it writes to Kixel Quest with the token $XDG_CONFIG_HOME/quest/records.json pairs with it, and holds are " +
+		"it writes to Kixel Quest with the token quest login stored for it, and holds are " +
 		"Kixel Quest's records rather than labels; QUEST_KIXEL_URL names another Kixel Quest. ";
 	const FORGE_READS =
-		"Where Kixel Quest serves the repository and $XDG_CONFIG_HOME/quest/records.json pairs a token with it, " +
+		"Where this host signed in to Kixel Quest with quest login and Kixel Quest serves the repository, " +
 		"these reads go to Kixel Quest's index instead, sparing the GitHub quota, and its failure fails the command; " +
 		"QUEST_FORGE=github reads GitHub, on your quota, to rerun a command Kixel Quest failed, and QUEST_KIXEL_URL " +
 		"names another Kixel Quest. A repository Kixel Quest " +
-		"hosts, named by a Kixel Quest PR URL or origin remote, is read there alone. ";
+		"hosts, named by a Kixel Quest PR URL or origin remote, is read there alone, and fails until quest login signs in. ";
 
 	const program = new Command("quest")
 		.description(description)
@@ -1509,6 +1511,65 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 			);
 		});
 
+	program
+		.command("login")
+		.summary("Sign this host in to Kixel Quest, so it can post records and read through Kixel Quest")
+		.description(
+			`Sign this host in to Kixel Quest (https://kixel.quest, or the one ${KIXEL_QUEST_URL} names). It first asks ` +
+				"whether to upload this host's agent transcripts with its session records, reading one line from stdin, " +
+				"where only y or yes agrees, so `echo n | quest login` answers no. It then shows a code to enter at " +
+				"Kixel Quest's /login page, signed in with GitHub, and waits until someone approves it or it expires, " +
+				`then stores the token Kixel Quest issues, named after this host's hostname, in ${tokensPath()}, ` +
+				"readable only by this user. Signing in again replaces this host's earlier token there and on Kixel " +
+				"Quest. The record sender, quest review, forge reads, and quest records incident use the token, and a " +
+				"command that needs Kixel Quest fails without it, naming quest login.",
+		)
+		.action(() => {
+			const ask = (question: string) =>
+				new Promise<string | null>((answered) => {
+					out.stdout(question);
+					const lines = createInterface({ input: process.stdin });
+					let line: string | null = null;
+					lines.once("line", (text) => {
+						line = text;
+						// A piped answer echoes nowhere, so end the question's line.
+						if (!process.stdin.isTTY) out.stdout("\n");
+						lines.close();
+					});
+					lines.once("close", () => answered(line));
+				});
+			settle(
+				login({
+					env: process.env,
+					fetch: globalThis.fetch,
+					now: Date.now,
+					sleep,
+					hostname: hostname(),
+					ask,
+					say: print,
+				}),
+				(signedIn) =>
+					print(
+						`signed in to ${signedIn.url} as ${signedIn.label}; transcript uploads ${signedIn.transcripts ? "agreed" : "declined"}`,
+					),
+			);
+		});
+	program
+		.command("logout")
+		.summary("Remove this host's Kixel Quest token")
+		.description(
+			`Remove the token quest login stored for Kixel Quest (https://kixel.quest, or the one ${KIXEL_QUEST_URL} ` +
+				"names) from this host. Kixel Quest still takes it until it is revoked on its Tokens page.",
+		)
+		.action(() => {
+			const { url, removed } = logout(process.env);
+			print(
+				removed
+					? `removed this host's token for ${url}; revoke it at ${url}/tokens`
+					: `this host held no token for ${url}`,
+			);
+		});
+
 	const recordsCommand = program.command("records").summary("Send agent sessions' records to Kixel Quest");
 	recordsCommand
 		.command("sender")
@@ -1516,14 +1577,14 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		.description(
 			"Send each session record the stop hook queued, with the records of its sub-agents on this host, to " +
 				`Kixel Quest's /records (https://kixel.quest, or the one ${KIXEL_QUEST_URL} names), posting {"records": [...], "breakages": [...]}, the breakages the merged PRs among them name under ## Caused by, with the token ` +
-				`${tokensPath()} pairs with its URL as a bearer token, one upload per repository, ` +
+				"the token quest login stored for its URL as a bearer token, one upload per repository, " +
 				`then again every ${SEND_INTERVAL / 1000} seconds until stopped, at low priority. A record is built as quest usage ` +
 				"builds it, from token-max's sessions on this host since the earliest queued session's first instant and " +
 				"the PRs updated since then, and replaces its earlier copy, so a resend never doubles. A repository Kixel " +
 				"Quest does not serve, as it says on GET /forge, has its sessions dropped, said once. A sent session whose " +
 				"latest branch, or a sub-agent's, heads no PR yet is sent again, with its sub-agents, once a pass for its " +
 				"repository reads a PR opened on that branch, until its transcript is gone. A Kixel Quest that " +
-				"refuses the token (401 or 403) is sent nothing more until the token changes; any other failure keeps the " +
+				"refuses the token (401 or 403) is sent nothing more until quest login signs in again; any other failure keeps the " +
 				"sessions queued, retried after a minute and then twice as long each time up to six hours, and the next " +
 				"stop hook says so once. Before a record is built, a cheap model, " +
 				`${SPLITTERS.map((e) => `${e.harness} ${e.model} ${e.effort}`).join(", then ")}, labels each step of its session's ` +
@@ -1564,7 +1625,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		)
 		.description(
 			"Post one breakage to Kixel Quest's /records " +
-				`(https://kixel.quest, or the one ${KIXEL_QUEST_URL} names), with the token ${tokensPath()} pairs with its URL, as {"records": [], "breakages": [...]}. ` +
+				`(https://kixel.quest, or the one ${KIXEL_QUEST_URL} names), with the token quest login stored for it, as {"records": [], "breakages": [...]}. ` +
 				"Without --pr the incident is open, its culprit unknown; report the same ID again with --pr to close it on " +
 				"its culprit, whose tier, size, writers, and local reviewers are read from its PR body, or name it on the " +
 				"culprit's ## Caused by line of the fix, as (incident <id>), whose record then replaces it. It posts at once " +
