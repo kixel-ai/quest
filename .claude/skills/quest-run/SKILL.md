@@ -4,4 +4,4 @@ description: Run a project's quest work from one session, starting ready quests 
 allowed-tools: Bash(quest skill run) PowerShell(quest skill run)
 ---
 
-!`quest skill run; echo "If quest skill run printed an error instead of instructions, run nix develop --command quest skill run and follow its output, prefixing later quest commands with nix develop --command except where the skill asks for a quest the PR cannot modify; if that fails too, install quest as https://github.com/kixel-ai/quest/blob/main/SETUP.md describes."`
+!`quest skill run; echo "If quest skill run printed an error instead of instructions, then unless this checkout is a PR whose author lacks write access, run nix develop --command quest skill run and follow its output, prefixing later quest commands with nix develop --command except where the skill asks for a quest the PR cannot modify; otherwise, or if that fails too, install quest as https://github.com/kixel-ai/quest/blob/main/SETUP.md describes."`

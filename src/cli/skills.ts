@@ -115,7 +115,9 @@ export class Skill {
 	 * `||`, so the stub always echoes a fallback after it instead, which also
 	 * keeps a missing `quest`'s error. The fallback is `launcher`, the command
 	 * the repository's tool manager runs its pinned `quest` with, when it has
-	 * one, then the setup guide, in case that guess has no `quest` either. Other agents, and a skill both
+	 * one, outside a PR whose author lacks write access, since the launcher
+	 * loads the checkout's own tool configuration, then the setup guide, in
+	 * case that guess has no `quest` either. Other agents, and a skill both
 	 * directories read through a link, get a pointer to run the command
 	 * themselves.
 	 */
@@ -124,11 +126,11 @@ export class Skill {
 		const pointer =
 			launcher === undefined
 				? `Run \`${call}\` and follow its output.\nIf \`quest\` is not installed, follow ${SETUP} first.\n`
-				: `Run \`${call}\` and follow its output.\nIf \`quest\` is not on \`PATH\`, run \`${launcher} ${call}\` instead, and prefix later \`quest\` commands with \`${launcher}\` except where the skill asks for a \`quest\` the PR cannot modify; if that fails too, follow ${SETUP} first.\n`;
+				: `Run \`${call}\` and follow its output.\nIf \`quest\` is not on \`PATH\` and this checkout is not a PR whose author lacks write access, run \`${launcher} ${call}\` instead, and prefix later \`quest\` commands with \`${launcher}\` except where the skill asks for a \`quest\` the PR cannot modify; otherwise, or if that fails too, follow ${SETUP} first.\n`;
 		const fallback =
 			launcher === undefined
 				? `install quest as ${SETUP} describes, then run ${call} and follow its output.`
-				: `run ${launcher} ${call} and follow its output, prefixing later quest commands with ${launcher} except where the skill asks for a quest the PR cannot modify; if that fails too, install quest as ${SETUP} describes.`;
+				: `then unless this checkout is a PR whose author lacks write access, run ${launcher} ${call} and follow its output, prefixing later quest commands with ${launcher} except where the skill asks for a quest the PR cannot modify; otherwise, or if that fails too, install quest as ${SETUP} describes.`;
 		const inline = `!\`${call}; echo "If ${call} printed an error instead of instructions, ${fallback}"\`\n`;
 		const head = `---\nname: ${this.installed}\ndescription: ${this.description}\n`;
 		const allowed = `allowed-tools: Bash(${call}) PowerShell(${call})\n`;

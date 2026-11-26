@@ -51,8 +51,9 @@ PowerShell, and follows it with a fallback for when `quest` is missing; the
 `.agents/skills/` stub, which a skill both directories read through a link
 gets, asks the agent to run it. When `mise.toml`, `.mise.toml`, or `flake.nix`
 names `github:kixel-ai/quest`, the fallback first runs the pinned binary
-through `mise exec --` or `nix develop --command`, in that order; either way it
-then points here. Init also creates `quest/README.md` when missing,
+through `mise exec --` or `nix develop --command`, in that order, except in a
+PR whose author lacks write access, since that loads the PR's own tool
+configuration; either way it then points here. Init also creates `quest/README.md` when missing,
 plants a stub for each audit Quest ships that no quest names and the root
 `quest/README.md` does not skip (see `quest audit`), and appends a line
 starting with `Quests: ` to the root `AGENTS.md`, or `CLAUDE.md` when only that

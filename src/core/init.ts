@@ -333,7 +333,7 @@ const LAUNCHED = LAUNCHERS.map(([, command]) => command.replace(/[.*+?^${}()|[\]
  */
 const STUBS = [
 	new RegExp(
-		String.raw`^---\nname: (\S+)\n(?:(?:name|description): .*\n)*---\n\nRun \`quest skill (\S+)\` and follow its output\.\nIf \`quest\` is not (?:installed, follow \S+ first|on \`PATH\`, run \`(?<launcher>${LAUNCHED}) quest skill (\S+)\` instead, and prefix later \`quest\` commands with \`\k<launcher>\` except where the skill asks for a \`quest\` the PR cannot modify; if that fails too, follow \S+ first)\.\n$`,
+		String.raw`^---\nname: (\S+)\n(?:(?:name|description): .*\n)*---\n\nRun \`quest skill (\S+)\` and follow its output\.\nIf \`quest\` is not (?:installed, follow \S+ first|on \`PATH\` and this checkout is not a PR whose author lacks write access, run \`(?<launcher>${LAUNCHED}) quest skill (\S+)\` instead, and prefix later \`quest\` commands with \`\k<launcher>\` except where the skill asks for a \`quest\` the PR cannot modify; otherwise, or if that fails too, follow \S+ first)\.\n$`,
 	),
 	/^---\nname: (\S+)\n(?:(?:name|description): .*\n)*allowed-tools: Bash\(quest skill (\S+)\) PowerShell\(quest skill (\S+)\)\n---\n\n!`quest skill (\S+); echo "[^"`\n]*"`\n$/,
 ];

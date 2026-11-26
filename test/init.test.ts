@@ -62,10 +62,12 @@ test.each([
 	expect(stubFindings(dir)).toEqual([]);
 	expect(read(dir, ".agents/skills/quest-start/SKILL.md")).toBe(start.stubs(launcher)[".agents/skills"]);
 	expect(read(dir, ".agents/skills/quest-start/SKILL.md")).toContain(
-		`If \`quest\` is not on \`PATH\`, run \`${launcher} quest skill start\` instead, and prefix later \`quest\` commands with \`${launcher}\` except where the skill asks for a \`quest\` the PR cannot modify; if that fails too, follow https://github.com/kixel-ai/quest/blob/main/SETUP.md first.`,
+		`If \`quest\` is not on \`PATH\` and this checkout is not a PR whose author lacks write access, run \`${launcher} quest skill start\` instead, and prefix later \`quest\` commands with \`${launcher}\` except where the skill asks for a \`quest\` the PR cannot modify; otherwise, or if that fails too, follow https://github.com/kixel-ai/quest/blob/main/SETUP.md first.`,
 	);
 	expect(read(dir, ".claude/skills/quest-start/SKILL.md")).toBe(start.stubs(launcher)[".claude/skills"]);
-	expect(read(dir, ".claude/skills/quest-start/SKILL.md")).toContain(`run ${launcher} quest skill start and follow`);
+	expect(read(dir, ".claude/skills/quest-start/SKILL.md")).toContain(
+		`unless this checkout is a PR whose author lacks write access, run ${launcher} quest skill start and follow`,
+	);
 
 	rmSync(join(dir, file));
 	init(dir);
