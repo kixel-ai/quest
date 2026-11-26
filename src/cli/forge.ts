@@ -63,16 +63,31 @@ export function kixelQuest(deps: ForgeDependencies): KixelQuest | null {
 	const forced = deps.env[FORGE];
 	if (forced !== undefined && forced !== "" && forced !== "github")
 		throw new Error(`${FORGE} is ${forced}; set it to github to read GitHub, or leave it unset`);
+	if (forced === "github") {
+		overridden(deps);
+		return null;
+	}
 	const url = kixelUrl(deps.env);
 	const token = tokenFor(url, deps.env);
-	if (token === null) return null;
-	if (forced !== "github") return new KixelQuest(url, token, deps, false);
-	// Without the override this person's reads would ask Kixel Quest; telling them costs no request, unlike asking
-	// Kixel Quest whether it serves the repository, which the override skips.
+	return token === null ? null : new KixelQuest(url, token, deps, false);
+}
+
+/**
+ * Warns that the override spends the GitHub quota when a paired token would have read Kixel Quest instead. It costs no
+ * request, unlike asking Kixel Quest whether it serves the repository, and a Kixel Quest setting that does not read,
+ * which the override exists to get past, skips it.
+ */
+function overridden(deps: ForgeDependencies): void {
+	let url: string;
+	try {
+		url = kixelUrl(deps.env);
+		if (tokenFor(url, deps.env) === null) return;
+	} catch {
+		return;
+	}
 	deps.warn(
 		`${FORGE}=github spends your GitHub quota on reads Kixel Quest (${url}) may serve; set it only to rerun a command Kixel Quest failed`,
 	);
-	return null;
 }
 
 /** Kixel Quest's backend for `repository`, which it hosts, failing without the person's token for it. */

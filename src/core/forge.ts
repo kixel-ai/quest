@@ -568,7 +568,7 @@ const check = shape<Check>({ name: string, required: boolean, result: string, ur
 const reviewStates = ["current", "diff-identical", "stale", "unknown"] as const;
 const tier = oneOf<Tier>(TIERS);
 
-const status = shape<Status>({
+const statusFields = shape<Status>({
 	url: string,
 	state: oneOf(["open", "closed", "merged"]),
 	draft: boolean,
@@ -606,12 +606,7 @@ const status = shape<Status>({
 	),
 	checkpoints: list(shape<Status["checkpoints"][number]>({ reviewer: string, round: count, url: string })),
 	reviewRecord: nullable(
-		shape<NonNullable<Status["reviewRecord"]>>({
-			state: oneOf(reviewStates),
-			head: string,
-			// A server older than #868 sends none: count no local review.
-			localReview: maybe(boolean, false),
-		}),
+		shape<NonNullable<Status["reviewRecord"]>>({ state: oneOf(reviewStates), head: string, localReview: boolean }),
 	),
 	risk: nullable((value, at, strict) =>
 		isRecord(value) && value.state === "malformed"
@@ -649,6 +644,24 @@ const status = shape<Status>({
 	starterHold: nullable(shape<StarterHold>({ lastActive: time, age: string, url: string })),
 	duplicates: list(shape<Duplicate>({ path: string, url: string, other: string })),
 });
+
+/**
+ * A server older than #868, which sends a review record without `localReview`, counted records no maintainer's
+ * `quest review` status attests: that record, and the risk tier it names, count for no head. A malformed risk stays,
+ * since `quest merge` refuses it.
+ */
+const status: Parse<Status> = (value, at, strict) =>
+	statusFields(
+		isRecord(value) && isRecord(value.reviewRecord) && !Object.hasOwn(value.reviewRecord, "localReview")
+			? {
+					...value,
+					reviewRecord: null,
+					risk: isRecord(value.risk) && value.risk.state === "malformed" ? value.risk : null,
+				}
+			: value,
+		at,
+		strict,
+	);
 
 const openPull = shape<OpenPull>({
 	number: count,

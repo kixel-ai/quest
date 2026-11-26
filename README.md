@@ -714,7 +714,8 @@ answers `{"value", "asOf"}`, the read's value and the time of the newest
 webhook behind it. Kixel Quest and a repository's pinned `quest` may each be
 newer than the other, so a client ignores answer fields it does not know and
 reads a field added since v0.22.0 that an answer lacks as the value permitting
-the least, such as no counting local review; a request with a field the server
+the least, such as no review record counting from a server too old to say
+whether a maintainer attested it; a request with a field the server
 does not know is refused. A 400 with `{"error"}` refuses a bad argument, such as a
 malformed `--since`, which `quest` reports as a usage error. `quest/core` exports each read's types and their parsers;
 `quest/github`'s `GitHubForge` answers the same reads from GitHub.

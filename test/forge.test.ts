@@ -534,6 +534,16 @@ describe("choosing the forge", () => {
 		expect(warned).toEqual([
 			`QUEST_FORGE=github spends your GitHub quota on reads Kixel Quest (${URL_}) may serve; set it only to rerun a command Kixel Quest failed`,
 		]);
+		// A token file or URL that does not read is what the override gets past, so it still reads GitHub.
+		warned = [];
+		const broken = dependencies(server.fetch, claimsGitHub, { QUEST_FORGE: "github" });
+		writeFileSync(join(config!, "quest", "records.json"), "{");
+		expect(await forgeFor(repository, broken)).toBeInstanceOf(GitHubForge);
+		const elsewhere = { QUEST_FORGE: "github", QUEST_KIXEL_URL: "http://example.com" };
+		expect(await forgeFor(repository, dependencies(server.fetch, claimsGitHub, elsewhere))).toBeInstanceOf(
+			GitHubForge,
+		);
+		expect(warned).toEqual([]);
 		await expect(
 			forgeFor(repository, dependencies(server.fetch, claimsGitHub, { QUEST_FORGE: "gitlab" })),
 		).rejects.toThrow("QUEST_FORGE is gitlab; set it to github to read GitHub, or leave it unset");
@@ -675,40 +685,46 @@ describe("wire", () => {
 		// Clients rejected this on 2026-11-25, as it has no `localReview`.
 		const older = statusBefore868();
 		const { value } = parseForgeAnswer("status", older);
-		expect(value.reviewRecord).toEqual({
-			state: "current",
-			head: older.value.reviewRecord.head,
-			localReview: false,
+		// That server counted records no maintainer attests, so neither the record nor its risk counts.
+		expect(value.reviewRecord).toBeNull();
+		expect(value.risk).toBeNull();
+		expect(value.checks).toEqual(older.value.checks);
+		// A malformed risk stays, as `quest merge` refuses it.
+		const malformed = { state: "malformed", error: "no tier" };
+		expect(parseForgeAnswer("status", { ...older, value: { ...older.value, risk: malformed } }).value.risk).toEqual(
+			malformed,
+		);
+		// An attested record reads as sent, and a risk without a class, as servers older than #802 sent, is in none.
+		const attested = { ...older.value, reviewRecord: { ...older.value.reviewRecord, localReview: true } };
+		expect(parseForgeAnswer("status", { ...older, value: attested }).value).toMatchObject({
+			reviewRecord: attested.reviewRecord,
+			risk: older.value.risk,
 		});
-		expect(value.risk).toEqual(older.value.risk);
-		// A server older than #802 sends no class.
 		const { class: _, ...unclassed } = older.value.risk;
-		const risk = parseForgeAnswer("status", { ...older, value: { ...older.value, risk: unclassed } }).value.risk;
+		const risk = parseForgeAnswer("status", { ...older, value: { ...attested, risk: unclassed } }).value.risk;
 		expect(risk).toEqual({ ...unclassed, class: null });
-		// A value sent is read, not replaced by the default.
-		const counted = { ...older.value.reviewRecord, localReview: true };
-		expect(
-			parseForgeAnswer("status", { ...older, value: { ...older.value, reviewRecord: counted } }).value
-				.reviewRecord,
-		).toEqual(counted);
 		// A field that has no default is still required.
-		const { head: __, ...headless } = older.value.reviewRecord;
-		expect(() =>
-			parseForgeAnswer("status", { ...older, value: { ...older.value, reviewRecord: headless } }),
-		).toThrow("answer.value.reviewRecord.head: expected a value");
+		const { head: __, ...headless } = attested.reviewRecord;
+		expect(() => parseForgeAnswer("status", { ...older, value: { ...attested, reviewRecord: headless } })).toThrow(
+			"answer.value.reviewRecord.head: expected a value",
+		);
 	});
 
 	test("an answer from a server newer than the client drops the fields it does not know, at any depth", () => {
 		const older = statusBefore868();
-		const known = parseForgeAnswer("status", older);
-		const newer = {
+		const current = {
 			...older,
+			value: { ...older.value, reviewRecord: { ...older.value.reviewRecord, localReview: false } },
+		};
+		const known = parseForgeAnswer("status", current);
+		const newer = {
+			...current,
 			served: "index",
 			value: {
-				...older.value,
+				...current.value,
 				merged: null,
-				reviewRecord: { ...older.value.reviewRecord, localReview: false, round: 3 },
-				checks: { ...older.value.checks, skipped: 1 },
+				reviewRecord: { ...current.value.reviewRecord, round: 3 },
+				checks: { ...current.value.checks, skipped: 1 },
 			},
 		};
 		expect(parseForgeAnswer("status", newer)).toEqual(known);
