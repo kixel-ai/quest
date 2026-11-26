@@ -524,6 +524,20 @@ test("a failed upload stays queued and is said once; a refused token stops sendi
 	expect(queue(stopped(root), env).queued).toBe(true);
 });
 
+test("a token a new sign-in replaced during the pass keeps the queue for the new one", async () => {
+	const env = home();
+	queue(stopped(checkout()), env);
+	const sessions = [session("s1", "quest/m0/a")];
+	// Signing in again revokes the token the pass read before its upload answers.
+	const revoked = sender(env, 401, sessions, () => writeTokens(env, { [URL_]: "fresh" }));
+	expect(await sendPass(revoked.deps)).toEqual([]);
+	expect(pending(env)).toHaveLength(1);
+	const { deps, uploads } = sender(env, 200, sessions);
+	await sendPass(deps);
+	expect(uploads.map((upload) => upload.token)).toEqual(["Bearer fresh"]);
+	expect(pending(env)).toEqual([]);
+});
+
 test("the sender fails loud without token-max, keeping the queue", async () => {
 	const env = home();
 	queue(stopped(checkout()), env);

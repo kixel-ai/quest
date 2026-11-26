@@ -687,12 +687,13 @@ $ quest login
 Upload this host's agent transcripts with its session records? A transcript holds everything a session saw, which can include pasted secrets and file contents, and the maintainers of the repository it worked on can read it. [y/N] n
 Open https://kixel.quest/login, sign in with GitHub, and enter the code BCDF-GHJK.
 Waiting for its approval; the code expires in 10 minutes.
-signed in to https://kixel.quest as workstation, not uploading transcripts
+signed in to https://kixel.quest as workstation; transcript uploads declined
 ```
 
 Kixel Quest issues the host a token named after its hostname, which `quest`
 keeps in `$XDG_CONFIG_HOME/quest/login.json` (`~/.config`), readable only by
-the user, with the answer about transcripts; only a `y` or `yes` uploads them.
+the user, with the answer about transcripts, where only a `y` or `yes` agrees;
+the record sender uploads no transcripts yet.
 Signing in again replaces the host's token. `quest logout` removes it from the
 host; Kixel Quest takes it until it is revoked on its Tokens page.
 
@@ -2264,7 +2265,8 @@ PRs among them name under `## Caused by`, as `quest usage` reports them, with
 queued session with its sub-agents, which stop without the hook naming them.
 Each upload is checked with `parseUpload` before it is posted. A 2xx drops the
 sessions from the queue, unless the hook queued one again meanwhile. A 401 or
-403 drops them and sends Kixel Quest nothing more until the token changes.
+403 drops them and sends Kixel Quest nothing more until `quest login` signs in
+again; a token a new sign-in replaced during the pass keeps them queued.
 Any other failure keeps them queued, and the next stop says so once. A failing
 repository backs off, waiting a minute and doubling up to six
 hours, and sits out the passes meanwhile, so it never widens the others'

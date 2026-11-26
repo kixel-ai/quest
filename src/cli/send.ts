@@ -381,6 +381,8 @@ async function sendTo(
 	);
 	/** Kixel Quest refused the token, which every group shares: nothing more is sent, and what is queued is dropped. */
 	const refuseAll = (status: number, repository: string, records: number, breakages: number) => {
+		// A token `quest login` replaced during the pass was revoked by that sign-in, so the queue waits for the new one.
+		if (tokenFor(url, deps.env) !== token) return;
 		refuse(deps.env, url, token);
 		for (const q of queued) settle(q);
 		for (const q of queued) clearBackoff(deps.env, groupId(q.pending));

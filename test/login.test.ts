@@ -118,21 +118,23 @@ test("logout removes the token, after which a command needing Kixel Quest names 
 		`Kixel Quest hosts example/project, but this host is not signed in to ${KIXEL}; run \`quest login\``,
 	);
 	expect(logout(env)).toEqual({ url: KIXEL, removed: false });
-	// The last sign-in gone, so is the file.
 	expect(logout({ ...env, QUEST_KIXEL_URL: "https://kixel.quest" }).removed).toBe(true);
-	expect(existsSync(tokensPath(env))).toBe(false);
+	expect(JSON.parse(readFileSync(tokensPath(env), "utf8"))).toEqual({});
 });
 
-test("a token file an earlier quest wrote is moved once, uploading no transcripts", () => {
+test("a token file an earlier quest wrote is copied once, uploading no transcripts, and left for it", () => {
 	const env = user();
 	const old = join(dirname(tokensPath(env)), "records.json");
 	mkdirSync(dirname(old), { recursive: true });
 	writeFileSync(old, JSON.stringify({ [KIXEL]: "pasted" }));
 	expect(tokenFor(KIXEL, env)).toBe("pasted");
-	expect(existsSync(old)).toBe(false);
 	expect(JSON.parse(readFileSync(tokensPath(env), "utf8"))).toEqual({
 		[KIXEL]: { token: "pasted", transcripts: false },
 	});
+	// Read once: signing out leaves the earlier quest's file, and reads no token from it again.
+	expect(existsSync(old)).toBe(true);
+	expect(logout(env).removed).toBe(true);
+	expect(tokenFor(KIXEL, env)).toBeNull();
 });
 
 test("a malformed sign-ins file fails, naming it", () => {
@@ -143,6 +145,7 @@ test("a malformed sign-ins file fails, naming it", () => {
 		["[]", "does not hold an object by Kixel Quest URL"],
 		[JSON.stringify({ [KIXEL]: "bare" }), `the sign-in to ${KIXEL} is not {"token"`],
 		[JSON.stringify({ [KIXEL]: { token: "t" } }), `the sign-in to ${KIXEL} is not {"token"`],
+		[JSON.stringify({ [KIXEL]: { token: "", transcripts: false } }), `the sign-in to ${KIXEL} is not {"token"`],
 	]) {
 		writeFileSync(tokensPath(env), content!);
 		expect(() => tokenFor(KIXEL, env)).toThrow(`${tokensPath(env)}`);

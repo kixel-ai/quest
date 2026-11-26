@@ -1542,7 +1542,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				}),
 				(signedIn) =>
 					print(
-						`signed in to ${signedIn.url} as ${signedIn.label}, ${signedIn.transcripts ? "uploading" : "not uploading"} transcripts`,
+						`signed in to ${signedIn.url} as ${signedIn.label}; transcript uploads ${signedIn.transcripts ? "agreed" : "declined"}`,
 					),
 			);
 		});
@@ -1576,7 +1576,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"Quest does not serve, as it says on GET /forge, has its sessions dropped, said once. A sent session whose " +
 				"latest branch, or a sub-agent's, heads no PR yet is sent again, with its sub-agents, once a pass for its " +
 				"repository reads a PR opened on that branch, until its transcript is gone. A Kixel Quest that " +
-				"refuses the token (401 or 403) is sent nothing more until the token changes; any other failure keeps the " +
+				"refuses the token (401 or 403) is sent nothing more until quest login signs in again; any other failure keeps the " +
 				"sessions queued, retried after a minute and then twice as long each time up to six hours, and the next " +
 				"stop hook says so once. Before a record is built, a cheap model, " +
 				`${SPLITTERS.map((e) => `${e.harness} ${e.model} ${e.effort}`).join(", then ")}, labels each step of its session's ` +
