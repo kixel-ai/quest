@@ -701,7 +701,10 @@ into `login.json` on the first read, uploading no transcripts.
 
 Without a sign-in, or for a repository Kixel Quest does not serve, reads go to
 GitHub as above; the output is the same either way. When Kixel Quest fails, the
-command fails too, naming `QUEST_FORGE=github`, which reads GitHub instead.
+command fails too, saying to rerun just that command with `QUEST_FORGE=github`,
+which reads GitHub instead. Leave it unset otherwise: it spends the GitHub
+quota Kixel Quest spares, and a command run with it while the host is signed in
+says so on stderr.
 `QUEST_KIXEL_URL` names another Kixel Quest, such as one running locally, which
 `quest login` signs in to separately.
 
@@ -719,7 +722,12 @@ Its read API lives under `/forge`, with the token as a bearer token:
 and the lowercase `owner/repo` of each repository served to them, and
 `POST /forge/<read>` takes one of `status`, `pulls`, `files`, `held`, `watch`, or `view` and
 answers `{"value", "asOf"}`, the read's value and the time of the newest
-webhook behind it. A 400 with `{"error"}` refuses a bad argument, such as a
+webhook behind it. Kixel Quest and a repository's pinned `quest` may each be
+newer than the other, so a client ignores answer fields it does not know and
+reads a field added since v0.22.0 that an answer lacks as the value permitting
+the least, such as no review record counting from a server too old to say
+whether a maintainer attested it; a request with a field the server
+does not know is refused. A 400 with `{"error"}` refuses a bad argument, such as a
 malformed `--since`, which `quest` reports as a usage error. `quest/core` exports each read's types and their parsers;
 `quest/github`'s `GitHubForge` answers the same reads from GitHub.
 
@@ -2700,6 +2708,10 @@ as the reason:
 - a scratch file written under `/tmp`, outside the checkout, by a redirection,
   `tee`, `mkdir`, `mktemp`, `git clone` or `worktree add`, or a file edit;
 - killing processes by name with `pkill` or `killall`, which can hit sibling agents;
+- `cargo test` or `mbx test`, other than `--doc` or `--no-run`, in a Cargo
+  workspace whose `.config/nextest.toml` kills hung tests with
+  `terminate-after`, since plain `cargo test` skips it, unless the command
+  starts with `QUEST_USER_ASKED=1` because the user asked for it;
 - in a checkout whose origin is on [Kixel Quest](#work-on-a-repository-kixel-quest-hosts),
   a `gh pr` or `gh api` call aimed at that repository, which `gh` cannot reach:
   one naming no repository, through `--repo`, `GH_REPO`, a PR URL, or an

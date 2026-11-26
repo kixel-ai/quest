@@ -1,7 +1,7 @@
 // The forge reads answer the same through GitHub and through Kixel Quest. The fake Kixel Quest serves each read by
 // running the GitHub backend on a fake GitHub, as its index's fallthrough does, so an answer that differs is the
 // wire's doing: a field lost, reordered, or retyped between the two.
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -24,6 +24,7 @@ import { type ForgeDependencies, forgeFor, KixelQuest, KixelQuestForge } from ".
 import { waitForActivity, WaitTimeout } from "../src/cli/wait";
 import { type GitHubReadDependencies } from "../src/github/client";
 import { GitHubForge } from "../src/github/forge";
+import { tokensPath } from "../src/cli/tokens";
 import { writeTokens } from "./kixel-fakes";
 import * as status from "./status-fakes";
 import * as wait from "./wait-fakes";
@@ -88,9 +89,12 @@ async function serve(forge: Forge, call: ForgeCall, request: any): Promise<unkno
 }
 
 let config: string | undefined;
+/** What the forge dependencies told the person. */
+let warned: string[] = [];
 afterEach(() => {
 	if (config) rmSync(config, { recursive: true, force: true });
 	config = undefined;
+	warned = [];
 });
 
 /** Forge dependencies whose token file pairs `TOKEN` with Kixel Quest, unless `token` is false. */
@@ -114,6 +118,7 @@ function dependencies(
 			const { readToken, ...rest } = github();
 			return { ...rest, token: readToken };
 		},
+		warn: (line) => warned.push(line),
 	};
 }
 
@@ -522,9 +527,24 @@ describe("choosing the forge", () => {
 		expect(await forgeFor(repository, dependencies(server.fetch, claimsGitHub, {}, false))).toBeInstanceOf(
 			GitHubForge,
 		);
+		expect(warned).toEqual([]);
 		const forced = await forgeFor(repository, dependencies(server.fetch, claimsGitHub, { QUEST_FORGE: "github" }));
 		expect(forced).toBeInstanceOf(GitHubForge);
 		expect(server.requests).toEqual([]);
+		// With a token, reads would have asked Kixel Quest, so the override says what it costs.
+		expect(warned).toEqual([
+			`QUEST_FORGE=github spends your GitHub quota on reads Kixel Quest (${URL_}) may serve; set it only to rerun a command Kixel Quest failed`,
+		]);
+		// A token file or URL that does not read is what the override gets past, so it still reads GitHub.
+		warned = [];
+		const broken = dependencies(server.fetch, claimsGitHub, { QUEST_FORGE: "github" });
+		writeFileSync(tokensPath({ XDG_CONFIG_HOME: config! }), "{");
+		expect(await forgeFor(repository, broken)).toBeInstanceOf(GitHubForge);
+		const elsewhere = { QUEST_FORGE: "github", QUEST_KIXEL_URL: "http://example.com" };
+		expect(await forgeFor(repository, dependencies(server.fetch, claimsGitHub, elsewhere))).toBeInstanceOf(
+			GitHubForge,
+		);
+		expect(warned).toEqual([]);
 		await expect(
 			forgeFor(repository, dependencies(server.fetch, claimsGitHub, { QUEST_FORGE: "gitlab" })),
 		).rejects.toThrow("QUEST_FORGE is gitlab; set it to github to read GitHub, or leave it unset");
@@ -546,7 +566,8 @@ describe("choosing the forge", () => {
 	});
 
 	test("a Kixel Quest error fails the read, naming the setting that reads GitHub", async () => {
-		const override = "set QUEST_FORGE=github to read GitHub";
+		const override =
+			"rerun this command with QUEST_FORGE=github; leave it unset otherwise, since it spends your GitHub quota";
 		const down = kixelQuest(unreachable, { fail: 503 });
 		await expect(forgeFor(repository, dependencies(down.fetch, unreachable))).rejects.toThrow(
 			`Kixel Quest (${URL_}) failed GET /forge: HTTP 503, index unavailable; ${override}`,
@@ -556,10 +577,10 @@ describe("choosing the forge", () => {
 		writeTokens({ XDG_CONFIG_HOME: config! }, { [URL_]: "revoked" });
 		await expect(forgeFor(repository, deps)).rejects.toThrow(`it refused the token`);
 		await expect(forgeFor(repository, deps)).rejects.toThrow(override);
-		const malformed = kixelQuest(unreachable, { answer: { value: [], asOf: null, extra: true } });
+		const malformed = kixelQuest(unreachable, { answer: { value: [{ number: 1 }], asOf: null } });
 		const forge = await forgeFor(repository, dependencies(malformed.fetch, unreachable));
 		await expect(forge.pulls(repository)).rejects.toThrow(
-			`Kixel Quest (${URL_}) failed POST /forge/pulls: malformed forge answer.extra: expected no such field; ${override}`,
+			`Kixel Quest (${URL_}) failed POST /forge/pulls: malformed forge answer.value[0].url: expected a value; ${override}`,
 		);
 	});
 
@@ -569,7 +590,7 @@ describe("choosing the forge", () => {
 		const error = await new KixelQuestForge(kixel).pulls(repository).catch((e: unknown) => e);
 		expect(error).not.toBeInstanceOf(InputError);
 		expect((error as Error).message).toBe(
-			`Kixel Quest (${URL_}) failed POST /forge/pulls: HTTP 400, index unavailable; set QUEST_FORGE=github to read GitHub`,
+			`Kixel Quest (${URL_}) failed POST /forge/pulls: HTTP 400, index unavailable; rerun this command with QUEST_FORGE=github; leave it unset otherwise, since it spends your GitHub quota`,
 		);
 	});
 
@@ -591,7 +612,7 @@ describe("choosing the forge", () => {
 				),
 			);
 		const message = (wait: string) =>
-			`Kixel Quest (${URL_}) failed POST /forge/pulls: it is rate limiting your requests (HTTP 429, read budget spent)${wait}; set QUEST_FORGE=github to read GitHub`;
+			`Kixel Quest (${URL_}) failed POST /forge/pulls: it is rate limiting your requests (HTTP 429, read budget spent)${wait}; rerun this command with QUEST_FORGE=github; leave it unset otherwise, since it spends your GitHub quota`;
 		// The dependencies' clock reads 0, the epoch.
 		for (const [header, wait] of [
 			["90", "; try again in 90 seconds"],
@@ -614,6 +635,9 @@ describe("choosing the forge", () => {
 
 describe("wire", () => {
 	const pull: PullRequest = { owner: "example", repo: "project", number: 7 };
+	/** A `quest status` answer in the shape Kixel Quest sent before its pin reached #868. */
+	const statusBefore868 = () =>
+		JSON.parse(readFileSync(new URL("./fixtures/status-before-868.json", import.meta.url), "utf8"));
 
 	test("requests and answers round-trip, maps included", () => {
 		const holdings: Holdings = {
@@ -636,9 +660,13 @@ describe("wire", () => {
 		});
 	});
 
-	test("anything missing, extra, or ill-typed is refused whole", () => {
+	test("anything missing or ill-typed is refused whole, and so is a request's unknown field", () => {
 		expect(() => parseForgeRequest("status", { pull: { ...pull, number: 0 } })).toThrow("request.pull.number");
 		expect(() => parseForgeRequest("status", { pull, extra: 1 })).toThrow("request.extra: expected no such field");
+		// Strict at every depth, as a pick's head would be dropped there too.
+		expect(() => parseForgeRequest("pick", { pull: { ...pull, base: "main" }, head: "a".repeat(40) })).toThrow(
+			"request.pull.base: expected no such field",
+		);
 		expect(() => parseForgeRequest("held", { sources: { upstream: { repository } }, branches: ["main"] })).toThrow(
 			"request.branches[0]: expected a quest branch",
 		);
@@ -652,5 +680,58 @@ describe("wire", () => {
 		expect(() => parseForgeInfo({ login: "kixelated", repositories: ["Moq-Dev/Quest"] })).toThrow(
 			"lowercase owner/repo",
 		);
+	});
+
+	test("an answer from a server older than the client reads, each later field failing closed", () => {
+		// Clients rejected this on 2026-11-25, as it has no `localReview`.
+		const older = statusBefore868();
+		const { value } = parseForgeAnswer("status", older);
+		// That server counted records no maintainer attests, so neither the record nor its risk counts.
+		expect(value.reviewRecord).toBeNull();
+		expect(value.risk).toBeNull();
+		expect(value.checks).toEqual(older.value.checks);
+		// A malformed risk stays, as `quest merge` refuses it.
+		const malformed = { state: "malformed", error: "no tier" };
+		expect(parseForgeAnswer("status", { ...older, value: { ...older.value, risk: malformed } }).value.risk).toEqual(
+			malformed,
+		);
+		// An attested record reads as sent, and a risk without a class, as servers older than #802 sent, is in none.
+		const attested = { ...older.value, reviewRecord: { ...older.value.reviewRecord, localReview: true } };
+		expect(parseForgeAnswer("status", { ...older, value: attested }).value).toMatchObject({
+			reviewRecord: attested.reviewRecord,
+			risk: older.value.risk,
+		});
+		const { class: _, ...unclassed } = older.value.risk;
+		const risk = parseForgeAnswer("status", { ...older, value: { ...attested, risk: unclassed } }).value.risk;
+		expect(risk).toEqual({ ...unclassed, class: null });
+		// A field that has no default is still required.
+		const { head: __, ...headless } = attested.reviewRecord;
+		expect(() => parseForgeAnswer("status", { ...older, value: { ...attested, reviewRecord: headless } })).toThrow(
+			"answer.value.reviewRecord.head: expected a value",
+		);
+	});
+
+	test("an answer from a server newer than the client drops the fields it does not know, at any depth", () => {
+		const older = statusBefore868();
+		const current = {
+			...older,
+			value: { ...older.value, reviewRecord: { ...older.value.reviewRecord, localReview: false } },
+		};
+		const known = parseForgeAnswer("status", current);
+		const newer = {
+			...current,
+			served: "index",
+			value: {
+				...current.value,
+				merged: null,
+				reviewRecord: { ...current.value.reviewRecord, round: 3 },
+				checks: { ...current.value.checks, skipped: 1 },
+			},
+		};
+		expect(parseForgeAnswer("status", newer)).toEqual(known);
+		expect(parseForgeInfo({ login: "kixelated", repositories: ["moq-dev/quest"], plan: "free" })).toEqual({
+			login: "kixelated",
+			repositories: ["moq-dev/quest"],
+		});
 	});
 });

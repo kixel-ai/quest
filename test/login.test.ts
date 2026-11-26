@@ -113,7 +113,7 @@ test("logout removes the token, after which a command needing Kixel Quest names 
 	expect(logout(env)).toEqual({ url: KIXEL, removed: true });
 	expect(tokenFor(KIXEL, env)).toBeNull();
 	expect(tokenFor("https://kixel.quest", env)).toBe("theirs");
-	const deps = { env, fetch, now: () => 0, sleep: async () => {}, github: () => ({}) as never };
+	const deps = { env, fetch, now: () => 0, sleep: async () => {}, github: () => ({}) as never, warn: () => {} };
 	expect(() => hostedForge(REPOSITORY, deps)).toThrow(
 		`Kixel Quest hosts example/project, but this host is not signed in to ${KIXEL}; run \`quest login\``,
 	);

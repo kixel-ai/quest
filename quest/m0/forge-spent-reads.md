@@ -3,7 +3,7 @@
 ## Goal
 
 When Kixel Quest (https://kixel.quest) cannot read GitHub for a repository because its own installation token's rate limit is spent, `quest`'s reads of that repository go to GitHub on the caller's token for the rest of the run, and it says so once on stderr, naming the reset, instead of failing.
-Today `quest status` fails with `failed POST /forge/status: HTTP 502, GitHub failed the status read: GitHub's core rate limit for this token is spent until …; set QUEST_FORGE=github to read GitHub`.
+Today `quest status` fails with `failed POST /forge/status: HTTP 502, GitHub failed the status read: GitHub's core rate limit for this token is spent until …; rerun this command with QUEST_FORGE=github; leave it unset otherwise, since it spends your GitHub quota`.
 
 Non-goals: the person's own budget at Kixel Quest (its 429), which still fails naming when to retry, and repositories Kixel Quest hosts, which have no GitHub to read.
 

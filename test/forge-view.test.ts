@@ -132,7 +132,7 @@ describe("quest pr view on a GitHub repository Kixel Quest serves", () => {
 		expect(await cli("pr", "view", url)).toEqual({
 			code: 1,
 			stdout: "",
-			stderr: `quest: Kixel Quest (${KIXEL}) failed POST /forge/view: it is rate limiting your requests (HTTP 429, read budget spent); try again in 30 seconds; set QUEST_FORGE=github to read GitHub\n`,
+			stderr: `quest: Kixel Quest (${KIXEL}) failed POST /forge/view: it is rate limiting your requests (HTTP 429, read budget spent); try again in 30 seconds; rerun this command with QUEST_FORGE=github; leave it unset otherwise, since it spends your GitHub quota\n`,
 		});
 	});
 });
@@ -155,6 +155,7 @@ describe("the view wire", () => {
 
 	test("round-trips, and refuses what Kixel Quest would", () => {
 		expect(parseForgeRequest("view", JSON.parse(forgeJson({ pull })))).toEqual({ pull });
+		expect(() => parseForgeRequest("view", { pull, labels: [] })).toThrow("no such field");
 		expect(parseForgeAnswer("view", JSON.parse(forgeJson({ value: view, asOf: null }))).value).toEqual(view);
 		expect(() => parseForgeAnswer("view", { value: { ...view, state: "draft" }, asOf: null })).toThrow(
 			"answer.value.state",
@@ -162,7 +163,6 @@ describe("the view wire", () => {
 		expect(() =>
 			parseForgeAnswer("view", { value: { ...view, threads: [{ ...view.threads[0], line: -1 }] }, asOf: null }),
 		).toThrow("answer.value.threads[0].line");
-		expect(() => parseForgeAnswer("view", { value: { ...view, labels: [] }, asOf: null })).toThrow("no such field");
 	});
 });
 
