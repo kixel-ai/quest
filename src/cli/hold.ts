@@ -302,8 +302,8 @@ async function passing(github: GitHub, pr: PullRequest, url: string, sha: string
 }
 
 /**
- * Refuse a head that an online reviewer's unanswered finding or a newer maintainer decision holds, naming each:
- * the review a pick relied on predates them, so landing would skip them.
+ * Refuse a head that an unanswered finding from an online reviewer the base requires, or a newer maintainer decision,
+ * holds, naming each: the review a pick relied on predates them, so landing would skip them.
  */
 async function unsignaled(github: GitHub, pr: PullRequest, url: string, sha: string): Promise<void> {
 	const read = (await readSignals(github, pr, [pr.number])).get(pr.number)!;

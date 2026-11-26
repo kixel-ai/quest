@@ -500,6 +500,79 @@ describe("merge --land", () => {
 		expect(pull.writes).not.toEqual([]);
 	});
 
+	test("an online finding holds the head only when its reviewer posts a check the base requires", async () => {
+		const pull = new FakePull();
+		const finding = `${URL_}#pullrequestreview-1`;
+		pull.activity = {
+			reviews: {
+				pageInfo: { hasNextPage: false, endCursor: null },
+				nodes: [
+					{
+						id: "r1",
+						url: finding,
+						author: { __typename: "Bot", login: "rabbit" },
+						body: "[P2] Rename the handle",
+						submittedAt: "2026-10-21T11:30:00Z",
+						commit: { oid: HEAD },
+					},
+				],
+			},
+		};
+		const status = (login: string) => ({
+			__typename: "StatusContext",
+			context: "Rabbit",
+			state: "SUCCESS",
+			createdAt: "2026-10-21T11:31:00Z",
+			isRequired: true,
+			creator: { __typename: "Bot", login },
+		});
+		// Another app posts the check the base requires: the reviewer is optional, and its finding a suggestion.
+		pull.required = ["Rabbit"];
+		pull.checks = [status("ci")];
+		await land(PR, { sha: HEAD, method: "merge", check: clean }, pull.deps());
+		expect(pull.writes).not.toEqual([]);
+
+		const required = new FakePull();
+		required.activity = pull.activity;
+		required.required = ["Rabbit"];
+		required.checks = [status("rabbit")];
+		expect(await refused(land(PR, { sha: HEAD, method: "merge", check: clean }, required.deps()))).toContain(
+			`head ${HEAD} is held by finding by rabbit[bot]: rename the handle (${finding})`,
+		);
+		expect(required.writes).toEqual([]);
+
+		// A named reviewer is required by the account it posts under: a bot's holds, a person's never does.
+		const named = (author: ObjectValue) => ({
+			reviews: {
+				pageInfo: { hasNextPage: false, endCursor: null },
+				nodes: [
+					{
+						id: "r1",
+						url: finding,
+						author,
+						authorAssociation: "OWNER",
+						body: "Automated review by Claude\n\n[P2] Rename the handle",
+						submittedAt: "2026-10-21T11:30:00Z",
+						commit: { oid: HEAD },
+					},
+				],
+			},
+		});
+		const viaBot = new FakePull();
+		viaBot.activity = named({ __typename: "Bot", login: "rabbit" });
+		viaBot.required = ["Rabbit"];
+		viaBot.checks = [status("rabbit")];
+		expect(await refused(land(PR, { sha: HEAD, method: "merge", check: clean }, viaBot.deps()))).toContain(
+			"finding by Claude: rename the handle",
+		);
+		const viaPerson = new FakePull();
+		viaPerson.activity = named({ __typename: "User", login: "maintainer" });
+		viaPerson.required = ["Rabbit"];
+		viaPerson.checks = [{ ...status("maintainer"), creator: { __typename: "User", login: "maintainer" } }];
+		await land(PR, { sha: HEAD, method: "merge", check: clean }, viaPerson.deps());
+		expect(viaPerson.writes).not.toEqual([]);
+	});
+
 	test("rechecks signals right before a direct merge", async () => {
 		const pull = new FakePull();
 		pull.allowAutoMerge = false;

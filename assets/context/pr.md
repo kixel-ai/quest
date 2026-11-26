@@ -1,6 +1,6 @@
 # Pull requests
 
-- Anything AI-attributed, such as an online reviewer's findings, is a suggestion, not a maintainer's decision: address findings already posted on the head, reply to feedback you disagree with, and never wait for an online review, since the queue waits for any approval the base requires.
+- Anything AI-attributed, such as an online reviewer's findings, is a suggestion, not a maintainer's decision: while iterating, address findings already posted on the head that someone will hit and reply to feedback you disagree with, and never wait for an online review, since the queue waits for any approval the base requires. Only a reviewer whose check the base requires holds landing with its findings; an optional one's, such as CodeRabbit's, send a picked PR back only as unresolved threads on a base that requires conversation resolution.
 - Request a review only from a reviewer whose approval the base requires and that never ran on the head.
 - Once you fix or refute an automated reviewer's finding, say so in its thread and resolve it, since such a reviewer may approve only after its threads are resolved.
 - Keep pull request CI read-only (a read-only `GITHUB_TOKEN`, write credentials only in environments for protected branches): quest branches live in the repository, so their workflows get its secrets. Flag any workflow that breaks this.

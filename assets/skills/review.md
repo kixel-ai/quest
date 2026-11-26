@@ -38,7 +38,7 @@ Refute a finding only with evidence the reviewer cannot rebut: a `path:line`, a 
 A finding the reviewer keeps against such a refutation is a decision for the user: once they accept it, run `quest review --accept <their reason>` on the pushed head, which records the open findings as accepted and passes the head without another round; otherwise fix or refute it.
 Write each round's `--responses` file in the checkout's `.tmp/`.
 
-At a `next decide` line, which prints once a reviewer's third round still reports findings, stop: fix nothing more, change no approach, and run no further round. `quest status <pr>` prints a `checkpoint` line when an online reviewer's third round does the same.
+At a `next decide` line, which prints once a reviewer's third round still reports findings, stop: fix nothing more, change no approach, and run no further round. `quest status <pr>` prints a `checkpoint` line when the third round of an online reviewer the base requires does the same.
 Report what remains, a line per finding with the fix its reviewer recommends, and recommend one of: fix them as recommended, accept them, or drop the PR. The user decides; an agent that cannot prompt hands the PR back with that choice as a `## Waiting` decision.
 Take up a reviewer's recommended approach only on the user's pick. Record it in a PR comment that starts with `Design change:`, and review it with `quest review --new`, which starts new sessions and keeps what the branch already settled.
 
@@ -51,7 +51,7 @@ Push any commit not yet pushed, resolve each `duplicate` line `quest status <pr>
 
 Summarize the review, with its last round's score and rationale, any reviewer's recommended approach with your take on it, and CI from `quest status <pr>`.
 Name any decisions the review raised without answering them, then ask the user for the pick with `/quest-merge`'s options.
-Recommend `/quest-merge` when the PR is landable as it defines, or will be once fixed with no decision left for the user, such as failing checks or unaddressed automated review findings, since `/quest-merge` runs `/quest-iterate` first; recommend `/quest-iterate` when the review raised significant issues or decisions.
+Recommend `/quest-merge` when the PR is landable as it defines, or will be once fixed with no decision left for the user, such as failing checks or a required online reviewer's unaddressed findings, since `/quest-merge` runs `/quest-iterate` first; recommend `/quest-iterate` when the review raised significant issues or decisions.
 
 While its required checks are still running, report that instead of asking; `/quest-run` asks once they finish.
 

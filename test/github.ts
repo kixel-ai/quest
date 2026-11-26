@@ -32,6 +32,8 @@ export type Pull = Issue & {
 		url: string;
 		app?: number;
 		context?: boolean;
+		/** The account that posts it, `<app slug>[bot]` for a run; GitHub Actions' bot by default. */
+		poster?: string;
 		commit?: string;
 		/** The check suite of the workflow run that reported it. */
 		suite?: number;
@@ -267,9 +269,17 @@ export const ACTIONS_APP = 15368;
 /** One page of a head's check runs and commit statuses, as `statusCheckRollup.contexts` pages them. */
 function contextPage(repo: Repo, pull: Pick<Pull, "runs">, after: unknown) {
 	const start = typeof after === "string" ? Number(after) : 0;
+	const poster = (run: NonNullable<Pull["runs"]>[number]) => run.poster ?? "github-actions[bot]";
 	const all = (pull.runs ?? []).map((run, index) =>
 		run.context
-			? { __typename: "StatusContext", context: run.name, state: run.conclusion, targetUrl: run.url }
+			? {
+					__typename: "StatusContext",
+					context: run.name,
+					state: run.conclusion,
+					targetUrl: run.url,
+					isRequired: (repo.required ?? []).includes(run.name),
+					creator: actorOf(poster(run)),
+				}
 			: {
 					__typename: "CheckRun",
 					// GitHub numbers runs as they are created.
@@ -278,10 +288,11 @@ function contextPage(repo: Repo, pull: Pick<Pull, "runs">, after: unknown) {
 					status: "COMPLETED",
 					conclusion: run.conclusion,
 					detailsUrl: run.url,
+					isRequired: (repo.required ?? []).includes(run.name),
 					checkSuite: {
 						databaseId: run.suite ?? null,
 						status: run.running ? "IN_PROGRESS" : "COMPLETED",
-						app: { databaseId: run.app ?? ACTIONS_APP },
+						app: { databaseId: run.app ?? ACTIONS_APP, slug: poster(run).replace(/\[bot\]$/, "") },
 						workflowRun: run.workflow
 							? { file: { path: run.workflow, repositoryName: `${repo.owner}/${repo.name}` } }
 							: null,

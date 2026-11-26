@@ -16,7 +16,7 @@ Read the PR, its linked issues and quest, the reviews and comments posted on it,
 `quest status <pr>` reports its checks, reviews by head, and unresolved threads in one call.
 Judge the approach before touching anything: would you take a different one?
 `/quest-review`'s `next decide` stop counts the rounds of each reviewer's session on the branch, including those earlier agents ran, so it may fall due in this one.
-At a `checkpoint` line in `quest status`, an online reviewer's every third round with findings, take that same stop.
+At a `checkpoint` line in `quest status`, put there every third round with findings by an online reviewer the base requires, take that same stop.
 
 Settle every decision this PR needs with the grill skill's interview, starting from the user's feedback: those its `## Waiting` section lists, those your judgment of the approach or the review findings raise, and any you find along the way.
 Record the settled decisions in this PR description's `## Decisions` section as the paper trail, then implement them.

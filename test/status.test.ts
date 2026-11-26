@@ -101,13 +101,24 @@ test("reports checks by requiredness, each reviewer's latest review against the 
 	]);
 });
 
-test("lists the signals that hold the head: unanswered online findings and newer maintainer decisions", async () => {
+test("lists the signals that hold the head: required reviewers' unanswered findings and newer maintainer decisions", async () => {
 	const body = pull({ checks: null, reviews: page([]), threads: page([]) });
 	const decision = `${URL_}#issuecomment-9`;
+	const review = (id: string, login: string, finding: string) => ({
+		id,
+		url: `${URL_}#pullrequestreview-${id}`,
+		author: { __typename: "Bot", login },
+		body: finding,
+		submittedAt: "2026-10-16T00:30:00Z",
+		commit: { oid: body.data.repository.pullRequest.headRefOid },
+	});
 	const status = await pullRequestStatus(
 		pr,
 		setup([body], {
+			// Only frog posts a check the base requires; rabbit's finding is a suggestion.
+			requiredBy: ["frog[bot]"],
 			signals: {
+				reviews: page([review("1", "rabbit", "[P2] Rename it"), review("2", "frog", "[P1] Drops a frame")]),
 				comments: page([
 					{
 						author: { __typename: "User", login: "kixelated" },
@@ -120,9 +131,10 @@ test("lists the signals that hold the head: unanswered online findings and newer
 			},
 		}).deps,
 	);
-	expect(statusLines(status)).toContain(
+	expect(statusLines(status).filter((line) => line.startsWith("signal "))).toEqual([
+		`signal finding ${URL_}#pullrequestreview-2 frog[bot]: drops a frame`,
 		`signal decision ${decision} kixelated: Maintainer decision: raise the timeout.`,
-	);
+	]);
 });
 
 test("a queued PR with auto-merge and no checks reports both, and JSON is deterministic", async () => {
@@ -1128,17 +1140,21 @@ describe("checkpoint", () => {
 		commit: { oid: commit },
 		reactions: { nodes: [] },
 	});
-	const line = async (reviews: Node[]) =>
+	// Both bots post a check the base requires unless a test names fewer.
+	const line = async (reviews: Node[], requiredBy = ["pullfrog[bot]", "other[bot]"]) =>
 		statusLines(
 			await pullRequestStatus(
 				pr,
-				setup([
-					pull({
-						checks: null,
-						reviews: page(reviews),
-						threads: page([]),
-					}),
-				]).deps,
+				setup(
+					[
+						pull({
+							checks: null,
+							reviews: page(reviews),
+							threads: page([]),
+						}),
+					],
+					{ requiredBy },
+				).deps,
 			),
 		).filter((entry) => entry.startsWith("checkpoint "));
 
@@ -1180,6 +1196,15 @@ describe("checkpoint", () => {
 			`checkpoint pullfrog round 3 ${URL_}#pullrequestreview-3`,
 			`checkpoint other round 3 ${URL_}#pullrequestreview-7`,
 		]);
+	});
+
+	test("ignores a reviewer the base does not require", async () => {
+		const rounds = [B, C, A].map((commit, index) => bot("pullfrog", "CHANGES_REQUESTED", commit, index + 1));
+		const other = [B, C, A].map((commit, index) => bot("other", "CHANGES_REQUESTED", commit, index + 5));
+		expect(await line([...rounds, ...other], ["other[bot]"])).toEqual([
+			`checkpoint other round 3 ${URL_}#pullrequestreview-7`,
+		]);
+		expect(await line(rounds, [])).toEqual([]);
 	});
 
 	test("ignores reviewers that only comment, and people", async () => {

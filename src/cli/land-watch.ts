@@ -335,11 +335,11 @@ async function enqueueArmed(
 }
 
 /**
- * Take each queued or armed PR whose head draws a signal, an online reviewer's unanswered finding or a newer
- * maintainer decision, out of the merge queue and disarm its auto-merge, so neither it nor {@link enqueueArmed} lands
- * it, and say why on it once per pick and head. Nothing waits for a reviewer: a signal that arrives before the merge
- * ends the pick until a writer fixes or answers it and picks the PR again. A pull is read again just before, so a
- * head pushed since is left for the next pass.
+ * Take each queued or armed PR whose head draws a signal, an unanswered finding from an online reviewer the base
+ * requires or a newer maintainer decision, out of the merge queue and disarm its auto-merge, so neither it nor
+ * {@link enqueueArmed} lands it, and say why on it once per pick and head. Nothing waits for a reviewer: a signal that
+ * arrives before the merge ends the pick until a writer fixes or answers it and picks the PR again. A pull is read
+ * again just before, so a head pushed since is left for the next pass.
  */
 async function dequeueSignaled(
 	github: GitHub,
@@ -902,9 +902,10 @@ type Permissions = Record<string, "read" | "write">;
 /**
  * The installation token permissions the watcher asks for. On GitHub's merge queue, `api` reads the
  * queue's events, comments, and the `merge_group` logs (`actions: read`), and enqueues the armed picks
- * GitHub left out of the queue, which `enqueuePullRequest` needs `merge_queues: write` for, and disarms a
+ * GitHub left out of the queue, which `enqueuePullRequest` needs `merge_queues: write` for, reads a head's checks
+ * (`checks: read` and `statuses: read`) to tell whether a finding's reviewer is one the base requires, and disarms a
  * signaled PR's auto-merge, which needs `contents: write`; with a fixer it also re-enqueues, edits the PR body's Review,
- * and reads the PR's own checks for the fixer (`checks: read` and `statuses: read`). The `own` queue
+ * and reads the PR's own checks for the fixer. The `own` queue
  * also disarms and arms auto-merge, cancels a build's runs (`actions: write`), posts each pick's queue
  * check (`checks: write`), and reads the base's classic protection (`administration: read`). `push` lease-pushes a fix, a merge, a queue branch, or a landing, and
  * `pushWorkflows` one that carries a workflow change; `read` fetches.
@@ -933,17 +934,19 @@ export function watchPermissions(
 			pushWorkflows: { ...push, workflows: "write" },
 			read: { contents: "read" },
 		};
-	// Disarming a signaled PR's auto-merge needs contents: write, as arming it does.
-	if (!fixing) return { api: { contents: "write", pull_requests: "write", actions: "read", merge_queues: "write" } };
+	// Disarming a signaled PR's auto-merge needs contents: write, as arming it does; telling a required reviewer's
+	// findings from an optional one's reads the head's checks and statuses.
+	const api: Permissions = {
+		contents: "write",
+		pull_requests: "write",
+		actions: "read",
+		merge_queues: "write",
+		checks: "read",
+		statuses: "read",
+	};
+	if (!fixing) return { api };
 	return {
-		api: {
-			contents: "write",
-			pull_requests: "write",
-			actions: "read",
-			merge_queues: "write",
-			checks: "read",
-			statuses: "read",
-		},
+		api,
 		push,
 		pushWorkflows: { ...push, workflows: "write" },
 		read: { contents: "read" },

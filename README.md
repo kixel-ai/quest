@@ -633,7 +633,7 @@ comes last, and a missing value prints as `-`:
 | `checks` | `failure` if any check fails, else `pending` if any is pending or a requirement is unreported, else `success`, and `passed=`, `failing=`, `pending=` counts, all from the checks that count; `-` when the head has no checks and the base requires none. |
 | `check` | `failing` or `pending`, `required` or `optional`, the result, details URL, and name. A required check or required workflow nothing reports yet prints as `pending required expected -` with its name, followed by `(from app <id>)` when the requirement names an app, or the workflow's repository and path, as `owner/name:path`. |
 | `review` | `current` or `stale` against the head, state, reviewer, time, and URL of each reviewer's latest review. |
-| `checkpoint` | Each bot reviewer that approves or requests changes, such as one whose approval the base requires, its round, and its review's URL, when that review is of the head and its latest verdict there, ignoring plain comments, is neither an approval nor a dismissal, at the end of its third, sixth, ... round, where [`/quest-review` stops for the user's decision](#review-locally). A round is one commit it reviewed; a dismissed review counts as one that approves or requests changes. Only printed when due. |
+| `checkpoint` | Each bot reviewer that approves or requests changes and that the base requires, as a `finding` signal's reviewer is, its round, and its review's URL, when that review is of the head and its latest verdict there, ignoring plain comments, is neither an approval nor a dismissal, at the end of its third, sixth, ... round, where [`/quest-review` stops for the user's decision](#review-locally). A round is one commit it reviewed; a dismissed review counts as one that approves or requests changes. Only printed when due. |
 | `reacted:<content>` | Actor, time, and the PR or review reacted to, as `quest wait` names reactions. |
 | `thread` | Node ID, `current` or `outdated`, last commenter, latest comment URL, and `path:line` of each unresolved thread. |
 | `signal` | `finding` or `decision`, its URL, who posted it, and its text, for each [signal](#signals-that-hold-a-head) holding the head. |
@@ -1011,13 +1011,13 @@ request with its Review recorded, and enqueues it like any other, with no
 maintainer's pick. A refused disable waits for the test's next flake, and a
 pull request GitHub refuses to enqueue says so and waits for a maintainer.
 
-Without a fixer its token asks for `contents: write`, which disarming a signaled
-pull request's auto-merge needs, `pull_requests: write`, `actions: read`, which
-the App needs for the logs, and `merge_queues: write`, which
-`enqueuePullRequest` needs. With one, which also arms auto-merge and pushes
-fixes, it also asks for `checks: read` and `statuses: read`,
-for the PR's own checks the fixer reads; a push that carries a workflow change
-asks for `workflows: write`.
+Its token asks for `contents: write`, which disarming a signaled pull
+request's auto-merge needs, `pull_requests: write`, `actions: read`, which
+the App needs for the logs, `merge_queues: write`, which
+`enqueuePullRequest` needs, and `checks: read` and `statuses: read`, which
+tell a required reviewer's findings from an optional one's and give the fixer
+the PR's own checks. With a fixer, which also arms auto-merge and pushes
+fixes, a push that carries a workflow change asks for `workflows: write`.
 
 ### The land fixer
 
@@ -1294,10 +1294,21 @@ to merge. Nothing waits for a reviewer: a signal the queue reads before the
 merge ends the pick. There are two kinds:
 
 - `finding`: an online reviewer's (a bot's, or a review whose body opens
-  `Automated review by <name>`) on the head. A review thread it opened holds
-  until it is resolved or a writer other than the reviewer replies. A `[P<n>]`
-  line in its latest review over the head, counting one that only opens
-  threads, holds until a writer's later comment links that review.
+  `Automated review by <name>`) on the head, when the base requires that
+  reviewer: on the commit it reviewed, GitHub reports a check posted by the
+  bot account the review came from, a check run from its app or a commit
+  status it created, as required for the PR. Every GitHub Actions workflow
+  posts as `github-actions[bot]`, so a reviewer posting as that account is
+  required wherever any Actions job is, and one posting as its own bot from a
+  required workflow is not. A review thread
+  it opened holds until it is resolved or a writer other than the reviewer
+  replies. A `[P<n>]` line in its latest review over the head, counting one
+  that only opens threads, holds until a writer's later comment links that
+  review. Any other online reviewer, such as CodeRabbit on a base that
+  requires none of its checks, is optional: its findings are suggestions and
+  hold nothing. A named reviewer posting under a person's account is never
+  required this way. GitHub's own review decision and conversation-resolution
+  rule still apply to every reviewer they count.
 - `decision`: a writer's comment that opens with `Maintainer decision`, not in
   a quote or code block, posted after the head's commit, which therefore cannot apply it. A
   newer commit answers it, as does a writer's later comment that links it.
