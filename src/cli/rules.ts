@@ -528,9 +528,7 @@ function libtest(args: string[]): boolean {
 	const rest = args.slice(i + 1);
 	const end = rest.indexOf("--");
 	const own = end === -1 ? rest : rest.slice(0, end);
-	return !own.some(
-		(arg) => ["--doc", "--no-run", "--help", "-h"].includes(arg) || /^--manifest-path(=|$)/.test(arg),
-	);
+	return !own.some((arg) => ["--doc", "--no-run", "--help", "-h"].includes(arg) || /^--manifest-path(=|$)/.test(arg));
 }
 
 /**
