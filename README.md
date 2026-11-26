@@ -593,7 +593,7 @@ first wait is still reported.
 `quest status` prints a GitHub PR's current state in one call, such as after
 `quest wait` wakes. It accepts the same PR argument and authentication as
 `quest wait`, and reports facts without deciding whether the PR is ready, except
-that it counts only a `## Review` record a maintainer's `quest review` status attests:
+that it counts only a review a maintainer's `quest review` run posted to Kixel Quest:
 
 ```console
 $ quest status 128
@@ -624,9 +624,9 @@ comes last, and a missing value prints as `-`:
 | --- | --- |
 | `url`, `state`, `draft`, `head` | The PR URL; `open`, `closed`, or `merged`; `true` or `false`; the head SHA. |
 | `mergeable`, `merge-state`, `review-decision` | GitHub's values, lowercased. |
-| `review-record` | Whether the PR body's [`## Review` record](#review-locally) still covers the head, and the head it names last: `current` when it is the head, `diff-identical` when `git diff <base>...<head>` prints the same as for it, `stale` otherwise, and also, with a warning, for an open PR once `RISK.md` at the base's tip is not the file the record names, since the tier that file set decided how much review the head got, or `unknown` when GitHub cannot compare them, such as a diff too large; then `local-review`, or `no-local-review` for a low head no local reviewer ran on, as the status below attests; `-` when the section holds no record `quest review` wrote or it names no full SHA, or, with a warning saying why, when no passing [`quest review` commit status](#review-locally) attests it: the latest one on the head it names must be `success`, set by a user with write access to the base repository, its target the diff from the head's merge base with the PR's base, and its description must name the record's risk tier, class, and risk file. So a record a contributor or a bot wrote, or edited to name another head, base, or tier, counts for nothing. Reading the setter's permission takes a token that can push to the repository; any other sees every record as untrusted. |
-| `risk` | The record's [risk tier](#risk-tiers), `low`, `medium`, or `high`; the same state as `review-record` for the head it names, so `stale` once the base's `RISK.md` changes, since that base may no longer hold the tier or offer the class; the tier its classifier set; and the reason. `-` when the record names none or does not count, and `- malformed -` with why when its risk lines do not parse, which `quest merge` refuses. |
-| `class` | The class, built in or from the base's `RISK.md` `## Automatic` list, the record's classifier found the change in, or `-`. |
+| `review-record` | Whether the review that counts still covers the head, and the head it reviewed: `current` when it is the head, `diff-identical` when `git diff <base>...<head>` prints the same as for it, `stale` otherwise, or `unknown` when the forge cannot compare them, such as a diff too large; then `local-review`, or `no-local-review` for a low head no local reviewer ran on. The review that counts is the newest passing run [`quest review` posted](#review-locally) to Kixel Quest from someone who can push to the repository, read through Kixel Quest; a run with findings open counts for none. `-` when none counts. Read from GitHub, as with `QUEST_FORGE=github`, it is only a PR body's `## Review` record an earlier `quest review` wrote, with a warning saying so, counted only where a writer's passing `quest review` commit status on the head it names attests it, and `stale`, with a warning, once `RISK.md` at the base's tip is not the file the record names. |
+| `risk` | The counted review's [risk tier](#risk-tiers), `low`, `medium`, or `high`; the same state as `review-record`; the tier its classifier set; and the reason. `-` when none counts, and `- malformed -` with why when a body record's risk lines do not parse. |
+| `class` | The class, built in or from the base's `RISK.md` `## Automatic` list, the counted review's classifier found the change in, or `-`. |
 | `auto-merge` | Method, who enabled it, when, and the head it was enabled on. |
 | `merge-queue` | Queue state, position, and when it was enqueued. |
 | `landing-stopped` | The reason the latest merge-queue entry, auto-merge, or [`quest land`](#the-watchers-own-queue) queue entry ended (such as `merge_conflict`, `failed_checks`, `unreviewed`, `manual`, `manually_disabled`, or `merged`), who ended it, and when; `-` once the PR has entered the merge queue or auto-merge again since. |
@@ -730,6 +730,8 @@ whether a maintainer attested it; a request with a field the server
 does not know is refused. A 400 with `{"error"}` refuses a bad argument, such as a
 malformed `--since`, which `quest` reports as a usage error. `quest/core` exports each read's types and their parsers;
 `quest/github`'s `GitHubForge` answers the same reads from GitHub.
+`quest review` posts each run to `POST /reviews` with the same token, its body
+`{"runs", "outcomes"}` as `parseReviews` in `quest/core` reads it.
 
 ### Work on a repository Kixel Quest hosts
 
@@ -824,18 +826,17 @@ online reviewer's that a ruleset requires (GitHub's review decision is
 for the approval, and refuses where nothing would wait, since an admin's token
 would merge or enqueue past the requirement.
 It also refuses while a [signal](#signals-that-hold-a-head) holds the head,
-naming each, and while the PR body's `## Review` record has risk lines that do
-not parse, until `quest review` rewrites it. A head is high when its
-`## Review` record rates it high or does not count, when a `quest review`
+naming each. A head is high when a `quest review`
 status on any of its commits rates it high, or when its change from its merge
 base with the base touches a path the base's `RISK.md` holds high, as
 [Risk tiers](#risk-tiers) says, or reaches GitHub's 300-file compare limit. A
-high head lands only once a `quest review` status that `quest status` counts
-covers its diff, on that head or on an earlier one whose diff from the base is
-identical, and its record names the base's current `RISK.md`, unless the head
-itself carries a `quest review` status that is not a pass. So any push after
-the last review that changes the diff, a person's or a helper's, and any change
-to the base's `RISK.md` since, waits for a new round.
+high head lands only once a passing `quest review` status covers its diff: one a
+user with write access set on that head, or on the newest of the PR's commits
+to carry a passing one when its diff from the base is identical, its target the
+diff from the head's merge base, and its description naming the base's current
+`RISK.md`, unless the head itself carries a `quest review` status that is not a
+pass. So any push after the last review that changes the diff, a person's or a
+helper's, and any change to the base's `RISK.md` since, waits for a new round.
 It enables auto-merge bound to that SHA, or merges at once when nothing is
 left to wait for. `--squash` or `--rebase` picks the method, and it refuses one
 the repository disallows; otherwise it uses the only method the repository
@@ -1634,7 +1635,7 @@ size at.
 
 A `quest` run from the source of the checkout it judges (`bun src/cli/bin.ts`, or
 a build made there) is that PR's own build, which never records its own review:
-the round runs, but writes no `## Review` record and sets no `quest review`
+the round runs, but posts nothing and sets no `quest review`
 status, and prints `record skipped:` telling you to rerun with an installed
 `quest`. `quest merge` run that way refuses.
 
@@ -1813,50 +1814,43 @@ branch's rounds, `risk`, the head's tier with its classification, `skipped`,
 `accepted`, the maintainer's reason under `--accept` or null, `record`, and
 `next`.
 
-After each round, `quest review` rewrites the `## Review` section of the open PR
-from the branch into the base, found among the upstream's PRs: the one from
-the repository the base's remote pushes to, else the only one from another
-repository whose pushed head the checked-out `HEAD` contains, as in a
-maintainer's checkout of a contributor's fork PR. It
-prints `record <url>`. The record
-names the reviewed head and the base's short SHA, the head's risk tier and who
-classified it, then for each reviewer its
-harness, model, and effort, its Reviewer line ending in `, second` for the second reviewer, the session and round, the score and rationale, the approach it recommends instead, if any, its tally, each finding with
-its location, its notes under `- Notes, the author's to take or leave:`, and the last round's findings with their dispositions. The
-tally, as `- Rounds: 3; first round 2 (medium 2); findings 4 (high 1, medium 3): fixed 3, refuted 1, open 0`,
-counts the reviewer's rounds on the branch, its first round's findings as that
-round graded them, and each finding it raised once,
-by its latest severity, however many rounds keep it open. A tally begun before
-it kept first rounds leaves that part out. A finding counts
-for the reviewer that raised it when a new size pick's reviewer fixes or
-refutes it, but one that reviewer keeps open becomes its own, since its round
-reports it again. `--new` drops the findings it leaves unsettled from the
-tallies. A reviewer the run left out keeps a block with only its session and
-tally. `quest status` takes the last full SHA a section holding that record
-names as the reviewed head, so the head appears in full only once no reviewer reports a
-finding, and model text
-appears as inline code, which mentions or links nothing and never holds a full
-SHA. The section runs to the next level-1 or
-level-2 heading, both as Markdown parses them, so an example in a code fence is
-text to `quest status` and the record alike; the rest of the body stays as written, and a body without one
-gains it at the end, unless it ends inside an unclosed code fence or HTML
-comment, which fails the record. With no such PR, or a remote off GitHub, it changes nothing
-and prints `record skipped: <why>`. It edits as the user the GitHub token names
-(`GH_TOKEN`, `GITHUB_TOKEN`, or `gh auth token`), then on GitHub sets the
-`quest review` commit status on the head on the same token, so push the head
-first: `success` once no finding is open, else `failure`, described by the
-head's risk tier, class, and risk file and whether a local reviewer ran, as
-`Risk low, class test, risk file 3f9c2a7b1e04: passed with no local
-reviewer`, or `findings accepted` after
-`--accept`, its target the diff from the
-head's merge base with the PR's base. `quest status` counts a record only
-through that status, set by someone who can push, so a contributor's own record
-counts for nothing, and a failing one blocks `quest merge --land` as any failed
-check does. A token that cannot push sets none, printing `; status skipped:
-<why>` after the record's URL. A record or status GitHub refuses otherwise fails
-the command after the round's report, with exit status 1, a status printing
-`; status refused: <why>`. It exits 0 once the round
-finishes, whatever it found, 2 for invalid arguments or a checkout that
+Every run that records needs the host signed in to Kixel Quest with
+[`quest login`](#read-through-kixel-quest), checked before any reviewer runs.
+After each run, `quest review` finds the open PR from the branch into the base,
+among the upstream's PRs: the one from the repository the base's remote pushes
+to, else the only one from another repository whose pushed head the
+checked-out `HEAD` contains, as in a maintainer's checkout of a contributor's
+fork PR. On GitHub it first sets the `quest review` commit status on the head,
+on the GitHub token (`GH_TOKEN`, `GITHUB_TOKEN`, or `gh auth token`), so push
+the head first: `success` once no finding is open, else `failure`, described
+by the head's risk tier, class, and risk file and whether a local reviewer
+ran, as `Risk low, class test, risk file 3f9c2a7b1e04: passed with no local
+reviewer`, or `findings accepted` after `--accept`, its target the diff from
+the head's merge base with the PR's base. The land gate counts it only from
+someone who can push, and a failing one blocks `quest merge --land` as any
+failed check does. A token that cannot push sets none, printing `; status
+skipped: <why>` after the record's URL.
+
+It then posts the run to Kixel Quest's `POST /reviews` and prints `record
+<url>`: the PR, its head, base branch, and merge base, the head's risk tier and
+reason, the tier its classifier set, its class, and the classifier model and
+session, the run's outcome as the status names it, and each reviewer's round
+with its harness, model, effort, seat (`pick`, or `second` for a high head's
+second reviewer), session, round number, score and rationale, and findings,
+each with its file, line, severity, and title. Notes are not posted. Beside the
+run go the outcomes of the findings an earlier posted round raised that this
+one fixed or refuted, each with its reason, named by that round's session and
+number and the finding's place in it. A low head no reviewer ran on posts its
+classification alone. A round whose post failed, or that an older `quest`
+recorded in the PR body, was never stored, so the next run sends no outcome
+for its findings. Kixel Quest counts a run toward merging only when its poster
+can push, so a contributor's own runs are recorded but a maintainer's review
+decides, and `quest status` reads the review from there; the PR body is left
+as written. With no such PR, or a remote off GitHub and Kixel Quest, it posts
+nothing and prints `record skipped: <why>`. A post Kixel Quest refuses, or a
+status GitHub refuses, fails the command after the round's report, with exit
+status 1, a status printing `; status refused: <why>`. It exits 0 once the
+round finishes, whatever it found, 2 for invalid arguments or a checkout that
 cannot be reviewed, 3 when no eligible reviewer could run, each not installed,
 logged out, its login rejected, at its usage limit, or unable to run on this host, and 1 for other
 failures. The only eligible reviewer's usage limit prints one line,
@@ -1943,9 +1937,8 @@ class every changed file falls in, or none. It is offered only the classes
 whose scope holds every changed path, either side of a rename, checked
 before it runs so it judges just the rule and cannot widen a scope; a change
 that touches no path falls in none. The scope is checked when the head is
-classified, so once the base's `RISK.md` changes, `quest status` reads an
-open PR's review record, tier, and class as `stale` until a review
-classifies the head again. It runs as Claude Code
+classified, so once the base's `RISK.md` changes, the land gate counts no
+review of a high head until a review classifies the head again. It runs as Claude Code
 `claude-haiku-5-5` at low effort, then Codex `gpt-6.2-sol` at low when Claude Code is
 missing, logged out, has its login rejected, or hits its usage limit. When none can
 run, the review fails on the limit that resets first if every one whose CLI is
@@ -1955,23 +1948,14 @@ marking them binary. A diff past 200,000 characters, or one holding a NUL byte o
 UTF-8, gives it only the stat and a file of the whole diff in a scratch directory, which Claude Code is
 let read and which is removed once it answers. The tier is kept with the reviewers'
 sessions, so a later round on the same head, base `RISK.md`, and built-in
-defaults reuses it, and `--new` classifies again. The record names it after the base:
-
-```markdown
-- Risk: medium, `It changes the record format quest status parses.`
-- Classified: medium by Claude Code, claude-haiku-5-5, low effort, session `5b0e6c1a-27d4-4f8e-9a51-3c2d7e8f9b10`
-- Risk file: 3f9c2a7b1e04
-```
-
-`Classified:` names `the always-high paths` or `default` when no model set the
-tier. A `- Class:` line follows when the classifier named a class, then
-`- Risk file:`, the base's `RISK.md` the tier was set against by its blob's
-first 12 characters, or `none`.
+defaults reuses it, and `--new` classifies again. The post names the
+classifier model and session, or none when the always-high paths or the
+default set the tier; the status names the base's `RISK.md` the tier was set
+against by its blob's first 12 characters, or `none`.
 
 A low head with no finding left to settle runs no local reviewer, unless
-`--harness`, `--model`, or `--effort` names one: the record names the head in
-full, adds `- Local review: none, since the head is low risk`, and `next done`
-says so. A high head gets a second reviewer: its size's entry from the other
+`--harness`, `--model`, or `--effort` names one: the run passes the head with
+no local reviewer, and `next done` says so. A high head gets a second reviewer: its size's entry from the other
 vendor, so Sol and Opus both review it. It is marked `second`, in a session
 of its own that reviews every head while the tier is high and settles its
 findings after. `--model` and `--effort` change only the pick, so the second
@@ -1980,8 +1964,8 @@ other vendor's model is avoided, as by `--exclude-model`, the run fails as a
 usage error; when it cannot run, as an outage.
 
 `--override <tier> --reason <text>` records the maintainer's tier for the
-branch in place of the reviewed one, as `- Risk: <tier>, <reason>` and
-`- Overridden: from <tier> by the maintainer`. It holds across heads until
+branch in place of the reviewed one, posted as the run's tier and reason beside
+the classifier's own tier. It holds across heads until
 the reviewed tier grows riskier than the one overridden, other than to the
 override's own tier, which agrees with it, and `quest usage`
 counts overrides as a reading of the tier's accuracy.
@@ -1990,10 +1974,9 @@ counts overrides as a reading of the tier's accuracy.
 head's last rounds left open, as when they side with the author against a
 reviewer that keeps a finding, or at a `next decide`. It
 runs no reviewer and no classifier: it repeats each reviewer's last round of
-the same head, base, and merge base, adds `- Accepted by the maintainer:
-<reason>`, lists their findings as accepted, which `quest usage` counts as
-settled, names the head in full, and sets the `quest review` status to
-`success`, described `findings accepted`. It is a usage error when no round
+the same head, base, and merge base, sets the `quest review` status to
+`success`, described `findings accepted`, and posts the rounds again as
+accepted, each open finding deferred for the maintainer's reason. It is a usage error when no round
 classified and reviewed that diff, when a high head lacks its second
 reviewer's round, or when no finding is open, and it takes no option that
 would run or reset a round. Its status goes first, so a token that cannot

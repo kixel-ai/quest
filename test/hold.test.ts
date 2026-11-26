@@ -5,7 +5,7 @@ import { describe, expect, test, vi } from "vitest";
 
 import type { GitHubDependencies, ObjectValue } from "../src/github/client";
 import { finish, land, release, take } from "../src/cli/hold";
-import { REVIEW_MARK, withoutHandBack } from "../src/core";
+import { withoutHandBack } from "../src/core";
 import { reviewTarget } from "../src/github/review-trust";
 import { type Output, main } from "../src/cli/main";
 import { Refusal } from "../src/core";
@@ -683,18 +683,6 @@ describe("merge --land", () => {
 		expect(pull.writes).toEqual([]);
 	});
 
-	test("refuses a body whose ## Review risk record does not parse", async () => {
-		const pull = new FakePull();
-		pull.body = `Summary.\n\n## Review\n\n- Head: ${HEAD}\n- Risk:dire\n`;
-		expect(await refused(land(PR, { sha: HEAD, method: "merge", check: clean }, pull.deps()))).toContain(
-			"risk is malformed: dire; rerun quest review",
-		);
-		expect(pull.writes).toEqual([]);
-		pull.body = `Summary.\n\n## Review\n\n- Head: ${HEAD}\n- Risk: low, \`docs\`\n- Classified: low by default\n`;
-		await land(PR, { sha: HEAD, method: "merge", check: clean }, pull.deps());
-		expect(pull.writes).not.toEqual([]);
-	});
-
 	test("leaves a merge queue to decide, even with auto-merge off", async () => {
 		const pull = new FakePull();
 		pull.allowAutoMerge = false;
@@ -1022,7 +1010,7 @@ describe("merge --land", () => {
 		},
 	);
 
-	test.each(["head", "hold", "base", "gate", "queue", "risk"])(
+	test.each(["head", "hold", "base", "gate", "queue"])(
 		"does not merge after the clean refusal changes its %s",
 		async (change) => {
 			const pull = new FakePull();
@@ -1034,7 +1022,6 @@ describe("merge --land", () => {
 				if (change === "base") pull.baseRef = "release";
 				if (change === "gate") pull.required = ["quest land"];
 				if (change === "queue") pull.queue = true;
-				if (change === "risk") pull.body = `## Review\n\n- Head: ${HEAD}\n- Risk:dire`;
 				return "Pull request is in clean status";
 			};
 			await expect(land(PR, { sha: HEAD, method: "merge", check: clean }, pull.deps())).rejects.toThrow();
@@ -1137,11 +1124,10 @@ const blobId = (text: string) =>
 
 describe("merge --land of a high head", () => {
 	const OLD = "c".repeat(40);
-	/** A `## Review` record of `head` at `tier`, and the passing status a maintainer's round sets on it. */
+	/** The passing status a maintainer's round of `head` at `tier` sets on it. */
 	const review = (pull: FakePull, head: string, tier: string) => {
 		// Classified against the base's risk file as it is now.
 		const file = pull.risk === null ? "none" : blobId(pull.risk).slice(0, 12);
-		pull.body = `Summary.\n\n## Review\n\n${REVIEW_MARK}\n\n- Head: ${head}\n- Risk: ${tier}, \`why\`\n- Risk file: ${file}\n- Classified: ${tier} by codex\n`;
 		pull.statuses[head] = {
 			state: "SUCCESS",
 			description: `Risk ${tier}, risk file ${file}: passed`,
@@ -1172,7 +1158,7 @@ describe("merge --land of a high head", () => {
 		review(pull, OLD, "high");
 		pull.diffs = { [OLD]: "diff", [HEAD]: "diff" };
 		pull.risk = "# Risk\n\n## High\n\n- `docs/` - published\n";
-		expect(await refused(land_(pull))).toContain("since its review record rates it high");
+		expect(await refused(land_(pull))).toContain(`since the quest review status on ${OLD} rates it high`);
 		expect(pull.writes).toEqual([]);
 		// A low record and no high path still lands, as with no review at all.
 		review(pull, OLD, "low");
@@ -1186,7 +1172,7 @@ describe("merge --land of a high head", () => {
 		const pull = new FakePull();
 		review(pull, OLD, "high");
 		expect(await refused(land_(pull))).toBe(
-			`${URL_} head ${HEAD} is high, since its review record rates it high, and no quest review status covers it; run quest review on it, then land it again`,
+			`${URL_} head ${HEAD} is high, since the quest review status on ${OLD} rates it high, and no quest review status covers it; run quest review on it, then land it again`,
 		);
 		expect(pull.writes).toEqual([]);
 	});
@@ -1206,13 +1192,15 @@ describe("merge --land of a high head", () => {
 		expect(pull.writes).toEqual([]);
 	});
 
-	test("refuses a head whose record does not count, since its tier is unknown", async () => {
+	test("refuses a high head whose status attests another diff, or was set by no writer", async () => {
 		const pull = new FakePull();
-		review(pull, OLD, "low");
-		pull.statuses[OLD]!.description = "Risk high: passed";
-		expect(await refused(land_(pull))).toContain(
-			`head ${HEAD} is high, since example/project#7's ## Review record does not count: its risk differs`,
-		);
+		review(pull, HEAD, "high");
+		pull.statuses[HEAD]!.targetUrl = reviewTarget({ owner: "example", repo: "project" }, "d".repeat(40), HEAD);
+		expect(await refused(land_(pull))).toContain(`head ${HEAD} is high, since the quest review status on ${HEAD}`);
+		review(pull, HEAD, "high");
+		pull.statuses[HEAD]!.creator = { __typename: "Bot", login: "helper" };
+		expect(await refused(land_(pull))).toContain(`head ${HEAD} is high, since the quest review status on ${HEAD}`);
+		expect(pull.writes).toEqual([]);
 	});
 
 	test("lands a head whose diff is the one a high review covers, as after a clean base merge", async () => {
@@ -1228,10 +1216,9 @@ describe("merge --land of a high head", () => {
 		expect(pull.writes).toEqual([`enablePullRequestAutoMerge ${HEAD} MERGE`]);
 	});
 
-	test("refuses a head an earlier commit's status rates high, whatever the body says", async () => {
+	test("refuses a head an earlier commit's status rates high", async () => {
 		const pull = new FakePull();
 		review(pull, OLD, "high");
-		pull.body = "Summary.";
 		expect(await refused(land_(pull))).toContain(
 			`head ${HEAD} is high, since the quest review status on ${OLD} rates it high`,
 		);

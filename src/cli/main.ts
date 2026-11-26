@@ -63,6 +63,7 @@ import { PENDING_MS } from "./admission";
 import { gate } from "./gate";
 import { gitHubDependencies, pullRequest, readRemote, remoteRepository, requireRemote } from "./github";
 import { type GitHubDependencies, mergedHolds } from "../github/client";
+import { GitHubForge } from "../github/forge";
 import { setTimeout as sleep } from "node:timers/promises";
 import { LAND_CHECK } from "../github/land";
 import { audit } from "./audits";
@@ -116,7 +117,7 @@ import { installSender, uninstallSender } from "./service";
 import { heal, init, stubFindings, uninstall } from "./setup";
 import { describe, notUpstream, releaseQuest, startQuest } from "./start";
 import { login, logout } from "./login";
-import { KIXEL_QUEST_URL, kixelUrl, tokensPath } from "./tokens";
+import { KIXEL_QUEST_URL, kixelUrl, requireToken, tokensPath } from "./tokens";
 import { CONTEXT, GUIDE, GUIDE_SECTIONS, SKILLS, guideSections, sectionHeading, skill } from "./skills";
 import { CONTEXT_PACKS, contextPack, contextPacks } from "./context";
 import { type Terminal, Theme } from "./theme";
@@ -713,13 +714,14 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"in one call. It reports facts; it does not decide whether the PR is ready.\n\n" +
 				"Plain output prints one record per line, its type first and any free text (a check name or path) last: " +
 				"url, state, draft, head, mergeable, merge-state, review-decision, review-record, risk, class, auto-merge, merge-queue, " +
-				"landing-stopped, and checks, whose state and counts follow the checks that count, pending while an open PR's base requires a check or workflow nothing reports; review-record gives whether the PR body's ## Review record " +
-				"covers the head, as current, diff-identical (git diff <base>...<head> prints the same as for the head it names), " +
-				"stale, also once the PR is open and RISK.md at the base's tip is not the file the record names, with a warning, since its tier decided how much review the head got, or unknown when GitHub cannot compare them, or - when the section holds no record quest review wrote, then the head it names last, then local-review or no-local-review for whether a local reviewer's round passed it; " +
-				"it counts the record only when the latest quest review commit status on that head is success, set by a user with write access to the repository, " +
-				"targets the diff from the head's merge base with the PR's base, and attests the record's risk tier, class, and risk file (else -, with a warning saying why, and risk and class print - too); risk gives the record's risk " +
+				"landing-stopped, and checks, whose state and counts follow the checks that count, pending while an open PR's base requires a check or workflow nothing reports; review-record gives whether the review that counts " +
+				"covers the head, as current, diff-identical (git diff <base>...<head> prints the same as for the head it reviewed), " +
+				"stale, or unknown when the forge cannot compare them, or - when none counts, then the head it reviewed, then local-review or no-local-review for whether a local reviewer's round passed it. " +
+				"The review that counts is the newest passing run quest review posted to Kixel Quest from someone who can push, which Kixel Quest answers; " +
+				"read from GitHub, it is only a PR body's ## Review record an earlier quest review wrote, with a warning saying so, counted only when the latest quest review commit status on the head it names is success, set by a user with write access to the repository, " +
+				"targets the diff from the head's merge base with the PR's base, and attests the record's risk tier, class, and risk file (else -, with a warning saying why, and risk and class print - too), and stale, with a warning, once the PR is open and RISK.md at the base's tip is not the file the record names; risk gives the review's risk " +
 				"tier, the same state for its head, the tier its classifier set, and the " +
-				"reason last, - when the record names none or does not count, or - malformed - and why when its risk lines do not parse; class gives the built-in or RISK.md ## Automatic class the record's classifier named, or -; auto-merge gives its method, who enabled it and when, and the head it was " +
+				"reason last, - when none counts, or - malformed - and why when a body record's risk lines do not parse; class gives the built-in or RISK.md ## Automatic class the review's classifier named, or -; auto-merge gives its method, who enabled it and when, and the head it was " +
 				"enabled on, which differs from head once a push follows, as GitHub keeps auto-merge across a writer's " +
 				"push (- when it cannot be told: a quest land pin names it, and otherwise the head branch's push " +
 				"activity, which GitHub lists up to minutes late); landing-stopped is the latest exit from the merge queue, auto-merge, or " +
@@ -748,7 +750,14 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		.action((value: string, options: { json?: boolean }) => {
 			const { pull: pr, hosted } = locatePull(value, root(), process.env);
 			pending = forgeFor(pr, forgeDependencies(), Infinity, hosted)
-				.then((forge) => forge.status(pr))
+				.then((forge) => {
+					// `quest review` posts its runs to Kixel Quest alone, so GitHub holds no review newer than a body record.
+					if (forge instanceof GitHubForge)
+						warn(
+							"read from GitHub, which holds no review quest review posted to Kixel Quest: review-record, risk, and class show only a PR body's ## Review record an earlier quest wrote",
+						);
+					return forge.status(pr);
+				})
 				.then(
 					({ value: status }) => {
 						if (options.json) print(JSON.stringify(status));
@@ -817,7 +826,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"lacks (GitHub's review decision is review_required or changes_requested), it only arms auto-merge, which waits " +
 				"for it, and refuses where nothing would wait, since an admin's token merges or enqueues past the requirement. It refuses a head on which quest check " +
 				"--no-stubs --base <base> --branch <head branch> finds anything, read from git objects fetched from the base repository, " +
-				"so nothing from the head runs, except findings the base or the head's merge base with it already has in a list entry or line the head left unchanged; a head without quests skips it when the base or its merge base has none, and one whose quest documents cannot be read is refused. It refuses a body whose ## Review record's risk lines do not parse, until quest review rewrites it. It also refuses while an unanswered finding on the head from an online reviewer " +
+				"so nothing from the head runs, except findings the base or the head's merge base with it already has in a list entry or line the head left unchanged; a head without quests skips it when the base or its merge base has none, and one whose quest documents cannot be read is refused. It also refuses while an unanswered finding on the head from an online reviewer " +
 				"whose check the base requires, or a newer comment opening with 'Maintainer decision', holds it. It uses the method --squash or --rebase names, refusing one " +
 				"the repository disallows; otherwise the only method the repository allows, or else a merge commit. " +
 				"On a base with GitHub's merge queue, which applies its own method, it enqueues that head, or arms " +
@@ -1872,25 +1881,26 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"fixing them as recommended, accepting them, or dropping the PR, `next respond` to fix or refute the findings, or `next done`, which for a low head no reviewer ran says so, and for --accept `next done` or `next stop`. A reply without a valid score " +
 				"fails as any malformed reply does. --json prints " +
 				"one object: `rounds`, one per reviewer, `tallies`, every reviewer's findings across the branch's rounds, `risk`, the head's tier with its classification, `skipped`, each reviewer passed over with its reason, `accepted`, the maintainer's reason under --accept or null, `record`, and `next`.\n\n" +
-				"When quest runs from the source of the checkout it judges (bun src/cli/bin.ts, or a build there), the round still runs but writes no record and sets no status: it prints `record skipped: ...` " +
+				"When quest runs from the source of the checkout it judges (bun src/cli/bin.ts, or a build there), the round still runs but posts nothing and sets no status: it prints `record skipped: ...` " +
 				"telling you to rerun with an installed quest, and `next stop` where the round found nothing to fix, so a PR can exercise its own review changes without marking itself reviewed.\n\n" +
-				"After each round, it rewrites the `## Review` section of the branch's open PR into the base, the one from the repository the base's remote pushes to, else the only one from another repository whose pushed head `HEAD` contains, as the " +
-				"user the GitHub token names, keeping the rest of the body, and prints `record <url>`: the reviewed " +
-				"head, named in full only once no reviewer reports a finding, the base, the head's risk tier and reason, " +
-				"an `- Overridden:` line, the classifier's tier and who set it, a `- Class:` line, a `- Risk file:` line naming the base's RISK.md it read by its blob's first 12 characters or none, a `- Local review: none` line for a low head no reviewer ran on, a `- Skipped:` line for each reviewer passed over, and each reviewer, its Reviewer line ending in `, second` for the second reviewer, its " +
-				"session and round, score, a `- Recommendation:` line with the approach it would build instead, its tally of findings across the branch's rounds, each finding with its disposition, and its notes. " +
-				"On GitHub it then sets the `quest review` commit status on the head, on the same token, so push the head first: success once no finding is open, else failure, " +
-				"its description the head's risk tier, class, and risk file and whether a local reviewer ran, its target the diff from the head's merge base with the PR's base, which `quest status` counts only from a user who can push. " +
+				"Every run that records needs this host signed in with quest login, checked before any reviewer runs. " +
+				"After each run it finds the branch's open PR into the base: the one from the repository the base's remote pushes to, else the only one from another repository whose pushed head `HEAD` contains. " +
+				"On GitHub it first sets the `quest review` commit status on the head, on the GitHub token, so push the head first: success once no finding is open, else failure, " +
+				"its description the head's risk tier, class, and risk file and whether a local reviewer ran, its target the diff from the head's merge base with the PR's base, which the land gate counts only from a user who can push. " +
 				"For a token that cannot push, it sets none and prints `; status skipped: <why>` after the record's URL; a status GitHub refuses otherwise prints `; status refused: <why>` and exits 1. " +
+				"It then posts the run to Kixel Quest (POST /reviews, QUEST_KIXEL_URL naming another), and prints `record <url>`: the head, the base and merge base, the risk tier and reason, the classifier's tier, class, and who set it, " +
+				"and each reviewer's round, its seat (pick or second), session, round number, score and rationale, and findings with their file, line, and severity, " +
+				"with the outcome of each finding of an earlier posted round that this run fixed or refuted. Notes are not posted. A low head no reviewer ran on posts its classification alone. " +
+				"Kixel Quest counts a run toward merging only when its poster can push, and quest status reads the review from there; the PR body is left as is. " +
 				"--accept <reason> runs no reviewer or classifier: it repeats each reviewer's last round of the same head, base, and merge base, failing as a usage error " +
 				"when none classified and reviewed it, when a high head lacks its second reviewer's round, or when no finding is open; sets the status to success " +
-				"described `findings accepted`; then records the rounds with `- Accepted by the maintainer: <reason>` and their findings as accepted, naming the head " +
-				"in full, and prints `next done`. When no status is set, as for a token that cannot push, it records nothing, prints `next stop`, and exits 1. With no " +
-				"such PR, several from other repositories that `HEAD` contains, or a remote off GitHub, it prints `record skipped: <why>` and changes nothing.\n\n" +
+				"described `findings accepted`; then posts the rounds as accepted, their findings deferred with the reason, " +
+				"and prints `next done`. When no status is set, as for a token that cannot push, it posts nothing, prints `next stop`, and exits 1. With no " +
+				"such PR, several from other repositories that `HEAD` contains, or a remote off GitHub and Kixel Quest, it prints `record skipped: <why>` and changes nothing.\n\n" +
 				"Exits 0 once the round finishes, whatever it found, 2 for invalid arguments " +
 				"or a checkout that cannot be reviewed, 3 when no eligible reviewer could run, each not installed, logged " +
-				"out, its login rejected, at its usage limit, or unable to run on this host, and 1 for other failures, including a PR GitHub will not show or a record it " +
-				"refuses or a status it refuses. A malformed `## Models` field the round reads, such as a Size line naming no size or an " +
+				"out, its login rejected, at its usage limit, or unable to run on this host, and 1 for other failures, including a PR GitHub will not show, a post Kixel Quest " +
+				"refuses, or a status GitHub refuses. A malformed `## Models` field the round reads, such as a Size line naming no size or an " +
 				"Implementer line naming no model it can read, is a usage error, unless --size or --exclude-model replaces it. A usage limit of the only " +
 				"eligible reviewer prints one line, " +
 				"`error: <harness> hit its usage limit; resets <time>`, where <time> is the reset as an ISO 8601 UTC " +
@@ -1999,6 +2009,8 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				};
 				// Decided once, before the round: a PR's own build never records its own review, whatever it finds.
 				const own = runsFromCheckout(root(), out.entry);
+				// Every run that records posts to Kixel Quest, so a host that cannot post spends no reviewer's round.
+				if (!own) requireToken(kixelUrl(process.env), process.env);
 				const run = review(
 					{
 						...options,
@@ -2023,7 +2035,9 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 						let record: Recorded | undefined;
 						let failure: unknown;
 						try {
-							record = own ? { skipped: OWN_REVIEW } : await recordRounds(root(), reviewed, github);
+							record = own
+								? { skipped: OWN_REVIEW }
+								: await recordRounds(root(), reviewed, { ...github, env: process.env, fetch });
 						} catch (error) {
 							failure = error;
 						}

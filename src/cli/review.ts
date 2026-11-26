@@ -18,6 +18,7 @@ import {
 	ALWAYS_HIGH,
 	type Class,
 	DEFAULT_CLASSES,
+	type FindingOutcome,
 	heldHigh,
 	highHits,
 	matches,
@@ -497,9 +498,19 @@ export interface Reviewed {
 	sized: { size: Size; from: string };
 	/** The maintainer's reason for accepting the open findings of `rounds`, which repeat the head's last rounds. */
 	accepted?: string;
+	/**
+	 * The findings of earlier posted rounds this run settled: fixed or refuted by a round, or the maintainer's accepted
+	 * ones, which are deferred.
+	 */
+	outcomes: SettledFinding[];
 	/** Keeps the accepted findings among those the branch settled; for the caller to run once the acceptance is attested. */
 	remember?: () => void;
+	/** Marks the run's rounds as posted, so the next run settles their findings on Kixel Quest; for the caller to run once they are. */
+	posted?: () => void;
 }
+
+/** A finding's outcome, as Kixel Quest names it by the posted round that raised it. */
+export type SettledFinding = Omit<FindingOutcome, "repository" | "number">;
 
 /**
  * A branch's review sessions, one per reviewer, kept in the clone's common Git directory so every worktree
@@ -530,6 +541,11 @@ interface Session {
 	rounds: { head: string; mergeBase: string; findings: Finding[] }[];
 	/** The session's last round, which a round on the same head with nothing to settle repeats. */
 	last: Round;
+	/**
+	 * Whether `last` reached Kixel Quest, which refuses an outcome for a finding it never stored, as one a failed post
+	 * or an older quest left unposted.
+	 */
+	posted?: true;
 	/**
 	 * Digests of the instruction files and the REVIEW.md the session started
 	 * with. A resumed session keeps its first instructions and rules, so a change
@@ -1897,6 +1913,7 @@ export function parseState(value: unknown): State {
 				typeof session?.reviewer === "string" &&
 				!("shadow" in session) &&
 				(session.second === undefined || session.second === true) &&
+				(session.posted === undefined || session.posted === true) &&
 				state.tallies!.some((tally) => sameSeat(tally, session)) &&
 				typeof session.session === "string" &&
 				typeof session.started === "number" &&
@@ -2469,6 +2486,19 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 		);
 		// An acceptance GitHub does not attest has not happened, so the caller saves it only once it is.
 		const kept = [...past, ...accepted.filter((each) => !past.some(same(each)))];
+		// Kixel Quest stores no outcome of an accepted finding, so it keeps one left to later work.
+		const outcomes = sessions
+			.filter((session) => session.posted && last.includes(session.last))
+			.flatMap(({ last: round }) =>
+				round.findings.map((_, i) => ({
+					harness: round.reviewer,
+					session: round.session,
+					round: round.round,
+					finding: i + 1,
+					outcome: "deferred" as const,
+					reason: options.accept!,
+				})),
+			);
 		return {
 			rounds: last.map((round) => ({ ...round, usage: [], unchanged: true })),
 			tallies,
@@ -2479,12 +2509,13 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 			base,
 			sized,
 			accepted: options.accept,
+			outcomes,
 			remember: () => save(statePath, state(sessions, tallies, risk, kept)),
 		};
 	}
 	if (!named && !settling && risk.tier === "low") {
 		save(statePath, state(sessions, tallies, risk, past));
-		return { rounds: [], tallies, risk, skipped: [], branch, head, base, sized };
+		return { rounds: [], tallies, risk, skipped: [], branch, head, base, sized, outcomes: [] };
 	}
 
 	const skipped: Skip[] = [];
@@ -2573,9 +2604,43 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 		past,
 		done.map((each) => each.round),
 	);
-	save(statePath, state([...done.map((each) => each.session), ...kept], after, risk, history));
+	const store = (posted: boolean) =>
+		save(
+			statePath,
+			state(
+				[...done.map((each) => (posted ? { ...each.session, posted: true as const } : each.session)), ...kept],
+				after,
+				risk,
+				history,
+			),
+		);
+	store(false);
 	const rounds = done.map((each) => each.round);
-	return { rounds, tallies: after, risk, skipped, branch, head, base, sized };
+	const outcomes = done.flatMap((each, i) => settledOutcomes(seats[i]!, each.round));
+	return { rounds, tallies: after, risk, skipped, branch, head, base, sized, outcomes, posted: () => store(true) };
+}
+
+/**
+ * The outcomes of the findings `round` settled in its seat's saved session, which raised them, unless that session's
+ * round never reached Kixel Quest: each fixed or refuted one, numbered within its round from 1.
+ */
+function settledOutcomes(seat: Seat, round: Round): SettledFinding[] {
+	const raised = seat.session;
+	if (raised?.posted !== true || round.unchanged) return [];
+	return (round.earlier?.findings ?? []).flatMap(({ number, disposition, reason }) =>
+		disposition === "open"
+			? []
+			: [
+					{
+						harness: raised.last.reviewer,
+						session: raised.last.session,
+						round: raised.last.round,
+						finding: number - seat.first + 1,
+						outcome: disposition,
+						reason,
+					},
+				],
+	);
 }
 
 /** Whether `past` is finding `a` settled before: the same title at the same file. */
