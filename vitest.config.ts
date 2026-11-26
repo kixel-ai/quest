@@ -27,22 +27,27 @@ export default defineConfig({
 		// Git for Windows maps "/dev/null" to its null device but rejects os.devNull's "\\.\nul".
 		// An agent session's ID would log the gates tests run as that session's waits (src/cli/waits.ts).
 		// The developer's own records.json would send reads to Kixel Quest where it serves this repository.
+		// Each test gets its own XDG_STATE_HOME and XDG_CONFIG_HOME (test/state.ts).
 		// An exported QUEST_FORGE=github would skip the Kixel Quest fakes the forge tests serve.
 		env: {
 			GIT_CONFIG_GLOBAL: "/dev/null",
 			QUEST_FORGE: "",
 			CLAUDE_CODE_SESSION_ID: "",
 			CODEX_THREAD_ID: "",
-			XDG_CONFIG_HOME: "/nonexistent/quest-test-config",
 		},
 		...(live
-			? { include: ["test/live/**/*.test.ts"], testTimeout: 30 * 60_000, hookTimeout: 60_000 }
+			? {
+					include: ["test/live/**/*.test.ts"],
+					setupFiles: ["test/state.ts"],
+					testTimeout: 30 * 60_000,
+					hookTimeout: 60_000,
+				}
 			: {
 					include: ["test/**/*.test.ts"],
 					exclude: [...configDefaults.exclude, "test/live/**"],
 					// A test's CPU budget (test/budget.ts) bounds how slow it may be; this wall-clock
 					// limit only catches a test awaiting what never comes, so a loaded host never reaches it.
-					setupFiles: ["test/budget.ts"],
+					setupFiles: ["test/state.ts", "test/budget.ts"],
 					globalSetup: ["test/scopes.ts"],
 					testTimeout: 5 * 60_000,
 					hookTimeout: 5 * 60_000,
