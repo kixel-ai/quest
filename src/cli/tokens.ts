@@ -1,7 +1,7 @@
 // This host's Kixel Quest sign-ins, which `quest login` writes, and the Kixel Quest they pair with: one built-in URL,
 // or the one `QUEST_KIXEL_URL` names. The forge reads and the record sender both send a token only to the URL the
 // user's file pairs it with.
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, linkSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -92,21 +92,41 @@ function readLogins(env: NodeJS.ProcessEnv): Record<string, Login> {
  */
 function moveTokens(env: NodeJS.ProcessEnv): Record<string, Login> {
 	const old = join(configDirectory(env), "records.json");
-	if (!existsSync(old)) return {};
+	const path = tokensPath(env);
+	let text: string;
+	try {
+		text = readFileSync(old, "utf8");
+	} catch (error) {
+		// None, or another quest moved it first, which writes the sign-ins before removing it.
+		if ((error as NodeJS.ErrnoException).code === "ENOENT") return existsSync(path) ? readLogins(env) : {};
+		throw error;
+	}
 	const logins: Record<string, Login> = {};
-	for (const [url, token] of Object.entries(readObject(old))) {
+	for (const [url, token] of Object.entries(parseObject(old, text))) {
 		if (typeof token !== "string" || token === "") throw new Error(`${old}: the token for ${url} is not a string`);
 		logins[url] = { token, transcripts: false };
 	}
-	write(tokensPath(env), logins);
-	rmSync(old);
+	// Linked rather than renamed, so a move racing another quest's never overwrites a sign-in written since.
+	const next = stage(path, logins);
+	try {
+		linkSync(next, path);
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+		rmSync(old, { force: true });
+		return readLogins(env);
+	} finally {
+		rmSync(next, { force: true });
+	}
+	rmSync(old, { force: true });
 	return logins;
 }
 
-function readObject(path: string): Record<string, unknown> {
+const readObject = (path: string) => parseObject(path, readFileSync(path, "utf8"));
+
+function parseObject(path: string, text: string): Record<string, unknown> {
 	let parsed: unknown;
 	try {
-		parsed = JSON.parse(readFileSync(path, "utf8"));
+		parsed = JSON.parse(text);
 	} catch (error) {
 		throw new Error(`${path} is not JSON: ${(error as Error).message}`);
 	}
@@ -115,10 +135,15 @@ function readObject(path: string): Record<string, unknown> {
 	return parsed as Record<string, unknown>;
 }
 
-/** Write `tokens` whole, readable only by the user, then rename, so no reader sees half a file. */
-function write(path: string, tokens: Record<string, unknown>): void {
+/** Write `logins` whole, readable only by the user, then rename, so no reader sees half a file. */
+function write(path: string, logins: Record<string, Login>): void {
+	renameSync(stage(path, logins), path);
+}
+
+/** `logins` written beside `path`, readable only by the user, returning where. */
+function stage(path: string, logins: Record<string, Login>): string {
 	mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
 	const next = `${path}.${process.pid}.new`;
-	writeFileSync(next, `${JSON.stringify(tokens, null, "\t")}\n`, { mode: 0o600 });
-	renameSync(next, path);
+	writeFileSync(next, `${JSON.stringify(logins, null, "\t")}\n`, { mode: 0o600 });
+	return next;
 }

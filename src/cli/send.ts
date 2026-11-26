@@ -144,7 +144,7 @@ export function queue(stopped: Stopped, env: NodeJS.ProcessEnv = process.env): Q
 	const url = kixelUrl(env);
 	const token = tokenFor(url, env);
 	if (token === null)
-		return said(`token:${url}`, `quest: ${notSignedIn(url)}, so it sends no session records until then.`);
+		return said(`login:${url}`, `quest: ${notSignedIn(url)}, so it sends no session records until then.`);
 	if (existsSync(refusal(env, url, token))) return { notices, queued: false };
 	let start: number;
 	let reviewed: Reviewed | undefined;
