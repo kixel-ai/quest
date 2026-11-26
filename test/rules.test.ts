@@ -326,7 +326,13 @@ test("plain cargo test is denied where nextest is configured, while doctests, bu
 	expect(bash("cargo test -p moq-net -- lost_group")).toEqual([]);
 	mkdirSync(join(cwd, ".git"));
 	mkdirSync(join(cwd, ".config"));
-	writeFileSync(join(cwd, ".config", "nextest.toml"), "[profile.default]\n");
+	// A config that never kills a hung test loses nothing to plain cargo test.
+	writeFileSync(join(cwd, ".config", "nextest.toml"), "[profile.default]\nretries = 0\n");
+	expect(bash("cargo test")).toEqual([]);
+	writeFileSync(
+		join(cwd, ".config", "nextest.toml"),
+		'[profile.default]\nslow-timeout = { period = "30s", terminate-after = 2 }\n',
+	);
 	for (const command of [
 		"cargo test -p moq-net -- lost_group",
 		"cargo +nightly --locked test --workspace",
@@ -342,6 +348,7 @@ test("plain cargo test is denied where nextest is configured, while doctests, bu
 		"cargo test --no-run",
 		"cargo test --help",
 		"cargo -C ../other test",
+		"cargo test --manifest-path ../other/Cargo.toml",
 		"cd ../other && cargo test",
 		"cargo build --tests",
 		"just test",

@@ -28,7 +28,7 @@ export const RULES = {
 	tmp: "Put scratch files, such as PR bodies, logs, patches, helper scripts, and temporary clones, in the checkout's `.tmp/`, never `/tmp`, so they disappear with the worktree.",
 	pkill: "Stop a process you started by its PID or process group, never by name with `pkill` or `killall`: other agents share the host.",
 	nextest:
-		"Where a repository configures nextest (`.config/nextest.toml`), run Rust tests with `cargo nextest run`: plain `cargo test` skips its slow-timeout, so a hung test never ends and holds the host's test slots. `cargo test --doc` runs the doctests nextest cannot.",
+		"Where a repository's `.config/nextest.toml` kills hung tests (`terminate-after`), run Rust tests through its test recipe or `cargo nextest run`, not plain `cargo test`, which skips that config, so a hung test never ends and holds the host's test slots. `cargo test --doc` runs the doctests nextest cannot.",
 	recommend:
 		"In a question dialog, end each option you recommend with `(Recommended)`, and recommend one in every question with two or more options.",
 	kixel: "On a repository Kixel Quest hosts, `gh` cannot reach its PRs: use `quest pr view`, `list`, `create`, `edit`, `comment`, and `resolve`, and `quest status`, `ready`, and `merge`.",
@@ -515,7 +515,8 @@ const CARGO_VALUE_OPTIONS = new Set(["--config", "-Z", "--color"]);
 
 /**
  * Whether `cargo`'s or `mbx`'s arguments run tests under libtest: `test`, unless it only builds, runs doctests,
- * which nextest cannot, or asks for help. `-C` runs it from another directory, whose configuration is unknown.
+ * which nextest cannot, or asks for help. `-C` and `--manifest-path` name another workspace, whose configuration is
+ * unknown.
  */
 function libtest(args: string[]): boolean {
 	let i = 0;
@@ -527,14 +528,20 @@ function libtest(args: string[]): boolean {
 	const rest = args.slice(i + 1);
 	const end = rest.indexOf("--");
 	const own = end === -1 ? rest : rest.slice(0, end);
-	return !own.some((arg) => ["--doc", "--no-run", "--help", "-h"].includes(arg));
+	return !own.some(
+		(arg) => ["--doc", "--no-run", "--help", "-h"].includes(arg) || /^--manifest-path(=|$)/.test(arg),
+	);
 }
 
-/** Whether a directory from `cwd` up to its checkout's root holds nextest's configuration. */
+/**
+ * Whether the nearest nextest configuration from `cwd` up to its checkout's root kills hung tests: by default
+ * nextest's slow-timeout only warns, so plain `cargo test` loses nothing there.
+ */
 function nextestConfigured(cwd: string): boolean {
 	const root = checkoutRoot(cwd);
 	for (let dir = cwd; ; dir = dirname(dir)) {
-		if (existsSync(join(dir, ".config", "nextest.toml"))) return true;
+		const config = read(dir, join(".config", "nextest.toml"));
+		if (config !== undefined) return /\bterminate-after\b/.test(config);
 		if (dir === root || dirname(dir) === dir) return false;
 	}
 }
