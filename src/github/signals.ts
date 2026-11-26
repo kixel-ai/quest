@@ -111,11 +111,11 @@ export function signals(pull: Activity, writers: ReadonlySet<string>, carried?: 
 	}
 
 	// Each reviewer's latest pass over each head lists what it still finds there; a pass may only open threads. A late
-	// pass over a carried head says nothing of another.
+	// pass over a carried head says nothing of another, nor one posted under another account of one under a bot's.
 	const latest = new Map<string, (typeof reviews)[number]>();
 	for (const review of reviews)
 		if (review.reviewer !== null && review.head && (review.body.trim() !== "" || opened.has(review.id))) {
-			const key = `${review.reviewer}\n${review.commit}`;
+			const key = `${review.reviewer}\n${review.poster ?? ""}\n${review.commit}`;
 			const prior = latest.get(key);
 			if (!prior || prior.at <= review.at) latest.set(key, review);
 		}
