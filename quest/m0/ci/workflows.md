@@ -7,7 +7,7 @@
 - **Composite action (`.github/actions/setup-nix`):** installs Nix (`determinate: false`), sets `accept-flake-config = true` so `flake.nix`'s `nixConfig` (`nix.kixel.quest`) is trusted on first run, and optionally wires `mbx` for S3/B2 Rust caching.
 - **Reusable workflows (`.github/workflows/`):**
   - `check.yml`: read-only check runner for outside contributor PRs on public GitHub mirrors (skips drafts, zero secrets, runs `quest run --tier pr`).
-  - `platform.yml`: dispatches public macOS and Windows `nightly` and `release-gate` tasks (`quest run --tier <tier> --os <os>`) and uploads `kixel-metrics` (`junit.xml` + `metrics.json`) for Kixel Quest ingestion.
+  - `platform.yml`: dispatches public macOS and Windows `nightly` and `release-gate` tasks with explicit scope (`quest run --tier nightly --os <os> --all` for scheduled/coalesced nightlies, and `quest run --tier release-gate --os <os> --base <event-base-sha>` or `--all` for release PRs) and uploads `kixel-metrics` (`junit.xml` + `metrics.json`) for Kixel Quest ingestion.
   - `npm-publish.yml`: minimal GitHub-hosted npm OIDC trusted publishing workflow (since npm accepts OIDC tokens only from GitHub's runners).
 
 ## Plan

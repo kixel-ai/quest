@@ -4,9 +4,9 @@
 
 `quest/core` exports a shared `quest.toml` schema and parser (importable by Kixel Quest's Cloudflare Worker without Nix), and `quest run` executes declared CI and lifecycle tasks directly:
 
-- Declares `[repo]` (`merge`, `release`, `cache`, `invalidate_all`) and `[tasks.<name>]` (`tier` among `pr`, `gate`, `nightly`, `release-gate`, `release`; `run`; `after`; `paths`; `exclude`; `caches`; `os`; `capabilities`; `nix`; `cache`; `environment`; `junit`; `metrics`).
+- Declares `[repo]` (`merge`, `release`, `cache`, `invalidate_all`) and `[tasks.<name>]` (`tier` among `pr`, `gate`, `nightly`, `release-gate`, `release`; `run`; `after`; `paths`; `exclude`; `inputs`; `caches`; `os`; `capabilities`; `nix`; `cache`; `environment`; `junit`; `metrics`).
 - Refuses to run Nix-backed tasks if `flake.nix` is missing (mandatory Nix contract), auto-enters `nix develop --command` when invoked outside the repository's dev shell (with 0ms overhead when already inside it), and respects `nix = false` for non-Nix escape hatches (such as Windows builds or npm OIDC).
-- Replaces per-repo `sh/dispatch.sh` / `check.sh` scripts with one tested diff-aware DAG engine: resolves `BASE` (explicit `--base`, `$QUEST_LAND_BASE`, or default branch), selects affected tasks by `paths`/`exclude`/`invalidate_all`, runs independent lanes in parallel, supports `--tier`, `--all`, `--only`, `--fail-fast`, and `--query` (JSON matrix output for runners), wraps heavy tasks in `quest gate`, and collects declared JUnit XML and `metrics.json` outputs.
+- Replaces per-repo `sh/dispatch.sh` / `check.sh` scripts with one tested diff-aware DAG engine: resolves `BASE` (explicit `--base`, `$QUEST_LAND_BASE`, or default branch), selects affected tasks by `paths`/`exclude`/`inputs`/`invalidate_all`, filters tasks by `--os` (defaulting to the host's native OS), runs independent lanes in parallel, supports `--tier`, `--all`, `--only`, `--fail-fast`, and `--query` (JSON matrix output for runners), wraps heavy tasks in `quest gate`, and collects declared JUnit XML and `metrics.json` outputs.
 - `quest check` validates `quest.toml` when present alongside the quest tree.
 
 ## Plan
