@@ -15,12 +15,12 @@ The head is landable when:
 
 - the PR is not a draft;
 - a review counts for it, as below;
-- every finding a local reviewer or a person posted on it is fixed on the head, answered with a refutation, or, for a local reviewer's, accepted by the maintainer with `quest review --accept`, no decision is open, and `quest status` prints no `signal` line, which also covers an online reviewer the base requires; an optional online reviewer's findings, such as CodeRabbit's where the base requires none of its checks, never hold a pick;
+- every finding a local reviewer or a person posted on it is fixed on the head, answered with a refutation, or, for a local reviewer's, accepted by the maintainer with `quest review --accept`, no decision is open, and `quest status` prints no `signal` line, which also covers an online reviewer the base requires; an optional online reviewer's findings, such as CodeRabbit's where the base requires none of its checks, never hold a pick, unless the base requires conversation resolution: then `quest status` prints no `thread` line, optional reviewers' threads included;
 - no check failed on it, required or not, a failing `quest review` status included, its required checks passed, other than the gate's own `quest land` check, which never reports on a head, and it does not conflict with its base;
 - `quest status`'s `review-decision` is not `changes_requested`; an approval its base requires may still be to come, since the queue waits for it.
 
 While its required checks are only pending, report that the pick stands until they pass; do not wait for them.
-A person's change request that stands once its findings are fixed or refuted and their threads resolved is the user's call.
+A change request that stands once its findings are fixed or refuted and their threads resolved is the user's call.
 Any other head needs `/quest-iterate`: run it, saying what the head needs, such as a review, fixes, a failed check fixed or rerun, flaky ones included, or decisions, then run this skill again once it finishes; if it stops for the user instead, report that.
 Run it in this session, where its interview can ask the user; under a coordinator such as `/quest-run`, return the PR to the loop, which dispatches it in a sub-agent.
 A PR that adds follow-ups also needs the pick round's answers recorded before queueing, as the guide's Creation section describes: ask about each follow-up that round has not asked, in a question of its own, then run `/quest-iterate` with the answers unless the head already records them.

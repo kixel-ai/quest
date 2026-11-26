@@ -1011,13 +1011,13 @@ request with its Review recorded, and enqueues it like any other, with no
 maintainer's pick. A refused disable waits for the test's next flake, and a
 pull request GitHub refuses to enqueue says so and waits for a maintainer.
 
-Without a fixer its token asks for `contents: write`, which disarming a signaled
-pull request's auto-merge needs, `pull_requests: write`, `actions: read`, which
-the App needs for the logs, and `merge_queues: write`, which
-`enqueuePullRequest` needs. With one, which also arms auto-merge and pushes
-fixes, it also asks for `checks: read` and `statuses: read`,
-for the PR's own checks the fixer reads; a push that carries a workflow change
-asks for `workflows: write`.
+Its token asks for `contents: write`, which disarming a signaled pull
+request's auto-merge needs, `pull_requests: write`, `actions: read`, which
+the App needs for the logs, `merge_queues: write`, which
+`enqueuePullRequest` needs, and `checks: read` and `statuses: read`, which
+tell a required reviewer's findings from an optional one's and give the fixer
+the PR's own checks. With a fixer, which also arms auto-merge and pushes
+fixes, a push that carries a workflow change asks for `workflows: write`.
 
 ### The land fixer
 
@@ -1295,8 +1295,12 @@ merge ends the pick. There are two kinds:
 
 - `finding`: an online reviewer's (a bot's, or a review whose body opens
   `Automated review by <name>`) on the head, when the base requires that
-  reviewer: GitHub reports a check it posts on the head, a check run from its
-  app or a commit status it created, as required for the PR. A review thread
+  reviewer: on the commit it reviewed, GitHub reports a check posted by the
+  bot account the review came from, a check run from its app or a commit
+  status it created, as required for the PR. Every GitHub Actions workflow
+  posts as `github-actions[bot]`, so a reviewer posting as that account is
+  required wherever any Actions job is, and one posting as its own bot from a
+  required workflow is not. A review thread
   it opened holds until it is resolved or a writer other than the reviewer
   replies. A `[P<n>]` line in its latest review over the head, counting one
   that only opens threads, holds until a writer's later comment links that

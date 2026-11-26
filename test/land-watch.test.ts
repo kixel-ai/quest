@@ -76,8 +76,8 @@ interface Pull {
 	labels?: string[];
 	/** Its reviews, threads, and comments as the signal reader reads them; none by default. */
 	activity?: Record<string, unknown>;
-	/** The accounts that post a commit status its base requires on its head; none by default. */
-	requiredBy?: string[];
+	/** The accounts that post a commit status its base requires, by commit; none by default. */
+	requiredBy?: Record<string, string[]>;
 }
 interface Job {
 	id: number;
@@ -252,8 +252,7 @@ function deps(world: World): GitHubDependencies {
 				}
 				if (query.includes("query RequiredPosters(")) {
 					const pull = world.pulls.find((item) => item.number === variables.number)!;
-					expect(variables.oid).toBe(headOf(world, pull));
-					const nodes = (pull.requiredBy ?? []).map((login) => ({
+					const nodes = (pull.requiredBy?.[String(variables.oid)] ?? []).map((login) => ({
 						__typename: "StatusContext",
 						isRequired: true,
 						creator: login.endsWith("[bot]")
@@ -904,7 +903,7 @@ test("a queued or armed pick that draws a required reviewer's finding leaves the
 			armed: at(2),
 			queued: at(2),
 			activity: finding,
-			requiredBy: ["rabbit[bot]"],
+			requiredBy: { [HEAD]: ["rabbit[bot]"] },
 		},
 		{
 			number: 31,
@@ -914,7 +913,7 @@ test("a queued or armed pick that draws a required reviewer's finding leaves the
 			armed: at(2),
 			mergeState: "BLOCKED",
 			activity: finding,
-			requiredBy: ["rabbit[bot]"],
+			requiredBy: { [HEAD]: ["rabbit[bot]"] },
 		},
 		// Retargeted after the list read: another base's watcher owns it now.
 		{
@@ -925,7 +924,7 @@ test("a queued or armed pick that draws a required reviewer's finding leaves the
 			armed: at(2),
 			base: "release",
 			activity: finding,
-			requiredBy: ["rabbit[bot]"],
+			requiredBy: { [HEAD]: ["rabbit[bot]"] },
 		},
 		// The base requires only another account's check, so the reviewer is optional and its finding a suggestion.
 		{
@@ -936,7 +935,7 @@ test("a queued or armed pick that draws a required reviewer's finding leaves the
 			armed: at(2),
 			queued: at(2),
 			activity: finding,
-			requiredBy: ["ci[bot]"],
+			requiredBy: { [HEAD]: ["ci[bot]"] },
 		},
 		// Nothing holds it.
 		{
@@ -978,7 +977,7 @@ test("a signaled pick leaves the queue even when GitHub refuses its comment, whi
 				removals: [],
 				armed: at(2),
 				queued: at(2),
-				requiredBy: ["rabbit[bot]"],
+				requiredBy: { [HEAD]: ["rabbit[bot]"] },
 				activity: {
 					reviews: {
 						pageInfo: { hasNextPage: false, endCursor: null },
@@ -1103,7 +1102,14 @@ test("an armed pick withdrawn, retargeted, or held while the pass reads it is no
 
 test("the watcher's tokens ask for writes only with a fixer, and pushes for workflows only when they carry one", () => {
 	expect(watchPermissions(false)).toEqual({
-		api: { contents: "write", pull_requests: "write", actions: "read", merge_queues: "write" },
+		api: {
+			contents: "write",
+			pull_requests: "write",
+			actions: "read",
+			merge_queues: "write",
+			checks: "read",
+			statuses: "read",
+		},
 	});
 	expect(watchPermissions(true)).toEqual({
 		api: {
@@ -1533,7 +1539,7 @@ describe.skipIf(process.platform === "win32")("the watcher's land fixer", () => 
 				],
 			},
 		};
-		pull.requiredBy = ["rabbit[bot]"];
+		pull.requiredBy = { [head]: ["rabbit[bot]"] };
 		github.now = Date.parse(at(10));
 		expect(await watchPass(REPOSITORY, { state }, deps(github), context)).toEqual(["handback 5"]);
 		expect(github.mutations).toEqual([]);
@@ -1592,7 +1598,7 @@ describe.skipIf(process.platform === "win32")("the watcher's land fixer", () => 
 				],
 			},
 		};
-		pull.requiredBy = ["rabbit[bot]"];
+		pull.requiredBy = { [head]: ["rabbit[bot]"] };
 		github.now = Date.parse(at(10));
 		expect(await watchPass(REPOSITORY, { state }, deps(github), context)).toEqual(["handback 5"]);
 		// Leaving the queue disarmed it, so nothing asks GitHub to disarm a request that is gone.
@@ -1636,7 +1642,7 @@ describe.skipIf(process.platform === "win32")("the watcher's land fixer", () => 
 				],
 			},
 		};
-		pull.requiredBy = ["rabbit[bot]"];
+		pull.requiredBy = { [head]: ["rabbit[bot]"] };
 		github.now = Date.parse(at(12));
 		expect(await watchPass(REPOSITORY, { state }, deps(github), context)).toEqual([
 			`dequeued 5 ${fixed()} 1 signals`,
