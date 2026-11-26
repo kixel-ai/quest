@@ -1,7 +1,7 @@
 // This host's Kixel Quest sign-ins, which `quest login` writes, and the Kixel Quest they pair with: one built-in URL,
 // or the one `QUEST_KIXEL_URL` names. The forge reads and the record sender both send a token only to the URL the
 // user's file pairs it with.
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -59,26 +59,18 @@ export function saveLogin(url: string, login: Login, env: NodeJS.ProcessEnv = pr
 	write(tokensPath(env), { ...readLogins(env), [url]: login });
 }
 
-/** Forget the sign-in to `url`, and its token in an earlier quest's file, returning whether there was one. */
+/** Forget the sign-in to `url`, returning whether there was one. */
 export function removeLogin(url: string, env: NodeJS.ProcessEnv = process.env): boolean {
 	const logins = readLogins(env);
 	if (!(url in logins)) return false;
 	delete logins[url];
-	// Kept when empty, so an earlier quest's file is not read again.
 	write(tokensPath(env), logins);
-	// A sender started before the upgrade still reads the old file, and must post with the token no more.
-	const old = oldPath(env);
-	if (existsSync(old)) {
-		const tokens = readObject(old);
-		delete tokens[url];
-		write(old, tokens);
-	}
 	return true;
 }
 
 function readLogins(env: NodeJS.ProcessEnv): Record<string, Login> {
 	const path = tokensPath(env);
-	if (!existsSync(path)) return copyTokens(env);
+	if (!existsSync(path)) return moveTokens(env);
 	const logins = readObject(path);
 	for (const [url, login] of Object.entries(logins)) {
 		const { token, transcripts } = (login ?? {}) as Partial<Login>;
@@ -95,12 +87,11 @@ function readLogins(env: NodeJS.ProcessEnv): Record<string, Login> {
 }
 
 /**
- * Copy the tokens an earlier quest read from `records.json`, `{"https://...": "token"}`, into the sign-ins file, as
- * sign-ins whose person was never asked about transcripts, so they upload none. The old file stays for an earlier
- * quest still running, such as a sender started before the upgrade, which would drop its queue without it.
+ * Move the tokens an earlier quest read from `records.json`, `{"https://...": "token"}`, into the sign-ins file, as
+ * sign-ins whose person was never asked about transcripts, so they upload none.
  */
-function copyTokens(env: NodeJS.ProcessEnv): Record<string, Login> {
-	const old = oldPath(env);
+function moveTokens(env: NodeJS.ProcessEnv): Record<string, Login> {
+	const old = join(configDirectory(env), "records.json");
 	if (!existsSync(old)) return {};
 	const logins: Record<string, Login> = {};
 	for (const [url, token] of Object.entries(readObject(old))) {
@@ -108,10 +99,9 @@ function copyTokens(env: NodeJS.ProcessEnv): Record<string, Login> {
 		logins[url] = { token, transcripts: false };
 	}
 	write(tokensPath(env), logins);
+	rmSync(old);
 	return logins;
 }
-
-const oldPath = (env: NodeJS.ProcessEnv) => join(configDirectory(env), "records.json");
 
 function readObject(path: string): Record<string, unknown> {
 	let parsed: unknown;

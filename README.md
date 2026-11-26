@@ -695,7 +695,9 @@ keeps in `$XDG_CONFIG_HOME/quest/login.json` (`~/.config`), readable only by
 the user, with the answer about transcripts, where only a `y` or `yes` agrees;
 the record sender uploads no transcripts yet.
 Signing in again replaces the host's token. `quest logout` removes it from the
-host; Kixel Quest takes it until it is revoked on its Tokens page.
+host; Kixel Quest takes it until it is revoked on its Tokens page. A
+`records.json` beside it, where earlier versions read a pasted token, is moved
+into `login.json` on the first read, uploading no transcripts.
 
 Without a sign-in, or for a repository Kixel Quest does not serve, reads go to
 GitHub as above; the output is the same either way. When Kixel Quest fails, the
