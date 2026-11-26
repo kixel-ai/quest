@@ -1,0 +1,30 @@
+# [S] Thin shared GitHub Actions action and reusable workflows
+
+## Goal
+
+`kixel-ai/quest` ships one composite action and a minimal set of reusable GitHub Actions workflows so repositories delete their copy-pasted `.github/actions/nix` actions and boilerplate workflow YAML for the jobs that remain on GitHub Actions:
+
+- **Composite action (`.github/actions/setup-nix`):** installs Nix (`determinate: false`), sets `accept-flake-config = true` so `flake.nix`'s `nixConfig` (`nix.kixel.quest`) is trusted on first run, and optionally wires `mbx` for S3/B2 Rust caching.
+- **Reusable workflows (`.github/workflows/`):**
+  - `check.yml`: read-only check runner for outside contributor PRs on public GitHub mirrors (skips drafts, zero secrets, runs `quest run --tier pr`).
+  - `platform.yml`: dispatches public macOS and Windows `nightly` and `release-gate` tasks (`quest run --tier <tier> --os <os>`) and uploads `kixel-metrics` (`junit.xml` + `metrics.json`) for Kixel Quest ingestion.
+  - `npm-publish.yml`: minimal GitHub-hosted npm OIDC trusted publishing workflow (since npm accepts OIDC tokens only from GitHub's runners).
+
+## Plan
+
+Decided 2026-11-26 (maintainer, `/quest-plan`, see the [CI epic](/quest/m0/ci/README.md)):
+
+- ✅ Keep Linux CI (`main` queue, `release` queue, nightly Linux, isolated deploys) native on Kixel Quest hosts, and maintain thin shared GitHub Actions workflows here only for public macOS/Windows legs (until mesh or native non-Linux hosts cover them), read-only outside contributor PRs, and npm OIDC publishing (rejected: duplicating `.github/actions/nix` across 7+ repos; running Linux CI on GitHub Actions).
+
+Implementation notes:
+
+- Pin all third-party GitHub Actions by full commit SHA and lint every workflow and action with `actionlint` and `zizmor --offline` in `just check`.
+- Keep PR workflows strictly read-only (`permissions: contents: read`, no secrets).
+- Version reusable workflow calls cleanly by tag/SHA so downstream repos opt in explicitly and never load unreviewed `@main` workflow code with write permissions.
+
+Tests: `actionlint` and `zizmor --offline` pass on all shipped actions and workflows; verify a downstream test workflow calling `setup-nix` and `check.yml` runs `quest run --tier pr` and uploads `kixel-metrics`.
+
+## Required
+
+- [quest.toml manifest and quest run](/quest/m0/ci/manifest.md) - provides `quest run --tier` invoked by the reusable workflows
+- [quest.lib.mkFlake and quest cache push](/quest/m0/ci/nix-lib.md) - establishes the `nix.kixel.quest` `nixConfig` trusted by `setup-nix`
