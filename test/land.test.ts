@@ -2982,6 +2982,45 @@ describe.skipIf(process.platform === "win32")("the watcher's own queue", () => {
 		},
 	);
 
+	// kixel-ai/dotfiles#358: GitHub answered the merge of the queue's own base merge "not mergeable" for
+	// seconds, and the PR read after it already showed settled mergeability.
+	test("a prepared head's 405 not mergeable while GitHub recomputes is retried until it merges", async () => {
+		const context = setup();
+		const { forge, pass, pauses } = context;
+		const pull = await behind(context);
+		pull.mergeRefusals = [
+			{ status: 405, message: "Pull Request is not mergeable" },
+			{ status: 405, message: "Pull Request is not mergeable" },
+		];
+		expect(await pass()).toEqual(["landed 1"]);
+		expect(pauses).toEqual([500, 1000]);
+		expect(forge.comment(1)).toBeUndefined();
+	});
+
+	test("a prepared head's 405 not mergeable that persists is ejected with what GitHub reported", async () => {
+		const context = setup();
+		const { forge, pass, pauses } = context;
+		const pull = await behind(context);
+		pull.mergeRefusals = Array.from({ length: 6 }, () => ({
+			status: 405 as const,
+			message: "Pull Request is not mergeable",
+		}));
+		expect(await pass()).toEqual(["refused 1"]);
+		expect(pauses).toEqual([500, 1000, 2000, 4000, 8000]);
+		expect(forge.comment(1)).toContain("mergeable true, mergeable_state clean");
+		expect(pull.merged).toBeFalsy();
+	});
+
+	test("a 405 not mergeable with no gate push is ejected without a retry", async () => {
+		const { forge, pass, pauses } = setup();
+		const pull = forge.pull("One", { "one.txt": "1\n" });
+		await pass();
+		report(forge, 1, "SUCCESS");
+		pull.mergeRefusals = [{ status: 405, message: "Pull Request is not mergeable" }];
+		expect(await pass()).toEqual(["refused 1"]);
+		expect(pauses).toEqual([]);
+	});
+
 	test("a prepared head GitHub keeps calling conflicting stays queued, and the next pass lands it", async () => {
 		const context = setup();
 		const { forge, pass, pauses } = context;
