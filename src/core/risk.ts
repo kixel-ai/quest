@@ -37,11 +37,17 @@ export const ALWAYS_HIGH: readonly HighPath[] = [
 export const heldHigh = (file: RiskFile | null): HighPath[] => [...ALWAYS_HIGH, ...(file?.high ?? [])];
 
 /**
- * The automatic classes every repository offers, whatever its risk file says: plans under `quest/`, the same tree in
- * every quest repository. A risk file's class of the same name replaces one.
+ * The quest tree, the same in every quest repository. A change adding or changing a line under it, a new quest or a
+ * move included, is at least medium whatever the risk file says, since agents start that work with no person reading it.
+ */
+export const PLANS = "quest/";
+
+/**
+ * The automatic classes every repository offers, whatever its risk file says: plans under {@link PLANS} that a change
+ * only removes, since one adding to them is never low. A risk file's class of the same name replaces one.
  */
 export const DEFAULT_CLASSES: readonly Class[] = [
-	{ name: "quest", scope: ["quest/**"], rule: "only plans under `quest/` change, which no user reads" },
+	{ name: "quest", scope: ["quest/**"], rule: "only plans under `quest/` are removed or cut, which no user reads" },
 ];
 
 /** The classes a base with risk file `file`, or none, offers: {@link DEFAULT_CLASSES} it does not replace, then its own. */

@@ -20,6 +20,8 @@ import {
 	DEFAULT_CLASSES,
 	heldHigh,
 	highHits,
+	matches,
+	PLANS,
 	RISK_FILE,
 	SIZES,
 	type Size,
@@ -1323,22 +1325,38 @@ function replied(reply: { structured?: unknown; text?: string }, what: string): 
 	}
 }
 
-/** The classifier's reply schema: the assessment, and the class the change falls in when any class is offered. */
-function classSchema(classes: string[]) {
-	if (classes.length === 0) return ASSESSMENT;
+/**
+ * The classifier's reply schema: the assessment, its tier no lower than `floor`, and the class the change falls in
+ * when any class is offered.
+ */
+function classSchema(classes: string[], floor: Tier) {
+	const tier = { type: "string", enum: TIERS.slice(TIERS.indexOf(floor)) };
+	const properties = { ...ASSESSMENT.properties, tier };
+	if (classes.length === 0) return { ...ASSESSMENT, properties };
 	return {
 		...ASSESSMENT,
 		required: [...ASSESSMENT.required, "class"],
-		properties: { ...ASSESSMENT.properties, class: { type: ["string", "null"], enum: [...classes, null] } },
+		properties: { ...properties, class: { type: ["string", "null"], enum: [...classes, null] } },
 	};
 }
 
-/** The classifier's assessment in `value`, and the class it names, which must be one of `classes`, or null. */
-export function classed(value: unknown, classes: string[], what: string): Assessment & { class: string | null } {
+/**
+ * The classifier's assessment in `value`, whose tier must be no lower than `floor`, and the class it names, which
+ * must be one of `classes`, or null.
+ */
+export function classed(
+	value: unknown,
+	classes: string[],
+	floor: Tier,
+	what: string,
+): Assessment & { class: string | null } {
 	const named = record(value)?.class ?? null;
 	if (named !== null && !classes.includes(named as string))
 		throw new Error(`${what} names ${JSON.stringify(named)}, which is no class the risk file offers this change`);
-	return { ...assessment(value, what), class: named as string | null };
+	const assessed = assessment(value, what);
+	if (riskier(floor, assessed.tier))
+		throw new Error(`${what} names ${assessed.tier}, below the ${floor} its change is held to`);
+	return { ...assessed, class: named as string | null };
 }
 
 /** The tier and reason `value` holds, with its reason on one line, failing as `what` when it holds none. */
@@ -1591,7 +1609,7 @@ export function reportPrompt(head: string, earlier: Finding[] = [], first = 1): 
 /** What each tier means, as the classifier reads it: who a mistake in the change reaches, and how soon they would know. */
 const TIER_SCALE =
 	"Risk is blast radius: who is hurt if the change is wrong, and whether anything catches it first. A change is low " +
-	"when no one outside the repository could tell it apart, such as tests, documentation, plans, comments, or a " +
+	"when no one outside the repository could tell it apart, such as tests, documentation, removed plans, comments, or a " +
 	"refactor that changes no behavior. It is high when a mistake in it reaches the users or customers of what the " +
 	"repository ships, or other repositories that build on it, before a check or a revert would catch it, such as " +
 	"the core of a wire protocol or data path, a public API others build against, billing, a security boundary, or a " +
@@ -1664,6 +1682,19 @@ const DIFF_FLAGS = ["--text", "--no-ext-diff", "--no-textconv", "--no-color", "-
 const modelDiff = (root: string, empty: string, args: string[]) =>
 	git(root, [`--attr-source=${empty}`, "diff", ...DIFF_FLAGS, ...args]);
 
+/**
+ * The paths under {@link PLANS} that `range` adds a line to, a rename's new side included, read as a model reads the
+ * diff so the head's attributes cannot hide one.
+ */
+function addedPlans(root: string, empty: string, range: string): string[] {
+	return modelDiff(root, empty, ["--numstat", "--no-renames", "-z", range, "--", PLANS])
+		.split("\0")
+		.flatMap((line) => {
+			const [, added, path] = /^(\d+)\t\d+\t([\s\S]+)$/.exec(line) ?? [];
+			return added !== undefined && added !== "0" && matches(PLANS, path!) ? [path!] : [];
+		});
+}
+
 /** The bytes as UTF-8 text, or null when they are not valid UTF-8, which decoding would swell with U+FFFD. */
 function text8(bytes: Buffer): string | null {
 	try {
@@ -1688,6 +1719,7 @@ export function classifyPrompt(
 	file: { sha: string; text: string | null },
 	diff: { stat: string; patch: string | null; file: string; size: number },
 	classes: readonly Class[] = [],
+	planned: readonly string[] = [],
 ): string {
 	const { stat, patch, file: patchFile, size } = diff;
 	const range = `${change.mergeBase}..${change.head}`;
@@ -1708,6 +1740,12 @@ export function classifyPrompt(
 		`<diff>\n${shown}\n</diff>`,
 		"Report the change's tier as JSON matching the response schema, with one sentence on what could break, for " +
 			"whom, and how hard it is to undo.",
+		...(planned.length > 0
+			? [
+					`It adds to plans under \`${PLANS}\`, which agents start without a person reading them, so its tier ` +
+						`is medium or high: ${planned.map(codeSpan).join(", ")}.`,
+				]
+			: []),
 		...(classes.length > 0
 			? [
 					"Also report as `class` the one class below whose rule every changed file meets, judged by what the " +
@@ -2018,7 +2056,7 @@ export async function classify(input: Classifying): Promise<{ key: string; value
 	// And the diff's form, so a tier set from a diff the head's attributes could shape is set again, and the built-in
 	// defaults, so a release that changes them classifies every head again.
 	const { empty } = change;
-	const defaults = [ALWAYS_HIGH, DEFAULT_CLASSES];
+	const defaults = [ALWAYS_HIGH, DEFAULT_CLASSES, PLANS];
 	const key = digest(JSON.stringify([change.mergeBase, change.head, text, changed, empty, DIFF_FLAGS, defaults]));
 	if (input.saved?.key === key) return { key, value: { ...input.saved.value, riskFile, usage: [] } };
 	if (input.savedOnly)
@@ -2037,10 +2075,17 @@ export async function classify(input: Classifying): Promise<{ key: string; value
 		const reason = `it changes ${path}, which is always high${more}: ${rule.reason}`;
 		return set({ tier: "high", reason, by: { kind: "paths" }, class: null });
 	}
+	// A plan an unreviewed change adds cascades into the work agents start from it, so adding to plans is never low,
+	// and only a change that removes plan text keeps the classes, which a low change needs to land on its own.
+	const planned = addedPlans(root, empty, range);
+	const floor: Tier = planned.length > 0 ? "medium" : "low";
 	// Only the classes whose scope holds every changed path, so the classifier cannot widen one.
-	const offered = classesFor(offeredClasses(file), changed);
+	const offered = floor === "low" ? classesFor(offeredClasses(file), changed) : [];
 	if (text === null && offered.length === 0) {
-		const reason = `the base has no ${RISK_FILE} to name what is always high or customer-facing, so every change is medium`;
+		const reason =
+			planned.length > 0
+				? `it adds to plans under ${PLANS}, which agents start without a person reading them`
+				: `the base has no ${RISK_FILE} to name what is always high or customer-facing, so every change is medium`;
 		return set({ tier: "medium", reason, by: { kind: "default" }, class: null });
 	}
 	const classes = offered.map((each) => each.name);
@@ -2067,7 +2112,13 @@ export async function classify(input: Classifying): Promise<{ key: string; value
 		// their length, so it goes down the file path too.
 		const bytes = stat.length + size <= DIFF_BUDGET ? readFileSync(patchFile) : null;
 		const patch = bytes && !bytes.includes(0) ? text8(bytes) : null;
-		const prompt = classifyPrompt(change, { sha: baseSha, text }, { stat, patch, file: patchFile, size }, offered);
+		const prompt = classifyPrompt(
+			change,
+			{ sha: baseSha, text },
+			{ stat, patch, file: patchFile, size },
+			offered,
+			planned,
+		);
 		answer = await ask(CLASSIFIERS, {
 			spent,
 			readable: scratch,
@@ -2076,11 +2127,11 @@ export async function classify(input: Classifying): Promise<{ key: string; value
 			env: input.env,
 			signal: input.signal,
 			instructions: CLASSIFY_INSTRUCTIONS,
-			schema: classSchema(classes),
+			schema: classSchema(classes, floor),
 			prompt,
 			who: "classifier",
 			task: "set the risk tier",
-			parse: (value) => classed(value, classes, "the classifier's reply"),
+			parse: (value) => classed(value, classes, floor, "the classifier's reply"),
 		});
 	} finally {
 		rmSync(scratch, { recursive: true, force: true });

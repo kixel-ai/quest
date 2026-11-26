@@ -1923,11 +1923,19 @@ from the base's tip, so a change cannot lower its own tier, and fails on one
 it cannot read, which the repository's own `quest check`
 reports first.
 
+A change that adds or changes a line under `quest/`, a new quest or a move
+included, is at least `medium` in every repository, whatever its `RISK.md` says:
+agents start a quest's work with no person reading it first, so a plan that
+lands unreviewed cascades into everything built from it. The classifier is
+told which plans it adds and may answer only `medium` or `high`, and is
+offered no class. A change that only removes plan text, such as finishing a
+quest or dropping a link, keeps the tier the rest of the diff earns.
+
 Every repository also offers the built-in class `quest` (`quest/**`), for a
-change to plans alone; a class the base's `RISK.md` lists by the same name
-replaces it, scope and rule. A base with no `RISK.md` makes every change no
-path holds high `medium`, unless a built-in class's scope holds every changed
-path.
+change that only removes or cuts plans; a class the base's `RISK.md` lists by
+the same name replaces it, scope and rule. A base with no `RISK.md` makes
+every change no path holds high `medium`, unless a built-in class's scope
+holds every changed path.
 
 Otherwise a classifier reads the diff and the base's `RISK.md`, if any, in one read-only
 turn and replies with a tier, one sentence on why, and the `## Automatic`

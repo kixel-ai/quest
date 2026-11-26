@@ -25,6 +25,7 @@ import {
 	ask,
 	authored,
 	baseInstructions,
+	classed,
 	claudeFlags,
 	codexFlags,
 	nextStep,
@@ -1752,18 +1753,18 @@ fakes(
 );
 
 fakes(
-	"a base with no risk file offers the built-in quest class to a plan-only change, and holds workflows high",
+	"a base with no risk file offers the built-in quest class to a change removing plans, and holds workflows high",
 	async () => {
 		const s = setup();
-		vi.stubEnv("FAKE_RISK", JSON.stringify({ tier: "low", reason: "Only a plan changes.", class: "quest" }));
+		moveBase(s.repo, (dir) => write(dir, "quest/m0/plan.md", "# [S] A plan\n\n## Goal\n\nDone.\n"));
+		vi.stubEnv("FAKE_RISK", JSON.stringify({ tier: "low", reason: "Only a plan goes.", class: "quest" }));
 		vi.stubEnv("FAKE_REPLY", JSON.stringify({ score: 10, rationale: "Lands as is.", findings: [] }));
 		git(s.repo, "checkout", "-qb", "plans", "origin/main");
-		write(s.repo, "quest/m0/plan.md", "# [S] A plan\n\n## Goal\n\nDone.\n");
-		git(s.repo, "add", ".");
-		git(s.repo, "commit", "-qm", "plan");
-		const planned = await quest("--root", s.repo, "review");
-		expect(planned.code, planned.stderr).toBe(0);
-		expect(planned.stdout).toContain("risk low Only a plan changes.\nclassified low model Only a plan changes.\n");
+		git(s.repo, "rm", "-q", "quest/m0/plan.md");
+		git(s.repo, "commit", "-qm", "plan done");
+		const removed = await quest("--root", s.repo, "review");
+		expect(removed.code, removed.stderr).toBe(0);
+		expect(removed.stdout).toContain("risk low Only a plan goes.\nclassified low model Only a plan goes.\n");
 		const [call, ...more] = classifying(s.calls());
 		expect(more).toEqual([]);
 		expect(JSON.parse(call!.argv[call!.argv.indexOf("--json-schema") + 1]!).properties.class.enum).toEqual([
@@ -1771,7 +1772,7 @@ fakes(
 			null,
 		]);
 		expect(call!.stdin).toContain("The repository has no risk file");
-		expect(call!.stdin).toContain("- `quest` (`quest/**`) - only plans under `quest/` change");
+		expect(call!.stdin).toContain("- `quest` (`quest/**`) - only plans under `quest/` are removed or cut");
 
 		// A change to the built-in defaults classifies the same head again.
 		const [quests] = DEFAULT_CLASSES as Class[];
@@ -1782,6 +1783,16 @@ fakes(
 		} finally {
 			quests!.rule = rule;
 		}
+		expect(classifying(s.calls())).toHaveLength(2);
+
+		// Adding a plan is medium with no model, for the plan rather than the missing risk file.
+		git(s.repo, "checkout", "-qB", "plans", "origin/main");
+		write(s.repo, "quest/m0/new.md", "# [S] New\n");
+		git(s.repo, "add", ".");
+		git(s.repo, "commit", "-qm", "new plan");
+		const added = await quest("--root", s.repo, "review");
+		expect(added.code, added.stderr).toBe(0);
+		expect(added.stdout).toContain("\nrisk medium it adds to plans under quest/, which agents start");
 		expect(classifying(s.calls())).toHaveLength(2);
 
 		// A workflow is high by its path, with no model.
@@ -1802,16 +1813,16 @@ fakes(
 
 fakes("a risk file's class named like a built-in one replaces it", async () => {
 	const s = setup();
-	moveBase(s.repo, (dir) =>
-		write(dir, "RISK.md", `${riskFile([])}\n## Automatic\n\n- \`quest\` (\`quest/m0/**\`) - OWN-RULE\n`),
-	);
-	vi.stubEnv("FAKE_RISK", JSON.stringify({ tier: "low", reason: "Only a plan changes.", class: null }));
+	moveBase(s.repo, (dir) => {
+		write(dir, "RISK.md", `${riskFile([])}\n## Automatic\n\n- \`quest\` (\`quest/m0/**\`) - OWN-RULE\n`);
+		for (const milestone of ["m0", "m1"]) write(dir, `quest/${milestone}/plan.md`, "# [S] A plan\n");
+	});
+	vi.stubEnv("FAKE_RISK", JSON.stringify({ tier: "low", reason: "Only a plan goes.", class: null }));
 	vi.stubEnv("FAKE_REPLY", JSON.stringify({ score: 10, rationale: "Lands as is.", findings: [] }));
 	const offered = async (path: string) => {
 		git(s.repo, "checkout", "-qB", "plans", "origin/main");
-		write(s.repo, path, "# [S] A plan\n");
-		git(s.repo, "add", ".");
-		git(s.repo, "commit", "-qm", "plan");
+		git(s.repo, "rm", "-q", path);
+		git(s.repo, "commit", "-qm", "plan done");
 		const result = await quest("--root", s.repo, "review");
 		expect(result.code, result.stderr).toBe(0);
 		const call = classifying(s.calls()).at(-1)!;
@@ -1823,6 +1834,54 @@ fakes("a risk file's class named like a built-in one replaces it", async () => {
 	expect(inside.call.stdin).not.toContain("which no user reads");
 	// Its narrower scope holds no plan outside m0, which the built-in one would have.
 	expect((await offered("quest/m1/plan.md")).names).toBeUndefined();
+});
+
+fakes("a change adding to plans is at least medium and offered no class, where one removing them is not", async () => {
+	const s = setup();
+	const plan = "# [S] A plan\n\n## Goal\n\nDone.\n\n## Plan\n\nSteps.\n";
+	moveBase(s.repo, (dir) => {
+		write(dir, "RISK.md", `${riskFile([])}\n## Automatic\n\n- \`any\` - anything\n`);
+		write(dir, "quest/m0/plan.md", plan);
+	});
+	vi.stubEnv("FAKE_RISK", JSON.stringify({ tier: "medium", reason: "It plans more work.", class: null }));
+	vi.stubEnv("FAKE_REPLY", JSON.stringify({ score: 10, rationale: "Lands as is.", findings: [] }));
+	const classified = async (change: () => void) => {
+		git(s.repo, "checkout", "-qB", "plans", "origin/main");
+		change();
+		git(s.repo, "add", "-A");
+		git(s.repo, "commit", "-qm", "plans");
+		const result = await quest("--root", s.repo, "review");
+		expect(result.code, result.stderr).toBe(0);
+		const call = classifying(s.calls()).at(-1)!;
+		const schema = JSON.parse(call.argv[call.argv.indexOf("--json-schema") + 1]!);
+		return { tiers: schema.properties.tier.enum, classes: schema.properties.class?.enum, prompt: call.stdin };
+	};
+
+	// A new quest, and a line added to one, each hold the tier at medium or above with no class to land in.
+	for (const change of [
+		() => write(s.repo, "quest/m0/follow-up.md", "# [XS] More work\n\n## Goal\n\nMore.\n"),
+		() => write(s.repo, "quest/m0/plan.md", plan.replace("Steps.", "Steps.\nAnd more steps.")),
+	]) {
+		const added = await classified(change);
+		expect(added.tiers).toEqual(["medium", "high"]);
+		expect(added.classes).toBeUndefined();
+		expect(added.prompt).toContain("It adds to plans under `quest/`");
+	}
+	// A move adds the plan at its new path.
+	const moved = await classified(() => git(s.repo, "mv", "quest/m0/plan.md", "quest/m0/moved.md"));
+	expect(moved.prompt).toContain("so its tier is medium or high: `quest/m0/moved.md`.");
+
+	// Cutting a plan's lines keeps every tier and class.
+	const cut = await classified(() => write(s.repo, "quest/m0/plan.md", plan.replace("\n## Plan\n\nSteps.\n", "")));
+	expect(cut.tiers).toEqual(["low", "medium", "high"]);
+	expect(cut.classes).toEqual(["quest", "any", null]);
+	expect(cut.prompt).not.toContain("It adds to plans");
+});
+
+test("a classifier reply below its change's floor is refused", () => {
+	const reply = { tier: "low", reason: "Only a plan.", class: null };
+	expect(() => classed(reply, [], "medium", "the reply")).toThrow("the reply names low, below the medium");
+	expect(classed({ ...reply, tier: "high" }, [], "medium", "the reply").tier).toBe("high");
 });
 
 fakes(

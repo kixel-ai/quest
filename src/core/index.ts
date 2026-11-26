@@ -58,6 +58,7 @@ export {
 	highHits,
 	matches,
 	offeredClasses,
+	PLANS,
 	parseRiskFile,
 	patternError,
 	recordedRisk,
