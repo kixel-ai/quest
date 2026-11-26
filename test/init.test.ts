@@ -62,7 +62,7 @@ test.each([
 	expect(stubFindings(dir)).toEqual([]);
 	expect(read(dir, ".agents/skills/quest-start/SKILL.md")).toBe(start.stubs(launcher)[".agents/skills"]);
 	expect(read(dir, ".agents/skills/quest-start/SKILL.md")).toContain(
-		`If \`quest\` is not on \`PATH\`, run \`${launcher} quest skill start\` instead, and prefix later \`quest\` commands with \`${launcher}\`; if that fails too, follow https://github.com/kixel-ai/quest/blob/main/SETUP.md first.`,
+		`If \`quest\` is not on \`PATH\`, run \`${launcher} quest skill start\` instead, and prefix later \`quest\` commands with \`${launcher}\` except where the skill asks for a \`quest\` the PR cannot modify; if that fails too, follow https://github.com/kixel-ai/quest/blob/main/SETUP.md first.`,
 	);
 	expect(read(dir, ".claude/skills/quest-start/SKILL.md")).toBe(start.stubs(launcher)[".claude/skills"]);
 	expect(read(dir, ".claude/skills/quest-start/SKILL.md")).toContain(`run ${launcher} quest skill start and follow`);
@@ -85,6 +85,15 @@ test("init keeps the setup pointer when a tool manager's file does not name Ques
 	expect(read(dir, ".agents/skills/quest-start/SKILL.md")).toBe(
 		SKILLS.find((skill) => skill.name === "start")!.stubs()[".agents/skills"],
 	);
+});
+
+test("init refuses a launcher stub edited to name a launcher Quest does not write", () => {
+	const dir = tempDir();
+	writeFileSync(join(dir, "flake.nix"), 'inputs.quest.url = "github:kixel-ai/quest";\n');
+	init(dir);
+	const path = ".agents/skills/quest-start/SKILL.md";
+	writeFileSync(join(dir, path), read(dir, path).replaceAll("nix develop --command", "devbox run"));
+	expect(() => init(dir)).toThrow(`${path} is not a Quest stub`);
 });
 
 test("init prefers mise, which runs everywhere, when both mise and the flake pin Quest", () => {

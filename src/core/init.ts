@@ -318,9 +318,12 @@ function sharedSkill(repo: Checkout, installed: string): boolean {
 	return new Set(files.map((file) => repo.real(file))).size === 1;
 }
 
+/** The launchers a stub names, as a regex alternation. */
+const LAUNCHED = LAUNCHERS.map(([, command]) => command.replace(/[.*+?^${}()|[\]\\-]/g, "\\$&")).join("|");
+
 /**
  * Any version's stub: frontmatter naming the skill, then either the pointer
- * to `quest skill`, with the setup link or the repository's launcher for
+ * to `quest skill`, with the setup link or one of Quest's launchers for
  * when `quest` is missing, or Claude Code's inline call of it. Descriptions,
  * the setup link, and the launcher change between versions and repositories,
  * so only these shapes identify a file Quest wrote. A pointer's frontmatter has only ever held `name` and
@@ -329,7 +332,9 @@ function sharedSkill(repo: Checkout, installed: string): boolean {
  * names the skill.
  */
 const STUBS = [
-	/^---\nname: (\S+)\n(?:(?:name|description): .*\n)*---\n\nRun `quest skill (\S+)` and follow its output\.\nIf `quest` is not (?:installed, follow \S+ first|on `PATH`, run `[^`\n]+ quest skill (\S+)` instead, and prefix later `quest` commands with `[^`\n]+`; if that fails too, follow \S+ first)\.\n$/,
+	new RegExp(
+		String.raw`^---\nname: (\S+)\n(?:(?:name|description): .*\n)*---\n\nRun \`quest skill (\S+)\` and follow its output\.\nIf \`quest\` is not (?:installed, follow \S+ first|on \`PATH\`, run \`(?<launcher>${LAUNCHED}) quest skill (\S+)\` instead, and prefix later \`quest\` commands with \`\k<launcher>\` except where the skill asks for a \`quest\` the PR cannot modify; if that fails too, follow \S+ first)\.\n$`,
+	),
 	/^---\nname: (\S+)\n(?:(?:name|description): .*\n)*allowed-tools: Bash\(quest skill (\S+)\) PowerShell\(quest skill (\S+)\)\n---\n\n!`quest skill (\S+); echo "[^"`\n]*"`\n$/,
 ];
 
@@ -344,7 +349,12 @@ function isStub(repo: Checkout, path: string, installed: string): boolean {
 		return (
 			match !== null &&
 			match[1] === installed &&
-			match.slice(2).every((name) => name === undefined || `${PREFIX}${name}` === installed)
+			// A launcher holds spaces, so no skill name capture equals it.
+			match
+				.slice(2)
+				.every(
+					(name) => name === undefined || name === match.groups?.launcher || `${PREFIX}${name}` === installed,
+				)
 		);
 	});
 }

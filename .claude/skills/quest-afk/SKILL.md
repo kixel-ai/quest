@@ -4,4 +4,4 @@ description: Keep this session's work going while the user is away, taking your 
 allowed-tools: Bash(quest skill afk) PowerShell(quest skill afk)
 ---
 
-!`quest skill afk; echo "If quest skill afk printed an error instead of instructions, run nix develop --command quest skill afk and follow its output, prefixing later quest commands with nix develop --command; if that fails too, install quest as https://github.com/kixel-ai/quest/blob/main/SETUP.md describes."`
+!`quest skill afk; echo "If quest skill afk printed an error instead of instructions, run nix develop --command quest skill afk and follow its output, prefixing later quest commands with nix develop --command except where the skill asks for a quest the PR cannot modify; if that fails too, install quest as https://github.com/kixel-ai/quest/blob/main/SETUP.md describes."`

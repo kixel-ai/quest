@@ -124,11 +124,11 @@ export class Skill {
 		const pointer =
 			launcher === undefined
 				? `Run \`${call}\` and follow its output.\nIf \`quest\` is not installed, follow ${SETUP} first.\n`
-				: `Run \`${call}\` and follow its output.\nIf \`quest\` is not on \`PATH\`, run \`${launcher} ${call}\` instead, and prefix later \`quest\` commands with \`${launcher}\`; if that fails too, follow ${SETUP} first.\n`;
+				: `Run \`${call}\` and follow its output.\nIf \`quest\` is not on \`PATH\`, run \`${launcher} ${call}\` instead, and prefix later \`quest\` commands with \`${launcher}\` except where the skill asks for a \`quest\` the PR cannot modify; if that fails too, follow ${SETUP} first.\n`;
 		const fallback =
 			launcher === undefined
 				? `install quest as ${SETUP} describes, then run ${call} and follow its output.`
-				: `run ${launcher} ${call} and follow its output, prefixing later quest commands with ${launcher}; if that fails too, install quest as ${SETUP} describes.`;
+				: `run ${launcher} ${call} and follow its output, prefixing later quest commands with ${launcher} except where the skill asks for a quest the PR cannot modify; if that fails too, install quest as ${SETUP} describes.`;
 		const inline = `!\`${call}; echo "If ${call} printed an error instead of instructions, ${fallback}"\`\n`;
 		const head = `---\nname: ${this.installed}\ndescription: ${this.description}\n`;
 		const allowed = `allowed-tools: Bash(${call}) PowerShell(${call})\n`;
