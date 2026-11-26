@@ -454,26 +454,35 @@ export function forgeJson(value: unknown): string {
 	return JSON.stringify(value, (_, entry: unknown) => (entry instanceof Map ? Object.fromEntries(entry) : entry));
 }
 
-/** A `GET /forge` answer, failing on any missing, extra, or ill-typed field. */
+// Kixel Quest follows quest's main, so it and a repository's pinned client may each run a quest the other predates.
+// Answers therefore drop fields the client does not know, and fill each field added since the wire's first release
+// (quest v0.22.0), when absent, with a default that fails closed. A new value of a known field, such as another
+// review state, still fails an older client, so carry new facts in new fields. Requests stay strict: a field the
+// server does not know may carry intent, such as how to land a pick, that must not be dropped.
+
+/** A `GET /forge` answer, dropping unknown fields and failing on any missing or ill-typed one. */
 export function parseForgeInfo(value: unknown): ForgeInfo {
-	return info(value, "info");
+	return info(value, "info", false);
 }
 
 /** A request for `call`, failing on any missing, extra, or ill-typed field. */
 export function parseForgeRequest<C extends ForgeCall>(call: C, value: unknown): ForgeCalls[C]["request"] {
-	return REQUESTS[call](value, "request") as ForgeCalls[C]["request"];
+	return REQUESTS[call](value, "request", true) as ForgeCalls[C]["request"];
 }
 
-/** An answer to `call`, failing on any missing, extra, or ill-typed field. */
+/** An answer to `call`, dropping unknown fields, defaulting later ones, and failing on any other missing or ill-typed one. */
 export function parseForgeAnswer<C extends ForgeCall>(call: C, value: unknown): Answer<ForgeCalls[C]["value"]> {
-	return answer(VALUES[call])(value, "answer") as Answer<ForgeCalls[C]["value"]>;
+	return answer(VALUES[call])(value, "answer", false) as Answer<ForgeCalls[C]["value"]>;
 }
 
 type RiskStatus = NonNullable<Status["risk"]>;
 type MalformedStatus = Extract<RiskStatus, { state: "malformed" }>;
 
-/** Parses untrusted JSON at a path named for its error, such as `answer.value.checks`. */
-type Parse<T> = (value: unknown, at: string) => T;
+/**
+ * Parses untrusted JSON at a path named for its error, such as `answer.value.checks`; `strict` refuses unknown fields
+ * rather than dropping them.
+ */
+type Parse<T> = (value: unknown, at: string, strict: boolean) => T;
 
 const fail = (at: string, expected: string): never => {
 	throw new Error(`malformed forge ${at}: expected ${expected}`);
@@ -498,40 +507,52 @@ const oneOf =
 		options.includes(value as T) ? (value as T) : fail(at, `one of ${options.join(", ")}`);
 const nullable =
 	<T>(parse: Parse<T>): Parse<T | null> =>
-	(value, at) =>
-		value === null ? null : parse(value, at);
+	(value, at, strict) =>
+		value === null ? null : parse(value, at, strict);
 const list =
 	<T>(parse: Parse<T>): Parse<T[]> =>
-	(value, at) =>
-		Array.isArray(value) ? value.map((entry, index) => parse(entry, `${at}[${index}]`)) : fail(at, "a list");
-/** An object of exactly these fields, rebuilt in their order so JSON output stays deterministic. */
+	(value, at, strict) =>
+		Array.isArray(value)
+			? value.map((entry, index) => parse(entry, `${at}[${index}]`, strict))
+			: fail(at, "a list");
+/** An object of these fields, rebuilt in their order so JSON output stays deterministic and drops unknown ones. */
 const shape =
 	<T>(fields: { [K in keyof T]-?: Parse<T[K]> }): Parse<T> =>
-	(value, at) => {
+	(value, at, strict) => {
 		if (!isRecord(value)) return fail(at, "an object");
 		const extra = Object.keys(value).find((key) => !Object.hasOwn(fields, key));
-		if (extra !== undefined) fail(`${at}.${extra}`, "no such field");
+		if (strict && extra !== undefined) fail(`${at}.${extra}`, "no such field");
 		const out: Record<string, unknown> = {};
 		for (const key of Object.keys(fields) as (keyof T & string)[]) {
 			const field = (fields as Record<string, Parse<unknown>>)[key]!;
-			if (Object.hasOwn(value, key)) out[key] = field(value[key], `${at}.${key}`);
-			else if (!optional.has(field)) fail(`${at}.${key}`, "a value");
+			const absent = optional.get(field);
+			if (Object.hasOwn(value, key)) out[key] = field(value[key], `${at}.${key}`, strict);
+			else if (absent === undefined) fail(`${at}.${key}`, "a value");
+			else if (absent.length > 0) out[key] = absent[0];
 		}
 		return out as T;
 	};
-/** Fields a shape may leave out. */
-const optional = new WeakSet<Parse<unknown>>();
-const maybe = <T>(parse: Parse<T>): Parse<T | undefined> => {
-	const parsed: Parse<T | undefined> = (value, at) => parse(value, at);
-	optional.add(parsed);
+/** Fields a shape may leave out, each with the value it takes when absent, if any. */
+const optional = new WeakMap<Parse<unknown>, [] | [unknown]>();
+/**
+ * A field a shape may leave out: absent, or else `fallback`, for a field answers gained after the wire's first
+ * release. The fallback is the value that permits the least, since an older server never decided it.
+ */
+function maybe<T>(parse: Parse<T>): Parse<T | undefined>;
+function maybe<T extends boolean | string | null>(parse: Parse<T>, fallback: T): Parse<T>;
+function maybe<T>(parse: Parse<T>, ...fallback: [] | [T]): Parse<T | undefined> {
+	const parsed: Parse<T | undefined> = (value, at, strict) => parse(value, at, strict);
+	optional.set(parsed, fallback);
 	return parsed;
-};
+}
 /** A JSON object of names to values, as a map. */
 const mapOf =
 	(key: Parse<string>, entry: Parse<string>): Parse<Map<string, string>> =>
-	(value, at) => {
+	(value, at, strict) => {
 		if (!isRecord(value)) return fail(at, "an object");
-		return new Map(Object.entries(value).map(([k, v]) => [key(k, `${at} key`), entry(v, `${at}.${k}`)]));
+		return new Map(
+			Object.entries(value).map(([k, v]) => [key(k, `${at} key`, strict), entry(v, `${at}.${k}`, strict)]),
+		);
 	};
 
 const sha: Parse<string> = (value, at) =>
@@ -539,15 +560,15 @@ const sha: Parse<string> = (value, at) =>
 const branch: Parse<string> = (value, at) =>
 	typeof value === "string" && value.startsWith("quest/") ? value : fail(at, "a quest branch");
 const repository = shape<Repository>({ owner: name, repo: name });
-const pullRequest: Parse<PullRequest> = (value, at) => {
-	const pull = shape<PullRequest>({ owner: name, repo: name, number: count })(value, at);
+const pullRequest: Parse<PullRequest> = (value, at, strict) => {
+	const pull = shape<PullRequest>({ owner: name, repo: name, number: count })(value, at, strict);
 	return pull.number > 0 ? pull : fail(`${at}.number`, "a PR number");
 };
 const check = shape<Check>({ name: string, required: boolean, result: string, url: nullable(string) });
 const reviewStates = ["current", "diff-identical", "stale", "unknown"] as const;
 const tier = oneOf<Tier>(TIERS);
 
-const status = shape<Status>({
+const statusFields = shape<Status>({
 	url: string,
 	state: oneOf(["open", "closed", "merged"]),
 	draft: boolean,
@@ -587,16 +608,17 @@ const status = shape<Status>({
 	reviewRecord: nullable(
 		shape<NonNullable<Status["reviewRecord"]>>({ state: oneOf(reviewStates), head: string, localReview: boolean }),
 	),
-	risk: nullable((value, at) =>
+	risk: nullable((value, at, strict) =>
 		isRecord(value) && value.state === "malformed"
-			? shape<MalformedStatus>({ state: oneOf(["malformed"] as const), error: string })(value, at)
+			? shape<MalformedStatus>({ state: oneOf(["malformed"] as const), error: string })(value, at, strict)
 			: shape<Exclude<RiskStatus, MalformedStatus>>({
 					tier,
 					reason: string,
 					classified: tier,
-					class: nullable(string),
+					// A server older than #802 sends none: in no class, so no standing pick lands it.
+					class: maybe(nullable(string), null),
 					state: oneOf(reviewStates),
-				})(value, at),
+				})(value, at, strict),
 	),
 	reactions: list(shape<Reaction>({ content: string, actor: string, createdAt: time, url: string })),
 	threads: list(
@@ -622,6 +644,24 @@ const status = shape<Status>({
 	starterHold: nullable(shape<StarterHold>({ lastActive: time, age: string, url: string })),
 	duplicates: list(shape<Duplicate>({ path: string, url: string, other: string })),
 });
+
+/**
+ * A server older than #868, which sends a review record without `localReview`, counted records no maintainer's
+ * `quest review` status attests: that record, and the risk tier it names, count for no head. A malformed risk stays,
+ * since `quest merge` refuses it.
+ */
+const status: Parse<Status> = (value, at, strict) =>
+	statusFields(
+		isRecord(value) && isRecord(value.reviewRecord) && !Object.hasOwn(value.reviewRecord, "localReview")
+			? {
+					...value,
+					reviewRecord: null,
+					risk: isRecord(value.risk) && value.risk.state === "malformed" ? value.risk : null,
+				}
+			: value,
+		at,
+		strict,
+	);
 
 const openPull = shape<OpenPull>({
 	number: count,

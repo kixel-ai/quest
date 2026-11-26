@@ -874,7 +874,7 @@ describe("start on GitHub, read through the Kixel Quest serving it", () => {
 		expect(out).toEqual({
 			code: 1,
 			stdout: "",
-			stderr: `quest: Kixel Quest (${KIXEL}) failed POST /forge/pulls: it is rate limiting your requests (HTTP 429, read budget spent); try again in 90 seconds; set QUEST_FORGE=github to read GitHub\n`,
+			stderr: `quest: Kixel Quest (${KIXEL}) failed POST /forge/pulls: it is rate limiting your requests (HTTP 429, read budget spent); try again in 90 seconds; rerun this command with QUEST_FORGE=github; leave it unset otherwise, since it spends your GitHub quota\n`,
 		});
 		expect(github.pulls[0]!.state).toBe("closed");
 		expect(tip(bare)).toBe("");
@@ -902,7 +902,14 @@ describe("start on GitHub, read through the Kixel Quest serving it", () => {
 		fake.open("example/project", "feature", "example/project", { body: "Does it.\n\n## Models\n\n- Size: S\n" });
 		// Through the stubbed fetch, which records each GitHub request.
 		const github = () => ({ ...fake.deps(), fetch: globalThis.fetch });
-		const forge = { env: process.env, fetch: globalThis.fetch, now: Date.now, sleep: async () => {}, github };
+		const forge = {
+			env: process.env,
+			fetch: globalThis.fetch,
+			now: Date.now,
+			sleep: async () => {},
+			github,
+			warn: () => {},
+		};
 		const deps = { github, forge: (repository: Repository) => forgeFor(repository, forge), warn: () => {} };
 		expect(await pullModels(work, "origin/main", "feature", deps)).toEqual({ sizes: ["S"], implementers: [] });
 		expect(kixel.calls.map(({ call }) => call)).toEqual(["pulls"]);

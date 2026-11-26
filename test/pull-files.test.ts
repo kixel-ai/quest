@@ -191,9 +191,7 @@ describe("the files wire", () => {
 		expect(() => parseForgeAnswer("files", { value: [{ ...pulls[0], files: [""] }], asOf: null })).toThrow(
 			"answer.value[0].files[0]",
 		);
-		expect(() => parseForgeAnswer("files", { value: [{ ...pulls[0], title: "T" }], asOf: null })).toThrow(
-			"no such field",
-		);
+		expect(() => parseForgeRequest("files", { repository: REPOSITORY, state: "open" })).toThrow("no such field");
 	});
 });
 
