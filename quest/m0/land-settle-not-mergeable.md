@@ -49,6 +49,6 @@ Recommended, for the implementer to confirm:
 - Test with a mocked GitHub that answers 405 for one or two rounds after the
   gate's push and then merges. A 405 that persists past the retries still
   ejects as `merge_refused`, and so does one with no gate push and settled,
-  non-conflicting mergeability. A conflict after the push still throws
+  non-conflicting mergeability. A 405 conflict after the push still throws
   `mergeability did not settle`, and with no push, `mergeable: null` still
   retries as today.
