@@ -41,9 +41,14 @@ Recommended, for the implementer to confirm:
   under the existing `SETTLE_RETRIES` backoff (about 15 s in all). When the
   retries run out, eject it as `merge_refused`, not throw as the other
   settling branches do: a refusal that lasts, such as a disabled merge
-  method, is real, and a throw would retry it every round.
+  method, is real, and a throw would retry it every round. A conflicting PR
+  after the push keeps today's path (wait, then throw so the next round
+  rebuilds on the moved base), since only a base that moved can conflict.
 - Put `mergeable` and `mergeable_state` in the ejection's detail, so the next
   refusal shows what GitHub reported. Neither refusal tonight recorded it.
 - Test with a mocked GitHub that answers 405 for one or two rounds after the
-  gate's push and then merges. A 405 that persists past the retries, or one
-  with no gate push, still ejects as `merge_refused`.
+  gate's push and then merges. A 405 that persists past the retries still
+  ejects as `merge_refused`, and so does one with no gate push and settled,
+  non-conflicting mergeability. A conflict after the push still throws
+  `mergeability did not settle`, and with no push, `mergeable: null` still
+  retries as today.
