@@ -404,7 +404,7 @@ export async function mergePinned(
 		// above follows the refusal, so it may already show settled mergeability. Retry it, but a refusal
 		// that lasts, such as a disabled merge method, is real: eject it rather than throw, which would
 		// retry it every round.
-		if (previous !== head && attempt < SETTLE_RETRIES) {
+		if (previous !== head && response.status === 405 && attempt < SETTLE_RETRIES) {
 			await github.pause(500 * 2 ** attempt);
 			continue;
 		}
