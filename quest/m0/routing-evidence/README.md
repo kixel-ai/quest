@@ -181,6 +181,12 @@ three hosts' saved review rounds:
     no list names Fable, Astra, or Neon. On 2026-11-24, Fable xhigh as a
     second reviewer took $976 of $1,430 of review spend, at $82 a PR
     against Sol xhigh's $8, for 23 high findings against 44.
+  - Amended 2026-11-26 (maintainer, `/quest-plan`): [Routine advisor A/B](/quest/m0/advisor-arms.md)
+    replaces the XS/S arms and adds M/L/XL arms testing Claude's built-in
+    `--advisor` tool (`XS`/`S`/`M` against `sonnet(high) + advisor opus`;
+    `L` against `opus(high) + advisor fable`; `XL` against `opus(xhigh) + advisor fable`),
+    and [Stuck-agent advisor](/quest/m0/advise.md) tracks read-only frontier
+    advisor escalations separately under `role: "advising"`.
   - Cost metric? ✅ Mean spend per merged PR, every session's, plus the
     spend of later PRs that name it under `## Caused by`, with a bootstrap
     95% interval, the median reported beside it (rejected: the median
