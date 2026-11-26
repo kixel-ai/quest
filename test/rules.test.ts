@@ -322,6 +322,38 @@ test("pkill and killall are blocked, while --help and pid-based kill pass", () =
 	expect(bash("kill -TERM 12345")).toEqual([]);
 });
 
+test("plain cargo test is denied where nextest is configured, while doctests, builds, and nextest pass", () => {
+	expect(bash("cargo test -p moq-net -- lost_group")).toEqual([]);
+	mkdirSync(join(cwd, ".git"));
+	mkdirSync(join(cwd, ".config"));
+	writeFileSync(join(cwd, ".config", "nextest.toml"), "[profile.default]\n");
+	for (const command of [
+		"cargo test -p moq-net -- lost_group",
+		"cargo +nightly --locked test --workspace",
+		"cargo --config build.jobs=4 t",
+		"mbx test -p clients --bin load subscribe::tests > .tmp/load.log 2>&1",
+		"quest gate nix develop -c cargo test -p clients",
+		"bash -c 'cargo test'",
+	])
+		expect(bash(command), command).toEqual([RULES.nextest]);
+	for (const command of [
+		"cargo nextest run -p moq-net lost_group",
+		"cargo test --doc -p moq-net",
+		"cargo test --no-run",
+		"cargo test --help",
+		"cargo -C ../other test",
+		"cd ../other && cargo test",
+		"cargo build --tests",
+		"just test",
+	])
+		expect(bash(command), command).toEqual([]);
+	// From a crate below the workspace root, the root's configuration still applies.
+	mkdirSync(join(cwd, "crates", "a"), { recursive: true });
+	expect(broken({ tool: "Bash", input: { command: "cargo test" }, cwd: join(cwd, "crates", "a") })).toEqual([
+		RULES.nextest,
+	]);
+});
+
 test("docs/context.md is the rules `quest context` prints, for agents without the CLI", () => {
 	expect(readFileSync(join(import.meta.dirname, "../docs/context.md"), "utf8")).toBe(
 		`${CONTEXT}\n${CHECKED_CONTEXT}`,
