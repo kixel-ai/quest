@@ -58,7 +58,8 @@ export function init(root: string): string[] {
 }
 
 /** The checkout under `root`, as the core's file plan reads it. */
-function checkout(root: string): Checkout {
+/** The repository at `root` as init and its stub check read it. */
+export function checkout(root: string): Checkout {
 	return {
 		lstat: (path) => kind(join(root, path)),
 		stat: (path) => {

@@ -5,7 +5,8 @@ import { join } from "node:path";
 
 import { expect, test } from "vitest";
 
-import { SKILL_DIRS } from "../src/core";
+import { SKILL_DIRS, launcher } from "../src/core";
+import { checkout } from "../src/cli/setup";
 import { CONTEXT_LIMIT } from "../src/cli/hooks";
 import { CONTEXT_PACKS, contextPack, contextPacks } from "../src/cli/context";
 import { CONTEXT, GUIDE_SECTIONS, INLINE_LIMIT, SKILLS, guideSections, skill } from "../src/cli/skills";
@@ -37,14 +38,14 @@ test.each(SKILLS.map((skill) => [skill.name, skill] as const))("%s loads nothing
  * renamed here without its stub fails rather than going unused.
  */
 test.each(SKILL_DIRS)("the repository's %s stubs are current", (path) => {
-	// This repository's flake pins the dev shell's quest, so its stubs fall back to it.
-	const dir = join(import.meta.dirname, "..", path);
+	const root = join(import.meta.dirname, "..");
+	const dir = join(root, path);
 	expect(readdirSync(dir).sort()).toEqual(SKILLS.map((skill) => skill.installed));
 	for (const skill of SKILLS) {
 		expect(
 			readFileSync(join(dir, skill.installed, "SKILL.md"), "utf8"),
 			`${skill.name} stub is stale; regenerate it with \`quest init\``,
-		).toBe(skill.stubs("nix develop --command")[path]);
+		).toBe(skill.stubs(launcher(checkout(root)))[path]);
 	}
 });
 
@@ -74,8 +75,10 @@ test("a skill prints its own instructions first, then what it builds on, each on
 
 /** Claude Code inlines the stub's whole output: the composed skill, then the setup line it echoes. */
 test.each(SKILLS.map((skill) => [skill.name, skill] as const))("%s fits inline in Claude Code", (_, skill) => {
-	const echoed = /; echo "([^"]*)"`/.exec(skill.stubs()[".claude/skills"])![1]!;
-	expect(skill.instructions.length + echoed.length + 1).toBeLessThanOrEqual(INLINE_LIMIT);
+	for (const runner of [undefined, "nix develop --command", "mise exec --"]) {
+		const echoed = /; echo "([^"]*)"`/.exec(skill.stubs(runner)[".claude/skills"])![1]!;
+		expect(skill.instructions.length + echoed.length + 1).toBeLessThanOrEqual(INLINE_LIMIT);
+	}
 });
 
 test("a skill that builds on nothing prints only its own instructions and guide sections", () => {

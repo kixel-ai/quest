@@ -62,7 +62,7 @@ test.each([
 	expect(stubFindings(dir)).toEqual([]);
 	expect(read(dir, ".agents/skills/quest-start/SKILL.md")).toBe(start.stubs(launcher)[".agents/skills"]);
 	expect(read(dir, ".agents/skills/quest-start/SKILL.md")).toContain(
-		`If \`quest\` is not on \`PATH\`, run \`${launcher} quest skill start\` instead, and prefix later \`quest\` commands with \`${launcher}\`.`,
+		`If \`quest\` is not on \`PATH\`, run \`${launcher} quest skill start\` instead, and prefix later \`quest\` commands with \`${launcher}\`; if that fails too, follow https://github.com/kixel-ai/quest/blob/main/SETUP.md first.`,
 	);
 	expect(read(dir, ".claude/skills/quest-start/SKILL.md")).toBe(start.stubs(launcher)[".claude/skills"]);
 	expect(read(dir, ".claude/skills/quest-start/SKILL.md")).toContain(`run ${launcher} quest skill start and follow`);
@@ -77,11 +77,22 @@ test.each([
 	expect(existsSync(join(dir, ".agents"))).toBe(false);
 });
 
-test("init keeps the setup pointer when a tool manager's file does not name Quest", () => {
+test("init keeps the setup pointer when a tool manager's file does not name Quest or is not a file", () => {
 	const dir = tempDir();
 	writeFileSync(join(dir, "flake.nix"), 'inputs.nixpkgs.url = "github:NixOS/nixpkgs";\n');
+	mkdirSync(join(dir, "mise.toml"));
 	init(dir);
-	expect(read(dir, ".agents/skills/quest-start/SKILL.md")).toContain("SETUP.md");
+	expect(read(dir, ".agents/skills/quest-start/SKILL.md")).toBe(
+		SKILLS.find((skill) => skill.name === "start")!.stubs()[".agents/skills"],
+	);
+});
+
+test("init prefers mise, which runs everywhere, when both mise and the flake pin Quest", () => {
+	const dir = tempDir();
+	writeFileSync(join(dir, "flake.nix"), 'inputs.quest.url = "github:kixel-ai/quest";\n');
+	writeFileSync(join(dir, "mise.toml"), '[tools]\n"github:kixel-ai/quest" = "v1.0.0"\n');
+	init(dir);
+	expect(read(dir, ".agents/skills/quest-start/SKILL.md")).toContain("run `mise exec -- quest skill start` instead");
 });
 
 test("init refuses a skill that is not a stub", () => {

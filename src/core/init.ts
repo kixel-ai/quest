@@ -81,11 +81,15 @@ export interface Stub {
 	stubs(launcher?: string): Readonly<Record<SkillDir, string>>;
 }
 
-/** How a repository pins Quest: the file that names it and the command that runs the pinned binary. */
+/**
+ * How a repository pins Quest: the file that names it and the command that
+ * runs the pinned binary. mise comes first, since it runs on every platform
+ * Quest ships for and the flake does not.
+ */
 const LAUNCHERS = [
-	["flake.nix", "nix develop --command"],
 	["mise.toml", "mise exec --"],
 	[".mise.toml", "mise exec --"],
+	["flake.nix", "nix develop --command"],
 ] as const;
 
 /**
@@ -95,7 +99,7 @@ const LAUNCHERS = [
  */
 export function launcher(repo: Checkout): string | undefined {
 	for (const [file, command] of LAUNCHERS) {
-		checkPath(repo, file, "file");
+		// Init only reads these files, so whatever else sits there just names no launcher.
 		if (repo.stat(file) === "file" && repo.read(file).includes("github:kixel-ai/quest")) return command;
 	}
 	return undefined;
@@ -325,7 +329,7 @@ function sharedSkill(repo: Checkout, installed: string): boolean {
  * names the skill.
  */
 const STUBS = [
-	/^---\nname: (\S+)\n(?:(?:name|description): .*\n)*---\n\nRun `quest skill (\S+)` and follow its output\.\nIf `quest` is not (?:installed, follow \S+ first|on `PATH`, run `[^`\n]+ quest skill (\S+)` instead, and prefix later `quest` commands with `[^`\n]+`)\.\n$/,
+	/^---\nname: (\S+)\n(?:(?:name|description): .*\n)*---\n\nRun `quest skill (\S+)` and follow its output\.\nIf `quest` is not (?:installed, follow \S+ first|on `PATH`, run `[^`\n]+ quest skill (\S+)` instead, and prefix later `quest` commands with `[^`\n]+`; if that fails too, follow \S+ first)\.\n$/,
 	/^---\nname: (\S+)\n(?:(?:name|description): .*\n)*allowed-tools: Bash\(quest skill (\S+)\) PowerShell\(quest skill (\S+)\)\n---\n\n!`quest skill (\S+); echo "[^"`\n]*"`\n$/,
 ];
 
