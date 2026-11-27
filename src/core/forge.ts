@@ -243,6 +243,8 @@ export interface PullFiles {
 /** A PR the forge updated since an instant, open, merged, or closed, as the record sender reads it. */
 export interface UpdatedPull {
 	number: number;
+	/** The PR's page, which a session's recorded PR is matched by. */
+	url: string;
 	/** The head branch, as {@link OpenPull} names it. */
 	branch: string;
 	state: "open" | "closed" | "merged";
@@ -250,6 +252,8 @@ export interface UpdatedPull {
 	created: number;
 	/** Epoch milliseconds of the last push, comment, or edit. */
 	updated: number;
+	/** Epoch milliseconds a merged or closed PR ended, or null while it is open. */
+	closed: number | null;
 	body: string;
 }
 
@@ -707,10 +711,12 @@ const updatedPage = shape<UpdatedPage>({
 	pulls: list(
 		shape<UpdatedPull>({
 			number: count,
+			url: string,
 			branch: name,
 			state: oneOf(["open", "closed", "merged"]),
 			created: count,
 			updated: count,
+			closed: nullable(count),
 			body: string,
 		}),
 	),

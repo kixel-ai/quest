@@ -685,10 +685,12 @@ describe("wire", () => {
 	test("the updated PRs read takes a first and a last page, and refuses a PR missing a field", () => {
 		const merged = {
 			number: 7,
+			url: "https://kixel.quest/example/project/pull/7",
 			branch: "quest/m0/one",
 			state: "merged",
 			created: 1_000,
 			updated: 5_000,
+			closed: 4_000,
 			body: "## Caused by\n",
 		};
 		const request = { repository, since: 0, cursor: null };
@@ -711,6 +713,10 @@ describe("wire", () => {
 					asOf: null,
 				}),
 			).toThrow(`answer.value.pulls[0].${field}`);
+		const open = { ...merged, state: "open", closed: null };
+		expect(parseForgeAnswer("updated", { value: { pulls: [open], next: null }, asOf: null }).value.pulls).toEqual([
+			open,
+		]);
 		expect(() =>
 			parseForgeAnswer("updated", { value: { pulls: [{ ...merged, state: "draft" }], next: null }, asOf: null }),
 		).toThrow("answer.value.pulls[0].state");
