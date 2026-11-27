@@ -585,3 +585,56 @@ test.runIf(posix)(
 		await expect(go()).rejects.toThrow("must belong to this user and be writable by no one else");
 	},
 );
+
+test.runIf(posix)("a crate that may build a path crate cargo metadata lists nowhere is never cached", async () => {
+	const dir = repository({
+		"flake.nix": "{}",
+		"Cargo.toml": '[workspace]\nmembers = ["a"]\n',
+		"a/Cargo.toml": "",
+		"quest.toml": `[tasks.test]\ntier = "pr"\nrun = 'echo "testing $QUEST_CRATE"'\ncargo = true\n`,
+	});
+	// a declares b, which a task's --features may enable while Cargo, building with every feature of the workspace's
+	// own crates only, resolves no b.
+	const output = JSON.parse(metadata(dir, { a: {} }));
+	output.packages[0].dependencies = [{ name: "b", kind: null, optional: true, path: `${dir}/b` }];
+	const file = join(tempDir(), "metadata.json");
+	writeFileSync(file, JSON.stringify(output));
+	const env = { XDG_CACHE_HOME: tempDir(), STUB_METADATA: file };
+	const first = await runIn(dir, { all: true, cache: true }, env);
+	expect(first.stderr).toContain(
+		"quest: test:a is not cached, since cargo metadata lists no crate at b, a path dependency it may build\n",
+	);
+	expect(ran(await runIn(dir, { all: true, cache: true }, env))).toEqual(["test:a | testing a"]);
+});
+
+test.runIf(posix)("a pass whose inputs cannot be read again is not recorded, and the run finishes", async () => {
+	const dir = repository({
+		"flake.nix": "{}",
+		// A file whose name holds a newline, which the task cache cannot hash, appears as the task runs.
+		"quest.toml": `[tasks.odd]\ntier = "pr"\nrun = '''echo ran; touch "src/$(printf 'a\\nb')"'''\npaths = ["src/"]\n`,
+		"src/a": "",
+	});
+	const env = { XDG_CACHE_HOME: tempDir() };
+	const first = await runIn(dir, { all: true, cache: true }, env);
+	expect(first.code, first.stderr).toBe(0);
+	expect(first.stderr).toContain("quest: odd is not cached, since its inputs could not be read again: cannot hash");
+	rmSync(join(dir, "src", "a\nb"));
+	expect((await runIn(dir, { all: true, cache: true }, env)).stdout).toBe("odd | ran\n");
+});
+
+test.runIf(posix)("a hit replays its reports byte for byte, whatever their encoding", async () => {
+	const dir = repository({
+		"flake.nix": "{}",
+		// A UTF-16 JUnit report, with its byte order mark.
+		"quest.toml": `[tasks.test]\ntier = "pr"\nrun = '''mkdir -p out; printf '\\377\\376<\\000a\\000/\\000>\\000' > out/junit.xml'''\njunit = "out/junit.xml"\n`,
+		".gitignore": "out/\n",
+	});
+	const env = { XDG_CACHE_HOME: tempDir() };
+	const utf16 = Buffer.from([0xff, 0xfe, ...Buffer.from("<a/>", "utf16le")]);
+	expect((await runIn(dir, { all: true, cache: true }, env)).code).toBe(0);
+	expect(readFileSync(join(dir, "out", "junit.xml"))).toEqual(utf16);
+	const report = join(tempDir(), "report");
+	expect((await runIn(dir, { all: true, cache: true, report }, env)).stderr).toContain("quest: cached (hit) test\n");
+	expect(readFileSync(join(dir, "out", "junit.xml"))).toEqual(utf16);
+	expect(readFileSync(join(report, "test", "junit.xml"))).toEqual(utf16);
+});

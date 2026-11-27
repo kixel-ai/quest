@@ -1680,8 +1680,10 @@ The digest a pass is recorded under covers:
 - the Git ids of the files it reads: its `paths` and `inputs`, or every file
   when it declares no `paths`, less `exclude`, plus `invalidate_all`
 
-A modified or untracked file counts as its own bytes, unfiltered, and an
-untracked nested repository, such as an agent's worktree, counts as nothing.
+A modified or untracked file counts as its own bytes, unfiltered, as does a
+clean one that checkout may write with CRLF endings, by its attributes and
+`core.autocrlf` or `core.eol`. An untracked nested repository, such as an
+agent's worktree, counts as nothing.
 A pass is recorded only if the task's inputs are unchanged once it finishes,
 so an edit saved while it ran is never filed under the old contents. A task
 reading a submodule with uncommitted changes runs uncached, as do the tasks
@@ -1704,7 +1706,12 @@ dependencies count. Each crate's digest reads:
 - the root `Cargo.toml`, with only the `[workspace.dependencies]` entries its closure uses
 - `.cargo/config.toml`, `rust-toolchain.toml`, and `.config/nextest.toml`
 - files outside the member crates that the task's `paths` select
+- the commit of a submodule holding any of those crates
 - the task's `inputs`
+
+A crate whose closure declares a path crate that `cargo metadata` lists
+nowhere, such as an optional one only a task's `--features` enables on a
+crate outside the workspace, runs uncached.
 
 Editing crate B or bumping its dependency leaves crate A's pass in place
 unless A depends on B.

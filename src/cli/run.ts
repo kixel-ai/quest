@@ -256,11 +256,8 @@ export async function run(options: RunOptions, io: RunIO): Promise<number> {
 
 	const cache = caching ? taskCache(io.env) : null;
 	const hits = new Map<Unit, TaskResult>();
-	/**
-	 * The digest of everything `unit` reads in `files`, or null when no digest can name it: it reads a submodule
-	 * with uncommitted changes, or runs after a task that does.
-	 */
-	let digestOf: (unit: Unit, files: TreeFile[]) => string | null = () => null;
+	/** The digest of everything `unit` reads in `files`, or why no digest can name it, while the run uses the cache. */
+	let digestOf: ((unit: Unit, files: TreeFile[]) => { digest: string } | { uncached: string }) | null = null;
 	if (cache !== null) {
 		const shell = fingerprint ? devShellDerivation(programs.nix!, top, io.env) : null;
 		const cargoManifest = workspace === null ? null : readFileSync(join(top, "Cargo.toml"), "utf8");
@@ -273,10 +270,20 @@ export async function run(options: RunOptions, io: RunIO): Promise<number> {
 				crate === null ? null : { crate, workspace: workspace! },
 			);
 			// Tasks come after those they run after, whose digests each covers, since it may read what they wrote.
-			const after = units.filter((each) => task.after.includes(each.task.name)).map((each) => each.digest);
-			if (read.some((file) => file.oid === DIRTY) || after.includes(null)) return null;
-			return digest({
-				version: 1,
+			const before = units.filter((each) => task.after.includes(each.task.name));
+			const after = before.map((each) => each.digest);
+			if (read.some((file) => file.oid === DIRTY))
+				return { uncached: "it reads a submodule with uncommitted changes" };
+			if (crate !== null && crate.unlisted.length > 0)
+				return {
+					uncached: `cargo metadata lists no crate at ${crate.unlisted.join(", ")}, a path dependency it may build`,
+				};
+			const uncachedBefore = before.find((each) => each.digest === null);
+			if (uncachedBefore !== undefined)
+				return { uncached: `it runs after ${uncachedBefore.name}, whose inputs no digest names` };
+			const key = digest({
+				// Raised whenever the digest's material changes meaning, so no earlier pass matches.
+				version: 2,
 				system: `${process.arch}-${process.platform}`,
 				shell: task.nix ? shell : null,
 				run: task.run,
@@ -294,16 +301,18 @@ export async function run(options: RunOptions, io: RunIO): Promise<number> {
 				files: read.map((file) => [file.path, file.mode, file.oid]),
 				after,
 			});
+			return { digest: key };
 		};
 		const files = treeFiles(top);
 		for (const unit of units) {
-			unit.digest = digestOf(unit, files);
+			const key = digestOf(unit, files);
+			unit.digest = "digest" in key ? key.digest : null;
 			if (!unit.task.cache) continue;
-			if (unit.digest === null) {
-				io.stderr(`quest: ${unit.name} is not cached, since it reads a submodule with uncommitted changes\n`);
+			if ("uncached" in key) {
+				io.stderr(`quest: ${unit.name} is not cached, since ${key.uncached}\n`);
 				continue;
 			}
-			const hit = await cache.get(unit.digest);
+			const hit = await cache.get(key.digest);
 			if (hit !== undefined) hits.set(unit, hit);
 		}
 	}
@@ -425,11 +434,12 @@ export async function run(options: RunOptions, io: RunIO): Promise<number> {
 						const recorded = hit.reports.find((each) => each.name === name);
 						if (recorded === undefined) continue;
 						mkdirSync(dirname(file), { recursive: true });
-						writeFileSync(file, recorded.text);
+						writeFileSync(file, Buffer.from(recorded.base64, "base64"));
 					}
 					if (destination !== null) {
 						mkdirSync(destination, { recursive: true });
-						for (const { name, text } of hit.reports) writeFileSync(join(destination, name), text);
+						for (const { name, base64 } of hit.reports)
+							writeFileSync(join(destination, name), Buffer.from(base64, "base64"));
 					}
 				} catch (error) {
 					finish(unit, "failed", `: cannot copy its cached reports: ${(error as Error).message}`);
@@ -472,13 +482,13 @@ export async function run(options: RunOptions, io: RunIO): Promise<number> {
 					results.set(unit, `${seconds.toFixed(1)}s`);
 					const status = failure ?? (code === 0 ? null : `exit ${code ?? signal}`);
 					let problems: string[];
-					let reports: { name: string; text: string }[] = [];
+					let reports: TaskResult["reports"] = [];
 					try {
 						problems = collect(top, outputs, status === null, reportDir(report, unit));
 						if (status === null && problems.length === 0)
 							reports = outputs.map(({ path, name }) => ({
 								name,
-								text: readFileSync(join(top, path), "utf8"),
+								base64: readFileSync(join(top, path)).toString("base64"),
 							}));
 					} catch (error) {
 						problems = [`cannot collect its reports: ${(error as Error).message}`];
@@ -488,8 +498,17 @@ export async function run(options: RunOptions, io: RunIO): Promise<number> {
 						// A pass counts for the inputs the digest named only while nothing changed them as the task ran,
 						// such as an edit saved meanwhile.
 						const record = cache !== null && task.cache && unit.digest !== null;
-						if (record && digestOf(unit, treeFiles(top)) !== unit.digest)
-							io.stderr(`quest: ${unit.name} is not cached, since its inputs changed while it ran\n`);
+						// Caught here, since a throw from this handler would end the run while other tasks still run.
+						let changed: string | null = null;
+						if (record)
+							try {
+								const key = digestOf!(unit, treeFiles(top));
+								if (!("digest" in key) || key.digest !== unit.digest)
+									changed = "its inputs changed while it ran";
+							} catch (error) {
+								changed = `its inputs could not be read again: ${(error as Error).message}`;
+							}
+						if (changed !== null) io.stderr(`quest: ${unit.name} is not cached, since ${changed}\n`);
 						else if (record)
 							// Caught at once, so a failed write fails the run once its tasks finish, not the process.
 							writes.push(

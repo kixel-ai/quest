@@ -102,13 +102,15 @@ test("a crate's closure takes every kind of its own dependencies, and only what 
 			dirs: ["app", "lib"],
 			packages: ["serde 1.0.0 registry+https://github.com/rust-lang/crates.io-index [derive,std]"],
 			names: ["app", "lib", "serde"],
+			unlisted: [],
 		},
-		{ name: "fixtures", dirs: ["lib/fixtures"], packages: [], names: ["fixtures"] },
+		{ name: "fixtures", dirs: ["lib/fixtures"], packages: [], names: ["fixtures"], unlisted: [] },
 		{
 			name: "lib",
 			dirs: ["lib", "lib/fixtures"],
 			packages: ["serde 1.0.0 registry+https://github.com/rust-lang/crates.io-index [derive,std]"],
 			names: ["fixtures", "lib", "serde"],
+			unlisted: [],
 		},
 	]);
 
@@ -129,7 +131,7 @@ test("the root manifest a crate reads keeps only the workspace dependencies its 
 	expect(read(base)).not.toBe(read(base.replace("lto = true", "lto = false")));
 });
 
-test("a declared path dependency the resolve graph leaves out still joins the closure", () => {
+test("a declared path dependency the resolve graph has no edge to still joins the closure", () => {
 	const top = "/repo";
 	const id = (name: string) => `path+file:///repo/${name}#${name}@0.1.0`;
 	const crate = (name: string, dependencies: unknown[] = []) => ({
@@ -140,14 +142,39 @@ test("a declared path dependency the resolve graph leaves out still joins the cl
 		manifest_path: `/repo/${name}/Cargo.toml`,
 		dependencies,
 	});
-	// b, outside the workspace, has an optional c that only a task's --features b/extra enables.
+	// b, outside the workspace, has an optional c that only a task's --features b/extra enables on b, and that
+	// d's own dependency on it resolves.
 	const output = JSON.stringify({
 		workspace_root: top,
-		workspace_members: [id("a")],
+		workspace_members: [id("a"), id("d")],
 		packages: [
 			crate("a", [{ kind: null, path: "/repo/b" }]),
 			crate("b", [{ kind: null, path: "/repo/c" }]),
 			crate("c"),
+			crate("d", [{ kind: null, path: "/repo/c" }]),
+		],
+		resolve: {
+			nodes: [
+				{ id: id("a"), features: [], deps: [{ pkg: id("b"), dep_kinds: [{ kind: null }] }] },
+				{ id: id("b"), features: [], deps: [] },
+				{ id: id("c"), features: [], deps: [] },
+				{ id: id("d"), features: [], deps: [{ pkg: id("c"), dep_kinds: [{ kind: null }] }] },
+			],
+		},
+	});
+	expect(cargoWorkspace(output, top).crates[0]).toMatchObject({ dirs: ["a", "b", "c"], unlisted: [] });
+
+	// With nothing else needing c, Cargo lists it nowhere, as it does b's dev-dependency e, which b builds only for
+	// its own tests.
+	const alone = JSON.stringify({
+		workspace_root: top,
+		workspace_members: [id("a")],
+		packages: [
+			crate("a", [{ kind: null, path: "/repo/b" }]),
+			crate("b", [
+				{ kind: null, path: "/repo/c" },
+				{ kind: "dev", path: "/repo/e" },
+			]),
 		],
 		resolve: {
 			nodes: [
@@ -156,11 +183,27 @@ test("a declared path dependency the resolve graph leaves out still joins the cl
 			],
 		},
 	});
-	expect(cargoWorkspace(output, top).crates[0]!.dirs).toEqual(["a", "b", "c"]);
+	expect(cargoWorkspace(alone, top).crates[0]).toMatchObject({ dirs: ["a", "b"], unlisted: ["c"] });
+});
+
+test("a crate inside a submodule reads the submodule's commit", () => {
+	const crate = { name: "a", dirs: ["a", "vendor/lib"], packages: [], names: ["a", "lib"], unlisted: [] };
+	const workspace = { crates: [crate], dirs: ["a", "vendor/lib"] };
+	const task = { paths: null, inputs: [], exclude: [] } as unknown as ManifestTask;
+	const files = [
+		{ path: "a/src/lib.rs", mode: "100644", oid: "1" },
+		{ path: "other", mode: "160000", oid: "2" },
+		{ path: "vendor", mode: "160000", oid: DIRTY },
+		{ path: "vendor-lib", mode: "160000", oid: "3" },
+	];
+	expect(inputFiles(task, files, [], { crate, workspace }).map(({ path }) => path)).toEqual([
+		"a/src/lib.rs",
+		"vendor",
+	]);
 });
 
 test("a crate reads shared Cargo files and the task's selected files even where a root package owns them", () => {
-	const crate = { name: "a", dirs: ["a"], packages: [], names: ["a"] };
+	const crate = { name: "a", dirs: ["a"], packages: [], names: ["a"], unlisted: [] };
 	const workspace = { crates: [crate], dirs: ["", "a"] };
 	const task = { paths: ["rs/", "Cargo.*", "tests/"], inputs: [], exclude: [] } as unknown as ManifestTask;
 	const files = [
@@ -189,6 +232,30 @@ test.runIf(posix)("a file whose bytes differ from its commit's only by Git's fil
 	const clean = treeFiles(dir).find(({ path }) => path === "run.sh")!.oid;
 	writeFileSync(join(dir, "run.sh"), "#!/bin/sh\r\n");
 	expect(treeFiles(dir).find(({ path }) => path === "run.sh")!.oid).not.toBe(clean);
+});
+
+test.runIf(posix)("a clean file that checkout writes with CRLF endings counts as its own bytes", () => {
+	const dir = initRepository(tempDir());
+	const git = (...args: string[]) => execFileSync("git", ["-C", dir, ...args], { stdio: "ignore" });
+	writeFileSync(join(dir, ".gitattributes"), "*.sh text\n*.lf text eol=lf\n*.bin -text\n");
+	for (const name of ["run.sh", "keep.lf", "data.bin", "plain"]) writeFileSync(join(dir, name), "#!/bin/sh\n");
+	git("add", "-A");
+	git("commit", "-q", "-m", "lf");
+	const oids = () => Object.fromEntries(treeFiles(dir).map(({ path, oid }) => [path, oid]));
+	const lf = oids();
+	const crlf = execFileSync("git", ["hash-object", "--stdin"], { input: "#!/bin/sh\r\n" }).toString().trim();
+	const checkout = (...config: string[]) => {
+		for (const [key, value] of config.map((each) => each.split("="))) git("config", key!, value!);
+		for (const name of ["run.sh", "keep.lf", "data.bin", "plain"]) rmSync(join(dir, name));
+		git("checkout", "--", ".");
+	};
+	// Git calls each checkout clean, yet a CRLF shebang runs differently.
+	checkout("core.eol=crlf");
+	expect(oids()).toEqual({ ...lf, "run.sh": crlf });
+	checkout("core.eol=lf", "core.autocrlf=true");
+	expect(oids()).toEqual({ ...lf, "run.sh": crlf, plain: crlf });
+	checkout("core.autocrlf=input");
+	expect(oids()).toEqual(lf);
 });
 
 test.runIf(posix)(

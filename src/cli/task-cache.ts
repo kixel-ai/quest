@@ -26,9 +26,9 @@ export const DIRTY = "dirty";
 
 /**
  * Every file of the working tree at `top` that Git tracks or would add, sorted by path, with the ids Git gives
- * them: the index's where the file matches it, so a clean checkout reads no file, and hashed from the working tree's
- * own bytes, without Git's filters, where it is modified or untracked. Ignored and deleted files and untracked
- * nested repositories are left out.
+ * them: the index's where the file matches it byte for byte, so a clean checkout reads no file, and hashed from the
+ * working tree's own bytes, without Git's filters, where it is modified, untracked, or one that checkout may write
+ * with CRLF line endings. Ignored and deleted files and untracked nested repositories are left out.
  */
 export function treeFiles(top: string): TreeFile[] {
 	const list = (args: string[]) => git(top, args).split("\0").filter(Boolean);
@@ -43,6 +43,11 @@ export function treeFiles(top: string): TreeFile[] {
 		else dirty.add(path);
 	}
 	const indexed = new Map(files);
+	for (const path of crlfCheckouts(
+		top,
+		[...files.values()].filter((file) => file.mode.startsWith("100")).map((file) => file.path),
+	))
+		dirty.add(path);
 	// A submodule with edits inside it is listed too, rather than passing as its gitlink.
 	for (const path of list(["diff-files", "--name-only", "--ignore-submodules=none", "-z"])) dirty.add(path);
 	for (const path of list(["ls-files", "--others", "--exclude-standard", "-z"])) dirty.add(path);
@@ -76,6 +81,37 @@ export function treeFiles(top: string): TreeFile[] {
 		regular.forEach((file, index) => (file.oid = oids[index]!));
 	}
 	return [...files.values()].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+}
+
+/**
+ * The paths among `paths` that checkout may write with CRLF line endings, by their attributes and this checkout's
+ * `core.autocrlf` and `core.eol`, as Git's `convert.c` decides: such a file reads as clean while its bytes differ
+ * from its blob's, and from another checkout's of the same commit. Asking costs no file reads, unlike `ls-files --eol`.
+ */
+function crlfCheckouts(top: string, paths: string[]): string[] {
+	if (paths.length === 0) return [];
+	const autocrlf = git(top, ["config", "--get", "core.autocrlf"]).toLowerCase();
+	const eol = git(top, ["config", "--get", "core.eol"]).toLowerCase();
+	// The ending a `text` file without an `eol` attribute gets.
+	const autoTrue = ["true", "yes", "on", "1"].includes(autocrlf);
+	const textCrlf =
+		autoTrue || (autocrlf !== "input" && (eol === "crlf" || (eol !== "lf" && process.platform === "win32")));
+	const out = git(top, ["check-attr", "-z", "--stdin", "text", "eol", "crlf"], paths.join("\0")).split("\0");
+	const attrs = new Map<string, Record<string, string>>();
+	for (let index = 0; index + 2 < out.length; index += 3) {
+		const [path, name, value] = [out[index]!, out[index + 1]!, out[index + 2]!];
+		if (!attrs.has(path)) attrs.set(path, {});
+		attrs.get(path)![name] = value;
+	}
+	return paths.filter((path) => {
+		const { text, eol: attr, crlf } = attrs.get(path) ?? {};
+		// The legacy `crlf` attribute stands in for an unspecified `text`.
+		const kind = text === "set" || text === "auto" || text === "unset" ? text : crlf === "input" ? "input" : crlf;
+		if (kind === "unset" || kind === "input") return false;
+		if (attr === "crlf") return true;
+		if (attr === "lf") return false;
+		return kind === "set" || kind === "auto" ? textCrlf : autoTrue;
+	});
 }
 
 /** The Nix system this host builds for, as a flake's outputs name it. */
@@ -127,6 +163,11 @@ export interface CargoCrate {
 	packages: string[];
 	/** The name of every package in its closure, itself included. */
 	names: string[];
+	/**
+	 * The directory of each path crate its closure declares that `cargo metadata` lists nowhere, such as an optional
+	 * one only a task's `--features` enables on a crate outside the workspace, whose files no digest could name.
+	 */
+	unlisted: string[];
 }
 
 /** A workspace's crates, and the directory of every crate with a path source, members or not. */
@@ -176,21 +217,26 @@ export function cargoWorkspace(output: string, top: string): CargoWorkspace {
 			);
 		return path.split(sep).join("/");
 	};
-	// A path crate by its directory, so a declared path dependency the resolve graph leaves out, such as an optional
-	// one a task's feature flags enable on a crate outside the workspace, still joins the closure.
+	// A path crate by its directory, so a declared path dependency the resolve graph has no edge to, such as an
+	// optional one a task's feature flags enable on a crate outside the workspace while another crate needs it anyway,
+	// still joins the closure.
 	const byDir = new Map(
 		metadata.packages.flatMap((each) => (each.source === null ? [[dirname(each.manifest_path), each.id]] : [])),
 	);
 	const crates = metadata.workspace_members.map((member) => {
 		const seen = new Set<string>();
+		const unlisted = new Set<string>();
 		const visit = (id: string, root: boolean) => {
 			if (seen.has(id)) return;
 			seen.add(id);
 			for (const dep of nodes.get(id)?.deps ?? [])
 				if (root || dep.dep_kinds.some((kind) => kind.kind !== "dev")) visit(dep.pkg, false);
 			for (const dep of packages.get(id)!.dependencies ?? []) {
-				const path = dep.path === undefined ? undefined : byDir.get(dep.path);
-				if (path !== undefined && (root || dep.kind !== "dev")) visit(path, false);
+				// A crate outside the workspace builds without its dev-dependencies, which Cargo then leaves out.
+				if (dep.path === undefined || (!root && dep.kind === "dev")) continue;
+				const path = byDir.get(dep.path);
+				if (path !== undefined) visit(path, false);
+				else unlisted.add(relative(metadata.workspace_root, dep.path).split(sep).join("/"));
 			}
 		};
 		visit(member, true);
@@ -206,7 +252,13 @@ export function cargoWorkspace(output: string, top: string): CargoWorkspace {
 			}
 		}
 		const names = [...new Set([...seen].map((id) => packages.get(id)!.name))].sort();
-		return { name: packages.get(member)!.name, dirs: dirs.sort(), packages: external.sort(), names };
+		return {
+			name: packages.get(member)!.name,
+			dirs: dirs.sort(),
+			packages: external.sort(),
+			names,
+			unlisted: [...unlisted].sort(),
+		};
 	});
 	const dirs = metadata.packages.flatMap((each) => {
 		const path = dir(each.id);
@@ -255,10 +307,13 @@ export function inputFiles(
 				found = dir;
 		return found;
 	};
-	const reads = (path: string): boolean => {
+	const reads = ({ path, mode }: TreeFile): boolean => {
 		if (task.inputs.some((pattern) => matches(pattern, path))) return true;
 		if (cargo === null) return task.paths === null || task.paths.some((pattern) => matches(pattern, path));
 		if (CARGO_SHARED.includes(path)) return true;
+		// A submodule holding one of the crate's directories, whose files Git lists only as its commit.
+		if (mode === "160000" && cargo.crate.dirs.some((dir) => dir === path || dir.startsWith(`${path}/`)))
+			return true;
 		const dir = owner(path);
 		if (dir !== undefined && cargo.crate.dirs.includes(dir)) return true;
 		// Outside the member crates, even where a root package owns it: a file the task's paths select, such as test
@@ -273,7 +328,7 @@ export function inputFiles(
 	return files.filter(
 		(file) =>
 			invalidateAll.some((pattern) => matches(pattern, file.path)) ||
-			(reads(file.path) && !task.exclude.some((pattern) => matches(pattern, file.path))),
+			(reads(file) && !task.exclude.some((pattern) => matches(pattern, file.path))),
 	);
 }
 
@@ -288,8 +343,8 @@ export interface TaskResult {
 	crate: string | null;
 	/** How long the run that recorded it took. */
 	seconds: number;
-	/** The reports it wrote, by the name `--report` gives each copy. */
-	reports: { name: string; text: string }[];
+	/** The reports it wrote, by the name `--report` gives each copy, in base64 so any encoding replays as it was. */
+	reports: { name: string; base64: string }[];
 }
 
 /** The cache's size bound; past it, the least recently used passes go first. */
@@ -322,7 +377,7 @@ function parseResult(value: unknown): TaskResult | undefined {
 				typeof report === "object" &&
 				report !== null &&
 				typeof report.name === "string" &&
-				typeof report.text === "string",
+				typeof report.base64 === "string",
 		)
 	)
 		return undefined;
