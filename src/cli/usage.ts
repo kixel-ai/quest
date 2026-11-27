@@ -1160,15 +1160,15 @@ function armRows(pulls: PullRow[]): ArmRow[] {
 		const first = each.implementers[0];
 		if (!first?.arm || each.size === null || each.unread.length > 0) continue;
 		const { harness, model, effort, advisor, arm, cohort } = first;
-		const sameEffort = (other: string) => other === effort || other === "unknown" || effort === "unknown";
+		const efforts = new Set(each.implementers.map((other) => other.effort).filter((e) => e !== "unknown"));
 		if (
+			efforts.size > 1 ||
 			each.implementers.some(
 				(other) =>
 					other.arm !== arm ||
 					other.cohort !== cohort ||
 					other.harness !== harness ||
 					other.model !== model ||
-					!sameEffort(other.effort) ||
 					other.advisor !== advisor,
 			)
 		)

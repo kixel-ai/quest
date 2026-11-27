@@ -1370,6 +1370,15 @@ describe("usage", () => {
 					`- Implementer: Claude Code, claude-sonnet-5-5, high effort (${advisedB})`,
 					`- Implementer: Claude Code, claude-sonnet-5-5, medium effort (iterate, M, ${advisedB})`,
 				),
+				// An unknown first effort matches either, but two known ones still differ.
+				armed(
+					30,
+					"quest/m0/efforts",
+					"- Size: M",
+					`- Implementer: Claude Code, claude-sonnet-5-5 (${advisedB})`,
+					`- Implementer: Claude Code, claude-sonnet-5-5, high effort (iterate, M, ${advisedB})`,
+					`- Implementer: Claude Code, claude-sonnet-5-5, medium effort (iterate, M, ${advisedB})`,
+				),
 			],
 			sessions: [
 				// The advised writer's session, whose advisor's tokens token-max reports under Opus.
@@ -1426,8 +1435,9 @@ describe("usage", () => {
 		// The advised writer's accuracy row is its own, with its advisor's spend in its cost.
 		const advised = report.accuracy.filter((a) => a.advisor !== null);
 		expect(advised.map((a) => [a.size, a.model, a.effort, a.advisor, a.pulls, a.spent.cost])).toEqual([
-			["M", "claude-sonnet-5-5", "high", "claude-opus-5-5", 3, 3],
-			["M", "claude-sonnet-5-5", "medium", "claude-opus-5-5", 1, 0],
+			["M", "claude-sonnet-5-5", "high", "claude-opus-5-5", 4, 3],
+			["M", "claude-sonnet-5-5", "medium", "claude-opus-5-5", 2, 0],
+			["M", "claude-sonnet-5-5", "unknown", "claude-opus-5-5", 1, 0],
 		]);
 		const twenty = report.pulls.find((p) => p.number === 20)!;
 		expect(twenty.implementers.map((i) => i.arm)).toEqual(["B", "B"]);

@@ -194,7 +194,7 @@ three hosts' saved review rounds:
     [Stuck-agent advisor](/quest/m0/advise.md) tracks read-only frontier
     advisor escalations separately under `role: "advising"`.
   - The advisor trial's readout is its own quest,
-    [Advisor trial readout](/quest/m0/routing-evidence/advisor-readout.md).
+    [Advisor trial readout](/quest/m0/advisor-readout.md).
   - Cost metric? ✅ Mean spend per merged PR, every session's, plus the
     spend of later PRs that name it under `## Caused by`, with a bootstrap
     95% interval, the median reported beside it (rejected: the median

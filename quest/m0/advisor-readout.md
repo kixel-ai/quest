@@ -28,13 +28,15 @@ The implementer's choices, for the readout to revisit:
 - Decide as the legacy arms are decided: compute each size's variance and the
   PRs each arm needs to detect 0.25 first-round findings per PR, and if the
   arms have not reached it, rewrite the `Scheduled` date for when they will.
-  Report XL's counts rather than wait for a detectable difference. Report the
-  epic's cost metric beside the findings: the mean spend per merged PR,
+  Report XL's counts rather than wait for a detectable difference. Report
+  Routing evidence's cost metric beside the findings: the mean spend per merged PR,
   including later `## Caused by` fixes, with a bootstrap interval.
 - Price the advisor's spend. token-max reports an advisor iteration's tokens
-  under the advisor's model, but until it prices them (`## Waiting`) their
-  cost reads $0 with `complete` false, which flatters arm B. If it still does
-  at the readout, price each arm-B session's advisor-model tokens at that
+  under the advisor's model, but Claude Code 2.1.330 records no service tier
+  on it, so token-max leaves its cost at $0 with `complete` false, which
+  flatters arm B; a kixel-ai/token-max follow-up of
+  [kixel-ai/quest#934](https://github.com/kixel-ai/quest/pull/934) asks it to
+  price them. If it still does not at the readout, price each arm-B session's advisor-model tokens at that
   model's list price yourself from `quest usage --json`. Transcripts outlive the trial: the maintainer's
   host keeps them for 3,650 days (`cleanupPeriodDays`), and the session
   records sent to Kixel Quest keep each model's token counts too.
@@ -44,10 +46,6 @@ The implementer's choices, for the readout to revisit:
   `quest unblocked --json`. Also delete the arm notes in the README, guide, and
   `/quest-run` and `/quest-iterate`. Keep `quest agent --advisor` only if a
   writer table then names an advisor.
-
-## Waiting
-
-- kixel-ai/token-max: `token-max sessions` prices a Claude advisor iteration, which Claude Code 2.1.330 records with no service tier, under the advisor's model, rather than leaving it unpriced (cost 0, `complete` false). Check by exporting a session run with `claude --advisor` and confirming its advisor model's `costUsd` is nonzero and `complete` true.
 
 ## Scheduled
 
