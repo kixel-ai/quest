@@ -1719,11 +1719,12 @@ quest fmt                        # format the repository
 quest fmt --fail-on-change src/  # treefmt's own arguments
 ```
 
-`quest fmt` runs that `treefmt` from the repository root: directly inside
-its dev shell, with no Nix evaluation, and through `nix develop --command`
-outside it. A `[tasks.fmt]` in `quest.toml` replaces it: `quest fmt` runs the
-task's `run` script, with its `environment`, the arguments as `$1` onward,
-and the dev shell unless it sets `nix = false`.
+`quest fmt` runs that `treefmt`, which finds the repository root itself and
+reads paths from the current directory: directly inside the dev shell, with
+no Nix evaluation, and through `nix develop --command` outside it. A
+`[tasks.fmt]` in `quest.toml` replaces it: `quest fmt` runs the task's `run`
+script from the repository root, with its `environment`, the arguments as
+`$1` onward, and the dev shell unless it sets `nix = false`.
 
 ## Route work by size
 

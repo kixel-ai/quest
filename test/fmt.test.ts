@@ -33,20 +33,22 @@ function setup(
 	if (treefmt) stub("treefmt", 'exit "${TREEFMT_EXIT:-0}"');
 	return {
 		dir,
-		env: { PATH: `${bin}:${process.env.PATH}` },
+		// Without treefmt, nothing else on PATH either, such as the dev shell's own.
+		env: { PATH: treefmt ? `${bin}:${process.env.PATH}` : bin },
 		log: () => (existsSync(log) ? readFileSync(log, "utf8").trim().split("\n") : []),
 	};
 }
 
 test.runIf(posix)(
-	"treefmt runs from the root, directly in the repository's dev shell and through nix develop outside it",
+	"treefmt runs where it is asked, directly in the repository's dev shell and through nix develop outside it",
 	() => {
 		const { dir, env, log } = setup({ "flake.nix": "{}" });
 		mkdirSync(join(dir, "sub"));
 		expect(fmt(join(dir, "sub"), ["--fail-on-change", "a.ts"], env)).toBe(0);
+		// From where it runs, since treefmt reads paths from there.
 		expect(log()).toEqual([
-			`nix develop ${dir} --command treefmt --fail-on-change a.ts in ${dir}`,
-			`treefmt --fail-on-change a.ts in ${dir}`,
+			`nix develop ${dir} --command treefmt --fail-on-change a.ts in ${join(dir, "sub")}`,
+			`treefmt --fail-on-change a.ts in ${join(dir, "sub")}`,
 		]);
 
 		const inside = setup({ "flake.nix": "{}" });
@@ -73,16 +75,18 @@ test.runIf(posix)("treefmt needs flake.nix outside the dev shell, and treefmt in
 test.runIf(posix)("quest.toml's fmt task replaces treefmt, with its environment and the arguments", () => {
 	const out = join(tempDir(), "out");
 	const task = (extra: string) =>
-		`[tasks.fmt]\ntier = "pr"\nrun = 'echo "$GREETING $# $1" >> ${out}'\nenvironment = { GREETING = "hi" }\n${extra}`;
+		`[tasks.fmt]\ntier = "pr"\nrun = 'echo "$GREETING $# $1 $PWD" >> ${out}'\nenvironment = { GREETING = "hi" }\n${extra}`;
 	const plain = setup({ "quest.toml": task("nix = false\n") });
-	expect(fmt(plain.dir, ["a b", "c"], plain.env)).toBe(0);
+	mkdirSync(join(plain.dir, "sub"));
+	expect(fmt(join(plain.dir, "sub"), ["a b", "c"], plain.env)).toBe(0);
 	expect(plain.log()).toEqual([]);
 	const nixed = setup({ "flake.nix": "{}", "quest.toml": task("") });
 	expect(fmt(nixed.dir, ["x"], nixed.env)).toBe(0);
 	expect(nixed.log()).toEqual([
-		`nix develop ${nixed.dir} --command env GREETING=hi bash -eo pipefail -c echo "$GREETING $# $1" >> ${out} quest-fmt x in ${nixed.dir}`,
+		`nix develop ${nixed.dir} --command env GREETING=hi bash -eo pipefail -c echo "$GREETING $# $1 $PWD" >> ${out} quest-fmt x in ${nixed.dir}`,
 	]);
-	expect(readFileSync(out, "utf8")).toBe("hi 2 a b\nhi 1 x\n");
+	// From the root, as quest run runs a task.
+	expect(readFileSync(out, "utf8")).toBe(`hi 2 a b ${plain.dir}\nhi 1 x ${nixed.dir}\n`);
 
 	const broken = setup({ "quest.toml": '[tasks.fmt]\ntier = "pr"\n' });
 	expect(() => fmt(broken.dir, [], broken.env)).toThrow("quest.toml: [tasks.fmt]: missing `run`");

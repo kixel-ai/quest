@@ -3,7 +3,7 @@
 import { spawnSync } from "node:child_process";
 import { lstatSync } from "node:fs";
 import { constants } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 
 import { MANIFEST_FILE } from "../core";
 import { git } from "./git";
@@ -41,7 +41,9 @@ export function fmt(root: string, args: string[], env: NodeJS.ProcessEnv): numbe
 		argv = [requireProgram(program!, env), ...rest];
 		childEnv = { ...env, ...Object.fromEntries(variables) };
 	}
-	const result = spawnSync(argv[0]!, argv.slice(1), { cwd: top, env: childEnv, stdio: "inherit" });
+	// treefmt finds the root itself and resolves paths from where it runs; the task runs from the root, as in quest run.
+	const cwd = task === null ? resolve(root) : top;
+	const result = spawnSync(argv[0]!, argv.slice(1), { cwd, env: childEnv, stdio: "inherit" });
 	if (result.error) throw result.error;
 	if (result.signal !== null) return 128 + constants.signals[result.signal];
 	return result.status ?? 1;

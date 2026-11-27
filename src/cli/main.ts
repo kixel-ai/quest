@@ -357,13 +357,14 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		.command("fmt")
 		.summary("Format the repository in its dev shell")
 		.description(
-			"Format the repository with the treefmt that quest.lib.mkFlake puts in its Nix dev shell, from the " +
-				"repository root, passing on every argument, such as paths or --fail-on-change. Inside the " +
+			"Format the repository with the treefmt that quest.lib.mkFlake puts in its Nix dev shell, passing on " +
+				"every argument, such as paths from the current directory or --fail-on-change. Inside the " +
 				"repository's dev shell, where QUEST_DEV_SHELL names its root, treefmt runs directly with no Nix " +
 				"evaluation; otherwise through nix develop --command, which needs flake.nix at the root. nix fmt runs " +
 				"the same treefmt.\n\n" +
-				"When quest.toml declares a fmt task, quest fmt runs its run script instead, with bash -eo pipefail " +
-				"-c, its environment table, the arguments as $1 onward, and the dev shell unless it sets nix = false. " +
+				"When quest.toml declares a fmt task, quest fmt runs its run script instead, from the repository root " +
+				"with bash -eo pipefail -c, its environment table, the arguments as $1 onward, and the dev shell " +
+				"unless it sets nix = false. " +
 				"Exits with the formatter's status.",
 		)
 		.argument("[args...]", "Arguments for treefmt, or the fmt task's script")
@@ -399,7 +400,8 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"backticked path pattern, ` - `, and a reason, and each item of its ## Automatic list that is not a " +
 				"backticked class name, an optional scope of backticked path patterns joined by `, ` in parentheses, " +
 				"` - `, and a rule. It also reads the repository's quest.toml, if any, as quest run does, and reports " +
-				"each problem with it, and Nix tasks in a repository without flake.nix.\n\n" +
+				"each problem with it, Nix tasks in a repository without flake.nix, and a flake.nix whose nixConfig " +
+				"does not list https://nix.kixel.quest in extra-substituters.\n\n" +
 				"With --fix, first drop every Required, Related, or Closes entry that links to a quest deleted in " +
 				"the history of HEAD, and of MERGE_HEAD during a merge, that the working tree lacks, as quest rm " +
 				"does, such as the quests a merged base finished, and every epic's Required entry naming a quest in " +
