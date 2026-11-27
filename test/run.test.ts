@@ -1,0 +1,309 @@
+// quest run: picking tasks from a change, running them in their order through the gate and the Nix dev shell,
+// and collecting their reports.
+import { execFileSync } from "node:child_process";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
+import { expect, test } from "vitest";
+
+import { main } from "../src/cli/main";
+import { REFERENCE_LINE } from "../src/core";
+import { type RunOptions, run } from "../src/cli/run";
+import { initRepository, tempDir } from "./fixture";
+
+// The stubs are shell scripts.
+const posix = process.platform !== "win32";
+
+const quote = (text: string) => `'${text.replace(/'/g, `'\\''`)}'`;
+
+/** A repository on main holding `files`, with `origin/main` at that commit. */
+function repository(files: Record<string, string>): string {
+	const dir = initRepository(tempDir());
+	write(dir, files);
+	execFileSync("git", ["-C", dir, "add", "-A"], { stdio: "ignore" });
+	execFileSync("git", ["-C", dir, "commit", "-q", "-m", "base"], { stdio: "ignore" });
+	execFileSync("git", ["-C", dir, "update-ref", "refs/remotes/origin/main", "HEAD"], { stdio: "ignore" });
+	return dir;
+}
+
+function write(dir: string, files: Record<string, string>): void {
+	for (const [path, text] of Object.entries(files)) {
+		mkdirSync(dirname(join(dir, path)), { recursive: true });
+		writeFileSync(join(dir, path), text);
+	}
+}
+
+/**
+ * A PATH directory with a `quest` whose gate runs its command at once and a `nix` whose `develop <flake> --command`
+ * runs its command in a dev shell, each logging its arguments.
+ */
+function stubs(): { bin: string; log: string } {
+	const bin = tempDir();
+	const log = join(bin, "log");
+	const script = (body: string) => `#!/bin/sh\necho "$(basename "$0") $*" >> ${quote(log)}\n${body}\n`;
+	writeFileSync(join(bin, "quest"), script('[ "$1" = gate ] || exit 99\nshift\nexec "$@"'), { mode: 0o755 });
+	writeFileSync(
+		join(bin, "nix"),
+		script('[ "$1" = develop ] && [ "$3" = --command ] || exit 98\nshift 3\nIN_NIX_SHELL=impure exec "$@"'),
+		{ mode: 0o755 },
+	);
+	return { bin, log };
+}
+
+const task = (name: string, script: string, extra = "") =>
+	`[tasks.${name}]\ntier = "pr"\nrun = ${JSON.stringify(script)}\nnix = false\n${extra}\n`;
+
+async function runIn(
+	dir: string,
+	options: Partial<RunOptions> = {},
+	env: NodeJS.ProcessEnv = {},
+): Promise<{ code: number; stdout: string; stderr: string; log: string[] }> {
+	const { bin, log } = stubs();
+	let stdout = "";
+	let stderr = "";
+	const code = await run(
+		{
+			root: dir,
+			tier: "pr",
+			all: false,
+			only: null,
+			base: undefined,
+			os: ["linux"],
+			failFast: false,
+			query: false,
+			report: undefined,
+			...options,
+		},
+		{
+			stdout: (text) => void (stdout += text),
+			stderr: (text) => void (stderr += text),
+			env: { PATH: `${bin}:${process.env.PATH}`, ...env },
+			now: () => 0,
+		},
+	);
+	const logged = existsSync(log) ? readFileSync(log, "utf8").trim().split("\n") : [];
+	return { code, stdout, stderr, log: logged };
+}
+
+test.runIf(posix)("a task starts once those it runs after pass, and independent tasks start at once", async () => {
+	const dir = repository({
+		"quest.toml": [
+			task("build", "touch built; echo built"),
+			task("test", "test -f built; echo tested", 'after = ["build"]'),
+			task("lint", "echo linted"),
+		].join(""),
+	});
+	const out = await runIn(dir, { all: true });
+	expect(out.code, out.stderr).toBe(0);
+	expect(out.stdout.split("\n").sort()).toEqual(["", "build | built", "lint  | linted", "test  | tested"]);
+	const events = out.stderr.split("\n").filter((line) => / (started|passed)/.test(line));
+	// build and lint start together; test waits for build.
+	expect(events.slice(0, 2)).toEqual(["quest: build started", "quest: lint started"]);
+	expect(events.indexOf("quest: test started")).toBeGreaterThan(events.indexOf("quest: build passed in 0.0s"));
+	expect(out.stderr).toContain("quest: 3 passed\n");
+	// Every task runs through the gate.
+	expect(out.log.filter((line) => line.startsWith("quest gate "))).toHaveLength(3);
+});
+
+test.runIf(posix)("a failed task skips those after it while the others finish, and fails the run", async () => {
+	const dir = repository({
+		"quest.toml": [
+			task("build", "exit 3"),
+			task("test", "echo never", 'after = ["build"]'),
+			task("e2e", "echo never", 'after = ["test"]'),
+			task("lint", "echo linted"),
+		].join(""),
+	});
+	const out = await runIn(dir, { all: true });
+	expect(out.code).toBe(1);
+	expect(out.stdout).toBe("lint  | linted\n");
+	expect(out.stderr).toContain("quest: build failed in 0.0s: exit 3\n");
+	expect(out.stderr).toContain("quest: test skipped, since build did not pass\n");
+	expect(out.stderr).toContain("quest: e2e skipped, since test did not pass\n");
+	expect(out.stderr).toContain("quest: 1 passed, 1 failed, 2 skipped\n");
+});
+
+test.runIf(posix)("fail-fast stops the running tasks and starts no more", async () => {
+	const dir = repository({
+		"quest.toml": [
+			task("slow", "exec sleep 300"),
+			task("broken", "exit 1"),
+			task("after", "echo never", 'after = ["broken", "slow"]'),
+		].join(""),
+	});
+	const out = await runIn(dir, { all: true, failFast: true });
+	expect(out.code).toBe(1);
+	expect(out.stderr).toContain("quest: slow cancelled in 0.0s: exit SIGTERM\n");
+	expect(out.stderr).toContain("quest: 1 failed, 1 cancelled, 1 skipped\n");
+});
+
+test.runIf(posix)("tasks get the tier, the merge base, and their environment", async () => {
+	const dir = repository({
+		"quest.toml": task("env", 'echo "$QUEST_TIER $QUEST_BASE $FOO"', 'environment = { FOO = "bar" }'),
+	});
+	const base = execFileSync("git", ["-C", dir, "rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+	write(dir, { "new.txt": "untracked" });
+	const out = await runIn(dir, { tier: "gate" });
+	expect(out.stdout).toBe(`env | gate ${base} bar\n`);
+	expect(out.stderr).toContain(`quest: base origin/main (${base.slice(0, 12)}), 1 changed paths\n`);
+	// --all sets no base.
+	expect((await runIn(dir, { all: true })).stdout).toBe("env | pr  bar\n");
+});
+
+test.runIf(posix)("the base is --base, else QUEST_LAND_BASE, else origin and [repo] merge", async () => {
+	const dir = repository({
+		"quest.toml": `[repo]\nmerge = "trunk"\n${task("a", "echo a", 'paths = ["a/"]')}${task("b", "echo b", 'paths = ["b/"]')}`,
+	});
+	execFileSync("git", ["-C", dir, "update-ref", "refs/remotes/origin/trunk", "HEAD"], { stdio: "ignore" });
+	write(dir, { "a/x": "1" });
+	execFileSync("git", ["-C", dir, "add", "-A"], { stdio: "ignore" });
+	execFileSync("git", ["-C", dir, "commit", "-q", "-m", "a"], { stdio: "ignore" });
+	execFileSync("git", ["-C", dir, "tag", "after-a"], { stdio: "ignore" });
+	write(dir, { "b/x": "1" });
+	// origin/trunk is before both changes.
+	expect((await runIn(dir)).stdout.split("\n").sort()).toEqual(["", "a | a", "b | b"]);
+	expect((await runIn(dir, {}, { QUEST_LAND_BASE: "after-a" })).stdout).toBe("b | b\n");
+	expect((await runIn(dir, { base: "after-a" }, { QUEST_LAND_BASE: "origin/trunk" })).stdout).toBe("b | b\n");
+	const missing = runIn(dir, { base: "nowhere" });
+	await expect(missing).rejects.toThrow("cannot find the merge base of nowhere and HEAD");
+});
+
+test.runIf(posix)("query prints one matrix entry per task and operating system and runs nothing", async () => {
+	const dir = repository({
+		"flake.nix": "{}",
+		"quest.toml": [
+			'[tasks.build]\ntier = "pr"\nrun = "touch ran"\ncaches = ["mbx"]\n',
+			'[tasks.test]\ntier = "gate"\nrun = "touch ran"\nafter = ["build"]\nos = ["linux"]\ncapabilities = ["kvm"]\n',
+		].join(""),
+	});
+	const out = await runIn(dir, { tier: "gate", all: true, query: true, os: ["linux", "macos"] });
+	expect(out.code).toBe(0);
+	expect(JSON.parse(out.stdout)).toEqual({
+		include: [
+			{ task: "build", os: "linux", tier: "pr", after: [], nix: true, capabilities: [], caches: ["mbx"] },
+			{ task: "build", os: "macos", tier: "pr", after: [], nix: true, capabilities: [], caches: ["mbx"] },
+			{ task: "test", os: "linux", tier: "gate", after: ["build"], nix: true, capabilities: ["kvm"], caches: [] },
+		],
+	});
+	expect(existsSync(join(dir, "ran"))).toBe(false);
+	expect(out.log).toEqual([]);
+});
+
+test.runIf(posix)("a Nix task enters the dev shell unless already in one, and needs flake.nix", async () => {
+	const nixTask = '[tasks.nixed]\ntier = "pr"\nrun = "echo shell=$IN_NIX_SHELL"\n';
+	const dir = repository({ "flake.nix": "{}", "quest.toml": nixTask + task("plain", "echo shell=$IN_NIX_SHELL") });
+	const outside = await runIn(dir, { all: true });
+	expect(outside.code, outside.stderr).toBe(0);
+	expect(outside.stdout.split("\n").sort()).toEqual(["", "nixed | shell=impure", "plain | shell="]);
+	expect(outside.log).toContain(`nix develop ${dir} --command bash -eo pipefail -c echo shell=$IN_NIX_SHELL`);
+	// Inside a dev shell, no task calls nix.
+	const inside = await runIn(dir, { all: true }, { IN_NIX_SHELL: "impure" });
+	expect(inside.code).toBe(0);
+	expect(inside.log.filter((line) => line.startsWith("nix "))).toEqual([]);
+
+	const bare = repository({ "quest.toml": nixTask + task("plain", "echo plain") });
+	await expect(runIn(bare, { all: true })).rejects.toThrow(
+		"quest.toml: nixed run in the Nix dev shell, but there is no flake.nix",
+	);
+	// A run that picks only tasks without Nix needs neither the flake nor nix.
+	const plain = await runIn(bare, { only: ["plain"] });
+	expect(plain.code).toBe(0);
+	expect(plain.stdout).toBe("plain | plain\n");
+});
+
+test.runIf(posix)("a task's reports are checked and copied, and a stale one never counts", async () => {
+	const dir = repository({
+		"quest.toml": [
+			task(
+				"good",
+				"echo '<testsuites/>' > out/good.xml; echo '{\"ms\": 1}' > out/good.json",
+				'junit = "out/good.xml"\nmetrics = "out/good.json"',
+			),
+			task("lazy", "true", 'junit = "out/lazy.xml"'),
+			task("bad", "echo '[1]' > out/bad.json", 'metrics = "out/bad.json"'),
+		].join(""),
+		// An earlier run's report, which lazy must not pass off as its own.
+		"out/lazy.xml": "<stale/>",
+	});
+	const report = join(tempDir(), "report");
+	mkdirSync(join(report, "lazy"), { recursive: true });
+	writeFileSync(join(report, "lazy", "junit.xml"), "<stale/>");
+	const out = await runIn(dir, { all: true, report });
+	expect(out.code).toBe(1);
+	expect(out.stderr).toContain("quest: lazy failed in 0.0s: it did not write out/lazy.xml\n");
+	expect(out.stderr).toContain("quest: bad failed in 0.0s: out/bad.json is not a JSON object\n");
+	expect(readFileSync(join(report, "good", "junit.xml"), "utf8")).toBe("<testsuites/>\n");
+	expect(readFileSync(join(report, "good", "metrics.json"), "utf8")).toBe('{"ms": 1}\n');
+	expect(existsSync(join(report, "lazy"))).toBe(false);
+});
+
+// The real CLI and the real gate, admitted at once so a loaded host does not hold the test.
+test.runIf(posix)("quest run runs a fixture repository's quest.toml end to end", async () => {
+	const dir = repository({
+		"quest.toml": [
+			'[repo]\ninvalidate_all = ["shared/"]\n',
+			task("build", "mkdir -p out; echo built > out/build", 'paths = ["src/"]'),
+			task(
+				"test",
+				"cat out/build; echo '<testsuites/>' > out/junit.xml",
+				'after = ["build"]\npaths = ["test/"]\njunit = "out/junit.xml"',
+			),
+			task("docs", "echo docs", 'paths = ["docs/"]'),
+			task("nightly", "echo nightly", 'tier = "nightly"').replace('tier = "pr"\n', ""),
+		].join(""),
+	});
+	write(dir, { "test/a.ts": "" });
+	const bin = tempDir();
+	const entry = fileURLToPath(new URL("../src/cli/bin.ts", import.meta.url));
+	const config = fileURLToPath(new URL("../bunfig.toml", import.meta.url));
+	writeFileSync(
+		join(bin, "quest"),
+		`#!/bin/sh\nexec ${quote(process.execPath)} --config=${quote(config)} ${quote(entry)} "$@"\n`,
+		{ mode: 0o755 },
+	);
+	const report = join(tempDir(), "report");
+	const previous = { PATH: process.env.PATH, admitted: process.env.QUEST_GATE_ADMITTED };
+	process.env.PATH = `${bin}:${process.env.PATH}`;
+	process.env.QUEST_GATE_ADMITTED = "1";
+	let stdout = "";
+	let stderr = "";
+	try {
+		const code = await main(["--root", dir, "run", "--tier", "gate", "--os", "linux", "--report", report], {
+			stdout: (text) => void (stdout += text),
+			stderr: (text) => void (stderr += text),
+		});
+		expect(code, stderr).toBe(0);
+	} finally {
+		process.env.PATH = previous.PATH;
+		if (previous.admitted === undefined) delete process.env.QUEST_GATE_ADMITTED;
+		else process.env.QUEST_GATE_ADMITTED = previous.admitted;
+	}
+	// test/ picks test, which pulls in build; docs and the nightly task stay out.
+	expect(stdout).toBe("test  | built\n");
+	expect(stderr).toContain("quest: 2 passed\n");
+	expect(readFileSync(join(report, "test", "junit.xml"), "utf8")).toBe("<testsuites/>\n");
+});
+
+test("quest check reports a malformed quest.toml, and Nix tasks without flake.nix", async () => {
+	const dir = tempDir();
+	mkdirSync(join(dir, ".git"));
+	write(dir, { "AGENTS.md": `${REFERENCE_LINE}\n`, "quest/README.md": "# Quests\n\n## Goal\n\nWork.\n" });
+	const check = async () => {
+		let stderr = "";
+		const code = await main(["--root", dir, "check", "--no-stubs"], {
+			stdout: () => {},
+			stderr: (text) => void (stderr += text),
+		});
+		return { code, stderr };
+	};
+	write(dir, { "quest.toml": '[tasks.a]\ntier = "pr"\n' });
+	expect(await check()).toEqual({ code: 1, stderr: "quest: quest.toml: [tasks.a]: missing `run`\n" });
+	write(dir, { "quest.toml": '[tasks.a]\ntier = "pr"\nrun = "x"\n' });
+	expect(await check()).toEqual({
+		code: 1,
+		stderr: "quest: quest.toml: a run in the Nix dev shell, but there is no flake.nix; set nix = false on a task that runs without Nix\n",
+	});
+	write(dir, { "flake.nix": "{}" });
+	expect((await check()).code).toBe(0);
+});

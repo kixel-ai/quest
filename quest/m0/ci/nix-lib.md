@@ -5,7 +5,7 @@
 `kixel-ai/quest`'s `flake.nix` exports a self-contained `lib.mkFlake` helper so downstream repositories eliminate duplicated flake boilerplate without adding extra flake inputs, and `quest` ships fast formatting (`quest fmt`) and S3/B2 Nix cache publishing (`quest cache push`):
 
 - `quest.lib.mkFlake` takes a repository's `nixpkgs`, systems, dev-shell packages/hooks, optional `packages`/`checks`, and optional `fmt` formatters (`nixfmt`, `rustfmt`, `biome`, `shfmt`, `taplo`, `ruff`, etc.), hiding `treefmt-nix` internally so downstream repos pin only `nixpkgs` and `quest`.
-- Automatically injects `quest` into `devShells.default`, builds the `treefmt` wrapper directly onto `$PATH` inside `devShells.default` (and exports `formatter`), sets a dev-shell marker env var so `quest run` skips nested `nix develop`, adds `checks.quest` (`quest check`), and documents/checks the shared `nix.kixel.quest` `nixConfig`.
+- Automatically injects `quest` into `devShells.default`, builds the `treefmt` wrapper directly onto `$PATH` inside `devShells.default` (and exports `formatter`), adds `checks.quest` (`quest check`), and documents/checks the shared `nix.kixel.quest` `nixConfig`.
 - `quest fmt` invokes the dev shell's `treefmt` directly (~50ms, zero Nix eval) unless overridden by `[tasks.fmt]` in `quest.toml`, while `nix fmt` remains available for external callers.
 - `quest cache push` builds every flake output listed under `[repo] cache` in `quest.toml` (including dev-shell closures via `nix develop --profile`), signs them with `$NIX_SIGNING_KEY`, uploads them to the configured S3-compatible store (`nix copy`), records commit roots, and refreshes stale object upload ages (`rclone touch`) so reused store paths never expire early under bucket lifecycle rules.
 
@@ -20,10 +20,7 @@ Decided 2026-11-26 (maintainer, `/quest-plan`, see the [CI epic](/quest/m0/ci/RE
 Implementation notes:
 
 - Note that Nix reads `nixConfig` only from the top-level `flake.nix` attrset (not from `outputs`), so `quest check` verifies a repo opting into Kixel Quest sets `nixConfig` to `https://nix.kixel.quest` (and `quest init` or a snippet documents the 4-line `nixConfig` block).
+- `quest run` already skips `nix develop` wherever `IN_NIX_SHELL` is set, as every `nix develop` and direnv shell sets it; add a marker of its own only if a dev shell from another repository must be told apart.
 - `quest cache push` must fail loudly if signing or S3 credentials are missing and must never silently skip missing store paths during TTL refresh, matching the strictness of `moq/infra/nix/justfile`.
 
 Tests: Nix flake evaluation test of `quest.lib.mkFlake` verifying `devShells.default`, `formatter`, `checks.quest`, and `treefmt` on `$PATH`; benchmark confirming `quest fmt` runs in under 200ms inside the dev shell on a fixture repo; unit and mocked-S3 tests for `quest cache push` covering signing, copy, root recording, and stale-object refresh.
-
-## Required
-
-- [quest.toml manifest and quest run](/quest/m0/ci/manifest.md) - defines `[repo] cache` and `[tasks.fmt]` override

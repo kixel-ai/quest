@@ -34,8 +34,12 @@ import {
 	waiting,
 	waitLine,
 	handBackProblems,
+	HOST,
+	type Host,
 	InputError,
 	Refusal,
+	TASK_TIERS,
+	type TaskTier,
 } from "../core";
 import {
 	AgentInputError,
@@ -61,6 +65,7 @@ import {
 } from "./forge";
 import { PENDING_MS } from "./admission";
 import { gate } from "./gate";
+import { manifestProblems, nativeOs, run as runTasks } from "./run";
 import { gitHubDependencies, pullRequest, readRemote, remoteRepository, requireRemote } from "./github";
 import { type GitHubDependencies, mergedHolds } from "../github/client";
 import { GitHubForge } from "../github/forge";
@@ -266,6 +271,85 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		});
 
 	program
+		.command("run")
+		.summary("Run the CI tasks quest.toml declares that a change affects")
+		.description(
+			"Run the tasks the repository's quest.toml declares for a tier, each through quest gate, and in the " +
+				"repository's Nix dev shell unless the task sets nix = false. A task starts once every task it runs " +
+				"after passed, so independent tasks run at once, and each line it prints is prefixed with its name.\n\n" +
+				"Without --all, it diffs the working tree, untracked files included, against the merge base of HEAD " +
+				"and a base ref: --base, else $QUEST_LAND_BASE, else origin/ and [repo] merge (main unless set). A " +
+				"task runs when a changed path matches one of its paths or inputs, or any path when it declares no " +
+				"paths, and none of its exclude patterns; a change to quest.toml, or to a path [repo] invalidate_all " +
+				"matches, runs every task of the tier. The tiers are pr, gate, nightly, release-gate, and release: a " +
+				"run of one of the first four also runs the tiers before it, and a release run only release tasks. " +
+				"--only runs the named tasks whatever their tier or the change. A picked task also runs every task it " +
+				"runs after.\n\n" +
+				"Each task gets QUEST_TIER, QUEST_BASE (the merge base, unless --all), and its environment table, and " +
+				"runs its run script with bash -eo pipefail -c from the repository root. A Nix task needs flake.nix " +
+				"there; inside a dev shell (IN_NIX_SHELL set) it runs directly, and otherwise through nix develop " +
+				"--command. quest, bash, and, outside a dev shell, nix must be on PATH.\n\n" +
+				"A task that passes must write the junit and metrics files it declares, and metrics must hold a JSON " +
+				"object; --report copies them to <dir>/<task>/junit.xml and <dir>/<task>/metrics.json. A failed task " +
+				"skips the tasks after it, and with --fail-fast also stops every running task. Exits 1 when a task " +
+				"fails.\n\n" +
+				"--query prints the picked tasks as JSON for a CI runner's matrix and runs nothing: " +
+				"{include: [{task, os, tier, after, nix, capabilities, caches}]}, one entry per task and operating " +
+				"system.",
+		)
+		.addOption(new Option("--tier <tier>", "The tier to run").choices(TASK_TIERS).default("pr"))
+		.addOption(new Option("--all", "Run every task of the tier, whatever changed").conflicts("base"))
+		.option(
+			"--only <task>",
+			"Run this task whatever its tier or the change (repeatable)",
+			(value: string, previous: string[]) => [...previous, value],
+			[],
+		)
+		.option("--base <ref>", "Diff against the merge base of HEAD and this ref")
+		.option(
+			"--os <os>",
+			`Run the tasks for this operating system, one of ${HOST.join(", ")} (repeatable; default: this host's)`,
+			(value: string, previous: Host[]) => {
+				if (!HOST.includes(value as Host)) throw new InvalidArgumentError(`expected one of ${HOST.join(", ")}`);
+				return [...previous, value as Host];
+			},
+			[],
+		)
+		.option("--fail-fast", "Stop every running task once one fails")
+		.option("--query", "Print the picked tasks as JSON instead of running them")
+		.option("--report <dir>", "Copy each task's JUnit XML and metrics into <dir>/<task>/")
+		.action(
+			(options: {
+				tier: TaskTier;
+				all?: boolean;
+				only: string[];
+				base?: string;
+				os: Host[];
+				failFast?: boolean;
+				query?: boolean;
+				report?: string;
+			}) => {
+				pending = runTasks(
+					{
+						root: root(),
+						tier: options.tier,
+						all: options.all ?? false,
+						only: options.only.length === 0 ? null : options.only,
+						base: options.base,
+						os: options.os.length === 0 ? [nativeOs()] : [...new Set(options.os)],
+						failFast: options.failFast ?? false,
+						query: options.query ?? false,
+						report: options.report,
+					},
+					{ stdout: out.stdout, stderr: out.stderr, env: process.env, now: Date.now },
+				).catch((error: unknown) => {
+					warn(error instanceof Error ? error.message : String(error));
+					return 1;
+				});
+			},
+		);
+
+	program
 		.command("check")
 		.summary("Report every structural mistake in the tree; exit non-zero if any")
 		.description(
@@ -286,7 +370,8 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"any, as quest review reads the base's, and reports each item of its ## High list that is not a " +
 				"backticked path pattern, ` - `, and a reason, and each item of its ## Automatic list that is not a " +
 				"backticked class name, an optional scope of backticked path patterns joined by `, ` in parentheses, " +
-				"` - `, and a rule.\n\n" +
+				"` - `, and a rule. It also reads the repository's quest.toml, if any, as quest run does, and reports " +
+				"each problem with it, and Nix tasks in a repository without flake.nix.\n\n" +
 				"With --fix, first drop every Required, Related, or Closes entry that links to a quest deleted in " +
 				"the history of HEAD, and of MERGE_HEAD during a merge, that the working tree lacks, as quest rm " +
 				"does, such as the quests a merged base finished, and every epic's Required entry naming a quest in " +
@@ -326,6 +411,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 			const repository = [
 				...(options.stubs && own ? stubFindings(root()) : []),
 				...(own && existsSync(risk) ? parseRiskFile(readFileSync(risk, "utf8")).problems : []),
+				...(own ? manifestProblems(root()) : []),
 			];
 			if (findings.length === 0 && repository.length === 0) {
 				const count = collect(root()).length;
