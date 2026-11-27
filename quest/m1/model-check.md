@@ -75,7 +75,12 @@ checkpoints and outages to count by hand:
     (`firstRounds.findings` over `firstRounds.pulls`), review rounds per
     reviewed PR (`tally.rounds / reviewed`), hand-backs per PR
     (`handedBack / pulls`, merged PRs included), and later
-    `## Caused by` escapes per merged PR (`fixes / merged`).
+    `## Caused by` escapes per merged PR (`fixes / merged`). A row whose
+    `spent` is incomplete, as an advised writer's is while token-max leaves
+    advisor iterations unpriced
+    ([kixel-ai/token-max#281](https://github.com/kixel-ai/token-max/pull/281)),
+    marks its cost `or more`, as `quest usage` does, in its label and
+    table, so no reader takes it for a point on the cost frontier.
   - Local reviewers, one point per `reviewers` row (PR size, harness,
     model, effort, shadow): cost per PR reviewed, `spent.cost /
     spent.pulls`, against findings per reviewed PR (`tally.findings` over
