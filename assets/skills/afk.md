@@ -11,7 +11,10 @@ A deferred question counts as asked, so a skill's loop goes on past it and finis
 The argument picks a mode, and modes combine, such as `soon merge`:
 
 - None: every merge pick below waits for the user.
-- `merge`: also run `/quest-merge` on each PR you strongly recommend merging that `quest status` shows low or medium for its head, with a review that counts for that head, no open decision, no follow-ups, and no quest deleted or deprioritized beyond the one it finishes. Defer every other PR, a high or unclassified one included.
+- `merge`: also run `/quest-merge` on each PR you recommend merging that `quest status` shows low for its head, with no open decision, no follow-ups, and no quest deleted or deprioritized beyond those it finishes.
+  Send each other PR you would take further to `/quest-iterate`, its brief naming each of its follow-ups you recommend doing now, to implement in the PR in place of the follow-up's quest; once it reports, apply this mode to it again.
+  When nothing else is left to do, you may also merge a medium PR meeting the same bar if its merge makes ready a quest you would start now.
+  Defer every other PR, a high or unclassified one included.
 - `soon`: the user is about to leave. Ask every question the session has pending now, in one batch, as `/quest-run`'s "decisions" does, and act on the answers; once the prompt returns, go on as afk, taking or deferring each question it left unanswered as below.
 
 Other words widen what you may decide, such as "close superseded PRs"; act on them within their words. A grant of merges that names no risk tier is `merge`.
