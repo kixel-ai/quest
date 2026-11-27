@@ -1428,9 +1428,9 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				Object.entries(ARMS)
 					.map(([size, arms]) => `${size} B ${entryText(arms.B)}`)
 					.join("; ") +
-				". --arm with --cohort prints that arm's entry at the PR's size instead, for an iterate on a PR whose first " +
-				"Implementer line names the arm and cohort; a line naming another cohort or none ran an earlier A/B, " +
-				"whose iterates run what the line records. Prints harness, model, and effort per line, tab-separated, " +
+				". An iterate on a PR whose first Implementer line names an arm runs the model, effort, and advisor that " +
+				"line records; --arm with --cohort prints that arm's entry at the PR's size instead, for the effort such a " +
+				"line leaves out, and refuses a cohort that has ended. Prints harness, model, and effort per line, tab-separated, " +
 				"then the advisor model for an entry that pairs one; --json prints an " +
 				"array of {harness, model, effort, advisor?} objects.",
 		)
@@ -1499,7 +1499,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"review thread it opens or a [P<n>] line in its review body, and its first answer's first word takes or " +
 				"declines it. Rollups follow: spend by size, role, harness, model, and " +
 				"effort, accuracy by size and implementer, summing each branch's tallies but the shadow's once, where an Implementer line's own size, as (iterate, XS), wins " +
-				"over the PR's, with its writing cost over the merged PRs it was found on, the writer A/B by size, cohort, and arm, counting a sized PR whose every Implementer line names the same arm, cohort, model, and advisor, as (arm B, cohort advisor-2026-11, advisor claude-opus-5-5), under its first line's writer with the spend of every session on it, its advisor's included, local reviewers by size, harness, model, effort, and shadow or second, with their " +
+				"over the PR's, with its writing cost over the merged PRs it was found on, the writer A/B by size, cohort, and arm, counting a sized PR whose every Implementer line names the same arm, cohort, harness, model, effort (unknown matching any), and advisor, as (arm B, cohort advisor-2026-11, advisor claude-opus-5-5), under its first line's writer with the spend of every session on it, its advisor's included, local reviewers by size, harness, model, effort, and shadow or second, with their " +
 				"tallies and reviewing cost per PR, each risk tier's PRs, merged PRs, tiers a reviewer raised, tiers the maintainer overrode, PRs a later one fixed, and time waited on a person, the same for each RISK.md ## Automatic class the classifiers named, with how many were low, each online reviewer's coverage and findings over the merged PRs, and each breakage a merged PR in the window names under ## Caused by: its culprit's tier, size, writers, and local reviewers, read from GitHub when older than the window, who found it and the incident it closes when the line ends with (found by check|reviewer|queue|canary|person|customer; incident <id>), either part alone allowed, and how long after the culprit merged the fix opened. Without token-max on PATH, it says how to install it and reports the PRs' records alone. " +
 				"--json prints the same report as one object.\n\n" +
 				"Uses GH_TOKEN, GITHUB_TOKEN, or gh auth token. Exits 0 when done, 2 for invalid arguments, and 1 for " +

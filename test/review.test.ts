@@ -2826,9 +2826,11 @@ test("an Implementer line reads as agents write it", () => {
 		arm: "A",
 		cohort: "advisor-2026-11",
 	});
-	// An advisor that names no model leaves the line unread rather than counted as unadvised.
-	expect(read("Claude Code, Opus 5.5, high effort (advisor unknown)")).toBeNull();
-	expect(read("Claude Code, Opus 5.5, high effort (advisor Some Model)")).toBeNull();
+	// A bare family reads as its listed model, as `--advisor opus` runs it; a name no table knows stays as written,
+	// so the line still reads, and `quest review` can still find the writer.
+	for (const name of ["opus", "Opus", "Claude Opus", "claude-opus"])
+		expect(read(`Claude Code, claude-sonnet-5-5, high effort (advisor ${name})`)?.advisor).toBe("claude-opus-5-5");
+	expect(read("Claude Code, Opus 5.5, high effort (advisor Some Model)")?.advisor).toBe("Some Model");
 	expect(read("unknown, Opus 5.5, high effort")).toEqual(opus("high", "unknown"));
 	expect(read("Claude Code, Fable 5.2, medium effort")?.model).toBe("claude-fable-5-2");
 	expect(read("Codex, openai/gpt-6.2-sol, high effort")?.model).toBe("gpt-6.2-sol");

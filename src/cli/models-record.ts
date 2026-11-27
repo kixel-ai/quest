@@ -99,12 +99,23 @@ function modelId(name: string, harness: string, loose = false): string | null {
 }
 
 /**
+ * The advisor an Implementer note names, as Claude Code's `--advisor` takes it: a listed model by any spelling, a
+ * bare Claude family such as `opus` as that family's listed model, else the name as written, so a spelling no table
+ * knows still keeps the line readable and only counts apart.
+ */
+function advisorId(name: string): string {
+	const family = /^(?:claude[\s-]+)?([a-z]+)$/i.exec(name)?.[1]?.toLowerCase();
+	const listed = family && [...new Set(KNOWN.values())].filter((id) => id.startsWith(`claude-${family}-`));
+	if (listed && listed.length === 1) return listed[0]!;
+	return modelId(name, "Claude Code") ?? name;
+}
+
+/**
  * The fields of an `Implementer: <harness>, <model>, <effort> effort` item, as agents write it: the model by ID or
  * display name, the harness or effort left out, the effort bare or `effort not reported`, and a size, writer A/B
  * arm and cohort, and advisor model among the notes of a parenthetical it ends with, as
- * `(iterate, XS, arm B, cohort advisor-2026-11, advisor claude-opus-5-5)`. Null when it names no model, has more
- * fields, or names an advisor that reads as no model; a lone field reads only as a listed model's ID or display name,
- * or as an ID.
+ * `(iterate, XS, arm B, cohort advisor-2026-11, advisor claude-opus-5-5)`. Null when it names no model or has more
+ * fields; a lone field reads only as a listed model's ID or display name, or as an ID.
  */
 export function implementer(item: string): Implementer | null {
 	let rest = item.trim().replace(/^Implementer:\s*/, "");
@@ -122,9 +133,7 @@ export function implementer(item: string): Implementer | null {
 	const arm = ARM_NAMES.find((name) => listed.includes(`arm ${name}`)) ?? null;
 	const cohort = labeled("cohort") || null;
 	const advising = labeled("advisor");
-	const advisor = advising === undefined ? null : modelId(advising, "Claude Code", true);
-	if (advisor === "unknown" || (advising !== undefined && advisor === null)) return null;
-	const extra = { size, arm, cohort, advisor };
+	const extra = { size, arm, cohort, advisor: advising ? advisorId(advising) : null };
 	// A lone field is a model only as a listed name or an ID, since `unknown` or another name alone may be a harness.
 	if (parts.length === 1) {
 		const id = modelId(parts[0]!, "");

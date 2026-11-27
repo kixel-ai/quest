@@ -1615,11 +1615,12 @@ claude	claude-opus-5-5	medium
 nearest size that lists it, the larger on a tie. A model no list names, such
 as Codex's, is an error, and the coordinator then starts the iterate on its
 size's first entry that can run. An iterate on a PR whose first
-`Implementer:` line names an arm and cohort runs that arm's entry at the PR's size instead, as
-`quest models S --arm B --cohort advisor-2026-11` prints, and records it as
-`(iterate, XS, arm B, cohort advisor-2026-11, advisor claude-opus-5-5)`. For
-an arm its size or cohort no longer runs, which `--arm` refuses, or a line
-naming no cohort, it runs the model, effort, and advisor that line records.
+`Implementer:` line names an arm runs the model, effort, and advisor that line
+records instead, even after the PR is resized, and records it as
+`(iterate, XS, arm B, cohort advisor-2026-11, advisor claude-opus-5-5)`. An
+effort the line leaves out comes from the arm's entry at the PR's size, as
+`quest models S --arm B --cohort advisor-2026-11` prints, while that size and
+cohort run the arm; `--arm` refuses an ended cohort.
 Plain output adds the advisor as a fourth column for an entry that pairs one,
 and `--json` prints an array of `{harness, model, effort, advisor?}` objects. The
 iterate records the size it was given in its `Implementer:` line, as
@@ -2098,8 +2099,8 @@ counts as unreviewed. An `Implementer:` line's own size, as
 `(iterate, XS)`, counts over the PR's, and a line naming an advisor, as
 `(advisor claude-opus-5-5)`, is its own implementer. The writer A/B reports by size, cohort, and arm,
 with the same outcomes and every session's spend, its advisor's included, counting a sized PR only when
-each of its `Implementer:` lines names the same arm, cohort, model, and
-advisor; lines that name no cohort, written before cohorts, report under `-`. Each implementer also carries its
+each of its `Implementer:` lines names the same arm, cohort, harness, model,
+effort (`unknown` matching any), and advisor; lines that name no cohort, written before cohorts, report under `-`. Each implementer also carries its
 writing sessions' cost on the merged PRs they were found on, so cost per merged
 PR divides by those PRs, not the ones no host reported: a PR's spend on a
 model goes to its line of that model or the line it advises, whose tokens

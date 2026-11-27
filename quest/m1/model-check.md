@@ -69,7 +69,7 @@ checkpoints and outages to count by hand:
   Points too thin for the run's variance estimate stay on the chart,
   marked thin in their label, never dropped. Cells whose
   `Implementer:` effort is `unknown` stay separate points. The charts:
-  - Writers, one point per `accuracy` row (size, model, effort): cost per
+  - Writers, one point per `accuracy` row (size, model, effort, advisor): cost per
     merged PR, `spent.cost / spent.pulls`, against each quality measure
     on its own chart. The measures are first-round findings per PR
     (`firstRounds.findings` over `firstRounds.pulls`), review rounds per

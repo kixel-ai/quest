@@ -1147,9 +1147,9 @@ function reviewerRows(pulls: PullRow[]): ReviewerRow[] {
 }
 
 /**
- * The writer A/B's rollup: each sized PR whose every Implementer line names the same arm, cohort, model, and advisor
+ * The writer A/B's rollup: each sized PR whose every Implementer line names the same arm, cohort, writer, and advisor
  * counts in it, under the cohort, size, and writer its first line names, with every session's spend on it, the
- * advisor's included; a writer off its arm, such as a fallback that names none or an iterate on another model or
+ * advisor's included, an effort of `unknown` matching any; a writer off its arm, such as a fallback that names none or an iterate on another model, effort, or
  * advisor, leaves its PR in neither.
  */
 function armRows(pulls: PullRow[]): ArmRow[] {
@@ -1160,10 +1160,16 @@ function armRows(pulls: PullRow[]): ArmRow[] {
 		const first = each.implementers[0];
 		if (!first?.arm || each.size === null || each.unread.length > 0) continue;
 		const { harness, model, effort, advisor, arm, cohort } = first;
+		const sameEffort = (other: string) => other === effort || other === "unknown" || effort === "unknown";
 		if (
 			each.implementers.some(
 				(other) =>
-					other.arm !== arm || other.cohort !== cohort || other.model !== model || other.advisor !== advisor,
+					other.arm !== arm ||
+					other.cohort !== cohort ||
+					other.harness !== harness ||
+					other.model !== model ||
+					!sameEffort(other.effort) ||
+					other.advisor !== advisor,
 			)
 		)
 			continue;
