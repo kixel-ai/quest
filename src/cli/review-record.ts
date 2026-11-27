@@ -1,6 +1,6 @@
 // `quest review` rewrites the `## Review` section of its branch's open PR after each round, so the head
 // it reviewed counts without an agent copying the round into the body by hand.
-import { DEFAULT, PATHS, REVIEW_MARK, codeSpan, reviewSection, riskFileId } from "../core";
+import { PATHS, REVIEW_MARK, codeSpan, reviewSection, riskFileId } from "../core";
 import { recorded } from "./models-record";
 import { type ClaimDependencies, upstream } from "./claims";
 import { pullsFrom } from "../github/claims";
@@ -87,7 +87,6 @@ const counted = ({ first, ...tally }: Tally): Counts => ({
 /** How the record names what set the classifier's tier, as `recordedRisk` reads it back. */
 function classifiedBy({ by }: Risk["classified"]): string {
 	if (by.kind === "paths") return PATHS;
-	if (by.kind === "default") return DEFAULT;
 	return `${HARNESSES[by.harness]}, ${by.model}, ${by.effort} effort, session ${code(by.session)}`;
 }
 

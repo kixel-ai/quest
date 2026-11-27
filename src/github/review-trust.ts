@@ -27,8 +27,7 @@ export type Outcome = "passed" | "passed with no local reviewer" | "findings acc
  */
 export function attestation(risk: Pick<RecordedRisk, "tier" | "class" | "riskFile">, outcome: Outcome): string {
 	const kind = risk.class === null ? "" : `, class ${risk.class}`;
-	const file = risk.riskFile === null ? "" : `, risk file ${risk.riskFile}`;
-	return `Risk ${risk.tier}${kind}${file}: ${outcome}`;
+	return `Risk ${risk.tier}${kind}, risk file ${risk.riskFile}: ${outcome}`;
 }
 
 /**
@@ -301,7 +300,8 @@ async function attestedOutcome(
 	// The status lives in this repository, so its target's diff binds it, whatever name the reader's remote gives it.
 	if (!String(targetUrl).toLowerCase().endsWith(`/compare/${from}...${sha}`))
 		return `the ${REVIEW_CONTEXT} status on ${sha} attests another diff than ${pr.base}'s, from ${from}: ${String(targetUrl)}`;
-	// The tier, class, and risk file gate a standing pick, so the body's must be the ones attested.
+	// The tier, class, and risk file gate a standing pick, so the body's must be the ones attested. A status that
+	// names no risk file came before it was attested, and names none, as a record without the line does.
 	const attested = ATTESTED.exec(typeof description === "string" ? description : "");
 	if (attested === null) return `the ${REVIEW_CONTEXT} status on ${sha} names no risk: ${String(description)}`;
 	const risk = recordedRisk(body);
@@ -309,7 +309,9 @@ async function attestedOutcome(
 	// A malformed risk is left for `quest status` to print and `quest merge` to refuse.
 	if (
 		!("malformed" in risk) &&
-		(risk.tier !== attested[1] || risk.class !== (attested[2] ?? null) || risk.riskFile !== (attested[3] ?? null))
+		(risk.tier !== attested[1] ||
+			risk.class !== (attested[2] ?? null) ||
+			risk.riskFile !== (attested[3] ?? riskFileId(null)))
 	)
 		return `its risk differs from the ${REVIEW_CONTEXT} status on ${sha}: ${String(description)}`;
 	return { localReview: attested[4] !== "passed with no local reviewer" };
