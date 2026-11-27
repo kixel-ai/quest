@@ -81,12 +81,19 @@ function parseRoot(read: (path: string) => RootFile): { manifest: Manifest | nul
 	return parsed.ok ? { manifest: parsed.manifest, problems: [] } : { manifest: null, problems: parsed.problems };
 }
 
-/** The working tree's manifest, failing with every problem it has. */
-function readManifest(top: string): Manifest {
+/** The working tree's manifest, or null when there is none, failing with every problem it has. */
+export function rootManifest(top: string): Manifest | null {
 	const parsed = parseRoot(workingTree(top));
-	if (parsed === null) throw new Error(`no ${MANIFEST_FILE} at ${top}`);
+	if (parsed === null) return null;
 	if (parsed.manifest === null) throw new Error(parsed.problems.join("\n"));
 	return parsed.manifest;
+}
+
+/** The working tree's manifest, failing when there is none or with every problem it has. */
+function readManifest(top: string): Manifest {
+	const manifest = rootManifest(top);
+	if (manifest === null) throw new Error(`no ${MANIFEST_FILE} at ${top}`);
+	return manifest;
 }
 
 /**
@@ -102,13 +109,180 @@ function flakeProblem(read: (path: string) => RootFile, tasks: ManifestTask[]): 
 	return `${MANIFEST_FILE}: ${nix.join(", ")} run in the Nix dev shell, but ${missing}; set nix = false on a task that runs without Nix`;
 }
 
-/** What `quest check` and `quest merge` report about a repository's quest.toml, if it has one, read with `read`. */
+/** The Nix binary cache Kixel Quest serves, which a repository opting in with quest.toml substitutes from. */
+export const NIX_CACHE = "https://nix.kixel.quest";
+
+/** A Nix token: a name, a string's literal text (interpolations left out), a path, or one punctuation character. */
+type NixToken = { kind: "name" | "string" | "path" | "punct"; text: string };
+
+/**
+ * A path literal at the start of the text, such as `./in/default.nix`, `~/x`, or `<nixpkgs>`, or the part of an
+ * interpolated one, such as `./profiles/${name}-in`, before its first `${`.
+ */
+const NIX_PATH = /^(?:<[\w.+/-]+>|(?:~|[\w.+-]*)(?:\/[\w.+-]+)+\/?|(?:~|[\w.+-]*)(?:\/[\w.+-]+)*\/(?=\$\{))/;
+
+/** The tokens of Nix source outside comments; an interpolation's code yields none. */
+function nixTokens(source: string): NixToken[] {
+	const tokens: NixToken[] = [];
+	let i = 0;
+	/** Code up to the `}` that closes an interpolation, or the end; `emit` is false inside one. */
+	const code = (emit: boolean, interpolation: boolean): void => {
+		let depth = 0;
+		while (i < source.length) {
+			const c = source[i]!;
+			if (/\s/.test(c)) i++;
+			else if (c === "#") i = source.indexOf("\n", i) < 0 ? source.length : source.indexOf("\n", i);
+			else if (source.startsWith("/*", i))
+				i = source.indexOf("*/", i + 2) < 0 ? source.length : source.indexOf("*/", i + 2) + 2;
+			else if (c === '"' || source.startsWith("''", i)) {
+				const text = string(c === '"' ? '"' : "''");
+				if (emit) tokens.push({ kind: "string", text });
+			} else if (NIX_PATH.test(source.slice(i, i + 4096))) {
+				const start = i;
+				i += NIX_PATH.exec(source.slice(i, i + 4096))![0].length;
+				// An interpolated path runs on through each `${...}` and the path characters after it.
+				while (source[start] !== "<" && source.startsWith("${", i)) {
+					i += 2;
+					code(false, true);
+					i += /^[\w.+/-]*/.exec(source.slice(i, i + 4096))![0].length;
+				}
+				if (emit) tokens.push({ kind: "path", text: source.slice(start, i) });
+			} else if (/[A-Za-z_]/.test(c)) {
+				const name = /^[A-Za-z_][\w'-]*/.exec(source.slice(i))![0];
+				i += name.length;
+				if (emit) tokens.push({ kind: "name", text: name });
+			} else {
+				i++;
+				if (c === "{") depth++;
+				else if (c === "}" && interpolation && depth-- === 0) return;
+				if (emit) tokens.push({ kind: "punct", text: c });
+			}
+		}
+	};
+	/** A string from its opening quote, returning its literal text. */
+	const string = (quote: '"' | "''"): string => {
+		i += quote.length;
+		let text = "";
+		while (i < source.length) {
+			if (quote === '"' && source[i] === "\\") {
+				text += source[i + 1] ?? "";
+				i += 2;
+			} else if (quote === "''" && /^''['$\\]/.test(source.slice(i, i + 3))) {
+				text += source[i + 2];
+				i += 3;
+			} else if (source.startsWith(quote, i)) {
+				i += quote.length;
+				return text;
+			} else if (source.startsWith("${", i)) {
+				i += 2;
+				code(false, true);
+			} else text += source[i++];
+		}
+		return text;
+	};
+	code(true, false);
+	return tokens;
+}
+
+/**
+ * The substituters flake.nix's `nixConfig` lists under `substituters` and `extra-substituters`, as a block or dotted
+ * keys and as lists or space-separated strings. Nix reads `nixConfig` only at the top of the file's attribute set, so
+ * one anywhere else counts for nothing.
+ */
+function substituters(flake: string): string[] {
+	const tokens = nixTokens(flake);
+	let p = 0;
+	const at = (text: string) => tokens[p]?.kind === "punct" && tokens[p]!.text === text;
+	/**
+	 * Skip a binding's value through its `;`, over every bracket, `let` ... `in`, and each `with` or `assert` and the
+	 * `;` that ends it at its own depth.
+	 */
+	const skip = () => {
+		const pending: number[] = [];
+		for (let depth = 0; p < tokens.length; p++) {
+			const { kind, text } = tokens[p]!;
+			if (kind === "name") {
+				if (text === "let") depth++;
+				else if (text === "in") depth--;
+				else if (text === "with" || text === "assert") pending.push(depth);
+			} else if (kind === "punct") {
+				if ("{[(".includes(text)) depth++;
+				else if ("}])".includes(text)) depth--;
+				else if (text === ";" && pending.at(-1) === depth) pending.pop();
+				else if (text === ";" && depth === 0) break;
+			}
+		}
+		p++;
+	};
+	/** A binding's attribute path through its `=`, or null for anything else, such as `inherit`. */
+	const path = (): string[] | null => {
+		const names: string[] = [];
+		while (tokens[p]?.kind === "name" || tokens[p]?.kind === "string") {
+			names.push(tokens[p++]!.text);
+			if (!at(".")) break;
+			p++;
+		}
+		if (names.length === 0 || names[0] === "inherit" || !at("=")) return null;
+		p++;
+		return names;
+	};
+	const found: string[] = [];
+	/** A setting's value, if it is a substituter list, then the rest of its binding. */
+	const setting = (key: string | undefined) => {
+		if (key === "substituters" || key === "extra-substituters") {
+			if (tokens[p]?.kind === "string") found.push(...tokens[p]!.text.split(/\s+/));
+			else if (at("[")) {
+				for (p++; p < tokens.length && !at("]"); p++)
+					if (tokens[p]!.kind === "string") found.push(tokens[p]!.text);
+				p++;
+			}
+		}
+		skip();
+	};
+	if (!at("{")) return found;
+	p++;
+	while (p < tokens.length && !at("}")) {
+		const names = path();
+		if (names === null) skip();
+		else if (names[0] !== "nixConfig") skip();
+		else if (names.length > 1) setting(names[1]);
+		else if (!at("{")) skip();
+		else {
+			p++;
+			while (p < tokens.length && !at("}")) {
+				const inner = path();
+				if (inner === null) skip();
+				else setting(inner[0]);
+			}
+			p++;
+			skip();
+		}
+	}
+	return found;
+}
+
+/** Why `flake` does not substitute from Kixel Quest's cache, or null when its `nixConfig` lists it. */
+function cacheProblem(flake: string): string | null {
+	if (substituters(flake).some((url) => url.replace(/\/$/, "") === NIX_CACHE)) return null;
+	return `${MANIFEST_FILE}: the repository opts into Kixel Quest, so flake.nix's nixConfig must list ${NIX_CACHE} in extra-substituters`;
+}
+
+/**
+ * What `quest check` and `quest merge` report about a repository's quest.toml, if it has one, read with `read`. A
+ * quest.toml opts the repository into Kixel Quest, which needs Nix: a regular root flake.nix substituting from its
+ * cache, even when every task sets `nix = false`.
+ */
 export function manifestProblems(read: (path: string) => RootFile): string[] {
 	const parsed = parseRoot(read);
 	if (parsed === null) return [];
 	if (parsed.manifest === null) return parsed.problems;
-	const problem = flakeProblem(read, parsed.manifest.tasks);
-	return problem === null ? [] : [problem];
+	const flake = read("flake.nix");
+	if (flake?.kind !== "file") {
+		const missing = flake === null ? "there is no flake.nix" : "flake.nix is a symlink, not a regular file";
+		return [`${MANIFEST_FILE}: the repository opts into Kixel Quest, which needs Nix, but ${missing} at its root`];
+	}
+	const cache = cacheProblem(flake.text);
+	return cache === null ? [] : [cache];
 }
 
 /**
@@ -118,7 +292,7 @@ export function manifestProblems(read: (path: string) => RootFile): string[] {
 export const DEV_SHELL = "QUEST_DEV_SHELL";
 
 /** Whether `env` is a dev shell entered for the repository at `top`. */
-function inDevShell(env: NodeJS.ProcessEnv, top: string): boolean {
+export function inDevShell(env: NodeJS.ProcessEnv, top: string): boolean {
 	const shell = env[DEV_SHELL];
 	if (!shell) return false;
 	try {

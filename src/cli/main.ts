@@ -64,6 +64,7 @@ import {
 	locate as locatePull,
 } from "./forge";
 import { PENDING_MS } from "./admission";
+import { fmt } from "./fmt";
 import { gate } from "./gate";
 import { manifestProblems, nativeOs, run as runTasks, workingTree } from "./run";
 import { gitHubDependencies, pullRequest, readRemote, remoteRepository, requireRemote } from "./github";
@@ -115,7 +116,7 @@ import {
 	setup,
 	targets,
 } from "./hooks";
-import { CHECKED_CONTEXT, USER_ASKED, questRoot } from "./rules";
+import { CHECKED_CONTEXT, USER_ASKED, checkoutRoot, questRoot } from "./rules";
 import { checkoutRepository, messageLines, messages } from "./messages";
 import { logWait, pullWaitKind, readWaits } from "./waits";
 import { readCalls } from "./calls";
@@ -353,6 +354,31 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		);
 
 	program
+		.command("fmt")
+		.summary("Format the repository in its dev shell")
+		.description(
+			"Format the repository with the treefmt that quest.lib.mkFlake puts in its Nix dev shell, passing on " +
+				"every argument after fmt, such as paths from the current directory, " +
+				"--fail-on-change, --help (quest help fmt prints this), or --root; Quest's own --root goes before fmt. Inside the " +
+				"repository's dev shell, where QUEST_DEV_SHELL names its root, treefmt runs directly with no Nix " +
+				"evaluation; otherwise through nix develop --command, which needs flake.nix at the root. nix fmt runs " +
+				"the same treefmt.\n\n" +
+				"When quest.toml declares a fmt task, quest fmt runs its run script instead, from the repository root " +
+				"with bash -eo pipefail -c, its environment table, the arguments as $1 onward, and the dev shell " +
+				"unless it sets nix = false. " +
+				"Exits with the formatter's status.",
+		)
+		.argument("[args...]", "Arguments for treefmt, or the fmt task's script")
+		.action((args: string[]) => {
+			try {
+				code = fmt(root(), args, process.env);
+			} catch (error) {
+				warn(error instanceof Error ? error.message : String(error));
+				code = 1;
+			}
+		});
+
+	program
 		.command("check")
 		.summary("Report every structural mistake in the tree; exit non-zero if any")
 		.description(
@@ -374,7 +400,8 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"backticked path pattern, ` - `, and a reason, and each item of its ## Automatic list that is not a " +
 				"backticked class name, an optional scope of backticked path patterns joined by `, ` in parentheses, " +
 				"` - `, and a rule. It also reads the repository's quest.toml, if any, as quest run does, and reports " +
-				"each problem with it, and Nix tasks in a repository without flake.nix.\n\n" +
+				"each problem with it, a missing or symlinked root flake.nix, which opting into Kixel Quest needs, and a nixConfig that " +
+				"does not list https://nix.kixel.quest in extra-substituters.\n\n" +
 				"With --fix, first drop every Required, Related, or Closes entry that links to a quest deleted in " +
 				"the history of HEAD, and of MERGE_HEAD during a merge, that the working tree lacks, as quest rm " +
 				"does, such as the quests a merged base finished, and every epic's Required entry naming a quest in " +
@@ -408,13 +435,16 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 			const tree = checkout(root(), warn);
 			const findings = check(tree.docs, tree.exists, { auditNames: options.stubs });
 			if (options.base !== undefined) findings.push(...landed(root(), options.base, { branch: options.branch }));
-			// A tree nested in another checkout, such as an example, has no stubs or risk file of its own.
+			// A tree nested in another checkout, such as an example, has no stubs, risk file, or quest.toml of its own.
+			// quest.toml applies at any checkout's root, as quest merge checks it, and outside any checkout, such as a
+			// flake's source in the Nix store.
 			const own = questRoot(resolve(root())) === resolve(root());
+			const manifest = checkoutRoot(resolve(root())) === resolve(root());
 			const risk = join(root(), RISK_FILE);
 			const repository = [
 				...(options.stubs && own ? stubFindings(root()) : []),
 				...(own && existsSync(risk) ? parseRiskFile(readFileSync(risk, "utf8")).problems : []),
-				...(own ? manifestProblems(workingTree(root())) : []),
+				...(manifest ? manifestProblems(workingTree(root())) : []),
 			];
 			if (findings.length === 0 && repository.length === 0) {
 				const count = collect(root()).length;
@@ -2483,7 +2513,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 	});
 
 	try {
-		program.parse(gateBoundary(argv), { from: "user" });
+		program.parse(argumentBoundary(argv), { from: "user" });
 		return pending ?? code;
 	} catch (error) {
 		if (error instanceof CommanderError) {
@@ -2546,10 +2576,10 @@ function positiveSeconds(value: string): number {
 }
 
 /**
- * Stop option parsing before a gated executable, keeping its own flags intact.
- * Quest's global options still apply on either side of `gate`.
+ * Stop option parsing before a gated executable, or the formatter's arguments after `fmt`, keeping their own flags
+ * intact. Quest's global options still apply on either side of `gate`, and before `fmt`.
  */
-export function gateBoundary(argv: string[]): string[] {
+export function argumentBoundary(argv: string[]): string[] {
 	const skip = (index: number) => {
 		for (;;) {
 			if (argv[index] === "--root") index += 2;
@@ -2558,6 +2588,9 @@ export function gateBoundary(argv: string[]): string[] {
 		}
 	};
 	const index = skip(0);
+	// Every argument after fmt is the formatter's, a --root included; Quest's own goes before fmt.
+	if (argv[index] === "fmt")
+		return argv[index + 1] === "--" ? argv : [...argv.slice(0, index + 1), "--", ...argv.slice(index + 1)];
 	if (argv[index] !== "gate") return argv;
 	const command = skip(index + 1);
 	if (!argv[command] || argv[command].startsWith("-")) return argv;
