@@ -1275,10 +1275,13 @@ describe.runIf(process.platform === "linux")("a systemd scope", () => {
 		const pid = join(dir, "pid");
 		const args = join(dir, "args");
 		mkdirSync(bin);
-		writeFileSync(join(bin, "systemd-run"), `#!/bin/sh\necho $$ > ${quote(pid)}\nexec sleep 1000\n`);
+		// The test polls for these files, so each appears only once written whole.
+		const write = (file: string, words: string) =>
+			`echo ${words} > ${quote(`${file}.tmp`)} && mv ${quote(`${file}.tmp`)} ${quote(file)}`;
+		writeFileSync(join(bin, "systemd-run"), `#!/bin/sh\n${write(pid, "$$")}\nexec sleep 1000\n`);
 		writeFileSync(
 			join(bin, "systemctl"),
-			`#!/bin/sh\necho $$ > ${quote(join(dir, "cancel"))}\necho "$@" > ${quote(args)}\n${cancels ? `kill "$(cat ${quote(pid)})"` : "exec sleep 1000"}\n`,
+			`#!/bin/sh\n${write(join(dir, "cancel"), "$$")}\n${write(args, '"$@"')}\n${cancels ? `kill "$(cat ${quote(pid)})"` : "exec sleep 1000"}\n`,
 		);
 		chmodSync(join(bin, "systemd-run"), 0o755);
 		chmodSync(join(bin, "systemctl"), 0o755);
