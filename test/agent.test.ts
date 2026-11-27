@@ -417,12 +417,12 @@ test("a launch waits for admission before it claims the worktree", async () => {
 		// Nothing holds the worktree while the launch waits.
 		const state = join(s.runtime, "quest", "agent");
 		expect(readdirSync(join(state, readdirSync(state)[0], "agents"))).toEqual([]);
-		deps.notice("waiting for the load average to fall before starting an agent");
+		deps.notice("waiting for free memory before starting an agent");
 	});
 	const started = await quest("agent", "start", ...launch("claude"), s.worktree, "go");
 	expect(started).toMatchObject({
 		code: 0,
-		stderr: "quest: waiting for the load average to fall before starting an agent\n",
+		stderr: "quest: waiting for free memory before starting an agent\n",
 	});
 });
 
