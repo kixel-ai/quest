@@ -240,11 +240,16 @@ describe.skipIf(process.platform === "win32")("git's sign-in", () => {
 		}
 	});
 
-	test("logout leaves an empty helper the person set for the URL without quest's", () => {
+	test("login and logout keep an empty helper the person set for the URL", async () => {
 		const env = user();
-		const before = `[credential "${KIXEL}"]\n\thelper = \n`;
+		const before = `[credential "${KIXEL}"]\n\thelper = \n\thelper = store\n`;
 		writeFileSync(env.GIT_CONFIG_GLOBAL!, before);
 		expect(logout(env).removed).toBe(false);
+		expect(readFileSync(env.GIT_CONFIG_GLOBAL!, "utf8")).toBe(before);
+		await login(host(new FakeLogin(), "n", env).deps);
+		await login(host(new FakeLogin(), "n", env).deps);
+		expect(readFileSync(env.GIT_CONFIG_GLOBAL!, "utf8")).toBe(`${before}\thelper = \n\thelper = ${HELPER}\n`);
+		expect(logout(env).removed).toBe(true);
 		expect(readFileSync(env.GIT_CONFIG_GLOBAL!, "utf8")).toBe(before);
 	});
 });
@@ -257,6 +262,13 @@ test("the helper answers only get, and without a token tells git to stop, naming
 	expect(credential("get", request, env, (line) => warned.push(line))).toBe("username=quest\npassword=mine\n");
 	expect(credential("store", `${request}username=quest\npassword=mine\n`, env, () => {})).toBe("");
 	expect(credential("erase", request, env, () => {})).toBe("");
+	const written = "protocol=http\nhost=LOCALHOST:8787\n\n";
+	expect(credential("get", written, env, () => {})).toBe("username=quest\npassword=mine\n");
+	writeTokens(env, { "https://kixel.quest": "theirs", [KIXEL]: "mine" });
+	expect(credential("get", "protocol=https\nhost=kixel.quest:443\n", env, () => {})).toBe(
+		"username=quest\npassword=theirs\n",
+	);
+	writeTokens(env, { [KIXEL]: "mine" });
 	expect(credential("get", "protocol=https\nhost=kixel.quest\n", env, (line) => warned.push(line))).toBe("quit=1\n");
 	expect(warned).toEqual(["this host is not signed in to https://kixel.quest; run `quest login`"]);
 	writeTokens(env, { [KIXEL]: "two\nlines" });

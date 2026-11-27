@@ -18,22 +18,41 @@ export const helperKey = (url: string) => `credential.${url}.helper`;
  * already ends with them, as one home-manager declares, is left unwritten.
  */
 export function signInGit(url: string, env: NodeJS.ProcessEnv): string[] {
-	const key = helperKey(url);
 	const values = helpers(url, env);
-	if (values.filter((value) => value === HELPER).length === 1 && values.slice(-2).join("\n") === `\n${HELPER}`)
-		return entries(url);
-	unset(url, env, "write");
-	config(url, env, ["--add", key, ""], "write");
-	config(url, env, ["--add", key, HELPER], "write");
+	const own = withoutQuest(values);
+	if (values.length === own.length + 2 && values.slice(-2).join("\n") === `\n${HELPER}`) return entries(url);
+	if (values.includes(HELPER)) remove(url, env, own, "write");
+	config(url, env, ["--add", helperKey(url), ""], "write");
+	config(url, env, ["--add", helperKey(url), HELPER], "write");
 	return entries(url);
 }
 
 /**
- * Remove the entries `signInGit` writes for `url`, leaving any other helper the person configured there, and touching
- * nothing when quest's helper is not among them.
+ * Remove the entries `signInGit` writes for `url`, leaving every other helper the person listed there, an empty one
+ * included, and touching nothing when quest's helper is not among them.
  */
 export function signOutGit(url: string, env: NodeJS.ProcessEnv): void {
-	if (helpers(url, env).includes(HELPER)) unset(url, env, "remove");
+	const values = helpers(url, env);
+	if (values.includes(HELPER)) remove(url, env, withoutQuest(values), "remove");
+}
+
+/** Leave `own` as the helpers listed for `url`, once quest's are removed. */
+function remove(url: string, env: NodeJS.ProcessEnv, own: string[], verb: string): void {
+	// Git cannot remove one of several equal values, so an empty entry of the person's own needs the list rewritten.
+	if (own.includes("")) return rewrite(url, env, own, verb);
+	// Matched whole by pattern, since `--fixed-value` needs git 2.30; git exits 5 when no entry matches.
+	for (const pattern of ["^$", "^!quest git-credential$"])
+		config(url, env, ["--unset-all", helperKey(url), pattern], verb, [5]);
+}
+
+/** `values` without each quest helper and the empty entry `signInGit` wrote just before it. */
+function withoutQuest(values: string[]): string[] {
+	const kept: string[] = [];
+	for (const value of values) {
+		if (value !== HELPER) kept.push(value);
+		else if (kept.at(-1) === "") kept.pop();
+	}
+	return kept;
 }
 
 /** The helpers the global config lists for `url`, in order. */
@@ -43,11 +62,11 @@ function helpers(url: string, env: NodeJS.ProcessEnv): string[] {
 	return listed === "" ? [] : listed.replace(/\n$/, "").split("\n");
 }
 
-/** Remove quest's two values for `url`, matched whole, since `--fixed-value` needs git 2.30. */
-function unset(url: string, env: NodeJS.ProcessEnv, verb: string): void {
-	// Git exits 5 when no entry matches.
-	for (const pattern of ["^$", "^!quest git-credential$"])
-		config(url, env, ["--unset-all", helperKey(url), pattern], verb, [5]);
+/** Replace the helpers listed for `url` with `values`, in order. */
+function rewrite(url: string, env: NodeJS.ProcessEnv, values: string[], verb: string): void {
+	// Git exits 5 when the key is absent.
+	config(url, env, ["--unset-all", helperKey(url)], verb, [5]);
+	for (const value of values) config(url, env, ["--add", helperKey(url), value], verb);
 }
 
 function config(url: string, env: NodeJS.ProcessEnv, args: string[], verb: string, allowed: number[] = []): string {
@@ -88,7 +107,9 @@ export function credential(
 	const protocol = request.get("protocol");
 	const host = request.get("host");
 	if (!protocol || !host) return "";
-	const url = `${protocol}://${host}`;
+	// As `kixelUrl` names it, so a remote written with its default port or an uppercase host finds the token.
+	const url = URL.parse(`${protocol}://${host}`)?.origin;
+	if (url === undefined || url === "null") return "";
 	const token = tokenFor(url, env);
 	if (token === null) {
 		warn(notSignedIn(url));
