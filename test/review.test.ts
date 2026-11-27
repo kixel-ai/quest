@@ -1496,6 +1496,7 @@ fakes(
 					classified: "medium",
 					class: null,
 					classifier,
+					riskFile: "none",
 				},
 			});
 			// The body's `## Models` record sizes the PR S.
@@ -2407,6 +2408,7 @@ fakes(
 			expect(writes.posts[0]!.outcomes).toEqual([]);
 			// Named by its blob's first 12 characters, so the land gate can tell when the base's file changes.
 			const file = git(s.repo, "rev-parse", "origin/main:RISK.md").slice(0, 12);
+			expect(run!.risk.riskFile).toBe(file);
 			// Its status attests the tier and class, which the land gate reads, and passes only once the post is stored.
 			const attested = {
 				sha: head,

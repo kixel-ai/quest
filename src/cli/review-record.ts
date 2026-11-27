@@ -428,6 +428,7 @@ export function reviewRun(
 				by.kind === "model"
 					? { harness: by.harness, model: by.model, effort: by.effort, session: by.session }
 					: null,
+			riskFile: riskFileId(risk.classified.riskFile),
 		},
 		outcome: runOutcome(reviewed),
 		rounds: reviewed.rounds.map((round) => ({
