@@ -7,8 +7,11 @@ const GiB = 2 ** 30;
 const signal = new AbortController().signal;
 const me = { pid: process.pid, start: processStart(process.pid) };
 
-/** A host of 8 CPUs with real ledgers, and load, memory, a clock, and process liveness the test controls. */
-function host() {
+/**
+ * A host of 8 CPUs with real ledgers, and load, memory, a clock, and process liveness the test
+ * controls; with `load`, agents also wait for load and the gate's queue, as on macOS.
+ */
+function host(load = false) {
 	const state = {
 		now: 10 * PENDING_MS,
 		load: 0,
@@ -33,6 +36,7 @@ function host() {
 	const deps: AdmissionDependencies = {
 		limits: { load: 8, memory: 4 * GiB },
 		gate: ledger(tempDir()),
+		load,
 		agents: ledger(tempDir()),
 		notice: (text) => notices.push(text),
 	};
@@ -86,6 +90,33 @@ test("agents start whatever the load and the gate's queue, while memory has room
 	// A recent gated admission takes one command's memory, as the gate counts it.
 	state.now += PENDING_MS;
 	gated([{ id: "test", at: state.now, ...me }]);
+	expect([await atOnce(), await atOnce()]).toEqual([true, false]);
+});
+
+test("on macOS, agents fill the load's headroom as the gate's callers would", async () => {
+	const { state, notices, atOnce } = host(true);
+	state.load = 5;
+	// Load 5 plus 0, 1, and 2 agents not yet building stays under 8 CPUs; a fourth would not.
+	expect([await atOnce(), await atOnce(), await atOnce(), await atOnce()]).toEqual([true, true, true, false]);
+	expect(notices).toEqual(["waiting for CPU load to fall before starting an agent"]);
+});
+
+test("on macOS, a queued or running gated command holds agents back as it would another command", async () => {
+	const { state, gated, atOnce, notices } = host(true);
+	state.load = 6;
+	// One command queued for the gate: an arrival would wait behind it only once the host is short.
+	gated([{ id: "queued", at: state.now, ...me, queued: true }]);
+	expect([await atOnce(), await atOnce()]).toEqual([true, false]);
+	expect(notices.at(-1)).toContain("gated commands queued");
+	// Running commands that kept every CPU busy hold the host whatever the load average says.
+	state.load = 0;
+	state.now += PENDING_MS;
+	gated([{ id: "build", at: state.now - RECENT_MS, ...me, cores: 8 }]);
+	expect(await atOnce()).toBe(false);
+	// A host loaded by work no gate holds still starts one agent at a time.
+	state.now += PENDING_MS;
+	gated([]);
+	state.load = 40;
 	expect([await atOnce(), await atOnce()]).toEqual([true, false]);
 });
 

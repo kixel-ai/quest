@@ -1482,7 +1482,9 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"while its memory would admit a gated command at once, counting as one recent admission each every " +
 				`agent admitted in the last ${PENDING_MS / 60_000} minutes, since an agent adds no gated work until ` +
 				"its first build; an agent start or resume runs counts only until it exits. CPU load and commands " +
-				"queued for quest gate do not count. Agents already running are never paused.\n\n" +
+				"queued for quest gate do not count, except on macOS, where the gate reads no memory: there the " +
+				"host has room while quest gate would admit a command at once, counting every queued command and " +
+				"each such agent as one recent admission. Agents already running are never paused.\n\n" +
 				"Exits 0 once admitted, 128 plus the signal number when interrupted, and 1 otherwise.",
 		)
 		.action(() => {

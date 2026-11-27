@@ -2537,7 +2537,10 @@ adds no gated work until its first build, and three quarters of those that build
 at all reach it by then. An agent `start` or `resume` runs stops counting when it
 exits. CPU load and commands queued for the gate do not hold agents back: an
 agent mostly waits on its model, and its builds wait in the gate. On macOS,
-where the gate reads no memory, agents start without waiting.
+where the gate reads no memory, the host has room instead while `quest gate`
+would admit a command at once, counting every command queued for it and each
+agent admitted in the last 5 minutes as one recent admission; as in the gate, a
+host loaded only by work no gate holds still starts one agent at a time.
 
 Admission only delays the next agent: none already running is paused or
 stopped, and `quest agent stop` does not see a launch still waiting, which ends

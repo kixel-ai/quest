@@ -627,6 +627,20 @@ function standing(limits: Limits, host: Host, running: Admission[], recent: Admi
 	return { memory: host.memory() - grows, reserved };
 }
 
+/** The ledger's queued callers still waiting, and its running and recent admissions, as `host` reads them now. */
+function snapshot(host: Host) {
+	const ledger = host.ledger();
+	const now = host.now();
+	const live = ledger.admissions.filter((admission) => host.running(admission));
+	const queued = live.filter(
+		(admission) => admission.queued && (admission.start !== undefined || admission.at > now - RECENT_MS),
+	).length;
+	const admissions = ledger.admissions.filter((admission) => !admission.queued);
+	const running = admissions.filter((admission) => live.includes(admission));
+	const recent = admissions.filter((admission) => admission.at > now - RECENT_MS);
+	return { queued, running, recent };
+}
+
 /**
  * Whether the host's memory has room for a command arriving now even with `reserved` more recent
  * admissions counted against it: work admitted elsewhere that has not reached the gate yet, such
@@ -634,12 +648,33 @@ function standing(limits: Limits, host: Host, running: Admission[], recent: Admi
  * waiting for CPUs never holds back what only needs memory.
  */
 export function memoryRoom(limits: Limits, host: Host, reserved: number): boolean {
-	const now = host.now();
-	const admissions = host.ledger().admissions.filter((admission) => !admission.queued);
-	const running = admissions.filter((admission) => host.running(admission));
-	const recent = admissions.filter((admission) => admission.at > now - RECENT_MS);
+	const { running, recent } = snapshot(host);
 	const { memory, reserved: recentMemory } = standing(limits, host, running, recent);
 	return memory - recentMemory - reserved * limits.memory >= limits.memory;
+}
+
+/**
+ * Why a command arriving now would wait, or null when the gate would admit it at once even with
+ * `reserved` more recent admissions counted against the headroom, for hosts whose memory alone
+ * cannot bound that work (see admission.ts). It counts every queued caller as ahead, and never the
+ * spaced admissions `admit` grants on raw room, which would pass the reserved work one by one. Like
+ * the gate, it admits a lone arrival whatever the load: with nothing gated running, recent, queued,
+ * or reserved, the load is work no gate can wait out.
+ */
+export function room(limits: Limits, host: Host, reserved: number): Waiting | null {
+	const { queued, running, recent } = snapshot(host);
+	const measured = host.load();
+	if (measured === undefined) return "load";
+	const used = running.reduce((sum, admission) => sum + (admission.cores ?? 0), 0);
+	const load = running.length > 0 ? Math.max(measured, used) : Math.min(measured, limits.load);
+	const { memory, reserved: recentMemory } = standing(limits, host, running, recent);
+	if (load > limits.load || used >= limits.load) return "load";
+	if (memory < limits.memory) return "memory";
+	const pending = queued + reserved;
+	const taken = recent.length + pending;
+	if (running.length === 0 && taken === 0) return null;
+	if (load + taken >= limits.load) return queued > 0 ? "queue" : "load";
+	return memory - recentMemory - pending * limits.memory >= limits.memory ? null : queued > 0 ? "queue" : "memory";
 }
 
 /**
