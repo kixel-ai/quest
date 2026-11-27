@@ -27,5 +27,4 @@ Tests: read from GitHub, a head with a writer's passing status reads `current` w
 
 ## Related
 
-- [Base merges keep a review](/quest/m0/review-base-merge.md) - changes how `reviewRecord` in `src/github/status.ts` judges `diff-identical`; whichever lands second merges its walk with the other's
 - [Usage reads posted reviews](/quest/m0/telemetry/usage-reviews.md) - keeps the body reader for `quest usage`'s older PRs

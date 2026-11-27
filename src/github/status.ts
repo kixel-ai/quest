@@ -16,6 +16,7 @@ import {
 import { appOf, checksState, contextOutcome } from "./checks";
 import { EJECTED, LAND_CHECK, pinned } from "./land";
 import {
+	BaseMerges,
 	type Check,
 	type PullRequest,
 	type Reaction,
@@ -35,6 +36,7 @@ import { readSignals, requiredPosters } from "./signals";
 import { login } from "./online-review";
 import { duplicateQuests } from "./duplicates";
 import { trustedReview } from "./review-trust";
+import { history } from "./history";
 
 /**
  * One query covers the PR; each connection pages by its own cursor, and a
@@ -282,7 +284,18 @@ async function reviewRecord(
 		if (!response.ok) return unknown("");
 		diffs.push(await response.text());
 	}
-	return { state: diffs[0] === diffs[1] ? "diff-identical" : "stale", head: reviewed };
+	if (diffs[0] === diffs[1]) return { state: "diff-identical", head: reviewed };
+	// A head that only merged the base since the review has another diff text, but no change of its own.
+	try {
+		const merges = new BaseMerges(history(github, { ...pr, base: string(pull.baseRefName) }), head);
+		return { state: (await merges.reaches(reviewed)) ? "diff-identical" : "stale", head: reviewed };
+	} catch (error) {
+		if (error instanceof GitHubDeadline || !(error instanceof Error)) throw error;
+		warn(
+			`cannot check the merges since ${reviewed}, so whether its review carries to ${head} is unknown: ${error.message}`,
+		);
+		return { state: "unknown", head: reviewed };
+	}
 }
 
 /** Repository activity types that move a branch to a new head, including merges into it. */
