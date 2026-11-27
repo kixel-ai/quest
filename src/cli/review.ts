@@ -441,7 +441,7 @@ export interface ReviewDependencies {
 	 */
 	models?: (root: string, base: string, branch: string) => Promise<PullModels | null>;
 	/** Fails unless the run's record can be posted, before any reviewer spends a round; without it, nothing is checked. */
-	posting?: (root: string, base: string) => Promise<void>;
+	posting?: (root: string, base: string, branch: string) => Promise<void>;
 	/**
 	 * Queues a session for the record sender, as the stop hook does an interactive one, since no hook runs in a
 	 * reviewer. It says for itself anything the person must hear, and must not throw, so a round never fails on it.
@@ -2357,8 +2357,8 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 		? { ref: options.base, sha: trackedBase(root, options.base) }
 		: await fetchBase(root, options.base);
 	const { branch: baseBranch } = parseBase(root, baseRef);
-	await deps.posting?.(root, baseRef);
 	const branch = sessionBranch(root, options.branch, baseBranch);
+	await deps.posting?.(root, baseRef, branch);
 	// The PR's own record names its size and implementers, so the author passes neither as a flag.
 	const needed = options.size === undefined || (options.exclude ?? []).length === 0;
 	const record = needed ? await deps.models?.(root, baseRef, branch) : undefined;
@@ -2521,19 +2521,22 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 		// An acceptance GitHub does not attest has not happened, so the caller saves it only once it is.
 		const kept = [...past, ...accepted.filter((each) => !past.some(same(each)))];
 		// Kixel Quest stores no outcome of an accepted finding, so it keeps one left to later work.
-		const outcomes = sessions
-			.filter((session) => session.posted !== undefined && last.includes(session.last))
-			.flatMap(({ last: round, posted }) =>
-				round.findings.map((_, i) => ({
-					...posted!,
-					harness: round.reviewer,
-					session: round.session,
-					round: round.round,
-					finding: i + 1,
-					outcome: "deferred" as const,
-					reason: options.accept!,
-				})),
-			);
+		const outcomes = [
+			...unposted(sessions),
+			...sessions
+				.filter((session) => session.posted !== undefined && last.includes(session.last))
+				.flatMap(({ last: round, posted }) =>
+					round.findings.map((_, i) => ({
+						...posted!,
+						harness: round.reviewer,
+						session: round.session,
+						round: round.round,
+						finding: i + 1,
+						outcome: "deferred" as const,
+						reason: options.accept!,
+					})),
+				),
+		];
 		return {
 			rounds: last.map((round) => ({ ...round, usage: [], unchanged: true })),
 			tallies,
@@ -2545,12 +2548,25 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 			sized,
 			accepted: options.accept,
 			outcomes,
-			remember: () => save(statePath, state(sessions, tallies, risk, kept)),
+			// Run once the acceptance is attested, which is after its post.
+			remember: () => save(statePath, state(sessions.map(withoutPending), tallies, risk, kept)),
 		};
 	}
 	if (!named && !settling && risk.tier === "low") {
 		save(statePath, state(sessions, tallies, risk, past));
-		return { rounds: [], tallies, risk, skipped: [], branch, head, base, sized, outcomes: [] };
+		// No round runs, but what an earlier run's failed post settled still goes with this one.
+		return {
+			rounds: [],
+			tallies,
+			risk,
+			skipped: [],
+			branch,
+			head,
+			base,
+			sized,
+			outcomes: unposted(sessions),
+			posted: () => save(statePath, state(sessions.map(withoutPending), tallies, risk, past)),
+		};
 	}
 
 	const skipped: Skip[] = [];
@@ -2647,11 +2663,11 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 			state(
 				[
 					...done.map(({ session }, i) => {
-						const { pending: _, ...rest } = session;
+						const rest = withoutPending(session);
 						if (at !== null) return { ...rest, posted: at };
 						return settled[i]!.length === 0 ? rest : { ...rest, pending: settled[i] };
 					}),
-					...kept,
+					...(at === null ? kept : kept.map(withoutPending)),
 				],
 				after,
 				risk,
@@ -2669,9 +2685,18 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 		head,
 		base,
 		sized,
-		outcomes: settled.flat(),
+		outcomes: [...settled.flat(), ...unposted(kept)],
 		posted: (at) => store(at),
 	};
+}
+
+/** The outcomes `sessions` settled that no post has carried yet. */
+const unposted = (sessions: Session[]) => sessions.flatMap((session) => session.pending ?? []);
+
+/** `session` once a post has carried its pending outcomes. */
+function withoutPending(session: Session): Session {
+	const { pending: _, ...rest } = session;
+	return rest;
 }
 
 /**
@@ -2681,23 +2706,25 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
  */
 function settledOutcomes(seat: Seat, round: Round): FindingOutcome[] {
 	const raised = seat.session;
-	if (round.unchanged) return raised?.pending ?? [];
+	const carried = raised?.pending ?? [];
 	const at = raised?.posted;
-	if (at === undefined) return [];
-	return (round.earlier?.findings ?? []).flatMap(({ number, disposition, reason }) =>
-		disposition === "open"
-			? []
-			: [
-					{
-						...at,
-						harness: raised!.last.reviewer,
-						session: raised!.last.session,
-						round: raised!.last.round,
-						finding: number - seat.first + 1,
-						outcome: disposition,
-						reason,
-					},
-				],
+	if (round.unchanged || at === undefined) return carried;
+	return carried.concat(
+		(round.earlier?.findings ?? []).flatMap(({ number, disposition, reason }) =>
+			disposition === "open"
+				? []
+				: [
+						{
+							...at,
+							harness: raised!.last.reviewer,
+							session: raised!.last.session,
+							round: raised!.last.round,
+							finding: number - seat.first + 1,
+							outcome: disposition,
+							reason,
+						},
+					],
+		),
 	);
 }
 

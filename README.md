@@ -1811,17 +1811,17 @@ branch's rounds, `risk`, the head's tier with its classification, `skipped`,
 `next`.
 
 Every run that records needs the host signed in to Kixel Quest with
-[`quest login`](#read-through-kixel-quest), and Kixel Quest serving the base's
-repository, since it stores no post for one it does not: both are checked
-before any reviewer runs.
+[`quest login`](#read-through-kixel-quest), and Kixel Quest serving the
+repository of the branch's open PR, since it stores no post for one it does
+not: both are checked before any reviewer runs.
 After each run, `quest review` finds the open PR from the branch into the base,
 among the upstream's PRs: the one from the repository the base's remote pushes
 to, else the only one from another repository whose pushed head the
 checked-out `HEAD` contains, as in a maintainer's checkout of a contributor's
 fork PR. On GitHub it first sets the `quest review` commit status on the head,
 on the GitHub token (`GH_TOKEN`, `GITHUB_TOKEN`, or `gh auth token`), so push
-the head first: `failure` while a finding is open, else `pending`, set to
-`success` only once the post below is stored, described
+the head first: `failure`, which a run with no finding open sets to `success`
+only once the post below is stored, so a failed post leaves the head failing, described
 by the head's risk tier, class, and risk file and whether a local reviewer
 ran, as `Risk low, class test, risk file 3f9c2a7b1e04: passed with no local
 reviewer`, or `findings accepted` after `--accept`, its target the diff from

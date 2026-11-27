@@ -234,13 +234,15 @@ async function openPull(
 			number: number;
 			/** The PR's base branch. */
 			base: string;
+			/** Whether Kixel Quest hosts the repository, rather than GitHub. */
+			hosted: boolean;
 			/** The PR's body as it is now. */
 			body(): Promise<string>;
 			/** Set the `quest review` status on `head`, for its diff from the merge base `from`, or say why not. */
 			attest(status: {
 				head: string;
 				from: string;
-				state: "pending" | "success" | "failure";
+				state: "success" | "failure";
 				description: string;
 			}): Promise<Unattested | null>;
 	  }
@@ -277,6 +279,7 @@ async function openPull(
 		repository: `${repository.owner}/${repository.repo}`.toLowerCase(),
 		number: pull.number,
 		base,
+		hosted: github === null,
 		// The forge's list may predate an edit just made, such as the `## Models` record written before a round, so on
 		// GitHub the body comes fresh from the PR itself, on the person's token.
 		body: async () =>
@@ -326,33 +329,33 @@ export async function pullModels(
 }
 
 /**
- * Fail unless this host can post a run on the branch's PR into `baseRef` before any reviewer spends a round: it must be
- * signed in to Kixel Quest, and Kixel Quest must serve the PR's repository, since it stores no post for one it does not.
- * A checkout with no upstream on GitHub posts nothing, so it needs neither.
+ * Fail unless this host can post a run on `branch`'s open PR into `baseRef` before any reviewer spends a round: it must
+ * be signed in to Kixel Quest, and Kixel Quest must serve the PR's repository, since it stores no post for one it does
+ * not. A branch with no such PR posts nothing, so it needs only the sign-in.
  */
 export async function requirePosting(
 	root: string,
 	baseRef: string,
+	branch: string,
 	deps: ClaimDependencies & Omit<ForgeDependencies, "warn">,
 ): Promise<void> {
 	const url = kixelUrl(deps.env);
 	const token = requireToken(url, deps.env);
-	const top = git(root, ["rev-parse", "--show-toplevel"]);
-	const up = await upstream(top, requireRemote(top, parseBase(top, baseRef).remote), deps);
+	const pull = await openPull(root, baseRef, branch, deps);
 	// A repository Kixel Quest hosts is one it serves.
-	if (up.hosting === null || up.github === null) return;
-	const { repository } = up.hosting;
-	if (!(await new KixelQuest(url, token, deps, false).serves(repository)))
+	if ("skipped" in pull || pull.hosted) return;
+	const [owner, repo] = pull.repository.split("/") as [string, string];
+	if (!(await new KixelQuest(url, token, deps, false).serves({ owner, repo })))
 		throw new Error(
-			`${url} does not serve ${repository.owner}/${repository.repo}, so it would store no review of it; install its GitHub App on the repository first`,
+			`${url} does not serve ${pull.repository}, so it would store no review of it; install its GitHub App on the repository first`,
 		);
 }
 
 /**
  * Attest a run with a `quest review` status on its head, which the land gate counts only when the token's user can push,
  * and post it to Kixel Quest for its branch's open PR, which counts it only when its poster can push. Either failing
- * fails the run. A failing status goes first, so a post that fails cannot leave an earlier pass standing for a failed
- * head; a passing one goes pending first and passes only once the post is stored, so no head passes unposted.
+ * fails the run. The status goes first as a failure, which a passing run turns to success only once the post is stored,
+ * so a post that fails leaves the head failing, never an earlier pass or a pending status the land gate would pass over.
  */
 export async function recordRounds(
 	root: string,
@@ -366,7 +369,7 @@ export async function recordRounds(
 	if ("skipped" in pull) return pull;
 	const outcome = runOutcome(reviewed);
 	const mergeBase = git(root, ["merge-base", reviewed.base.sha, reviewed.head]);
-	const attest = (state: "pending" | "success" | "failure") =>
+	const attest = (state: "success" | "failure") =>
 		pull.attest({
 			head: reviewed.head,
 			from: mergeBase,
@@ -380,8 +383,7 @@ export async function recordRounds(
 				outcome,
 			),
 		});
-	const failing = outcome === "findings open";
-	const status = await attest(failing ? "failure" : "pending");
+	const status = await attest("failure");
 	// An acceptance no status records has not happened, so nothing posts it.
 	if (status !== null && reviewed.accepted !== undefined) return { url: pull.url, status };
 	const at = { repository: pull.repository, number: pull.number };
@@ -391,7 +393,7 @@ export async function recordRounds(
 	});
 	reviewed.posted?.(at);
 	// A status the token could not set before would fail the same way again.
-	if (status === null && !failing) {
+	if (status === null && outcome !== "findings open") {
 		const passed = await attest("success");
 		if (passed !== null) return { url: pull.url, status: passed };
 	}

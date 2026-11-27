@@ -1125,6 +1125,7 @@ const blobId = (text: string) =>
 describe("merge --land of a high head", () => {
 	const OLD = "c".repeat(40);
 	/** The passing status a maintainer's round of `head` at `tier` sets on it. */
+	let clock = 0;
 	const review = (pull: FakePull, head: string, tier: string) => {
 		// Classified against the base's risk file as it is now.
 		const file = pull.risk === null ? "none" : blobId(pull.risk).slice(0, 12);
@@ -1132,6 +1133,7 @@ describe("merge --land of a high head", () => {
 			state: "SUCCESS",
 			description: `Risk ${tier}, risk file ${file}: passed`,
 			targetUrl: reviewTarget({ owner: "example", repo: "project" }, FORK, head),
+			createdAt: new Date(Date.UTC(2026, 10, 1) + clock++ * 60_000).toISOString(),
 			creator: { __typename: "User", login: "maintainer" },
 		};
 	};
@@ -1221,6 +1223,23 @@ describe("merge --land of a high head", () => {
 		delete pull.statuses[HEAD];
 		await land_(pull);
 		expect(pull.writes).toEqual(Array(3).fill(`enablePullRequestAutoMerge ${HEAD} MERGE`));
+	});
+
+	test("lets the most recently set status of the head's diff decide, whatever commit carries it", async () => {
+		const pull = new FakePull();
+		const MID = "e".repeat(40);
+		pull.diffs = { [OLD]: "diff", [MID]: "diff", [HEAD]: "diff" };
+		// The older commit's failed round was set after the newer one's pass, as from an older checkout.
+		review(pull, OLD, "high");
+		review(pull, MID, "high");
+		pull.statuses[OLD] = {
+			...pull.statuses[OLD]!,
+			state: "FAILURE",
+			description: "Risk high: findings open",
+			createdAt: new Date(Date.UTC(2026, 11, 1)).toISOString(),
+		};
+		expect(await refused(land_(pull))).toContain("is high");
+		expect(pull.writes).toEqual([]);
 	});
 
 	test("refuses a head an earlier commit's status rates high", async () => {

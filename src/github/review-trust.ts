@@ -92,7 +92,7 @@ const TIERS_QUERY = `query ReviewTiers($owner: String!, $repo: String!, $number:
 		commits(last: 100, before: $before) {
 			pageInfo { hasPreviousPage startCursor }
 			nodes { commit { oid status { context(name: "${REVIEW_CONTEXT}") {
-				state description targetUrl creator { __typename login }
+				state description targetUrl createdAt creator { __typename login }
 			} } } }
 		}
 	} }
@@ -138,7 +138,10 @@ export async function unreviewedHigh(
 	return high === null ? null : `${sha} is high, since ${high}, and no quest review status covers it`;
 }
 
-/** The `quest review` statuses on `pr`'s commits, newest first; GitHub lists at most 250 commits, so three pages. */
+/**
+ * The `quest review` statuses on `pr`'s commits, the most recently set first, since a checkout may review an older
+ * commit after a newer one; GitHub lists at most 250 commits, so three pages.
+ */
 async function reviewStatuses(github: GitHubReader, pr: PullRequest): Promise<ReviewStatus[]> {
 	const found: ReviewStatus[] = [];
 	for (let before: string | null = null, more = true; more;) {
@@ -153,7 +156,8 @@ async function reviewStatuses(github: GitHubReader, pr: PullRequest): Promise<Re
 		more = page.hasPreviousPage === true;
 		before = more ? string(page.startCursor) : null;
 	}
-	return found;
+	const set = (each: ReviewStatus) => Date.parse(string(each.status.createdAt));
+	return found.sort((a, b) => set(b) - set(a));
 }
 
 const BASE_RISK_QUERY = `query BaseRisk($owner: String!, $repo: String!, $expression: String!) {

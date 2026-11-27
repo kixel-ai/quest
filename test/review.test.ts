@@ -2389,7 +2389,7 @@ fakes(
 				target_url: `https://github.com/acme/widget/compare/${git(s.repo, "merge-base", "origin/main", head)}...${head}`,
 			};
 			expect(writes.statuses).toEqual([
-				{ ...attested, state: "pending" },
+				{ ...attested, state: "failure" },
 				{ ...attested, state: "success" },
 			]);
 
@@ -3002,11 +3002,11 @@ fakes("a post Kixel Quest refuses fails the command after printing the round", a
 		);
 		// The status went first, so the failed head is attested as such.
 		expect(writes.statuses).toMatchObject([{ state: "failure" }]);
-		// A passing run's status waits pending for its post, so a refused post leaves no pass standing.
+		// A passing run's status stays failing until its post is stored, so a refused post leaves no pass standing.
 		const accepted = await quest("--root", s.repo, "review", "--accept", "Fine.");
 		expect(accepted.code).toBe(1);
 		expect(accepted.stdout).toContain("\nnext stop: the acceptance was not recorded;");
-		expect(writes.statuses).toMatchObject([{ state: "failure" }, { state: "pending" }]);
+		expect(writes.statuses).toMatchObject([{ state: "failure" }, { state: "failure" }]);
 	} finally {
 		vi.unstubAllGlobals();
 	}
@@ -3068,9 +3068,10 @@ fakes(
 	},
 );
 
-fakes("a repository Kixel Quest does not serve runs no reviewer, since it would store no round", async () => {
+fakes("a repository Kixel Quest does not serve runs no reviewer for a PR, since it would store no round", async () => {
 	const s = setup();
-	onGitHub(s.repo, [{ number: 7, body: "" }]);
+	const pulls: FakePull[] = [];
+	onGitHub(s.repo, pulls);
 	const github = globalThis.fetch;
 	vi.stubGlobal("fetch", async (input: URL, init?: RequestInit) =>
 		new URL(input).pathname === "/forge"
@@ -3078,10 +3079,16 @@ fakes("a repository Kixel Quest does not serve runs no reviewer, since it would 
 			: github(input, init),
 	);
 	try {
+		// A branch with no PR yet posts nothing, so it is reviewed all the same.
+		const local = await quest("--root", s.repo, "review");
+		expect(local.code, local.stderr).toBe(0);
+		expect(local.stdout).toContain("record skipped: no open PR from feature into main");
+		const calls = s.calls().length;
+		pulls.push({ number: 7, body: "" });
 		const result = await quest("--root", s.repo, "review");
 		expect(result.code).toBe(1);
 		expect(result.stderr).toContain(`${KIXEL} does not serve acme/widget, so it would store no review of it`);
-		expect(s.calls()).toEqual([]);
+		expect(s.calls()).toHaveLength(calls);
 	} finally {
 		vi.unstubAllGlobals();
 	}

@@ -1883,9 +1883,9 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"one object: `rounds`, one per reviewer, `tallies`, every reviewer's findings across the branch's rounds, `risk`, the head's tier with its classification, `skipped`, each reviewer passed over with its reason, `accepted`, the maintainer's reason under --accept or null, `record`, and `next`.\n\n" +
 				"When quest runs from the source of the checkout it judges (bun src/cli/bin.ts, or a build there), the round still runs but posts nothing and sets no status: it prints `record skipped: ...` " +
 				"telling you to rerun with an installed quest, and `next stop` where the round found nothing to fix, so a PR can exercise its own review changes without marking itself reviewed.\n\n" +
-				"Every run that records needs this host signed in with quest login, and Kixel Quest serving the base's repository, both checked before any reviewer runs. " +
+				"Every run that records needs this host signed in with quest login, and Kixel Quest serving the repository of the branch's open PR, both checked before any reviewer runs. " +
 				"After each run it finds the branch's open PR into the base: the one from the repository the base's remote pushes to, else the only one from another repository whose pushed head `HEAD` contains. " +
-				"On GitHub it first sets the `quest review` commit status on the head, on the GitHub token, so push the head first: failure while a finding is open, else pending, set to success once the post below is stored, " +
+				"On GitHub it first sets the `quest review` commit status on the head, on the GitHub token, so push the head first: failure, which a run with no finding open sets to success once the post below is stored, " +
 				"its description the head's risk tier, class, and risk file and whether a local reviewer ran, its target the diff from the head's merge base with the PR's base, which the land gate counts only from a user who can push. " +
 				"For a token that cannot push, it sets none and prints `; status skipped: <why>` after the record's URL; a status GitHub refuses otherwise prints `; status refused: <why>` and exits 1. " +
 				"It then posts the run to Kixel Quest (POST /reviews, QUEST_KIXEL_URL naming another), and prints `record <url>`: the head, the base and merge base, the risk tier and reason, the classifier's tier, class, and who set it, " +
@@ -2012,7 +2012,8 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				// Every run that records posts to Kixel Quest, so a host that cannot post spends no reviewer's round.
 				const posting = own
 					? undefined
-					: (dir: string, base: string) => requirePosting(dir, base, { ...forgeDependencies(), ...github });
+					: (dir: string, base: string, branch: string) =>
+							requirePosting(dir, base, branch, { ...forgeDependencies(), ...github });
 				const run = review(
 					{
 						...options,
