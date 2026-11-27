@@ -1909,11 +1909,11 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"For a token that cannot push, it sets none and prints `; status skipped: <why>` after the record's URL; a status GitHub refuses otherwise prints `; status refused: <why>` and exits 1. " +
 				"It then posts the run to Kixel Quest (POST /reviews, QUEST_KIXEL_URL naming another), and prints `record <url>`: the head, the base and merge base, the risk tier and reason, the classifier's tier, class, and who set it, " +
 				"and each reviewer's round, its seat (pick or second), session, round number, score and rationale, and findings with their file, line, and severity, " +
-				"with the outcome of each finding of an earlier posted round that this run fixed or refuted, sent to the PR that round was posted on, and kept for the next run on the head when the post fails. Notes are not posted. A low head no reviewer ran on posts its classification alone. " +
+				"with the outcome of each finding of an earlier posted round that this run fixed or refuted, sent to the PR that round was posted on, and kept for the branch's next post when the post fails. Notes are not posted. A low head no reviewer ran on posts its classification alone. " +
 				"Kixel Quest counts a run toward merging only when its poster can push, and quest status reads the review from there; the PR body is left as is. " +
 				"--accept <reason> runs no reviewer or classifier: it repeats each reviewer's last round of the same head, base, and merge base, failing as a usage error " +
-				"when none classified and reviewed it, when a high head lacks its second reviewer's round, or when no finding is open; sets the status to success " +
-				"described `findings accepted`; then posts the rounds as accepted, their findings deferred with the reason, " +
+				"when none classified and reviewed it, when a high head lacks its second reviewer's round, or when no finding is open; sets the status to failure " +
+				"described `findings accepted`; posts the rounds as accepted, their findings deferred with the reason; sets the status to success once the post is stored; " +
 				"and prints `next done`. When no status is set, as for a token that cannot push, or the post fails, it prints `next stop` and exits 1. With no " +
 				"such PR, several from other repositories that `HEAD` contains, or a remote off GitHub and Kixel Quest, it prints `record skipped: <why>` and changes nothing.\n\n" +
 				"Exits 0 once the round finishes, whatever it found, 2 for invalid arguments " +

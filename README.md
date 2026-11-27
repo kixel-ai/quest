@@ -1859,8 +1859,8 @@ number and the finding's place in it, and sent to the PR that round was posted
 on, even after a replacement PR took the branch. A low head no reviewer ran on
 posts its classification alone. A round whose post failed, or that an older
 `quest` recorded in the PR body, was never stored, so the next run sends no
-outcome for its findings; the outcomes a failed post carried are kept, and
-the next run on the same head, which repeats its round, sends them. Kixel Quest counts a run toward merging only when its poster
+outcome for its findings; the outcomes a failed post carried are kept for
+the branch, and its next post sends them, after `--new` too. Kixel Quest counts a run toward merging only when its poster
 can push, so a contributor's own runs are recorded but a maintainer's review
 decides, and `quest status` reads the review from there; the PR body is left
 as written. With no such PR, or a remote off GitHub and Kixel Quest, it posts
@@ -1992,8 +1992,10 @@ head's last rounds left open, as when they side with the author against a
 reviewer that keeps a finding, or at a `next decide`. It
 runs no reviewer and no classifier: it repeats each reviewer's last round of
 the same head, base, and merge base, sets the `quest review` status to
-`success`, described `findings accepted`, and posts the rounds again as
-accepted, each open finding deferred for the maintainer's reason. It is a usage error when no round
+`failure`, described `findings accepted`, posts the rounds again as
+accepted, each open finding deferred for the maintainer's reason on the PR it
+posts to and on a since-replaced PR its round was posted on, and only once the
+post is stored sets the status to `success`. It is a usage error when no round
 classified and reviewed that diff, when a high head lacks its second
 reviewer's round, or when no finding is open, and it takes no option that
 would run or reset a round. Its status goes first, so a token that cannot
