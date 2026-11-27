@@ -124,6 +124,7 @@ import { SEND_INTERVAL, background, parseInstant, queue, reportIncident, runSend
 import { installSender, uninstallSender } from "./service";
 import { heal, init, stubFindings, uninstall } from "./setup";
 import { describe, notUpstream, releaseQuest, startQuest } from "./start";
+import { credential } from "./git-credential";
 import { login, logout } from "./login";
 import { KIXEL_QUEST_URL, kixelUrl, tokensPath } from "./tokens";
 import { CONTEXT, GUIDE, GUIDE_SECTIONS, SKILLS, guideSections, sectionHeading, skill } from "./skills";
@@ -1696,7 +1697,10 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				`then stores the token Kixel Quest issues, named after this host's hostname, in ${tokensPath()}, ` +
 				"readable only by this user. Signing in again replaces this host's earlier token there and on Kixel " +
 				"Quest. The record sender, quest review, forge reads, and quest records incident use the token, and a " +
-				"command that needs Kixel Quest fails without it, naming quest login.",
+				"command that needs Kixel Quest fails without it, naming quest login. It then signs git in to the " +
+				"repositories that Kixel Quest hosts, as gh auth setup-git does for GitHub: in the global git config, " +
+				"credential.<url>.helper for its URL becomes empty, dropping any helper set earlier for that URL, then " +
+				"`!quest git-credential`, which answers with the stored token, so a read-only git config fails the command.",
 		)
 		.action(() => {
 			const ask = (question: string) =>
@@ -1722,10 +1726,12 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 					ask,
 					say: print,
 				}),
-				(signedIn) =>
+				(signedIn) => {
 					print(
 						`signed in to ${signedIn.url} as ${signedIn.label}; transcript uploads ${signedIn.transcripts ? "agreed" : "declined"}`,
-					),
+					);
+					print(`signed git in to ${signedIn.url}'s repositories: ${signedIn.git.join(", ")}`);
+				},
 			);
 		});
 	program
@@ -1733,7 +1739,9 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		.summary("Remove this host's Kixel Quest token")
 		.description(
 			`Remove the token quest login stored for Kixel Quest (https://kixel.quest, or the one ${KIXEL_QUEST_URL} ` +
-				"names) from this host. Kixel Quest still takes it until it is revoked on its Tokens page.",
+				"names) from this host, after removing the two credential.<url>.helper entries quest login wrote to the " +
+				"global git config; a git config it cannot write fails the command and keeps the token. Kixel Quest " +
+				"still takes the token until it is revoked on its Tokens page.",
 		)
 		.action(() => {
 			const { url, removed } = logout(process.env);
@@ -1742,6 +1750,16 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 					? `removed this host's token for ${url}; revoke it at ${url}/tokens`
 					: `this host held no token for ${url}`,
 			);
+		});
+
+	program
+		.command("git-credential", { hidden: true })
+		.argument("<operation>", "get, store, or erase")
+		.description(
+			"Answer git's credential helper protocol for the repositories Kixel Quest hosts, as quest login configures it.",
+		)
+		.action((operation: string) => {
+			out.stdout(credential(operation, readFileSync(0, "utf8"), process.env, warn));
 		});
 
 	const recordsCommand = program.command("records").summary("Send agent sessions' records to Kixel Quest");
