@@ -2770,7 +2770,7 @@ arrives with the guide sections and other skills it builds on, in one call:
 | `quest-review` | Review a PR's branch locally with a model no weaker than its latest writer, then mark it ready for review. |
 | `quest-merge` | Queue a PR to land, running `quest-iterate` first when it needs work. |
 | `quest-run` | Orchestrate a project from one session: start ready quests, take PRs to merge, and settle what quests and drafts wait on you, in a loop until only your decisions remain, then plan the follow-ups no quest owns yet. Pass a filter such as `prs` to start no quests. |
-| `quest-afk` | Keep a session such as `quest-run` going while you are away: it acts on its recommendations, defers merges, and walks you through the rest when you return. `afk merge` also merges low-risk PRs it recommends, folds the follow-ups it recommends doing now into other PRs, and once idle merges a medium-risk PR that unblocks a quest it would start; and `afk soon` asks pending questions in one batch before you leave. |
+| `quest-afk` | Keep a session such as `quest-run` going while you are away: it acts on its recommendations, defers merges, and walks you through the rest when you return. `afk merge` also merges low-risk PRs it recommends, implements the follow-ups it recommends doing now in the PRs that add them, and once idle merges a medium-risk PR that unblocks a quest it would start; and `afk soon` asks pending questions in one batch before you leave. |
 
 Use `/quest-plan` in Claude Code or `$quest-plan` in Codex. Skills coordinate
 within your agent session. A started quest stops at a pull request; merging is
