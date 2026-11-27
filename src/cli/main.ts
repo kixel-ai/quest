@@ -116,7 +116,7 @@ import {
 	setup,
 	targets,
 } from "./hooks";
-import { CHECKED_CONTEXT, USER_ASKED, inCheckout, questRoot } from "./rules";
+import { CHECKED_CONTEXT, USER_ASKED, checkoutRoot, questRoot } from "./rules";
 import { checkoutRepository, messageLines, messages } from "./messages";
 import { logWait, pullWaitKind, readWaits } from "./waits";
 import { readCalls } from "./calls";
@@ -435,10 +435,11 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 			const tree = checkout(root(), warn);
 			const findings = check(tree.docs, tree.exists, { auditNames: options.stubs });
 			if (options.base !== undefined) findings.push(...landed(root(), options.base, { branch: options.branch }));
-			// A tree nested in another checkout, such as an example, has no stubs, risk file, or quest.toml of its own;
-			// one outside any checkout, such as a flake's source in the Nix store, keeps its quest.toml.
+			// A tree nested in another checkout, such as an example, has no stubs, risk file, or quest.toml of its own.
+			// quest.toml applies at any checkout's root, as quest merge checks it, and outside any checkout, such as a
+			// flake's source in the Nix store.
 			const own = questRoot(resolve(root())) === resolve(root());
-			const manifest = own || !inCheckout(resolve(root()));
+			const manifest = checkoutRoot(resolve(root())) === resolve(root());
 			const risk = join(root(), RISK_FILE);
 			const repository = [
 				...(options.stubs && own ? stubFindings(root()) : []),

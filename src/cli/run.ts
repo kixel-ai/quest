@@ -115,8 +115,11 @@ export const NIX_CACHE = "https://nix.kixel.quest";
 /** A Nix token: a name, a string's literal text (interpolations left out), a path, or one punctuation character. */
 type NixToken = { kind: "name" | "string" | "path" | "punct"; text: string };
 
-/** A path literal at the start of the text, such as `./in/default.nix`, `~/x`, or `<nixpkgs>`. */
-const NIX_PATH = /^(?:<[\w.+/-]+>|(?:~|[\w.+-]*)(?:\/[\w.+-]+)+\/?)/;
+/**
+ * A path literal at the start of the text, such as `./in/default.nix`, `~/x`, or `<nixpkgs>`, or the part of an
+ * interpolated one, such as `./profiles/${name}-in`, before its first `${`.
+ */
+const NIX_PATH = /^(?:<[\w.+/-]+>|(?:~|[\w.+-]*)(?:\/[\w.+-]+)+\/?|(?:~|[\w.+-]*)(?:\/[\w.+-]+)*\/(?=\$\{))/;
 
 /** The tokens of Nix source outside comments; an interpolation's code yields none. */
 function nixTokens(source: string): NixToken[] {
@@ -135,9 +138,15 @@ function nixTokens(source: string): NixToken[] {
 				const text = string(c === '"' ? '"' : "''");
 				if (emit) tokens.push({ kind: "string", text });
 			} else if (NIX_PATH.test(source.slice(i, i + 4096))) {
-				const path = NIX_PATH.exec(source.slice(i, i + 4096))![0];
-				i += path.length;
-				if (emit) tokens.push({ kind: "path", text: path });
+				const start = i;
+				i += NIX_PATH.exec(source.slice(i, i + 4096))![0].length;
+				// An interpolated path runs on through each `${...}` and the path characters after it.
+				while (source[start] !== "<" && source.startsWith("${", i)) {
+					i += 2;
+					code(false, true);
+					i += /^[\w.+/-]*/.exec(source.slice(i, i + 4096))![0].length;
+				}
+				if (emit) tokens.push({ kind: "path", text: source.slice(start, i) });
 			} else if (/[A-Za-z_]/.test(c)) {
 				const name = /^[A-Za-z_][\w'-]*/.exec(source.slice(i))![0];
 				i += name.length;

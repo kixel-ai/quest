@@ -410,6 +410,9 @@ test("a repository with quest.toml and flake.nix substitutes from Kixel Quest's 
 		'{ outputs = _: let a = 1; nixConfig = { extra-substituters = [ "https://nix.kixel.quest" ]; }; in { }; }',
 		// A path whose component reads as `in`.
 		'{ outputs = _: let dir = ./in/default.nix; nixConfig.extra-substituters = [ "https://nix.kixel.quest" ]; in { }; }',
+		// An interpolated path whose text after an interpolation reads as `in`.
+		'{ outputs = _: let dir = ./profiles/${"local"}-in; nixConfig.extra-substituters = [ "https://nix.kixel.quest" ]; in { }; }',
+		'{ outputs = _: let dir = ./${"x"}/in; nixConfig.extra-substituters = [ "https://nix.kixel.quest" ]; in { }; }',
 	])
 		expect(problems(flake), flake).toEqual(missing);
 });
@@ -418,9 +421,9 @@ test.runIf(posix)("quest check reports a malformed quest.toml, and Nix tasks wit
 	const dir = tempDir();
 	mkdirSync(join(dir, ".git"));
 	write(dir, { "AGENTS.md": `${REFERENCE_LINE}\n`, "quest/README.md": "# Quests\n\n## Goal\n\nWork.\n" });
-	const check = async () => {
+	const check = async (root = dir) => {
 		let stderr = "";
-		const code = await main(["--root", dir, "check", "--no-stubs"], {
+		const code = await main(["--root", root, "check", "--no-stubs"], {
 			stdout: () => {},
 			stderr: (text) => void (stderr += text),
 		});
@@ -455,9 +458,20 @@ test.runIf(posix)("quest check reports a malformed quest.toml, and Nix tasks wit
 		code: 1,
 		stderr: "quest: quest.toml: must be a regular file, not a symlink\n",
 	});
-	// A source outside any checkout, as a flake's checks.quest sees the Nix store's copy, is still the repository's.
+	// quest merge checks quest.toml at a checkout's root without Quest's marker in AGENTS.md, and so does quest check.
 	rmSync(join(dir, "quest.toml"));
-	write(dir, { "quest.toml": '[tasks.a]\ntier = "pr"\nrun = "x"\n', "flake.nix": "{}" });
+	write(dir, { "quest.toml": '[tasks.a]\ntier = "pr"\nrun = "x"\n', "flake.nix": "{}", "AGENTS.md": "# Agents\n" });
+	expect((await check()).stderr).toContain("flake.nix's nixConfig must list https://nix.kixel.quest");
+	// A tree nested in a checkout, such as an example, has no quest.toml of its own.
+	const nested = join(dir, "example");
+	write(nested, {
+		"quest/README.md": "# Quests\n\n## Goal\n\nWork.\n",
+		"quest.toml": '[tasks.a]\ntier = "pr"\nrun = "x"\n',
+		"flake.nix": "{}",
+	});
+	expect(await check(nested)).toMatchObject({ code: 0, stderr: "" });
+	rmSync(nested, { recursive: true });
+	// A source outside any checkout, as a flake's checks.quest sees the Nix store's copy, is still the repository's.
 	rmSync(join(dir, ".git"), { recursive: true });
 	expect((await check()).stderr).toContain("flake.nix's nixConfig must list https://nix.kixel.quest");
 });

@@ -1697,8 +1697,8 @@ It adds to what `perSystem` returns, for each of `systems` (`x86_64-linux`,
 
 - `devShells.default`, `pkgs.mkShell` called with `shell`, holding `quest`
   and the repository's `treefmt`. It sets `QUEST_DEV_SHELL` to the nearest
-  directory up holding `flake.nix` when that `flake.nix`, its `flake.lock`,
-  and its git commit are the ones the shell was built from, so `quest run` and `quest fmt` run
+  directory up holding `flake.nix` when that `flake.nix` and its `flake.lock`
+  are the ones the shell was built from, so `quest run` and `quest fmt` run
   there without entering the shell again, and a shell entered from another
   checkout names none. `perSystem`'s `quest` replaces the `quest` package.
 - `formatter`, the same `treefmt`, which `nix fmt` runs.

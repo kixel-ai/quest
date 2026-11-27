@@ -32,8 +32,6 @@ let
     builtins.readFile "${self}/flake.nix"
     + lib.optionalString (builtins.pathExists lock) (builtins.readFile lock)
   );
-  # The commit the shell was built from, or "" for a source outside git.
-  rev = self.rev or (lib.removeSuffix "-dirty" (self.dirtyRev or ""));
   outputs =
     system:
     let
@@ -63,8 +61,8 @@ let
             ]
             ++ shell.packages or [ ];
             # Names the repository's root, the nearest directory up that holds flake.nix, so `quest run` and
-            # `quest fmt` run here without entering the shell again: only when its flake.nix, flake.lock, and
-            # commit are the ones this shell was built from, so `nix develop ../other` names no checkout.
+            # `quest fmt` run here without entering the shell again: only when its flake.nix and flake.lock are
+            # the ones this shell was built from, so `nix develop ../other` names no checkout.
             shellHook = ''
               QUEST_DEV_SHELL=$PWD
               while [ ! -f "$QUEST_DEV_SHELL/flake.nix" ] && [ "$QUEST_DEV_SHELL" != / ]; do
@@ -75,9 +73,7 @@ let
                   cat "$QUEST_DEV_SHELL/flake.nix"
                   [ ! -f "$QUEST_DEV_SHELL/flake.lock" ] || cat "$QUEST_DEV_SHELL/flake.lock"
                 } | sha256sum
-              )" = "${flakeHash}  -" ] && {
-                [ -z "${rev}" ] || [ "$(${lib.getExe pkgs.git} -C "$QUEST_DEV_SHELL" rev-parse HEAD 2>/dev/null)" = "${rev}" ]
-              }; then
+              )" = "${flakeHash}  -" ]; then
                 export QUEST_DEV_SHELL
               else
                 unset QUEST_DEV_SHELL
