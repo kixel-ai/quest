@@ -1,17 +1,16 @@
-// Which `quest review` commit statuses count: only one set on the reviewed head by a user with write access to the base
-// repository, bound to the head's diff from its merge base. The land gate reads the review from them alone; `quest
-// status` still counts a PR body's `## Review` record, which `quest review` once wrote, only where one attests it.
+// Which `quest review` commit statuses count: only one set on a commit of the PR by a user with write access to the base
+// repository, bound to that commit's diff from its merge base. The land gate and `quest status` read the review from
+// them alone, through one walk, so they cannot disagree.
 import {
 	type PullRequest,
 	type RecordedRisk,
-	REVIEW_MARK,
 	RISK_FILE,
 	type Repository,
+	type ReviewRecord,
+	type Tier,
 	heldHigh,
 	highHits,
 	parseRiskFile,
-	recordedRisk,
-	reviewSection,
 	riskFileId,
 } from "../core";
 import { GitHubDeadline, type GitHubReader, type ObjectValue, array, object, repositoryPath, string } from "./client";
@@ -24,7 +23,7 @@ export type Outcome = "passed" | "passed with no local reviewer" | "findings acc
 
 /**
  * The status description `quest review` sets: the head's risk, class, and the base's risk file they were set against,
- * which the body's record must match, and its outcome.
+ * and its outcome.
  */
 export function attestation(risk: Pick<RecordedRisk, "tier" | "class" | "riskFile">, outcome: Outcome): string {
 	const kind = risk.class === null ? "" : `, class ${risk.class}`;
@@ -45,43 +44,6 @@ const ATTESTED =
 /** Repository permissions that can push. */
 const WRITE = ["admin", "maintain", "write"];
 
-const STATUS_QUERY = `query ReviewStatus($owner: String!, $repo: String!, $sha: GitObjectID!) {
-	repository(owner: $owner, name: $repo) {
-		object(oid: $sha) { ... on Commit { status { context(name: "${REVIEW_CONTEXT}") {
-			state description targetUrl creator { __typename login }
-		} } } }
-	}
-}`;
-
-/** A PR body as `quest status` reads it, the head its status attests, and whether it attests a local reviewer's round. */
-export interface Trusted {
-	body: string;
-	head: string | null;
-	localReview: boolean;
-}
-
-/**
- * `body` as `quest status` reads its `## Review` record: as written when a `quest review` status attests the head the
- * section names last, else without the record, with a warning saying why unless it names no full SHA.
- */
-export async function trustedReview(
-	github: GitHubReader,
-	pr: PullRequest & { base: string },
-	body: string,
-	warn: (message: string) => void,
-): Promise<Trusted> {
-	const section = reviewSection(body);
-	const text = section === null ? "" : body.slice(section.start, section.end);
-	// As `reviewRecord` reads it: only a section holding `quest review`'s record names a head, by its last full SHA.
-	const reviewed = text.includes(REVIEW_MARK) && text.match(/\b[0-9a-f]{40}\b/g)?.at(-1);
-	// A section naming no head, as a record with a finding open, counts for none, so its risk and class print as none.
-	if (!reviewed) return { body: section === null ? body : "", head: null, localReview: false };
-	const attested = await attestedOutcome(github, pr, body, reviewed);
-	if (typeof attested !== "string") return { body, head: reviewed, localReview: attested.localReview };
-	warn(`${pr.owner}/${pr.repo}#${pr.number}'s ## Review record does not count: ${attested}`);
-	return { body: "", head: null, localReview: false };
-}
-
 /** The most files GitHub's compare API lists. */
 const FILE_LIMIT = 300;
 
@@ -98,7 +60,7 @@ const TIERS_QUERY = `query ReviewTiers($owner: String!, $repo: String!, $number:
 }`;
 
 /** A commit's latest `quest review` status, as GitHub returns it. */
-interface ReviewStatus {
+export interface ReviewStatus {
 	oid: string;
 	status: ObjectValue;
 }
@@ -120,28 +82,77 @@ export async function unreviewedHigh(
 	const head = sha.toLowerCase();
 	const risk = await baseRisk(github, pr);
 	const statuses = await reviewStatuses(github, pr);
+	const { counted } = await countedReview(github, pr, head, statuses, false);
+	if (counted?.passed && counted.attested.riskFile === riskFileId(risk?.blob ?? null)) return null;
+	const high = statusHigh(statuses) ?? (await pathHigh(github, pr, head, risk?.text ?? null));
+	return high === null ? null : `${sha} is high, since ${high}, and no quest review status covers it`;
+}
+
+/** The review that counts for a head: a writer's `quest review` status, and how its diff relates to the head's. */
+export interface Counted {
+	/** The commit the status is on. */
+	oid: string;
+	/** `current` on the head, `diff-identical` on another commit with the head's diff, `stale` on one with another diff, `unknown` when GitHub cannot compare them. */
+	state: ReviewRecord["state"];
+	/** Whether the status is a success: a failed round on the head's diff outweighs an earlier pass of it. */
+	passed: boolean;
+	attested: Attested;
+}
+
+/**
+ * The review that counts for `head` from `statuses`, the PR's `quest review` statuses newest first: the newest writer's
+ * status bound to a diff equal to the head's, so a round that failed outweighs an earlier pass of the same diff. With
+ * `older`, a head no such status covers falls back to the newest passing writer's status on another diff, `stale`, or
+ * `unknown` where a diff cannot be compared. `skipped` says why each status that counts for none does not.
+ */
+export async function countedReview(
+	github: GitHubReader,
+	pr: PullRequest & { base: string },
+	head: string,
+	statuses: ReviewStatus[],
+	older: boolean,
+): Promise<{ counted: Counted | null; skipped: string[] }> {
+	const skipped: string[] = [];
+	const rest: { each: ReviewStatus; known: boolean }[] = [];
 	let diff: Promise<string | null> | undefined;
 	for (const each of statuses) {
 		if (each.oid !== head) {
 			diff ??= baseDiff(github, pr, head);
 			const own = await diff;
-			if (own === null || (await baseDiff(github, pr, each.oid)) !== own) continue;
+			const theirs = own === null ? null : await baseDiff(github, pr, each.oid);
+			if (own === null || theirs !== own) {
+				rest.push({ each, known: own !== null && theirs !== null });
+				continue;
+			}
 		}
 		// Only a writer's status, bound to the diff it reviewed, says anything about the head.
 		const bound = await boundStatus(github, pr, each.oid, each.status);
-		if (typeof bound === "string") continue;
-		if (each.status.state === "SUCCESS" && bound.riskFile === riskFileId(risk?.blob ?? null)) return null;
-		break;
+		if (typeof bound === "string") {
+			skipped.push(bound);
+			continue;
+		}
+		const state = each.oid === head ? "current" : "diff-identical";
+		return { counted: { oid: each.oid, state, passed: each.status.state === "SUCCESS", attested: bound }, skipped };
 	}
-	const high = statusHigh(statuses) ?? (await pathHigh(github, pr, head, risk?.text ?? null));
-	return high === null ? null : `${sha} is high, since ${high}, and no quest review status covers it`;
+	if (older)
+		for (const { each, known } of rest) {
+			if (each.status.state !== "SUCCESS") continue;
+			const bound = await boundStatus(github, pr, each.oid, each.status);
+			if (typeof bound === "string") skipped.push(bound);
+			else
+				return {
+					counted: { oid: each.oid, state: known ? "stale" : "unknown", passed: true, attested: bound },
+					skipped,
+				};
+		}
+	return { counted: null, skipped };
 }
 
 /**
  * The `quest review` statuses on `pr`'s commits, the most recently set first, since a checkout may review an older
  * commit after a newer one; GitHub lists at most 250 commits, so three pages.
  */
-async function reviewStatuses(github: GitHubReader, pr: PullRequest): Promise<ReviewStatus[]> {
+export async function reviewStatuses(github: GitHubReader, pr: PullRequest): Promise<ReviewStatus[]> {
 	const found: ReviewStatus[] = [];
 	for (let before: string | null = null, more = true; more;) {
 		const data = await github.graphql(TIERS_QUERY, { owner: pr.owner, repo: pr.repo, number: pr.number, before });
@@ -238,53 +249,12 @@ async function pathHigh(
 	return hit === undefined ? null : `it changes ${hit.path}, which is always high: ${hit.rule.reason}`;
 }
 
-/** Whether a writer's passing `quest review` status on `sha` attests `body`'s record, with a local reviewer or not, or why not. */
-async function attestedOutcome(
-	github: GitHubReader,
-	pr: PullRequest & { base: string },
-	body: string,
-	sha: string,
-): Promise<{ localReview: boolean } | string> {
-	const data = await github.graphql(STATUS_QUERY, { owner: pr.owner, repo: pr.repo, sha });
-	const commit = object(data.repository).object;
-	if (commit === null) return `${pr.owner}/${pr.repo} has no commit ${sha}`;
-	const rollup = object(commit).status;
-	const status = rollup == null ? null : object(rollup).context;
-	if (status == null) return `${sha} has no ${REVIEW_CONTEXT} status`;
-	const attested = await attestedStatus(github, pr, sha, object(status));
-	if (typeof attested === "string") return attested;
-	const risk = recordedRisk(body);
-	if (risk === null) return `it names no risk, which the ${REVIEW_CONTEXT} status on ${sha} attests`;
-	// A malformed risk is left for `quest status` to print.
-	if (
-		!("malformed" in risk) &&
-		(risk.tier !== attested.tier || risk.class !== attested.class || risk.riskFile !== attested.riskFile)
-	)
-		return `its risk differs from the ${REVIEW_CONTEXT} status on ${sha}: ${String(object(status).description)}`;
-	return { localReview: attested.outcome !== "passed with no local reviewer" };
-}
-
 /** What a `quest review` status attests: the head's risk, and the run's outcome. */
-interface Attested {
-	tier: string;
+export interface Attested {
+	tier: Tier;
 	class: string | null;
 	riskFile: string;
 	outcome: Outcome;
-}
-
-/**
- * The risk and outcome a writer's passing `quest review` status on `sha` attests for its diff from the merge base with
- * the PR's base, or why it attests nothing.
- */
-async function attestedStatus(
-	github: GitHubReader,
-	pr: PullRequest & { base: string },
-	sha: string,
-	status: ObjectValue,
-): Promise<Attested | string> {
-	if (status.state !== "SUCCESS")
-		return `the ${REVIEW_CONTEXT} status on ${sha} is ${String(status.state).toLowerCase()}, not success`;
-	return boundStatus(github, pr, sha, status);
 }
 
 /**
@@ -334,7 +304,7 @@ async function boundStatus(
 	const attested = ATTESTED.exec(typeof description === "string" ? description : "");
 	if (attested === null) return `the ${REVIEW_CONTEXT} status on ${sha} names no risk: ${String(description)}`;
 	return {
-		tier: attested[1]!,
+		tier: attested[1] as Tier,
 		class: attested[2] ?? null,
 		riskFile: attested[3] ?? riskFileId(null),
 		outcome: attested[4] as Outcome,

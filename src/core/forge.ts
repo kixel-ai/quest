@@ -64,9 +64,9 @@ export interface Thread {
 }
 
 /**
- * The head the `## Review` section holding `quest review`'s record names last, the latest reviewed one, which a
- * `quest review` status attests. `current` is the PR's head; `diff-identical` an earlier head whose diff from
- * the base (`git diff <base>...<sha>`) matches the head's; `unknown` one the forge cannot compare, such as a diff too
+ * The commit holding the review that counts, which a passing `quest review` status of a user who can push attests.
+ * `current` is the PR's head; `diff-identical` an earlier commit whose diff from the base (`git diff <base>...<sha>`)
+ * matches the head's; `stale` one whose diff differs; `unknown` one the forge cannot compare, such as a diff too
  * large to render.
  */
 export interface ReviewRecord {
@@ -136,21 +136,27 @@ export interface Status {
 	/** The online reviewers whose rounds on the head have reached the point where the user decides. */
 	checkpoints: { reviewer: string; round: number; url: string }[];
 	/**
-	 * Null when the `## Review` section holds no record `quest review` wrote or names no full SHA, or no writer's passing `quest review` status attests it.
+	 * Null when no writer's passing `quest review` status on a commit of the PR counts for the head.
 	 * `localReview` is whether that status attests a local reviewer's round, false for a low head none ran on.
-	 * `state` is `stale` for an open PR whose base's risk file at its tip is not the one the record names, since the
+	 * `state` is `stale` for an open PR whose base's risk file at its tip is not the one the status names, since the
 	 * tier that file set decided how much review the head got.
 	 */
 	reviewRecord: (ReviewRecord & { localReview: boolean }) | null;
 	/**
-	 * The head's risk tier as the `## Review` record names it, and the classifier's own tier, lower when a reviewer
-	 * raised it; null when the record names none or does not count, as for `reviewRecord`. `state` is the review record's, which a line after it carries to a
-	 * later head, else `current` when the record names the head and `stale` when not. `class` is the class, built
-	 * in or the risk file's `## Automatic` one, the classifier found the change in, or null. A record whose risk lines do not parse is
-	 * `malformed`, with why, which `quest merge` refuses.
+	 * The risk tier of the review that counts, as its status attests it, as for `reviewRecord`: the final tier, after
+	 * any reviewer raised it. `reason` and `classified`, the classifier's own tier, are null where the forge does
+	 * not carry them, as GitHub's commit statuses do not. `state` is the review record's. `class` is the class, built
+	 * in or the risk file's `## Automatic` one, the classifier found the change in, or null. A risk the forge cannot
+	 * parse is `malformed`, with why, which `quest merge` refuses.
 	 */
 	risk:
-		| { tier: Tier; reason: string; classified: Tier; class: string | null; state: ReviewRecord["state"] }
+		| {
+				tier: Tier;
+				reason: string | null;
+				classified: Tier | null;
+				class: string | null;
+				state: ReviewRecord["state"];
+		  }
 		| { state: "malformed"; error: string }
 		| null;
 	reactions: Reaction[];
@@ -613,8 +619,8 @@ const statusFields = shape<Status>({
 			? shape<MalformedStatus>({ state: oneOf(["malformed"] as const), error: string })(value, at, strict)
 			: shape<Exclude<RiskStatus, MalformedStatus>>({
 					tier,
-					reason: string,
-					classified: tier,
+					reason: nullable(string),
+					classified: nullable(tier),
 					// A server older than #802 sends none: in no class, so no standing pick lands it.
 					class: maybe(nullable(string), null),
 					state: oneOf(reviewStates),
