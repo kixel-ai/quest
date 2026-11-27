@@ -9,6 +9,8 @@ A PR `quest review` posted to Kixel Quest has no body record, so today those col
 
 Found 2026-11-26 by the review of [kixel-ai/quest#931](https://github.com/kixel-ai/quest/pull/931), which moved the record to Kixel Quest.
 
+Decided 2026-11-26 (maintainer, /quest-run): ✅ keep it (rejected: drop it, leaving `quest usage` without reviews posted after #931).
+
 - Read the posted runs and outcomes of the window's PRs from Kixel Quest, and keep the body reader (`parseReview`, `recordedRisk`, `reviewSessions`, `classifierSessions` in `src/cli/review-record.ts`) for PRs reviewed before the posts, preferring a posted run where a PR has both.
 - Take the reviewer and classifier session ids from the posted runs' rounds and classifier, so `sessionRecords` names their role in `quest usage` as it does in the sender.
 - Agent's recommendation: read through the existing `/forge` client with the person's token, failing loud without it, as the instructions audit and routing readouts depend on these numbers.
