@@ -1,6 +1,6 @@
 // The PR body's `## Review` record as `quest review` wrote it before it posted rounds to Kixel Quest, which `quest usage`
 // still reads from merged PRs' bodies; tests build those bodies with it.
-import { DEFAULT, PATHS, REVIEW_MARK, codeSpan, riskFileId } from "../src/core";
+import { PATHS, REVIEW_MARK, codeSpan, riskFileId } from "../src/core";
 import { type Reviewed, type Risk, SEVERITIES, type Tally, located, sameSeat } from "../src/cli/review";
 import { type Counts, HARNESSES, findingsText, passed } from "../src/cli/review-record";
 
@@ -37,7 +37,6 @@ const counted = ({ first, ...tally }: Tally): Counts => ({
 /** How the record names what set the classifier's tier, as `recordedRisk` reads it back. */
 function classifiedBy({ by }: Risk["classified"]): string {
 	if (by.kind === "paths") return PATHS;
-	if (by.kind === "default") return DEFAULT;
 	return `${HARNESSES[by.harness]}, ${by.model}, ${by.effort} effort, session ${code(by.session)}`;
 }
 

@@ -50,6 +50,7 @@ import {
 	KIXEL,
 	type Call,
 	at,
+	classified,
 	effortOf,
 	fakes,
 	git,
@@ -235,6 +236,7 @@ fakes("--exclude-model avoids each model it names, and every model weaker than i
 
 fakes("a missing or logged-out reviewer CLI with no reviewer after it is an outage", async () => {
 	const s = setup();
+	await classified(s);
 	// Only git is on PATH, so no codex install outside the fakes is found either.
 	const only = join(s.bin, "..", "git-only");
 	mkdirSync(only);
@@ -245,6 +247,7 @@ fakes("a missing or logged-out reviewer CLI with no reviewer after it is an outa
 	expect(missing.stderr).toContain("codex is not installed");
 
 	const t = setup();
+	await classified(t);
 	vi.stubEnv("FAKE_LOGGED_OUT", "1");
 	const out = await quest("--root", t.repo, "review");
 	expect(out.code).toBe(3);
@@ -267,6 +270,7 @@ fakes.each([
 	"a logged-out error names the profile its status check read (host %s, %s, %s=%s)",
 	async (host, variable, flag, value, message) => {
 		const s = setup(host);
+		await classified(s);
 		vi.stubEnv(variable, "/work");
 		vi.stubEnv(flag, value);
 		const result = await quest("--root", s.repo, "review");
@@ -285,6 +289,7 @@ fakes.each([
 	"a login the API rejects fails as logged out, whatever the status check said (host %s, rejected in %s)",
 	async (host, variant, message) => {
 		const s = setup(host);
+		await classified(s);
 		vi.stubEnv("FAKE_REJECTED", variant);
 		const result = await quest("--root", s.repo, "review");
 		expect(result.stderr).toContain(message);
@@ -349,7 +354,6 @@ fakes("a reviewer's first turn that hit its usage limit after its session opened
 
 fakes("a seat cancelled by its sibling's usage limit queues no session but its own", async () => {
 	const s = setup();
-	moveBase(s.repo, (dir) => write(dir, "RISK.md", riskFile([])));
 	write(s.repo, "AGENTS.md", `HEAD-ROOT rule\n${REFERENCE_LINE}\n`);
 	git(s.repo, "commit", "-qam", "use Quest");
 	onGitHub(s.repo, []);
@@ -368,7 +372,6 @@ fakes("a seat cancelled by its sibling's usage limit queues no session but its o
 
 fakes("a seat cancelled by its sibling's usage limit still queues the session it had opened", async () => {
 	const s = setup();
-	moveBase(s.repo, (dir) => write(dir, "RISK.md", riskFile([])));
 	write(s.repo, "AGENTS.md", `HEAD-ROOT rule\n${REFERENCE_LINE}\n`);
 	git(s.repo, "commit", "-qam", "use Quest");
 	onGitHub(s.repo, []);
@@ -430,6 +433,7 @@ fakes.each([
 	["--effort", "high"],
 ])("a reviewer named with %s %s never falls through", async (flag, value) => {
 	const s = setup(null);
+	await classified(s);
 	vi.stubEnv("FAKE_FAILS", "codex");
 	vi.stubEnv("FAKE_LIMITED", "reset");
 	const result = await quest("--root", s.repo, "review", ...OPUS_WROTE, flag, value);
@@ -440,6 +444,7 @@ fakes.each([
 
 fakes("a failed turn whose reply only quotes a usage limit is no limit, so no other reviewer runs", async () => {
 	const s = setup();
+	await classified(s);
 	vi.stubEnv("FAKE_QUOTED", "1");
 	const result = await quest("--root", s.repo, "review", ...CLAUDE_REVIEWS);
 	expect(result.code).toBe(1);
@@ -449,6 +454,7 @@ fakes("a failed turn whose reply only quotes a usage limit is no limit, so no ot
 
 fakes("Codex reaches a gateway at OPENAI_BASE_URL, whose persistent 429 is the pool's usage limit", async () => {
 	const s = setup();
+	await classified(s);
 	vi.stubEnv("FAKE_LOGGED_OUT", "1");
 	vi.stubEnv("CODEX_API_KEY", "proxy-key");
 	vi.stubEnv("FAKE_LIMITED", "retried");
@@ -481,6 +487,7 @@ fakes.each([
 	"Codex sent to a gateway with no credential never gets the stored login (logged out: %j, credentials: %j)",
 	async (loggedOut, blank) => {
 		const s = setup();
+		await classified(s);
 		vi.stubEnv("FAKE_LOGGED_OUT", loggedOut);
 		vi.stubEnv("OPENAI_BASE_URL", "http://127.0.0.1:4000/v1");
 		vi.stubEnv("CODEX_API_KEY", blank);
@@ -504,6 +511,7 @@ fakes.each([
 	["CODEX_ACCESS_TOKEN", "gateway-token"],
 ])("a gateway's %s wins over Codex's stored login, which its status check never needs", async (name, value) => {
 	const s = setup();
+	await classified(s);
 	vi.stubEnv("OPENAI_BASE_URL", "http://127.0.0.1:4000/v1");
 	vi.stubEnv(name, value);
 	const result = await quest("--root", s.repo, "review");
@@ -518,6 +526,7 @@ fakes.each([
 
 fakes("a gateway that rejects Codex's key names the key and the gateway", async () => {
 	const s = setup();
+	await classified(s);
 	vi.stubEnv("OPENAI_BASE_URL", "http://127.0.0.1:4000/v1");
 	vi.stubEnv("CODEX_API_KEY", "gateway-key");
 	vi.stubEnv("FAKE_REJECTED", "turn");
@@ -530,6 +539,7 @@ fakes("a gateway that rejects Codex's key names the key and the gateway", async 
 
 fakes("a reviewer with no stored login reviews with the credential its CLI reads from the environment", async () => {
 	const s = setup();
+	await classified(s);
 	vi.stubEnv("FAKE_LOGGED_OUT", "1");
 	vi.stubEnv("CODEX_API_KEY", "codex-key");
 	vi.stubEnv("CLAUDE_CODE_OAUTH_TOKEN", "session-token");
@@ -544,6 +554,7 @@ fakes("a reviewer with no stored login reviews with the credential its CLI reads
 	}
 
 	const t = setup();
+	await classified(t);
 	vi.stubEnv("FAKE_LOGGED_OUT", "1");
 	vi.stubEnv("ANTHROPIC_API_KEY", "anthropic-key");
 	vi.stubEnv("CODEX_API_KEY", "codex-key");
@@ -582,6 +593,7 @@ fakes("a stored login wins over an environment credential, so a shell's key neve
 
 fakes("an environment credential the API rejects is named in the error", async () => {
 	const s = setup();
+	await classified(s);
 	vi.stubEnv("FAKE_LOGGED_OUT", "1");
 	vi.stubEnv("CODEX_API_KEY", "codex-key");
 	vi.stubEnv("FAKE_REJECTED", "turn");
@@ -592,6 +604,7 @@ fakes("an environment credential the API rejects is named in the error", async (
 
 fakes("a stored login the API rejects names the credential quest review strips beside it", async () => {
 	const s = setup();
+	await classified(s);
 	vi.stubEnv("ANTHROPIC_API_KEY", "anthropic-key");
 	vi.stubEnv("FAKE_REJECTED", "status");
 	const result = await quest("--root", s.repo, "review", "--harness", "claude");
@@ -630,9 +643,10 @@ fakes.each([
 		session: JSON.parse(first.stdout).rounds[0].session,
 	});
 	const calls = s.calls();
-	// Opus high reviews and reports, then resumes once; each run checks its login.
+	// Opus high reviews and reports, then resumes once; each run checks its login for Haiku's classifying and the review.
 	expect(at(calls, "high").map((c) => c.argv[0])).toEqual(["-p", "-p", "-p"]);
-	expect(calls.filter((c) => effortOf(c) === null)).toHaveLength(2);
+	expect(at(calls, "low").map((c) => c.argv[0])).toEqual(["-p", "-p"]);
+	expect(calls.filter((c) => effortOf(c) === null)).toHaveLength(4);
 	for (const call of calls) {
 		expect(call.env).toMatchObject({
 			ANTHROPIC_AUTH_TOKEN: "gateway-token",
@@ -660,6 +674,7 @@ fakes.each([
 	"a gateway with no credential never gets the stored login (logged out: %j, credentials: %j)",
 	async (loggedOut, blank) => {
 		const s = setup();
+		await classified(s);
 		vi.stubEnv("FAKE_LOGGED_OUT", loggedOut);
 		vi.stubEnv("ANTHROPIC_BASE_URL", "https://gateway.example");
 		vi.stubEnv("ANTHROPIC_API_KEY", blank);
@@ -726,6 +741,7 @@ fakes("a host-managed provider is dropped, and the review runs on the stored log
 
 fakes("a host-managed provider with no stored login fails as logged out", async () => {
 	const s = setup();
+	await classified(s);
 	vi.stubEnv("FAKE_LOGGED_OUT", "1");
 	vi.stubEnv("CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST", "true");
 	vi.stubEnv("ANTHROPIC_BASE_URL", "http://127.0.0.1:8317");
@@ -742,6 +758,7 @@ fakes("a host-managed provider with no stored login fails as logged out", async 
 
 fakes("a gateway credential the API rejects is named with the gateway", async () => {
 	const s = setup();
+	await classified(s);
 	vi.stubEnv("ANTHROPIC_AUTH_TOKEN", "gateway-token");
 	vi.stubEnv("ANTHROPIC_BASE_URL", "https://gateway.example");
 	vi.stubEnv("FAKE_REJECTED", "status");
@@ -805,6 +822,7 @@ fakes("Claude gets no provider key over a stored login with no gateway or provid
 
 fakes("a provider's keys alone are no login, so the review stops before it starts", async () => {
 	const s = setup();
+	await classified(s);
 	for (const key of PROVIDER_KEYS) vi.stubEnv(key, "provider-key");
 	vi.stubEnv("FAKE_LOGGED_OUT", "1");
 	const result = await quest("--root", s.repo, "review", "--harness", "claude");
@@ -825,6 +843,7 @@ fakes("Claude gets a provider's keys while the provider is set", async () => {
 
 fakes("Codex keeps CODEX_CA_CERTIFICATE always, and CODEX_ACCESS_TOKEN without a stored login", async () => {
 	const s = setup();
+	await classified(s);
 	vi.stubEnv("CODEX_CA_CERTIFICATE", "/etc/gateway-ca.pem");
 	vi.stubEnv("CODEX_ACCESS_TOKEN", "agent-identity");
 	expect((await quest("--root", s.repo, "review")).code).toBe(0);
@@ -834,6 +853,7 @@ fakes("Codex keeps CODEX_CA_CERTIFICATE always, and CODEX_ACCESS_TOKEN without a
 	}
 
 	const t = setup();
+	await classified(t);
 	vi.stubEnv("FAKE_LOGGED_OUT", "1");
 	vi.stubEnv("CODEX_CA_CERTIFICATE", "/etc/gateway-ca.pem");
 	vi.stubEnv("CODEX_ACCESS_TOKEN", "agent-identity");
@@ -902,7 +922,6 @@ fakes("a detached checkout continues the session of the branch --branch names", 
 
 fakes("a detached checkout queues each session with the branch --branch names and its role", async () => {
 	const s = setup();
-	moveBase(s.repo, (dir) => write(dir, "RISK.md", riskFile([])));
 	write(s.repo, "AGENTS.md", `HEAD-ROOT rule\n${REFERENCE_LINE}\n`);
 	git(s.repo, "commit", "-qam", "use Quest");
 	onGitHub(s.repo, []);
@@ -991,14 +1010,18 @@ fakes("codex reviews read-only with the base's instructions, then reports in the
 	expect(result.code).toBe(0);
 	const head = git(s.repo, "rev-parse", "HEAD");
 	const base = git(s.repo, "rev-parse", "origin/main");
+	// The fixture's base has no RISK.md, which Haiku classifies against as it would an empty one.
+	const [classifier] = at(s.calls(), "low");
+	const session = classifier!.argv[classifier!.argv.indexOf("--session-id") + 1];
 	expect(result.stdout).toBe(
 		[
 			"size M default",
 			`base ${base} origin/main`,
 			`head ${head}`,
-			// The fixture's base has no RISK.md, so no model classifies the change.
-			"risk medium the base has no RISK.md to name what is always high or customer-facing, so every change is medium",
-			"classified medium default the base has no RISK.md to name what is always high or customer-facing, so every change is medium",
+			"risk medium It changes what the library returns.",
+			"classified medium model It changes what the library returns.",
+			`classifier claude claude-haiku-5-5 low ${session}`,
+			"usage classify input 40 cached 0 output 3",
 			"",
 			"reviewer codex gpt-6.2-sol high",
 			"session thread-1",
@@ -1146,6 +1169,7 @@ fakes("claude reviews read-only with the base's instructions, then reports in th
 	const s = setup();
 	// The rules travel inside the command's one double-quoted argument.
 	moveBase(s.repo, (dir) => write(dir, "REVIEW.md", 'Flag "magic" numbers \\ constants.\n'));
+	await classified(s);
 	const args = ["--harness", "claude", "--model", "opus", "--effort", "low", "--size", "XS", "--json"];
 	const result = await quest("--root", s.repo, "review", ...args);
 	expect(result.code).toBe(0);
@@ -1446,6 +1470,12 @@ fakes(
 			expect(first.stdout).toContain("record https://github.com/acme/widget/pull/7\n");
 			const head = git(s.repo, "rev-parse", "HEAD");
 			const base = git(s.repo, "rev-parse", "origin/main");
+			// Haiku classifies each head in a session of its own, which the run names.
+			const classifierNow = () => {
+				const classifier = at(s.calls(), "low").at(-1)!;
+				const session = classifier.argv[classifier.argv.indexOf("--session-id") + 1];
+				return { harness: "claude", model: "claude-haiku-5-5", effort: "low", session };
+			};
 			// The head carries a status saying it has not passed, which the land gate reads.
 			expect(writes.statuses).toEqual([
 				{
@@ -1456,18 +1486,18 @@ fakes(
 					target_url: `https://github.com/acme/widget/compare/${base}...${head}`,
 				},
 			]);
-			const run = {
+			const run = (classifier = classifierNow()) => ({
 				repository: "acme/widget",
 				number: 7,
 				base: { ref: "main", sha: base },
 				risk: {
 					tier: "medium",
-					reason: "the base has no RISK.md to name what is always high or customer-facing, so every change is medium",
+					reason: "It changes what the library returns.",
 					classified: "medium",
 					class: null,
-					classifier: null,
+					classifier,
 				},
-			};
+			});
 			// The body's `## Models` record sizes the PR S.
 			const seat = {
 				harness: "codex",
@@ -1480,7 +1510,7 @@ fakes(
 				{
 					runs: [
 						{
-							...run,
+							...run(),
 							head,
 							outcome: "findings open",
 							rounds: [
@@ -1533,7 +1563,7 @@ fakes(
 				findings: [{ path: "src/lib.ts", start: null, end: null, severity: "high", title: "Still off" }],
 			};
 			expect(writes.posts[1]).toEqual({
-				runs: [{ ...run, head: kept, outcome: "findings open", rounds: [secondRound] }],
+				runs: [{ ...run(), head: kept, outcome: "findings open", rounds: [secondRound] }],
 				outcomes: [
 					{
 						repository: "acme/widget",
@@ -1594,7 +1624,7 @@ fakes(
 			});
 			// The accepted round is posted again as the run's, its finding left to later work for the maintainer's reason.
 			expect(writes.posts[2]).toEqual({
-				runs: [{ ...run, head: kept, outcome: "findings accepted", rounds: [secondRound] }],
+				runs: [{ ...run(), head: kept, outcome: "findings accepted", rounds: [secondRound] }],
 				outcomes: [
 					{
 						repository: "acme/widget",
@@ -1833,15 +1863,18 @@ fakes(
 		}
 		expect(classifying(s.calls())).toHaveLength(2);
 
-		// Adding a plan is medium with no model, for the plan rather than the missing risk file.
+		// Adding a plan is at least medium, which the classifier judges with no class offered, as under a risk file.
 		git(s.repo, "checkout", "-qB", "plans", "origin/main");
 		write(s.repo, "quest/m0/new.md", "# [S] New\n");
 		git(s.repo, "add", ".");
 		git(s.repo, "commit", "-qm", "new plan");
+		vi.stubEnv("FAKE_RISK", JSON.stringify({ tier: "medium", reason: "It adds a plan.", class: null }));
 		const added = await quest("--root", s.repo, "review");
 		expect(added.code, added.stderr).toBe(0);
-		expect(added.stdout).toContain("\nrisk medium it adds to plans under quest/, which agents start");
-		expect(classifying(s.calls())).toHaveLength(2);
+		expect(added.stdout).toContain("\nrisk medium It adds a plan.\n");
+		const adding = classifying(s.calls())[2]!;
+		expect(adding.stdin).toContain("It adds to plans under `quest/`");
+		expect(adding.stdin).not.toContain("- `quest` (`quest/**`)");
 
 		// A workflow is high by its path, with no model.
 		for (const path of [".github/workflows/ci.yml", ".github/actions/setup/action.yml"]) {
@@ -1854,7 +1887,7 @@ fakes(
 			expect(ci.code, ci.stderr).toBe(0);
 			expect(ci.stdout).toContain(`\nrisk high it changes ${path}, which is always high: `);
 		}
-		expect(classifying(s.calls())).toHaveLength(2);
+		expect(classifying(s.calls())).toHaveLength(3);
 	},
 	30_000,
 );
@@ -1936,7 +1969,6 @@ fakes(
 	"the classifier sees every hunk, whatever the head's attributes and bytes say",
 	async () => {
 		const s = setup();
-		moveBase(s.repo, (dir) => write(dir, "RISK.md", riskFile([])));
 		vi.stubEnv("FAKE_RISK", JSON.stringify({ tier: "medium", reason: "It changes the output." }));
 		vi.stubEnv("FAKE_REPLY", JSON.stringify({ score: 10, rationale: "Lands as is.", findings: [] }));
 		// A head that marks its source binary.
@@ -2060,7 +2092,6 @@ fakes(
 
 fakes("without a logged-in Claude Code, Codex classifies", async () => {
 	const s = setup();
-	moveBase(s.repo, (dir) => write(dir, "RISK.md", riskFile([])));
 	// Only git and the fake Codex are on PATH, so no Claude Code install outside the fakes is found either.
 	const only = join(s.bin, "..", "codex-only");
 	mkdirSync(only);
@@ -2100,7 +2131,6 @@ fakes(
 	"a classifier whose turn fails on its login or usage limit, or replies unusably, passes the turn to the next",
 	async () => {
 		const s = setup();
-		moveBase(s.repo, (dir) => write(dir, "RISK.md", riskFile([])));
 		vi.stubEnv("FAKE_REPLY", JSON.stringify({ score: 10, rationale: "Lands as is.", findings: [] }));
 		const run = async (failing: string) => {
 			vi.stubEnv("FAKE_CLASSIFY", failing);
@@ -2171,7 +2201,6 @@ fakes("a question no model answers usably throws with what each reply took", asy
 
 fakes("a classifier session that hit its usage limit is queued though no classifier answers", async () => {
 	const s = setup();
-	moveBase(s.repo, (dir) => write(dir, "RISK.md", riskFile([])));
 	vi.stubEnv("FAKE_CLASSIFY", "claude-limited,codex-limited");
 	const queued: { harness: string; session: string }[] = [];
 	const error = await review({ root: s.repo }, { env: process.env, queue: (session) => queued.push(session) }).catch(
@@ -2184,7 +2213,6 @@ fakes("a classifier session that hit its usage limit is queued though no classif
 
 fakes("a second reviewer with open findings settles them on a head below high, even at a named effort", async () => {
 	const s = setup();
-	moveBase(s.repo, (dir) => write(dir, "RISK.md", riskFile([])));
 	const responses = join(s.repo, ".tmp", "responses.md");
 	write(s.repo, ".tmp/responses.md", "1. Fixed.\n2. Fixed.\n");
 	const seconds = (out: string) => out.split("\n").filter((line) => /^reviewer .* second$/.test(line));
@@ -2213,7 +2241,6 @@ fakes("a second reviewer with open findings settles them on a head below high, e
 
 fakes("each session a round starts is queued with the PR its record went to, or none", async () => {
 	const s = setup();
-	moveBase(s.repo, (dir) => write(dir, "RISK.md", riskFile([])));
 	write(s.repo, "AGENTS.md", `HEAD-ROOT rule\n${REFERENCE_LINE}\n`);
 	git(s.repo, "commit", "-qam", "use Quest");
 	const pulls: { number: number; body: string | null }[] = [];
@@ -2255,7 +2282,6 @@ fakes(
 	"every session a round starts is queued for the record sender, and a resumed one again once it runs",
 	async () => {
 		const s = setup();
-		moveBase(s.repo, (dir) => write(dir, "RISK.md", riskFile([])));
 		write(s.repo, "AGENTS.md", `HEAD-ROOT rule\n${REFERENCE_LINE}\n`);
 		git(s.repo, "commit", "-qam", "use Quest");
 		onGitHub(s.repo, []);
@@ -2767,11 +2793,27 @@ test("a Models record reads its size and every implementing model", () => {
 		implementers: [
 			{
 				item: "Implementer: Claude Code, claude-opus-5-5, high effort",
-				fields: { harness: "Claude Code", model: "claude-opus-5-5", effort: "high", size: null, arm: null },
+				fields: {
+					harness: "Claude Code",
+					model: "claude-opus-5-5",
+					effort: "high",
+					size: null,
+					arm: null,
+					cohort: null,
+					advisor: null,
+				},
 			},
 			{
 				item: "Implementer: Codex, unknown, unknown effort",
-				fields: { harness: "Codex", model: "unknown", effort: "unknown", size: null, arm: null },
+				fields: {
+					harness: "Codex",
+					model: "unknown",
+					effort: "unknown",
+					size: null,
+					arm: null,
+					cohort: null,
+					advisor: null,
+				},
 			},
 		],
 	});
@@ -2790,6 +2832,8 @@ test("an Implementer line reads as agents write it", () => {
 		effort,
 		size: null,
 		arm: null,
+		cohort: null,
+		advisor: null,
 	});
 	expect(read("Claude Code, Opus 5.5, high effort")).toEqual(opus("high"));
 	expect(read("Claude Code, Claude Opus 5.5, xhigh effort")).toEqual(opus("xhigh"));
@@ -2801,6 +2845,8 @@ test("an Implementer line reads as agents write it", () => {
 		effort: "low",
 		size: null,
 		arm: null,
+		cohort: null,
+		advisor: null,
 	});
 	expect(read("claude-haiku-5-5, effort not reported")).toEqual({
 		harness: "unknown",
@@ -2808,6 +2854,8 @@ test("an Implementer line reads as agents write it", () => {
 		effort: "unknown",
 		size: null,
 		arm: null,
+		cohort: null,
+		advisor: null,
 	});
 	expect(read("Codex, GPT-6.2 Sol, medium effort (iterate, XS)")).toEqual({
 		harness: "Codex",
@@ -2815,6 +2863,8 @@ test("an Implementer line reads as agents write it", () => {
 		effort: "medium",
 		size: "XS",
 		arm: null,
+		cohort: null,
+		advisor: null,
 	});
 	// A retired model's spellings still read as its ID, as older records name it; an unlisted ID reads as written.
 	for (const name of ["GPT-6.1 Sol", "GPT 6.1  Sol", "GPT-6.1-SOL", "openai/gpt-6.1-sol"])
@@ -2839,6 +2889,34 @@ test("an Implementer line reads as agents write it", () => {
 	expect(read("Claude Code, Opus 5.5, high effort (arm A)")).toEqual({ ...opus("high"), arm: "A" });
 	// Only an arm the A/B runs reads as one.
 	expect(read("Claude Code, Opus 5.5, high effort (arm C)")).toEqual(opus("high"));
+	// A cohort and advisor read from the notes, the advisor by any spelling of a model.
+	expect(
+		read(
+			"Claude Code, claude-sonnet-5-5, high effort (iterate, M, arm B, cohort advisor-2026-11, advisor Opus 5.5)",
+		),
+	).toEqual({
+		harness: "Claude Code",
+		model: "claude-sonnet-5-5",
+		effort: "high",
+		size: "M",
+		arm: "B",
+		cohort: "advisor-2026-11",
+		advisor: "claude-opus-5-5",
+	});
+	expect(read("Claude Code, Opus 5.5, xhigh effort (advisor claude-fable-5-2)")).toEqual({
+		...opus("xhigh"),
+		advisor: "claude-fable-5-2",
+	});
+	expect(read("claude-opus-5-5 (arm A, cohort advisor-2026-11)")).toEqual({
+		...opus("unknown", "unknown"),
+		arm: "A",
+		cohort: "advisor-2026-11",
+	});
+	// A bare family reads as its listed model, as `--advisor opus` runs it; a name no table knows stays as written,
+	// so the line still reads, and `quest review` can still find the writer.
+	for (const name of ["opus", "Opus", "Claude Opus", "claude-opus"])
+		expect(read(`Claude Code, claude-sonnet-5-5, high effort (advisor ${name})`)?.advisor).toBe("claude-opus-5-5");
+	expect(read("Claude Code, Opus 5.5, high effort (advisor Some Model)")?.advisor).toBe("Some Model");
 	expect(read("unknown, Opus 5.5, high effort")).toEqual(opus("high", "unknown"));
 	expect(read("Claude Code, Fable 5.2, medium effort")?.model).toBe("claude-fable-5-2");
 	expect(read("Codex, openai/gpt-6.2-sol, high effort")?.model).toBe("gpt-6.2-sol");

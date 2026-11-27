@@ -201,11 +201,9 @@ export interface Assessment {
 	reason: string;
 }
 
-/** How the head's tier was set before review: by a model, by a path held high, or by default with no risk file. */
+/** How the head's tier was set before review: by a model, or by a path held high. */
 export type Classification =
-	| { kind: "model"; harness: HarnessName; model: string; effort: string; session: string }
-	| { kind: "paths" }
-	| { kind: "default" };
+	{ kind: "model"; harness: HarnessName; model: string; effort: string; session: string } | { kind: "paths" };
 
 /** The head's tier as set before review, and the classifier's turn, empty when no model ran or it was reused. */
 export interface Classified extends Assessment {
@@ -1967,7 +1965,7 @@ export function parseState(value: unknown): State {
 			(typeof state.classified?.key === "string" &&
 				TIERS.includes(state.classified.value?.tier) &&
 				typeof state.classified.value.reason === "string" &&
-				["model", "paths", "default"].includes(state.classified.value.by?.kind) &&
+				["model", "paths"].includes(state.classified.value.by?.kind) &&
 				(state.classified.value.class === null || typeof state.classified.value.class === "string"))) &&
 		(state.override === undefined ||
 			(TIERS.includes(state.override?.tier) &&
@@ -2090,10 +2088,9 @@ interface Classifying {
 
 /**
  * Set the head's risk tier before any reviewer runs, from the change alone: high when it touches a path
- * {@link heldHigh} names from the base's risk file, medium when the base has no risk file and offers the change no
- * default class, and otherwise as the first of {@link CLASSIFIERS} that can run judges the diff against the file, if
- * any. The last classification is reused while the change, the file, and the built-in defaults are the same, which
- * `key` names.
+ * {@link heldHigh} names from the base's risk file, and otherwise as the first of {@link CLASSIFIERS} that can run
+ * judges the diff against the file, if any. The last classification is reused while the change, the file, and the
+ * built-in defaults are the same, which `key` names.
  */
 export async function classify(input: Classifying): Promise<{ key: string; value: Classified }> {
 	const { root, baseSha, change, changed } = input;
@@ -2113,7 +2110,6 @@ export async function classify(input: Classifying): Promise<{ key: string; value
 		throw new ReviewInputError(
 			`no round classified ${change.head} from this base with this quest's diff; review it before accepting its findings`,
 		);
-	const set = (value: Omit<Classified, "usage" | "riskFile">) => ({ key, value: { ...value, riskFile, usage: [] } });
 	const file = text === null ? null : parseRiskFile(text);
 	if (file !== null && file.problems.length > 0)
 		throw new ReviewInputError(`the base's ${RISK_FILE} cannot be read: ${file.problems.join("; ")}`);
@@ -2123,7 +2119,7 @@ export async function classify(input: Classifying): Promise<{ key: string; value
 		const { path, rule } = hits[0]!;
 		const more = hits.length > 1 ? `, as are ${hits.length - 1} more of its paths` : "";
 		const reason = `it changes ${path}, which is always high${more}: ${rule.reason}`;
-		return set({ tier: "high", reason, by: { kind: "paths" }, class: null });
+		return { key, value: { tier: "high", reason, by: { kind: "paths" }, class: null, riskFile, usage: [] } };
 	}
 	// A plan an unreviewed change adds cascades into the work agents start from it, so adding to plans is never low,
 	// and only a change that removes plan text keeps the classes, which a low change needs to land on its own.
@@ -2131,13 +2127,6 @@ export async function classify(input: Classifying): Promise<{ key: string; value
 	const floor: Tier = planned.length > 0 ? "medium" : "low";
 	// Only the classes whose scope holds every changed path, so the classifier cannot widen one.
 	const offered = floor === "low" ? classesFor(offeredClasses(file), changed) : [];
-	if (text === null && offered.length === 0) {
-		const reason =
-			planned.length > 0
-				? `it adds to plans under ${PLANS}, which agents start without a person reading them`
-				: `the base has no ${RISK_FILE} to name what is always high or customer-facing, so every change is medium`;
-		return set({ tier: "medium", reason, by: { kind: "default" }, class: null });
-	}
 	const classes = offered.map((each) => each.name);
 
 	// With no attributes and every file as text, so the head can hide none of its hunks by marking them binary.

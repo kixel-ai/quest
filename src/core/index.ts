@@ -44,7 +44,6 @@ export {
 	ALWAYS_HIGH,
 	type Class,
 	classesFor,
-	DEFAULT,
 	DEFAULT_CLASSES,
 	type HighPath,
 	PATHS,

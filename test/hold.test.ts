@@ -1148,6 +1148,16 @@ describe("merge --land of a high head", () => {
 		expect(pull.writes).toEqual([`enablePullRequestAutoMerge ${HEAD} MERGE`]);
 	});
 
+	test("lands one whose review predates the risk file line, where the base has no RISK.md", async () => {
+		const pull = new FakePull();
+		pull.risk = null;
+		review(pull, HEAD, "high");
+		pull.body = pull.body.replace("- Risk file: none\n", "");
+		pull.statuses[HEAD]!.description = "Risk high: passed";
+		await land_(pull);
+		expect(pull.writes).toEqual([`enablePullRequestAutoMerge ${HEAD} MERGE`]);
+	});
+
 	test("refuses one a review covers once the base's RISK.md changed, until it touches no high path", async () => {
 		const pull = new FakePull();
 		pull.risk = "# Risk\n";
