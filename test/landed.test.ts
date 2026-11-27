@@ -181,6 +181,12 @@ describe("quest merge's landing check", () => {
 			expect((await inspect(tree, "fix/manifest")).map((finding) => finding.message)).toEqual([
 				expect.stringContaining("a run in the Nix dev shell, but there is no flake.nix"),
 			]);
+			symlinkSync("missing.nix", join(tree.path, "flake.nix"));
+			commit(tree, "dangling flake");
+			expect((await inspect(tree, "fix/manifest")).map((finding) => finding.message)).toEqual([
+				expect.stringContaining("a run in the Nix dev shell, but flake.nix is a symlink, not a regular file"),
+			]);
+			rmSync(join(tree.path, "flake.nix"));
 			tree.write("flake.nix", "{}\n");
 			commit(tree, "flake");
 			expect(await inspect(tree, "fix/manifest")).toEqual([]);

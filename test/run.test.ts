@@ -188,6 +188,19 @@ test.runIf(posix)("tasks get the tier, the merge base, and their environment ins
 	const out = await runIn(dir, { tier: "gate" });
 	expect(out.stdout).toBe(`env | gate ${base} it's /elsewhere hello\n`);
 	expect(out.stderr).toContain(`quest: base origin/main (${base.slice(0, 12)}), 1 changed paths\n`);
+	// Setting the environment starts no other Bash, which would run an inherited BASH_ENV a second time, in or
+	// out of the dev shell.
+	const counter = join(tempDir(), "count");
+	const startup = join(tempDir(), "startup.sh");
+	writeFileSync(startup, `echo ran >> ${quote(counter)}\n`);
+	const once = repository({
+		"flake.nix": "{}",
+		"quest.toml": `${task("plain", 'echo "$FOO"', 'environment = { FOO = "bar" }')}[tasks.nixed]\ntier = "pr"\nrun = 'echo "$FOO"'\nenvironment = { FOO = "baz" }\n`,
+	});
+	const inherited = await runIn(once, { all: true }, { BASH_ENV: startup });
+	expect(inherited.stdout.split("\n").sort()).toEqual(["", "nixed | baz", "plain | bar"]);
+	expect(inherited.log).toContain(`nix develop ${once} --command env FOO=baz bash -eo pipefail -c echo "$FOO"`);
+	expect(readFileSync(counter, "utf8")).toBe("ran\nran\n");
 	// --all sets no base, even one a run around this one set.
 	expect((await runIn(dir, { all: true }, { QUEST_BASE: "outer" })).stdout).toBe("env | pr  it's /elsewhere hello\n");
 });
@@ -272,6 +285,11 @@ test.runIf(posix)(
 		await expect(runIn(bare, { all: true })).rejects.toThrow(
 			"quest.toml: nixed run in the Nix dev shell, but there is no flake.nix",
 		);
+		symlinkSync("missing.nix", join(bare, "flake.nix"));
+		await expect(runIn(bare, { all: true })).rejects.toThrow(
+			"quest.toml: nixed run in the Nix dev shell, but flake.nix is a symlink, not a regular file",
+		);
+		rmSync(join(bare, "flake.nix"));
 		// A run that picks only tasks without Nix needs neither the flake nor nix.
 		const plain = await runIn(bare, { only: ["plain"] });
 		expect(plain.code).toBe(0);
@@ -364,6 +382,13 @@ test.runIf(posix)("quest check reports a malformed quest.toml, and Nix tasks wit
 		code: 1,
 		stderr: "quest: quest.toml: a run in the Nix dev shell, but there is no flake.nix; set nix = false on a task that runs without Nix\n",
 	});
+	// A dangling flake symlink is no flake, and a commit holds any symlink only as its target's path.
+	symlinkSync("missing.nix", join(dir, "flake.nix"));
+	expect(await check()).toEqual({
+		code: 1,
+		stderr: "quest: quest.toml: a run in the Nix dev shell, but flake.nix is a symlink, not a regular file; set nix = false on a task that runs without Nix\n",
+	});
+	rmSync(join(dir, "flake.nix"));
 	write(dir, { "flake.nix": "{}" });
 	expect((await check()).code).toBe(0);
 	// A commit holds a symlink as its target's path, so quest merge could not read one; neither does quest check.

@@ -89,11 +89,17 @@ function readManifest(top: string): Manifest {
 	return parsed.manifest;
 }
 
-/** Why `tasks` cannot run in a repository with or without a flake.nix: Nix tasks need one. */
-function flakeProblem(flake: boolean, tasks: ManifestTask[]): string | null {
+/**
+ * Why `tasks` cannot run with the root flake.nix `read` finds: Nix tasks need one, as a regular file, since a commit
+ * holds a symlink only as its target's path and a dangling one is no flake.
+ */
+function flakeProblem(read: (path: string) => RootFile, tasks: ManifestTask[]): string | null {
 	const nix = tasks.filter((task) => task.nix).map((task) => task.name);
-	if (nix.length === 0 || flake) return null;
-	return `${MANIFEST_FILE}: ${nix.join(", ")} run in the Nix dev shell, but there is no flake.nix; set nix = false on a task that runs without Nix`;
+	if (nix.length === 0) return null;
+	const flake = read("flake.nix");
+	if (flake?.kind === "file") return null;
+	const missing = flake === null ? "there is no flake.nix" : "flake.nix is a symlink, not a regular file";
+	return `${MANIFEST_FILE}: ${nix.join(", ")} run in the Nix dev shell, but ${missing}; set nix = false on a task that runs without Nix`;
 }
 
 /** What `quest check` and `quest merge` report about a repository's quest.toml, if it has one, read with `read`. */
@@ -101,7 +107,7 @@ export function manifestProblems(read: (path: string) => RootFile): string[] {
 	const parsed = parseRoot(read);
 	if (parsed === null) return [];
 	if (parsed.manifest === null) return parsed.problems;
-	const problem = flakeProblem(read("flake.nix") !== null, parsed.manifest.tasks);
+	const problem = flakeProblem(read, parsed.manifest.tasks);
 	return problem === null ? [] : [problem];
 }
 
@@ -120,13 +126,6 @@ function inDevShell(env: NodeJS.ProcessEnv, top: string): boolean {
 	} catch {
 		return false;
 	}
-}
-
-/** Bash that exports `environment`, each value single-quoted. */
-function exports(environment: Record<string, string>): string {
-	return Object.entries(environment)
-		.map(([name, value]) => `export ${name}='${value.replace(/'/g, `'\\''`)}'\n`)
-		.join("");
 }
 
 /** The merge base of `ref` and HEAD, and every path changed since, tracked or untracked, both sides of a rename. */
@@ -185,7 +184,7 @@ export async function run(options: RunOptions, io: RunIO): Promise<number> {
 	}
 
 	// Every program is found before any task starts, so a missing one fails the run rather than one task.
-	const problem = flakeProblem(workingTree(top)("flake.nix") !== null, tasks);
+	const problem = flakeProblem(workingTree(top), tasks);
 	if (problem !== null) throw new Error(problem);
 	// This repository's dev shell, already entered, runs Nix tasks directly with no evaluation.
 	const enter = tasks.some((task) => task.nix) && !inDevShell(io.env, top);
@@ -194,6 +193,10 @@ export async function run(options: RunOptions, io: RunIO): Promise<number> {
 		bash: requireProgram("bash", io.env),
 		nix: enter ? requireProgram("nix", io.env) : null,
 	};
+	// Sets the environment of a task run outside `nix develop`, whose dev shell has its own `env`. It runs by name,
+	// since a multi-call coreutils, which its resolved path can be, picks the tool by the name it runs as.
+	if (tasks.some((task) => Object.keys(task.environment).length > 0 && !(task.nix && enter)))
+		requireProgram("env", io.env);
 	// A directory this run creates, so no other run's or earlier run's report passes for this one's, and nothing
 	// else is touched; creating it is atomic, so two runs cannot share it.
 	const report = options.report === undefined ? null : resolve(options.report);
@@ -219,13 +222,14 @@ export async function run(options: RunOptions, io: RunIO): Promise<number> {
 	const width = Math.max(...tasks.map((task) => task.name.length));
 	const command = (task: ManifestTask): string[] => {
 		// The environment applies inside the dev shell, so the gate and Nix keep the caller's PATH, and before the
-		// task's own Bash starts, so it reads a BASH_ENV the task sets: a first Bash exports it and runs the second.
-		const script =
-			Object.keys(task.environment).length === 0
-				? ["-eo", "pipefail", "-c", task.run]
-				: ["-c", `${exports(task.environment)}exec "$BASH" -eo pipefail -c "$0"`, task.run];
-		if (task.nix && programs.nix !== null) return [programs.nix, "develop", top, "--command", "bash", ...script];
-		return [programs.bash, ...script];
+		// task's Bash starts, so it reads a BASH_ENV the task sets. `env` sets it, since a launcher Bash would run an
+		// inherited BASH_ENV a second time.
+		const script = ["-eo", "pipefail", "-c", task.run];
+		const variables = Object.entries(task.environment).map(([name, value]) => `${name}=${value}`);
+		const launch = variables.length === 0 ? [] : ["env", ...variables];
+		if (task.nix && programs.nix !== null)
+			return [programs.nix, "develop", top, "--command", ...launch, "bash", ...script];
+		return [...launch, programs.bash, ...script];
 	};
 
 	const outcomes = new Map<string, Outcome>();

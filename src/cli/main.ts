@@ -287,9 +287,9 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"runs after.\n\n" +
 				"Each task runs its run script with bash -eo pipefail -c from the repository root, with QUEST_TIER, " +
 				"QUEST_BASE (the merge base, unless --all), and its environment table exported. A Nix task needs " +
-				"flake.nix there; inside the repository's dev shell, where QUEST_DEV_SHELL names its root, it runs " +
-				"directly, and otherwise through nix develop --command. quest, bash, and, outside that dev shell, nix " +
-				"must be on PATH.\n\n" +
+				"flake.nix there, a regular file; inside the repository's dev shell, where QUEST_DEV_SHELL names its " +
+				"root, it runs directly, and otherwise through nix develop --command. quest and bash must be on PATH, " +
+				"env when a task run outside nix develop has an environment table, and nix outside that dev shell.\n\n" +
 				"A task that passes must write the junit and metrics files it declares, and metrics must hold a JSON " +
 				"object; --report copies them to <dir>/<task>/junit.xml and <dir>/<task>/metrics.json, where <dir> " +
 				"must not exist yet. A failed task skips the tasks after it, and with --fail-fast also stops every " +

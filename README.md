@@ -1610,7 +1610,7 @@ publish.
 Each task runs through [`quest gate`](#gate-cpu-heavy-commands), so independent
 tasks start together and wait only for the host's room. A task that sets
 `nix = false` runs on the host's own tools; every other task needs the
-repository's `flake.nix` and runs in its dev shell: directly when `quest run`
+repository's `flake.nix`, a regular file, and runs in its dev shell: directly when `quest run`
 is already inside it, with no Nix evaluation, and through `nix develop
 --command` otherwise. The dev shell says it is the repository's by setting
 `QUEST_DEV_SHELL` to the repository's root, as `quest.lib.mkFlake` will; a
@@ -1638,7 +1638,7 @@ operating system, under `include` for a GitHub Actions matrix:
 `quest check` validates `quest.toml` beside the quest tree: every key and
 value, that each `after` names a task of the same or an earlier tier that runs
 on every OS the task does, without a cycle, and that Nix tasks have a
-`flake.nix`. `quest/core` exports the parser, `parseQuestManifest`, with no
+regular `flake.nix`. `quest/core` exports the parser, `parseQuestManifest`, with no
 Node or Nix dependency, so a service such as Kixel Quest can validate a
 manifest straight from a git tree.
 
