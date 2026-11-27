@@ -1695,13 +1695,18 @@ It adds to what `perSystem` returns, for each of `systems` (`x86_64-linux`,
 `overlays`:
 
 - `devShells.default`, `pkgs.mkShell` called with `shell`, holding `quest`
-  and the repository's `treefmt`, and setting `QUEST_DEV_SHELL` to the nearest
-  directory up holding `flake.nix`, so `quest run` and `quest fmt` run there
-  without entering the shell again. `perSystem`'s `quest` replaces the `quest`
-  package.
+  and the repository's `treefmt`. It sets `QUEST_DEV_SHELL` to the nearest
+  directory up holding `flake.nix` when that `flake.nix` and its `flake.lock`
+  are the ones the shell was built from, so `quest run` and `quest fmt` run
+  there without entering the shell again, and a shell entered from another
+  checkout names none. `perSystem`'s `quest` replaces the `quest` package.
 - `formatter`, the same `treefmt`, which `nix fmt` runs.
-- `checks.quest`, which runs `quest check` on the flake's source; a `checks`
-  entry of the same name replaces it.
+- `checks.quest`, which runs `quest check`, `quest.toml` and `nixConfig`
+  included, on the flake's source; a `checks` entry of the same name replaces
+  it.
+
+`devShells.default` and `formatter` are always these; `perSystem` adds other
+shells and outputs.
 
 `treefmt-nix` builds `treefmt` inside Quest's flake, so `fmt` takes any of its
 [`programs`](https://github.com/numtide/treefmt-nix) and `settings` with no
@@ -1712,8 +1717,9 @@ quest fmt                        # format the repository
 quest fmt --fail-on-change src/  # treefmt's own arguments
 ```
 
-`quest fmt` runs that `treefmt`, which finds the repository root itself and
-reads paths from the current directory: directly inside the dev shell, with
+`quest fmt` passes every argument after `fmt` on, `--help` included (`quest
+help fmt` prints its own), and runs that `treefmt`, which finds the repository
+root itself and reads paths from the current directory: directly inside the dev shell, with
 no Nix evaluation, and through `nix develop --command` outside it. A
 `[tasks.fmt]` in `quest.toml` replaces it: `quest fmt` runs the task's `run`
 script from the repository root, with its `environment`, the arguments as

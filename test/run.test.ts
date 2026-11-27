@@ -382,6 +382,15 @@ test("a repository with quest.toml and flake.nix substitutes from Kixel Quest's 
 		'{ nixConfig.extra-substituters = [ "https://cache.nixos.org" "https://nix.kixel.quest/" ]; }',
 		'{ nixConfig = { substituters = [\n # the shared cache\n "https://nix.kixel.quest"\n ]; }; }',
 		'{ nixConfig = { "extra-substituters" = [ "https://nix.kixel.quest" ]; extra-trusted-public-keys = [ "k:v" ]; }; }',
+		// A space-separated string, as Nix also reads a list setting.
+		'{ nixConfig.extra-substituters = "https://cache.nixos.org https://nix.kixel.quest"; }',
+		// Strings holding comment and brace characters, and values with their own `;`, before and after it.
+		[
+			'{ inputs.a.url = "github:o/r#x"; excludes = [ "vendor/*" ]; hook = \'\'echo "${pkgs.x}" }\'\';',
+			'  outputs = inputs: with inputs; let a = 1; in { b = "${a}"; };',
+			'  nixConfig = { extra-substituters = [ "https://nix.kixel.quest" ]; };',
+			'  other = [ "*/generated" ]; }',
+		].join("\n"),
 	])
 		expect(problems(flake), flake).toEqual([]);
 	for (const flake of [
@@ -390,6 +399,10 @@ test("a repository with quest.toml and flake.nix substitutes from Kixel Quest's 
 		'{ nixConfig = { extra-substituters = [ "https://cache.nixos.org" ]; }; shellHook = "https://nix.kixel.quest"; }',
 		'{ nixConfig = { extra-trusted-public-keys = [ "https://nix.kixel.quest" ]; }; }',
 		'{ nixConfig.extra-substituters = [ "https://nix.kixel.quest.example" ]; }',
+		'{ /* nixConfig.extra-substituters = [ "https://nix.kixel.quest" ]; */ }',
+		// Nix reads only the top-level nixConfig, not one in outputs or a let.
+		'{ outputs = _: { nixConfig.extra-substituters = [ "https://nix.kixel.quest" ]; }; }',
+		'{ outputs = _: let a = 1; nixConfig = { extra-substituters = [ "https://nix.kixel.quest" ]; }; in { }; }',
 	])
 		expect(problems(flake), flake).toEqual(missing);
 });
@@ -435,4 +448,9 @@ test.runIf(posix)("quest check reports a malformed quest.toml, and Nix tasks wit
 		code: 1,
 		stderr: "quest: quest.toml: must be a regular file, not a symlink\n",
 	});
+	// A source outside any checkout, as a flake's checks.quest sees the Nix store's copy, is still the repository's.
+	rmSync(join(dir, "quest.toml"));
+	write(dir, { "quest.toml": '[tasks.a]\ntier = "pr"\nrun = "x"\n', "flake.nix": "{}" });
+	rmSync(join(dir, ".git"), { recursive: true });
+	expect((await check()).stderr).toContain("flake.nix's nixConfig must list https://nix.kixel.quest");
 });

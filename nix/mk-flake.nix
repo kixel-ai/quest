@@ -27,6 +27,11 @@
 }:
 let
   inherit (nixpkgs) lib;
+  lock = self + "/flake.lock";
+  flakeHash = builtins.hashString "sha256" (
+    builtins.readFile (self + "/flake.nix")
+    + lib.optionalString (builtins.pathExists lock) (builtins.readFile lock)
+  );
   outputs =
     system:
     let
@@ -56,13 +61,23 @@ let
             ]
             ++ shell.packages or [ ];
             # Names the repository's root, the nearest directory up that holds flake.nix, so `quest run` and
-            # `quest fmt` run here without entering the shell again.
+            # `quest fmt` run here without entering the shell again: only when its flake.nix and flake.lock are
+            # the ones this shell was built from, so `nix develop ../other` names no checkout.
             shellHook = ''
               QUEST_DEV_SHELL=$PWD
               while [ ! -f "$QUEST_DEV_SHELL/flake.nix" ] && [ "$QUEST_DEV_SHELL" != / ]; do
                 QUEST_DEV_SHELL=$(dirname "$QUEST_DEV_SHELL")
               done
-              if [ -f "$QUEST_DEV_SHELL/flake.nix" ]; then export QUEST_DEV_SHELL; else unset QUEST_DEV_SHELL; fi
+              if [ -f "$QUEST_DEV_SHELL/flake.nix" ] && [ "$(
+                {
+                  cat "$QUEST_DEV_SHELL/flake.nix"
+                  [ ! -f "$QUEST_DEV_SHELL/flake.lock" ] || cat "$QUEST_DEV_SHELL/flake.lock"
+                } | sha256sum
+              )" = "${flakeHash}  -" ]; then
+                export QUEST_DEV_SHELL
+              else
+                unset QUEST_DEV_SHELL
+              fi
             ''
             + shell.shellHook or "";
           }

@@ -59,19 +59,25 @@
       ];
       fmt =
         { pkgs, ... }:
+        let
+          # The Prettier bun.lock pins, which `bun run check` runs from node_modules, so a fresh clone formats too.
+          prettier = pkgs.runCommand "prettier" { } ''
+            mkdir "$out"
+            tar -xzf ${
+              (pkgs.callPackage ./nix/package.nix { }).tarball "prettier"
+            } --strip-components=1 -C "$out"
+          '';
+        in
         {
           programs.shfmt = {
             enable = true;
             # .editorconfig's.
             indent_size = null;
           };
-          # The locked Prettier that `just install` puts in node_modules, as `bun run check` runs it.
           settings.formatter.prettier = {
             command = pkgs.lib.getExe pkgs.bun;
             options = [
-              "run"
-              "--silent"
-              "prettier"
+              "${prettier}/bin/prettier.cjs"
               "--write"
             ];
             includes = [
@@ -142,12 +148,11 @@
               touch "$out"
             '';
             # `lib.mkFlake` as another repository calls it, with a stand-in quest: its dev shell carries quest and
-            # treefmt and names the root holding flake.nix, and it adds the formatter and the tree check.
+            # treefmt and names the root holding this flake, and it adds the formatter and the tree check.
             mk-flake =
               let
                 fixture = lib.mkFlake {
-                  self = ./nix;
-                  inherit nixpkgs;
+                  inherit self nixpkgs;
                   systems = [ system ];
                   perSystem = _: { quest = pkgs.hello; };
                 };
@@ -158,14 +163,18 @@
                 hello --version >/dev/null
                 treefmt --version
                 [ "$(${pkgs.lib.getExe fixture.formatter.${system}} --version)" = "$(treefmt --version)" ]
-                mkdir -p repo/sub
-                touch repo/flake.nix
+                mkdir -p repo/sub other
+                cp ${self}/flake.nix ${self}/flake.lock repo/
                 cd repo/sub
                 ${shell.shellHook}
                 [ "$QUEST_DEV_SHELL" = "$(dirname "$PWD")" ]
-                cd /
-                ${shell.shellHook}
-                [ -z "''${QUEST_DEV_SHELL+set}" ]
+                # Another flake's checkout, and none at all.
+                { cat ${self}/flake.nix; echo "# other"; } > ../../other/flake.nix
+                for dir in ../../other /; do
+                  cd "$dir"
+                  ${shell.shellHook}
+                  [ -z "''${QUEST_DEV_SHELL+set}" ]
+                done
                 touch "$out"
               '';
           };

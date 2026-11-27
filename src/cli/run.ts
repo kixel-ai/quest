@@ -112,29 +112,137 @@ function flakeProblem(read: (path: string) => RootFile, tasks: ManifestTask[]): 
 /** The Nix binary cache Kixel Quest serves, which a repository opting in with quest.toml substitutes from. */
 export const NIX_CACHE = "https://nix.kixel.quest";
 
-/**
- * Why `flake` does not substitute from Kixel Quest's cache: its `nixConfig`, which Nix reads only as a literal at the
- * top of flake.nix, must list the cache under `substituters` or `extra-substituters`, in a block or dotted.
- */
-function cacheProblem(flake: string): string | null {
-	// Comments, where `#` starts a line or follows a space, so a URL's fragment is not one.
-	const code = flake.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/(^|\s)#.*$/gm, "$1");
-	const lists: string[] = [];
-	const list = /(?:^|[\s;{.])"?(?:extra-)?substituters"?\s*=\s*\[([^\]]*)\]/g;
-	for (const dotted of code.matchAll(/\bnixConfig(\.[^;]*;)/g))
-		lists.push(...[...dotted[1]!.matchAll(list)].map((each) => each[1]!));
-	const block = /\bnixConfig\s*=\s*\{/.exec(code);
-	if (block !== null) {
+/** A Nix token: a name, a string's literal text (interpolations left out), or one punctuation character. */
+type NixToken = { kind: "name" | "string" | "punct"; text: string };
+
+/** The tokens of Nix source outside comments; an interpolation's code yields none. */
+function nixTokens(source: string): NixToken[] {
+	const tokens: NixToken[] = [];
+	let i = 0;
+	/** Code up to the `}` that closes an interpolation, or the end; `emit` is false inside one. */
+	const code = (emit: boolean, interpolation: boolean): void => {
 		let depth = 0;
-		let end = block.index + block[0].length - 1;
-		for (; end < code.length; end++) {
-			if (code[end] === "{") depth++;
-			else if (code[end] === "}" && --depth === 0) break;
+		while (i < source.length) {
+			const c = source[i]!;
+			if (/\s/.test(c)) i++;
+			else if (c === "#") i = source.indexOf("\n", i) < 0 ? source.length : source.indexOf("\n", i);
+			else if (source.startsWith("/*", i))
+				i = source.indexOf("*/", i + 2) < 0 ? source.length : source.indexOf("*/", i + 2) + 2;
+			else if (c === '"' || source.startsWith("''", i)) {
+				const text = string(c === '"' ? '"' : "''");
+				if (emit) tokens.push({ kind: "string", text });
+			} else if (/[A-Za-z_]/.test(c)) {
+				const name = /^[A-Za-z_][\w'-]*/.exec(source.slice(i))![0];
+				i += name.length;
+				if (emit) tokens.push({ kind: "name", text: name });
+			} else {
+				i++;
+				if (c === "{") depth++;
+				else if (c === "}" && interpolation && depth-- === 0) return;
+				if (emit) tokens.push({ kind: "punct", text: c });
+			}
 		}
-		lists.push(...[...code.slice(block.index, end).matchAll(list)].map((each) => each[1]!));
+	};
+	/** A string from its opening quote, returning its literal text. */
+	const string = (quote: '"' | "''"): string => {
+		i += quote.length;
+		let text = "";
+		while (i < source.length) {
+			if (quote === '"' && source[i] === "\\") {
+				text += source[i + 1] ?? "";
+				i += 2;
+			} else if (quote === "''" && /^''['$\\]/.test(source.slice(i, i + 3))) {
+				text += source[i + 2];
+				i += 3;
+			} else if (source.startsWith(quote, i)) {
+				i += quote.length;
+				return text;
+			} else if (source.startsWith("${", i)) {
+				i += 2;
+				code(false, true);
+			} else text += source[i++];
+		}
+		return text;
+	};
+	code(true, false);
+	return tokens;
+}
+
+/**
+ * The substituters flake.nix's `nixConfig` lists under `substituters` and `extra-substituters`, as a block or dotted
+ * keys and as lists or space-separated strings. Nix reads `nixConfig` only at the top of the file's attribute set, so
+ * one anywhere else counts for nothing.
+ */
+function substituters(flake: string): string[] {
+	const tokens = nixTokens(flake);
+	let p = 0;
+	const at = (text: string) => tokens[p]?.kind === "punct" && tokens[p]!.text === text;
+	/** Skip a binding's value through its `;`, over every bracket, `let` ... `in`, and `with` or `assert` and its `;`. */
+	const skip = () => {
+		for (let depth = 0, pending = 0; p < tokens.length; p++) {
+			const { kind, text } = tokens[p]!;
+			if (kind === "name") {
+				if (text === "let") depth++;
+				else if (text === "in") depth--;
+				else if (text === "with" || text === "assert") pending++;
+			} else if (kind === "punct") {
+				if ("{[(".includes(text)) depth++;
+				else if ("}])".includes(text)) depth--;
+				else if (text === ";" && depth === 0 && pending-- === 0) break;
+			}
+		}
+		p++;
+	};
+	/** A binding's attribute path through its `=`, or null for anything else, such as `inherit`. */
+	const path = (): string[] | null => {
+		const names: string[] = [];
+		while (tokens[p]?.kind === "name" || tokens[p]?.kind === "string") {
+			names.push(tokens[p++]!.text);
+			if (!at(".")) break;
+			p++;
+		}
+		if (names.length === 0 || names[0] === "inherit" || !at("=")) return null;
+		p++;
+		return names;
+	};
+	const found: string[] = [];
+	/** A setting's value, if it is a substituter list, then the rest of its binding. */
+	const setting = (key: string | undefined) => {
+		if (key === "substituters" || key === "extra-substituters") {
+			if (tokens[p]?.kind === "string") found.push(...tokens[p]!.text.split(/\s+/));
+			else if (at("[")) {
+				for (p++; p < tokens.length && !at("]"); p++)
+					if (tokens[p]!.kind === "string") found.push(tokens[p]!.text);
+				p++;
+			}
+		}
+		skip();
+	};
+	if (!at("{")) return found;
+	p++;
+	while (p < tokens.length && !at("}")) {
+		const names = path();
+		if (names === null) skip();
+		else if (names[0] !== "nixConfig") skip();
+		else if (names.length > 1) setting(names[1]);
+		else if (!at("{")) skip();
+		else {
+			p++;
+			while (p < tokens.length && !at("}")) {
+				const inner = path();
+				if (inner === null) skip();
+				else setting(inner[0]);
+			}
+			p++;
+			skip();
+		}
 	}
-	const cache = new RegExp(`"${NIX_CACHE.replace(/\./g, "\\.")}/?"`);
-	if (lists.some((each) => cache.test(each))) return null;
+	return found;
+}
+
+/** Why `flake` does not substitute from Kixel Quest's cache, or null when its `nixConfig` lists it. */
+function cacheProblem(flake: string): string | null {
+	if (substituters(flake).some((url) => url.replace(/\/$/, "") === NIX_CACHE)) return null;
 	return `${MANIFEST_FILE}: the repository opts into Kixel Quest, so flake.nix's nixConfig must list ${NIX_CACHE} in extra-substituters`;
 }
 

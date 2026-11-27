@@ -6,6 +6,8 @@ import { join } from "node:path";
 import { expect, test } from "vitest";
 
 import { fmt } from "../src/cli/fmt";
+import { nativeOs } from "../src/cli/run";
+import { argumentBoundary } from "../src/cli/main";
 import { initRepository, tempDir } from "./fixture";
 
 // The stubs are shell scripts.
@@ -90,4 +92,17 @@ test.runIf(posix)("quest.toml's fmt task replaces treefmt, with its environment 
 
 	const broken = setup({ "quest.toml": '[tasks.fmt]\ntier = "pr"\n' });
 	expect(() => fmt(broken.dir, [], broken.env)).toThrow("quest.toml: [tasks.fmt]: missing `run`");
+	// As quest run --only refuses a task for another operating system.
+	const elsewhere = setup({
+		"quest.toml": task(`nix = false\nos = ["${nativeOs() === "windows" ? "linux" : "windows"}"]\n`),
+	});
+	expect(() => fmt(elsewhere.dir, [], elsewhere.env)).toThrow("task fmt runs only on");
+	expect(elsewhere.log()).toEqual([]);
+});
+
+test("every argument after fmt is the formatter's, even flags Quest also parses", () => {
+	expect(argumentBoundary(["fmt", "--version", "--help"])).toEqual(["fmt", "--", "--version", "--help"]);
+	expect(argumentBoundary(["--root", "r", "fmt"])).toEqual(["--root", "r", "fmt", "--"]);
+	expect(argumentBoundary(["fmt", "--root=r", "src/"])).toEqual(["fmt", "--root=r", "--", "src/"]);
+	expect(argumentBoundary(["fmt", "--", "-x"])).toEqual(["fmt", "--", "-x"]);
 });

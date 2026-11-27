@@ -71,6 +71,14 @@ export function questRoot(cwd: string): string | null {
 	}
 }
 
+/** Whether `cwd` is in a git checkout, found without running git. */
+export function inCheckout(cwd: string): boolean {
+	for (let dir = cwd; ; dir = dirname(dir)) {
+		if (existsSync(join(dir, ".git"))) return true;
+		if (dirname(dir) === dir) return false;
+	}
+}
+
 /** The fields of a Claude Code `Stop` or `SubagentStop` hook's JSON input that `runningTasks` reads. */
 export interface StopInput {
 	hook_event_name: string;

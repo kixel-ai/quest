@@ -8,7 +8,7 @@ import { join, resolve } from "node:path";
 import { MANIFEST_FILE } from "../core";
 import { git } from "./git";
 import { requireProgram, which } from "./program";
-import { inDevShell, rootManifest } from "./run";
+import { inDevShell, nativeOs, rootManifest } from "./run";
 
 /** The task in quest.toml that replaces treefmt. */
 const FMT_TASK = "fmt";
@@ -17,6 +17,8 @@ const FMT_TASK = "fmt";
 export function fmt(root: string, args: string[], env: NodeJS.ProcessEnv): number {
 	const top = git(root, ["rev-parse", "--show-toplevel"]);
 	const task = rootManifest(top)?.tasks.find((each) => each.name === FMT_TASK) ?? null;
+	if (task !== null && !task.os.includes(nativeOs()))
+		throw new Error(`task ${FMT_TASK} runs only on ${task.os.join(", ")}`);
 	// The task's script gets `args` as $1 onward.
 	const [program, ...rest] =
 		task === null ? ["treefmt", ...args] : ["bash", "-eo", "pipefail", "-c", task.run, "quest-fmt", ...args];

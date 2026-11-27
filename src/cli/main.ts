@@ -116,7 +116,7 @@ import {
 	setup,
 	targets,
 } from "./hooks";
-import { CHECKED_CONTEXT, USER_ASKED, questRoot } from "./rules";
+import { CHECKED_CONTEXT, USER_ASKED, inCheckout, questRoot } from "./rules";
 import { checkoutRepository, messageLines, messages } from "./messages";
 import { logWait, pullWaitKind, readWaits } from "./waits";
 import { readCalls } from "./calls";
@@ -358,7 +358,8 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		.summary("Format the repository in its dev shell")
 		.description(
 			"Format the repository with the treefmt that quest.lib.mkFlake puts in its Nix dev shell, passing on " +
-				"every argument, such as paths from the current directory or --fail-on-change. Inside the " +
+				"every argument after fmt other than a leading --root, such as paths from the current directory, " +
+				"--fail-on-change, or --help (quest help fmt prints this). Inside the " +
 				"repository's dev shell, where QUEST_DEV_SHELL names its root, treefmt runs directly with no Nix " +
 				"evaluation; otherwise through nix develop --command, which needs flake.nix at the root. nix fmt runs " +
 				"the same treefmt.\n\n" +
@@ -368,7 +369,6 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"Exits with the formatter's status.",
 		)
 		.argument("[args...]", "Arguments for treefmt, or the fmt task's script")
-		.allowUnknownOption()
 		.action((args: string[]) => {
 			try {
 				code = fmt(root(), args, process.env);
@@ -435,13 +435,15 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 			const tree = checkout(root(), warn);
 			const findings = check(tree.docs, tree.exists, { auditNames: options.stubs });
 			if (options.base !== undefined) findings.push(...landed(root(), options.base, { branch: options.branch }));
-			// A tree nested in another checkout, such as an example, has no stubs or risk file of its own.
+			// A tree nested in another checkout, such as an example, has no stubs, risk file, or quest.toml of its own;
+			// one outside any checkout, such as a flake's source in the Nix store, keeps its quest.toml.
 			const own = questRoot(resolve(root())) === resolve(root());
+			const manifest = own || !inCheckout(resolve(root()));
 			const risk = join(root(), RISK_FILE);
 			const repository = [
 				...(options.stubs && own ? stubFindings(root()) : []),
 				...(own && existsSync(risk) ? parseRiskFile(readFileSync(risk, "utf8")).problems : []),
-				...(own ? manifestProblems(workingTree(root())) : []),
+				...(manifest ? manifestProblems(workingTree(root())) : []),
 			];
 			if (findings.length === 0 && repository.length === 0) {
 				const count = collect(root()).length;
@@ -2510,7 +2512,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 	});
 
 	try {
-		program.parse(gateBoundary(argv), { from: "user" });
+		program.parse(argumentBoundary(argv), { from: "user" });
 		return pending ?? code;
 	} catch (error) {
 		if (error instanceof CommanderError) {
@@ -2573,10 +2575,10 @@ function positiveSeconds(value: string): number {
 }
 
 /**
- * Stop option parsing before a gated executable, keeping its own flags intact.
- * Quest's global options still apply on either side of `gate`.
+ * Stop option parsing before a gated executable, or the formatter's arguments after `fmt`, keeping their own flags
+ * intact. Quest's global options still apply on either side of `gate` or `fmt`.
  */
-export function gateBoundary(argv: string[]): string[] {
+export function argumentBoundary(argv: string[]): string[] {
 	const skip = (index: number) => {
 		for (;;) {
 			if (argv[index] === "--root") index += 2;
@@ -2585,6 +2587,10 @@ export function gateBoundary(argv: string[]): string[] {
 		}
 	};
 	const index = skip(0);
+	if (argv[index] === "fmt") {
+		const args = skip(index + 1);
+		return argv[args] === "--" ? argv : [...argv.slice(0, args), "--", ...argv.slice(args)];
+	}
 	if (argv[index] !== "gate") return argv;
 	const command = skip(index + 1);
 	if (!argv[command] || argv[command].startsWith("-")) return argv;
