@@ -21,7 +21,7 @@ stuckness thresholds in prose.
 Decided 2026-11-26 (maintainer, `/quest-plan`):
 
 - Scope? ✅ Both stuck-agent escalation (`quest advise`) and routine `--advisor`
-  pairing with A/B arms per size ([Routine advisor A/B](/quest/m0/advisor-arms.md))
+  pairing with A/B arms per size ([kixel-ai/quest#934](https://github.com/kixel-ai/quest/pull/934))
   (rejected: stuck-agent escalation only; review-only triggers; drop).
 - Mechanism? ✅ New `quest advise` CLI command + `/quest-advise` skill,
   standalone without requiring T3 Code (rejected: coordinator-only via T3
@@ -127,8 +127,6 @@ or untrusted code execution.
 
 ## Related
 
-- [Routine advisor A/B](/quest/m0/advisor-arms.md) - routine Claude `--advisor`
-  pairing and writer A/B arms across T-shirt sizes
 - [Routing evidence](/quest/m0/routing-evidence/README.md) - measures rework,
   spend, and escapes across routing choices
 - [Model check](/quest/m1/model-check.md) - audits shipped model tables each

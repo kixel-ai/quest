@@ -77,7 +77,9 @@ import {
 	ARM_NAMES,
 	type Arm,
 	CLASSIFIERS,
+	COHORT,
 	DEFAULT_SIZE,
+	type Model,
 	SPLITTERS,
 	SPLIT_CHECKERS,
 	REVIEWERS,
@@ -408,12 +410,13 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"section, a ## Parked item, or a ## Scheduled date after today's local date. Counts exclude structural epic membership " +
 				"but include the quests an epic's ## Required holds back. Other prerequisites may remain for dependents. " +
 				"Invalid trees fail before printing a ranking. Prints a count and path per line; --json prints an " +
-				"ordered array of {path, dependents, hosts, arm, models} objects, where hosts lists the operating systems " +
-				"(linux, macos, windows) under the quest's ## Hosts, empty when it runs anywhere, and models ranks the {harness, model, effort} " +
+				"ordered array of {path, dependents, hosts, arm, cohort, models} objects, where hosts lists the operating systems " +
+				"(linux, macos, windows) under the quest's ## Hosts, empty when it runs anywhere, and models ranks the {harness, model, effort, advisor?} " +
 				"entries that write the quest: its size's list, or the next size's while a Maintainer: item other than an " +
 				"action under its ## Waiting leaves a decision open (quest models lists them). While the writer A/B runs, arm is A or B for " +
-				"a size that runs one, and null for M, XL, or a quest routed up for an open decision, and models opens with that arm's entry; the agent that runs it " +
-				"records the arm on its Implementer line.\n\n" +
+				"a size that runs one, and null for a quest routed up for an open decision, cohort names the A/B's cohort beside an arm, " +
+				"and models opens with that arm's entry; the agent that runs it " +
+				"records the arm, cohort, and any advisor on its Implementer line.\n\n" +
 				"--unclaimed ranks the fetched upstream default branch's tree instead of the checkout, then drops " +
 				"quests someone holds: a quest branch upstream, or an open PR from that branch in any repository. A " +
 				"branch whose tip is a merged PR's head holds nothing; a closed, unmerged PR's branch still does. A " +
@@ -1315,7 +1318,9 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"a batch shim such as npm's claude.cmd runs through System32's cmd.exe, and stop ends the agent's process tree at once.\n\n" +
 				"The agent runs in <worktree> with the user's environment minus every CLAUDE* (except CLAUDE_CONFIG_DIR), " +
 				"ANTHROPIC*, CODEX_* (except CODEX_HOME), OP_*, OPENAI_API_KEY, QUEST_GATE_ADMITTED, QUEST_GATE_PRIORITY, " +
-				"and MBX_SCHEDULER_PRIORITY when QUEST_GATE_PRIORITY=1, so it uses the CLI's stored login rather than the coordinating session's.\n\n" +
+				"and MBX_SCHEDULER_PRIORITY when QUEST_GATE_PRIORITY=1, so it uses the CLI's stored login rather than the coordinating session's. " +
+				"--advisor turns on Claude Code's advisor tool with that model, setting CLAUDE_CODE_ENABLE_EXPERIMENTAL_ADVISOR_TOOL=1, " +
+				"without which Claude Code drops the tool silently on an account its rollout has not reached; it is refused for Codex.\n\n" +
 				"Start and resume first wait until the host can carry the agent, as agent admit describes, " +
 				"before claiming the worktree.\n\n" +
 				"Prints `session <id>` as soon as the id is known, then `outcome finished|failed|limited|logged-out|stopped`, " +
@@ -1328,6 +1333,10 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 			.addOption(new Option("--harness <name>", "Agent CLI to run").choices(HARNESSES).makeOptionMandatory())
 			.requiredOption("--model <model>", "Model the agent runs")
 			.requiredOption("--effort <level>", "Reasoning effort the agent runs at, never max", effortLevel)
+			.option(
+				"--advisor <model>",
+				"Model Claude Code's advisor tool consults, as quest models prints it; claude only",
+			)
 			.requiredOption(
 				"--permission-mode <mode>",
 				"Claude Code's --permission-mode, or Codex's sandbox mode; the agent cannot prompt",
@@ -1399,28 +1408,31 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 			);
 		});
 
+	const entryText = (e: Model) =>
+		`${e.harness} ${e.model} ${e.effort}${e.advisor === undefined ? "" : ` advised by ${e.advisor}`}`;
 	program
 		.command("models")
 		.summary("Print the harnesses, models, and efforts that write work of a size, ranked")
 		.description(
 			"Print the ranked entries that write work of a size, the same for every repository unless its AGENTS.md " +
 				"names others: " +
-				SIZES.map(
-					(size) =>
-						`${size} ${WRITERS[size].map((e) => `${e.harness} ${e.model} ${e.effort}`).join(", then ")}`,
-				).join("; ") +
+				SIZES.map((size) => `${size} ${WRITERS[size].map(entryText).join(", then ")}`).join("; ") +
 				". A spawn starts a quest on the first entry that can run, as quest unblocked --json lists them. " +
 				"--writer prints the one entry that runs that model on the work instead, for an iterate, which stays " +
 				"on its PR's writer: the size's own entry for the model, else its entry at the nearest size that " +
 				"lists it, the larger on a tie, so an XS iterate on an Opus PR runs Opus at S's effort. A model no " +
-				"list names is an error. While the writer A/B runs, each armed size's quests split by a hash of their " +
+				"list names is an error. While the writer A/B runs, cohort " +
+				COHORT +
+				", each armed size's quests split by a hash of their " +
 				"path between arm A, the size's first entry, and arm B: " +
 				Object.entries(ARMS)
-					.map(([size, arms]) => `${size} B ${arms.B.harness} ${arms.B.model} ${arms.B.effort}`)
+					.map(([size, arms]) => `${size} B ${entryText(arms.B)}`)
 					.join("; ") +
-				". --arm prints that arm's entry at the PR's size instead, for an iterate on a PR whose first " +
-				"Implementer line names the arm. Prints harness, model, and effort per line, tab-separated; --json prints an " +
-				"array of {harness, model, effort} objects.",
+				". An iterate on a PR whose first Implementer line names an arm runs the model, effort, and advisor that " +
+				"line records; --arm with --cohort prints that arm's entry at the PR's size instead, for the effort such a " +
+				"line leaves out, and refuses a cohort that has ended. Prints harness, model, and effort per line, tab-separated, " +
+				"then the advisor model for an entry that pairs one; --json prints an " +
+				"array of {harness, model, effort, advisor?} objects.",
 		)
 		.addArgument(new Argument("<size>", "The work's size").choices(SIZES))
 		.option("--writer <model>", "Print only the entry that runs this model, the PR's first Implementer")
@@ -1429,16 +1441,22 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				ARM_NAMES,
 			),
 		)
+		.option("--cohort <cohort>", "The writer A/B cohort the PR's first Implementer line names, with --arm")
 		.option("--json", "Print a JSON array")
-		.action((size: Size, options: { writer?: string; arm?: Arm; json?: boolean }) => {
+		.action((size: Size, options: { writer?: string; arm?: Arm; cohort?: string; json?: boolean }) => {
 			let entries = WRITERS[size];
+			if ((options.arm === undefined) !== (options.cohort === undefined))
+				throw new UsageError("give --arm and --cohort together");
 			if (options.arm !== undefined) {
 				if (options.writer !== undefined) throw new UsageError("give --writer or --arm, not both");
 				const arms = ARMS[size];
-				if (!arms)
+				const earlier =
+					"an iterate on a PR an earlier arm wrote runs the model, effort, and advisor its Implementer line records";
+				if (options.cohort !== COHORT)
 					throw new UsageError(
-						`${size} runs no writer arms; an iterate on a PR an earlier arm wrote runs the model and effort its Implementer line records`,
+						`cohort ${options.cohort} has ended, the writer A/B runs ${COHORT}; ${earlier}`,
 					);
+				if (!arms) throw new UsageError(`${size} runs no writer arms; ${earlier}`);
 				entries = [arms[options.arm]];
 			} else if (options.writer !== undefined) {
 				const entry = writerAt(size, canonicalModel(options.writer));
@@ -1446,7 +1464,9 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				entries = [entry];
 			}
 			if (options.json) print(JSON.stringify(entries));
-			else for (const e of entries) print(`${e.harness}\t${e.model}\t${e.effort}`);
+			else
+				for (const e of entries)
+					print([e.harness, e.model, e.effort, ...(e.advisor ? [e.advisor] : [])].join("\t"));
 		});
 
 	program
@@ -1479,7 +1499,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"review thread it opens or a [P<n>] line in its review body, and its first answer's first word takes or " +
 				"declines it. Rollups follow: spend by size, role, harness, model, and " +
 				"effort, accuracy by size and implementer, summing each branch's tallies but the shadow's once, where an Implementer line's own size, as (iterate, XS), wins " +
-				"over the PR's, with its writing cost over the merged PRs it was found on, the writer A/B by size and arm, counting a sized PR whose every Implementer line names the same arm, as (arm B), under its first line's writer with the spend of every session on it, local reviewers by size, harness, model, effort, and shadow or second, with their " +
+				"over the PR's, with its writing cost over the merged PRs it was found on, the writer A/B by size, cohort, and arm, counting a sized PR whose every Implementer line names the same arm, cohort, harness, model, effort (unknown matching any), and advisor, as (arm B, cohort advisor-2026-11, advisor claude-opus-5-5), under its first line's writer with the spend of every session on it, its advisor's included, local reviewers by size, harness, model, effort, and shadow or second, with their " +
 				"tallies and reviewing cost per PR, each risk tier's PRs, merged PRs, tiers a reviewer raised, tiers the maintainer overrode, PRs a later one fixed, and time waited on a person, the same for each RISK.md ## Automatic class the classifiers named, with how many were low, each online reviewer's coverage and findings over the merged PRs, and each breakage a merged PR in the window names under ## Caused by: its culprit's tier, size, writers, and local reviewers, read from GitHub when older than the window, who found it and the incident it closes when the line ends with (found by check|reviewer|queue|canary|person|customer; incident <id>), either part alone allowed, and how long after the culprit merged the fix opened. Without token-max on PATH, it says how to install it and reports the PRs' records alone. " +
 				"--json prints the same report as one object.\n\n" +
 				"Uses GH_TOKEN, GITHUB_TOKEN, or gh auth token. Exits 0 when done, 2 for invalid arguments, and 1 for " +

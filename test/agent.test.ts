@@ -344,6 +344,32 @@ test("start runs claude with every launch setting on its own login", async () =>
 	expect(result.stdout).toBe(`session ${session}\noutcome finished\n\ndone\n`);
 });
 
+test("an advisor reaches claude with the variable that turns its tool on, and codex refuses one", async () => {
+	const s = setup();
+	const advised = [...launch("claude"), "--advisor", "claude-fable-5-2"];
+	expect((await quest("agent", "start", ...advised, s.worktree, "go")).code).toBe(0);
+	const [call] = s.calls();
+	const argv = call.argv as string[];
+	expect(argv.slice(argv.indexOf("--settings") + 2, argv.indexOf("--session-id"))).toEqual([
+		"--advisor",
+		"claude-fable-5-2",
+	]);
+	expect(call.env).toMatchObject({ CLAUDE_CODE_ENABLE_EXPERIMENTAL_ADVISOR_TOOL: "1" });
+	// A resume keeps the advisor too, as the iterate that resumes it passes the same options.
+	const session = argv[argv.indexOf("--session-id") + 1]!;
+	expect((await quest("agent", "resume", ...advised, s.worktree, session, "next")).code).toBe(0);
+	const resumed = s.calls()[1]!.argv as string[];
+	expect(resumed.slice(resumed.indexOf("--advisor"), resumed.indexOf("--advisor") + 2)).toEqual([
+		"--advisor",
+		"claude-fable-5-2",
+	]);
+	// Codex has no advisor tool, so it refuses before launching anything.
+	const codex = await quest("agent", "start", ...launch("codex"), "--advisor", "claude-opus-5-5", s.worktree, "go");
+	expect(codex.code).toBe(2);
+	expect(codex.stderr).toContain("--advisor runs only on claude, not codex");
+	expect(s.calls()).toHaveLength(2);
+});
+
 test("a launch that died leaves no record that blocks the next launch", async () => {
 	const s = setup();
 	const dir = spawnDirectory(join(s.runtime, "quest", "agent"), s.worktree);
