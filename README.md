@@ -831,8 +831,8 @@ status on any of its commits rates it high, or when its change from its merge
 base with the base touches a path the base's `RISK.md` holds high, as
 [Risk tiers](#risk-tiers) says, or reaches GitHub's 300-file compare limit. A
 high head lands only once the newest `quest review` status, by when it was set,
-that a user with write access set on that head or on a commit with an identical
-diff from the base, its target the diff from the head's merge base, passes and
+that a user with write access set on that head or on another of the PR's
+commits with an identical diff from the base, its target the diff from the head's merge base, passes and
 names the base's current `RISK.md`. So any push after the last review that changes the diff, a person's or a
 helper's, and any change to the base's `RISK.md` since, waits for a new round.
 It enables auto-merge bound to that SHA, or merges at once when nothing is

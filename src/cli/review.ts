@@ -517,6 +517,8 @@ export interface PostedOn {
 	number: number;
 }
 
+const samePull = (a: PostedOn, b: PostedOn) => a.repository === b.repository && a.number === b.number;
+
 /**
  * A branch's review sessions, one per reviewer, kept in the clone's common Git directory so every worktree
  * resumes them. They are in the order the last run reported them, which numbers their findings.
@@ -2522,21 +2524,26 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 		);
 		// An acceptance GitHub does not attest has not happened, so the caller saves it only once it is.
 		const kept = [...past, ...accepted.filter((each) => !past.some(same(each)))];
-		// Kixel Quest stores no outcome of an accepted finding, so it keeps one left to later work, on the PR this run
-		// posts the rounds to, which holds them even when an earlier post failed or went to a since-replaced PR.
+		// Kixel Quest stores no outcome of an accepted finding, so it keeps one left to later work: on the PR this run
+		// posts the rounds to, which holds them even when an earlier post failed, and on a since-replaced PR that
+		// holds them too.
 		const outcomes = (at: PostedOn) => [
 			...carried,
-			...last.flatMap((round) =>
-				round.findings.map((_, i) => ({
-					...at,
-					harness: round.reviewer,
-					session: round.session,
-					round: round.round,
-					finding: i + 1,
-					outcome: "deferred" as const,
-					reason: options.accept!,
-				})),
-			),
+			...last.flatMap((round) => {
+				const posted = sessions.find((session) => session.last === round)?.posted;
+				const prs = posted === undefined || samePull(posted, at) ? [at] : [at, posted];
+				return prs.flatMap((pr) =>
+					round.findings.map((_, i) => ({
+						...pr,
+						harness: round.reviewer,
+						session: round.session,
+						round: round.round,
+						finding: i + 1,
+						outcome: "deferred" as const,
+						reason: options.accept!,
+					})),
+				);
+			}),
 		];
 		return {
 			rounds: last.map((round) => ({ ...round, usage: [], unchanged: true })),

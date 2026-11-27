@@ -3174,6 +3174,20 @@ fakes("the outcomes a failed post settled survive --new, which drops the session
 	}
 });
 
+fakes("accepting a round posted on a since-replaced PR defers its findings on both PRs", async () => {
+	const s = setup();
+	const pulls = [{ number: 7, body: "" }];
+	const writes = onGitHub(s.repo, pulls);
+	expect((await quest("--root", s.repo, "review")).code).toBe(0);
+	pulls[0]!.number = 8;
+	const accepted = await quest("--root", s.repo, "review", "--accept", "Fine.");
+	expect(accepted.code, accepted.stderr).toBe(0);
+	expect(writes.posts[1]!.outcomes.map(({ number, outcome }) => ({ number, outcome }))).toEqual([
+		{ number: 8, outcome: "deferred" },
+		{ number: 7, outcome: "deferred" },
+	]);
+});
+
 fakes("accepting a round whose post failed defers its findings on the PR the acceptance posts it to", async () => {
 	const s = setup();
 	const pulls = [{ number: 7, body: "" }];
