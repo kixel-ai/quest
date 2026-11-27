@@ -1923,10 +1923,10 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		.description(
 			"Review the checkout's committed branch against its base with reviewers picked by its (size + risk) rung, never one " +
 				`weaker than the model that changed it last, which may review its own work. The 7 rungs (harness, model, effort; rungs 0-2 run 1 seat with fallback, rungs 3-6 run both seats): ${reviewers}. The ` +
-				"first whose model is not avoided reviews. A Git older than 2.41, which has no --attr-source to keep the head's .gitattributes from hiding its hunks from the classifier and reviewers, is a usage error, except under --accept. One that cannot run, as its CLI or provider reports before any " +
+				"first whose model is not avoided reviews. A Git older than 2.41, which has no --attr-source to keep the head's .gitattributes from hiding its hunks from the classifier and reviewers, is a usage error, except under --accept. On a one-seat rung, a reviewer that cannot run, as its CLI or provider reports before any " +
 				"finding is saved, passes the round to the next whose model is not avoided: a CLI that is not installed, " +
 				"logged out, or has its login rejected, or sent to a gateway with no credential, passes over every model of that CLI, and a model at its usage limit " +
-				"only itself; the run's report and record name each it passed over and why. A reviewer --harness, --model, " +
+				"only itself; the run's report and record name each it passed over and why. On a two-seat rung, both seats are required, so either being unavailable fails as an outage. A reviewer --harness, --model, " +
 				"or --effort names never passes the round on. " +
 				"--exclude-model names each model to avoid, with every model weaker than it; without it, every model " +
 				"weaker than the latest writer is avoided, which only Sonnet is, than any other, " +
@@ -2005,10 +2005,9 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"offered only the classes whose scope, backticked patterns in parentheses after the class's name, holds " +
 				"every changed path, either side of a rename: each path must match one pattern whole, so a directory " +
 				"needs a trailing / or /**, and a change that touches no path falls in no class. " +
-				"The tier combines with size to pick the rung: every low head runs a local reviewer; rungs 0-2 (XS low through XS high, S medium, M low) run one reviewer, falling from Sol to Opus when Sol cannot run; rungs 3-6 (S high, M medium, L low through XL high) run a second reviewer beside the pick: the rung's entry from the other " +
+				"The tier combines with size to pick the rung: every low head runs a local reviewer; rungs 0-2 (XS low/medium/high, S low/medium, M low) run one reviewer, falling from Sol to Opus when Sol cannot run; rungs 3-6 (S high, M medium, L low and up) run a second reviewer beside the pick: the rung's entry from the other " +
 				"vendor, in its own session, which reviews every head on a two-seat rung and settles its findings after. " +
-				"--model and --effort change only the pick, so a two-seat rung's second reviewer still runs; the one reviewer --harness " +
-				"names runs alone. " +
+				"--model and --effort change only the pick, so a two-seat rung's second reviewer still runs; excluding either vendor's model on a two-seat rung requires --harness to run one reviewer alone. " +
 				"--override and --reason record the maintainer's tier for the branch, which holds until the reviewed " +
 				"tier grows riskier than the one overridden, other than to the override's own tier.\n\n" +
 				"Prints the size and where it came from, base, and head, its risk tier and reason, the classifier's tier, " +

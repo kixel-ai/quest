@@ -65,7 +65,7 @@ export interface PostedRisk {
 	riskFile: string | null;
 }
 
-/** One `quest review` run on a PR's head: its classification, and each seat's round, none for a low head. */
+/** One `quest review` run on a PR's head: its classification, and each seat's round (empty only on older low-tier runs). */
 export interface ReviewRun {
 	repository: string;
 	number: number;

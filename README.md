@@ -1840,8 +1840,10 @@ The reviewers run at once;
 the first to fail, such as on a usage limit, stops the others, and the round
 saves none.
 
-A reviewer that cannot run passes the round to the next eligible one, so
-Opus reviews while Sol is out. That is a failure the CLI or provider reports before any finding is
+On a one-seat rung (rungs `0`–`2`), a reviewer that cannot run passes the round
+to the next eligible one, so Opus reviews while Sol is out; on a two-seat rung
+(rungs `3`–`6`), both seats are required, so either being unavailable fails as
+an outage (exit 3). That is a failure the CLI or provider reports before any finding is
 saved, never text in the diff or a reply: a CLI that is not installed, logged
 out, or has its login rejected, or sent to a gateway with no credential,
 passes over every model of that CLI, and a
@@ -1849,9 +1851,10 @@ model at its usage limit passes over only itself. The run prints a `skipped`
 line for each reviewer it passed over, such as
 `skipped codex gpt-6.2-sol high usage limit, resets 2026-11-18T03:00:00Z`.
 
-The new reviewer settles the open findings of the one it replaces. Only when every eligible reviewer is out does the run fail,
-exiting 3 with each one's error. A reviewer `--harness`, `--model`, or
-`--effort` names never passes the round on.
+The new reviewer settles the open findings of the one it replaces. When no
+eligible reviewer is left (or either required reviewer on a two-seat rung is
+out), the run fails, exiting 3 with each one's error. A reviewer `--harness`,
+`--model`, or `--effort` names never passes the round on.
 
 A quest branch takes its quest's size, read from the base branch's tip so a
 change cannot lower its own review; any other PR, such as a skill's own, takes
@@ -1864,8 +1867,8 @@ names the latest writer, since each session moves its line last whenever it push
 `--exclude-model` names each model to avoid instead, with every model weaker
 than it. Without a record, or when its last line names an `unknown` model,
 none is avoided, so the never-weaker rule needs the record. `--harness` names the only reviewer instead of
-the pick and the second reviewer, at the model and effort of its first entry whose model is not avoided, and
-`--model` and `--effort` override the size pick's or that reviewer's, as a
+the rung's seats, at the model and effort of its first entry whose model is not avoided, and
+`--model` and `--effort` override the rung pick's or that reviewer's, as a
 repository whose `AGENTS.md` names other reviewers needs; a `--model` the list
 names, in any spelling such as `openai/gpt-6.2-sol`, runs on its own entry's
 harness and effort, passed to the CLI as given, and one it does not at
@@ -1873,9 +1876,9 @@ harness and effort, passed to the CLI as given, and one it does not at
 a listed model by any spelling too. A `--harness` run keeps the other
 reviewers' sessions for the pick's next run, and refuses while one has
 findings to settle, so a head never passes one reviewer alone while the other's
-findings are open. When the latest writer changes the size's pick to one with
+findings are open. When the latest writer changes the rung's pick to one with
 no session on the branch, its first session settles the open findings of the
-reviewer it replaces. A size whose every reviewer is avoided is an error. The reviewer reaches its model as the user's own CLI does:
+reviewer it replaces. A rung whose every reviewer is avoided is an error. The reviewer reaches its model as the user's own CLI does:
 Claude Code keeps `ANTHROPIC_BASE_URL`, `ANTHROPIC_CUSTOM_HEADERS`, and its
 cloud providers' `CLAUDE_CODE_USE_*` switches and settings, so a gateway such
 as CLIProxyAPI, Bedrock, Vertex, or Foundry works, and Codex keeps
@@ -2150,17 +2153,18 @@ classifier model and session, or none when the always-high paths set the
 tier; the status names the base's `RISK.md` the tier was set against by its
 blob's first 12 characters, or `none`, which a status without it names too.
 
-Every tier runs a local review. On rungs `0`–`2` (`XS low` through `XS high`,
-`S medium`, and `M low`), one reviewer runs, falling from Sol to Opus when Sol
-cannot run. On rungs `3`–`6` (`S high`, `M medium`, `L low` through `XL high`),
+Every tier runs a local review. On rungs `0`–`2` (`XS low/medium/high`,
+`S low/medium`, and `M low`), one reviewer runs, falling from Sol to Opus when Sol
+cannot run. On rungs `3`–`6` (`S high`, `M medium`, `L low` and up),
 the head gets a second reviewer: its rung's entry from the other
 vendor, so Sol and Opus both review it. It is marked `second`, in a session
 of its own that reviews every head on a two-seat rung and settles its
 findings after even if a later head drops to a one-seat rung. `--model` and
 `--effort` change only the pick, so a two-seat rung's second
 reviewer still runs; the one reviewer `--harness` names runs alone. When the
-other vendor's model is avoided, as by `--exclude-model`, the run fails as a
-usage error; when either seat cannot run on a two-seat rung, as an outage.
+other vendor's model is avoided on a two-seat rung, as by `--exclude-model`,
+the run fails as a usage error (pass `--harness` to run one reviewer alone);
+when either seat cannot run on a two-seat rung, it fails as an outage.
 
 `--override <tier> --reason <text>` records the maintainer's tier for the
 branch in place of the reviewed one, posted as the run's tier and reason beside

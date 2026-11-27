@@ -159,7 +159,7 @@ export interface Usage {
 /** One reviewer's finished round, as `quest review` prints it. */
 export interface Round {
 	reviewer: HarnessName;
-	/** The round is the second reviewer's, from a vendor other than the pick's, which a high-risk head gets too. */
+	/** The round is the second reviewer's, from a vendor other than the pick's, on a two-seat rung. */
 	second?: true;
 	model: string;
 	effort: string;
@@ -333,13 +333,13 @@ export function pickReviewer(size: Size, tier: Tier, choice: Choice, avoided: (e
 	const entry = named ?? (choice.model === undefined ? undefined : first) ?? ours.find((e) => !avoided(e)) ?? first;
 	if (entry === undefined && choice.harness === undefined) {
 		const models = [...new Set(list.map((e) => e.model))].join(", ");
-		throw new ReviewInputError(`every ${size} ${tier} reviewer (${models}) is avoided; pass --harness and --model`);
+		throw new ReviewInputError(`every ${size} reviewer (${models}) is avoided; pass --harness and --model`);
 	}
 	const harness = choice.harness ?? entry!.harness;
 	const model = choice.model ?? entry?.model;
 	const effort = choice.effort ?? entry?.effort;
 	if (model === undefined || effort === undefined) {
-		throw new ReviewInputError(`no ${harness} reviewer in the ${size} ${tier} list; pass --model and --effort`);
+		throw new ReviewInputError(`no ${harness} reviewer in the ${size} list; pass --model and --effort`);
 	}
 	const picked = { harness, model, effort };
 	if (avoided(picked))
@@ -487,7 +487,7 @@ export interface Tally {
 
 /** What a run of `quest review` gives: each reviewer's round, every tally on the branch, the run's first, and the head's risk. */
 export interface Reviewed {
-	/** Each reviewer's round; none when the head's tier is low, which needs no local review. */
+	/** Each reviewer's round. */
 	rounds: Round[];
 	tallies: Tally[];
 	risk: Risk;
@@ -2323,14 +2323,15 @@ export function overridden(risk: Risk, override: Override | undefined): Risk {
 }
 
 /**
- * Review the checkout's committed branch: one round of each reviewer on the same head, the size's pick and any
+ * Review the checkout's committed branch: one round of each reviewer on the same head, the rung's pick and any
  * second reviewer, or only `--harness`'s, each resuming its session on the branch unless `fresh`.
- * Every reviewer runs at once, and the first to fail stops the others and fails the whole, saving no round. A pick
- * that cannot run, logged out, not installed, or at its usage limit, passes the round to the size's next eligible
- * reviewer, unless the options name the reviewer; once none is left, the run fails as an outage.
+ * Every reviewer runs at once, and the first to fail stops the others and fails the whole, saving no round. On a
+ * one-seat rung, a pick that cannot run, logged out, not installed, or at its usage limit, passes the round to the
+ * rung's next eligible reviewer, unless the options name the reviewer; once none is left, or on a two-seat rung when
+ * either required seat cannot run, the run fails as an outage.
  *
- * The head's tier scales the review: a low head with nothing left to settle gets no local review, and a high one
- * gets a second reviewer from another vendor on its size's list.
+ * The head's `(size + risk)` rung scales the review: every tier runs a local reviewer, rungs 0–2 run one seat, and
+ * rungs 3–6 seat a second reviewer from another vendor beside the pick.
  */
 export async function review(options: ReviewOptions, deps: ReviewDependencies): Promise<Reviewed> {
 	// Native Windows installs the reviewer CLIs as batch shims, which `run` cannot start without a shell.
@@ -2404,9 +2405,20 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 			responses: options.responses,
 		});
 
-	// The first candidate's seats are checked before the classifier spends a turn.
+	// The first candidate's seats are checked before the classifier spends a turn. When every tier at `sized.size`
+	// requires two seats (L and XL), an avoided second vendor also fails before classifying.
 	let at = 0;
-	if (options.accept === undefined) plan(pre[0]!);
+	if (options.accept === undefined) {
+		if (
+			auto &&
+			TIERS.every((t) => reviewRung(sized.size, t).seats === 2) &&
+			secondsTo(sized.size, "medium", pre[0]!, avoided).length === 0
+		)
+			throw new ReviewInputError(
+				`a head at ${sized.size} needs a second reviewer from a vendor other than ${pre[0]!.harness}'s, and every such model of its rung's list is avoided, as excluded or weaker than the latest writer; pass --harness to run one reviewer alone`,
+			);
+		plan(pre[0]!);
+	}
 
 	const head = git(root, ["rev-parse", "HEAD"]);
 	let mergeBase: string;
@@ -2509,9 +2521,15 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 			throw new ReviewInputError(
 				`no round reviewed ${head} against ${baseRef} from ${mergeBase}; review it before accepting its findings`,
 			);
-		if (rung.seats === 2 && !last.some((round) => round.second))
+		// Use the largest size among the current sizing and the rounds being accepted, so a `--size L` run cannot be
+		// accepted with a smaller default size that skips the second-seat requirement.
+		const acceptSize = last.reduce<Size>(
+			(max, round) => (SIZES.indexOf(round.size) > SIZES.indexOf(max) ? round.size : max),
+			sized.size,
+		);
+		if (reviewRung(acceptSize, risk.tier).seats === 2 && !last.some((round) => round.second))
 			throw new ReviewInputError(
-				`a ${sized.size} ${risk.tier} head needs its second reviewer's round before its findings are accepted; review it again`,
+				`a head at ${acceptSize} ${risk.tier} needs its second reviewer's round before its findings are accepted; review it again`,
 			);
 		if (last.every((round) => round.findings.length === 0))
 			throw new ReviewInputError(`no finding is open on ${head}, so there is nothing to accept`);
@@ -2571,7 +2589,7 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 		const others = secondsTo(sized.size, risk.tier, routed, avoided);
 		if (others.length === 0)
 			throw new ReviewInputError(
-				`a ${sized.size} ${risk.tier} head needs a second reviewer from a vendor other than ${routed.harness}'s, and every such model of its rung's list is avoided, as excluded or weaker than the latest writer`,
+				`a head at ${sized.size} ${risk.tier} needs a second reviewer from a vendor other than ${routed.harness}'s, and every such model of its rung's list is avoided, as excluded or weaker than the latest writer; pass --harness to run one reviewer alone`,
 			);
 		const next = others.find((each) => !out.has(each.model) && !down.has(each.harness));
 		if (next === undefined) throw new ReviewOutageError(sized.size, risk.tier, skipped, messages);
@@ -2718,7 +2736,7 @@ function remembered(past: Past[], rounds: Round[]): Past[] {
 /** What picks a run's seats: the routed reviewer and the second, whether the size picked them, and the branch's sessions. */
 interface Seating {
 	routed: Model;
-	/** The second reviewer a high-risk head gets, or null. */
+	/** The second reviewer a two-seat rung gets, or null. */
 	second: Model | null;
 	auto: boolean;
 	sessions: Session[];

@@ -342,7 +342,14 @@ fakes("--exclude-model avoids each model it names, and every model weaker than i
 	const all = ["gpt-6.2-sol", "claude-opus-5-5"].flatMap((m) => ["--exclude-model", m]);
 	const none = await quest("--root", s.repo, "review", ...all, "--new");
 	expect(none.code).toBe(2);
-	expect(none.stderr).toContain("every M medium reviewer (gpt-6.2-sol, claude-opus-5-5) is avoided");
+	expect(none.stderr).toContain("every M reviewer (gpt-6.2-sol, claude-opus-5-5) is avoided");
+
+	// On L/XL, every tier requires two seats, so excluding a vendor fails before spending a classifier turn.
+	const twoSeat = setup(null);
+	const excluded = await quest("--root", twoSeat.repo, "review", "--size", "L", "--exclude-model", "claude-opus-5-5");
+	expect(excluded.code).toBe(2);
+	expect(excluded.stderr).toContain("needs a second reviewer from a vendor other than codex's");
+	expect(twoSeat.calls()).toEqual([]);
 });
 
 fakes("a missing or logged-out reviewer CLI with no reviewer after it is an outage", async () => {
@@ -3197,7 +3204,22 @@ fakes("--accept refuses another base's rounds, a high head without its second ro
 		expect(out.stdout).not.toContain(" second\n");
 		const lone = await quest("--root", mid.repo, "review", "--accept", "Fine.");
 		expect(lone.code, lone.stderr).toBe(2);
-		expect(lone.stderr).toContain("a M medium head needs its second reviewer's round");
+		expect(lone.stderr).toContain("a head at M medium needs its second reviewer's round");
+	} finally {
+		vi.unstubAllEnvs();
+		vi.unstubAllGlobals();
+	}
+
+	// A low head reviewed under `--size L --harness codex` cannot bypass its second-seat requirement via a plain `--accept` defaulting to M.
+	const sized = setup();
+	onGitHub(sized.repo, [{ number: 7, body: "" }]);
+	try {
+		const out = await quest("--root", sized.repo, "review", "--size", "L", "--harness", "codex");
+		expect(out.code, out.stderr).toBe(0);
+		expect(out.stdout).not.toContain(" second\n");
+		const lone = await quest("--root", sized.repo, "review", "--accept", "Fine.");
+		expect(lone.code, lone.stderr).toBe(2);
+		expect(lone.stderr).toContain("a head at L low needs its second reviewer's round");
 	} finally {
 		vi.unstubAllEnvs();
 		vi.unstubAllGlobals();
