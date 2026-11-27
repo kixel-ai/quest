@@ -35,29 +35,32 @@ Repository window:
 
 - `quest` versions observed in `kixel-ai/quest`: `556d816002` (#882) through `v0.29.0` (`9690cecf6603`).
 - Sole lower bound: PR #882 (`556d816002`, merged `2026-11-25T07:34:04Z`).
-- Volume snapshot at filing: 65 non-bot PRs merged between #882 and #957 (plus any merged before reviewers adopt `v0.30.0`).
-- Missed-Sol `low` PRs and 28 culprit/sample replays were already audited during #956/#957; credit any equivalent prior replay already completed and cover every remaining shortfall (including under-effort `XS`/`S`/`M` `high` PRs such as #931 needing Sol `xhigh`, low-effort `XS`/`S` `medium` PRs, and single-seat `M`/`L`/`XL` `medium` / `L`/`XL` `low` PRs).
+- Volume snapshot at filing: 65 non-bot PRs merged between #882 and #957 (plus any merged before all reviewer hosts upgrade to `v0.30.0`).
+- Missed-Sol `low` PRs and 28 culprit/sample replays were already audited during #956/#957; credit any equivalent prior replay verified to cover the merged diff and cover every remaining shortfall (including under-effort `XS`/`S`/`M` `high` PRs such as #931 needing Sol `xhigh`, low-effort `XS`/`S` `medium` PRs, and single-seat `M`/`L`/`XL` `medium` / `L`/`XL` `low` PRs).
 
 Steps:
 
 1. Enumerate every non-bot PR merged in `kixel-ai/quest` starting at
-   PR #882 (`556d816002`, merged `2026-11-25T07:34:04Z`) and continuing through reviewer adoption of `v0.30.0` (using actual recorded review runs on PRs merged around and after #957 so any PR reviewed under `v0.29.0` during the rollout gap is included, and recording open PRs at cutover that still carry `v0.27.0`–`v0.29.0` reviews so they are checked on merge unless re-reviewed under `v0.30.0` first).
-2. Inspect each PR's `quest review` commit statuses (across all of its
-   commits, not only its final head SHA), `## Review` body record, and Kixel
-   Quest review runs to compare its actual recorded seats and efforts against
-   its `v0.30.0` `(size, risk)` rung:
-   - Rung 0 (`XS low`): Sol `medium`
-   - Rung 1 (`XS med`, `S low`): Sol `high`
-   - Rung 2 (`XS high`, `S med`, `M low`): Sol `xhigh`
+   PR #882 (`556d816002`, merged `2026-11-25T07:34:04Z`) and continuing through the last confirmed reviewer-host upgrade to `v0.30.0` (classifying PRs merged around and after #957 by their recorded review runs). At cutover, also record every open PR carrying reviews from any in-scope flat-policy commit (`556d816002` or `v0.27.0`–`v0.29.0`) and keep it on the audit list through merge until recorded reviews verified to cover the merged diff satisfy every required seat and effort of its final `v0.30.0` rung.
+2. For each enumerated PR, apply `v0.30.0`'s risk rules to its merged diff
+   (including the rule that any change adding or editing lines under `quest/`
+   is at least `medium`, even if historically classified `low` before
+   `v0.28.1`) to determine its target `v0.30.0` `(size, risk)` rung:
+   - Rung 0 (`XS low`): Sol `medium` (or fallback Opus `medium`)
+   - Rung 1 (`XS med`, `S low`): Sol `high` (or fallback Opus `medium`)
+   - Rung 2 (`XS high`, `S med`, `M low`): Sol `xhigh` (or fallback Opus `high`)
    - Rung 3 (`S high`, `M med`, `L low`): Sol `xhigh` + Opus `medium`
    - Rung 4 (`M high`, `L med`, `XL low`): Sol `xhigh` + Opus `high`
    - Rung 5 (`L high`, `XL med`): Sol `xhigh` + Opus `high`
    - Rung 6 (`XL high`): Sol `xhigh` + Opus `xhigh`
 
+   Inspect the PR's `quest review` commit statuses, `## Review` body record,
+   and Kixel Quest review runs, using each run's recorded base and head to
+   credit only runs that covered the merged diff (or an identical diff).
    Exclude only `moq-bot` pin bumps, pure `quest/` plan deletions (keep active
    quest/plan additions and edits), diffs already reverted or superseded on
-   `main`, and any PR whose shortfall was already covered by an equivalent
-   prior replay.
+   `main`, and any PR whose merged diff already has qualifying coverage at its
+   target rung (from recorded runs or equivalent prior replays).
 3. Schedule every PR retained by step 2 for the exact missing reviewer seat(s)
    and/or effort upgrade its `v0.30.0` rung requires (read-only against its
    merged diff). Use the following priority order solely to order the queue,
@@ -75,4 +78,4 @@ Steps:
 
 ## Waiting
 
-- kixel-ai/quest: `v0.30.0` (shipping #957's 7-rung reviewer ladder) is published and reviewers on the maintainer's hosts have adopted it, closing the `#882`–`v0.29.0` rollout window. Check `gh release list --repo kixel-ai/quest` for `v0.30.0` and that newly merged PRs show `v0.30.0` rung coverage.
+- kixel-ai/quest: `v0.30.0` (shipping #957's 7-rung reviewer ladder) is published and every reviewer host's installed `quest` binary is confirmed at `>= v0.30.0`, closing the `#882`–`v0.29.0` rollout window. Check `quest --version` on each reviewer host and set the cutoff at the last confirmed host upgrade.
