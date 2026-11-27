@@ -1798,8 +1798,8 @@ stance; the base's `REVIEW.md` is optional, adds repo-specific rules, and takes
 precedence where they conflict.
 
 It prints the size and its source, base, and head; the head's `risk` tier and
-reason, then `classified` with the classifier's tier, how it was set (`model`,
-`paths`, or `default`), and reason, and for a model a `classifier` line with its
+reason, then `classified` with the classifier's tier, how it was set (`model`
+or `paths`), and reason, and for a model a `classifier` line with its
 harness, model, effort, and session, and its `usage` line; then for each reviewer its
 harness, model, and effort, session, round,
 an `unchanged` line for a repeated round, or an `accepted` line for a round `--accept` repeats, a `usage` line per turn (input tokens, the part read from the prompt cache, and output),
