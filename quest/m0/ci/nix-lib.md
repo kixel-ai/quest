@@ -19,5 +19,6 @@ Decided 2026-11-26 (maintainer, `/quest-plan`, see the [CI epic](/quest/m0/ci/RE
 Implementation notes:
 
 - Note that Nix reads `nixConfig` only from the top-level `flake.nix` attrset (not from `outputs`), so `quest check` verifies a repo opting into Kixel Quest sets `nixConfig`'s substituter to `https://nix.kixel.quest` (and `quest init` or a snippet documents the 4-line `nixConfig` block). [Cache push](/quest/m0/ci/cache-push.md) adds the public key to the check once Kixel Quest publishes it.
+- While the task cache is in use, `quest run` runs every Nix task through `nix develop` even inside the dev shell, since an entered shell may predate a flake edit and the cache keys passes to the flake's current shell. Recommended: have the dev shell also export an identity of itself, such as a hash of its inputs, that `quest run` reads beside the `drvPath` in the one `nix eval` it already makes, and run tasks directly when the entered shell's identity matches, saving a flake evaluation per task and per crate.
 
 Tests: Nix flake evaluation test of `quest.lib.mkFlake` verifying `devShells.default`, `formatter`, `checks.quest`, and `treefmt` on `$PATH`; benchmark confirming `quest fmt` runs in under 200ms inside the dev shell on a fixture repo.

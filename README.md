@@ -1651,28 +1651,41 @@ manifest straight from a git tree.
 
 ### Cached passes
 
-A task that sets `cache`, by default a Nix task that no other task runs
-after, takes a pass recorded on this host for the same inputs instead of
-running, and records each pass it runs. Its summary line reads
-`cached (hit) <task>` or `ran <task> (<seconds>)`, and the closing count
-says how many passes were cached. A task without Nix is never cached, since
-nothing pins the host's toolchain. One that others run `after` defaults
-to `cache = false`, since a cached pass restores none of the files it wrote,
-as does a `release` task, which publishes. A cached task runs through
-`nix develop` even inside the repository's dev shell, so it runs with the
-toolchain its digest names rather than one entered before an edit to the
-flake. `--no-cache` runs every task and records nothing.
+A task that sets `cache` takes a pass recorded on this host for the same
+inputs instead of running, and records each pass it runs. Its summary line
+reads `cached (hit) <task>` or `ran <task> (<seconds>)`, and the closing
+count says how many passes were cached. A hit writes the reports it recorded
+to the task's `junit` and `metrics` paths and under `--report`.
+
+`cache` is on by default for a Nix task, with four exceptions:
+
+- a task that others run `after`, since a cached pass restores none of the
+  files it wrote
+- a `nightly` task, such as a benchmark or live interop suite, which must
+  run again on the same code
+- a `release` task, which publishes
+- a task declaring `metrics`, which describe the run that wrote them
+
+A task without Nix is never cached, since nothing pins the host's toolchain.
+While the cache is in use, every Nix task runs through `nix develop` even
+inside the repository's dev shell, so it runs with the toolchain the digests
+name rather than one entered before an edit to the flake. `--no-cache` runs
+every task and records nothing.
 
 The digest a pass is recorded under covers:
 
-- the derivation of the flake's `devShells.<system>.default`, from `nix eval`, which pins every tool
+- the derivation of the shell `nix develop` enters, from `nix eval`, which pins every tool
 - the task's `run`, `environment`, and report paths, and the host's OS and CPU
 - the digests of the tasks it runs after, since it may read what they wrote
 - the Git ids of the files it reads: its `paths` and `inputs`, or every file
-  when it declares no `paths`, less `exclude`, plus `invalidate_all`. A
-  modified or untracked file counts as Git would commit it, so a local run
-  and a clean checkout of the same content agree. A submodule with
-  uncommitted changes fails the run unless it passes `--no-cache`.
+  when it declares no `paths`, less `exclude`, plus `invalidate_all`
+
+A modified or untracked file counts as its own bytes, unfiltered, and an
+untracked nested repository, such as an agent's worktree, counts as nothing.
+A pass is recorded only if the task's inputs are unchanged once it finishes,
+so an edit saved while it ran is never filed under the old contents. A task
+reading a submodule with uncommitted changes runs uncached, as do the tasks
+after it.
 
 The digest leaves out `QUEST_TIER` and `QUEST_BASE`, so a pass holds across
 tiers and rebases; a task whose outcome depends on either sets `cache = false`.
@@ -1680,16 +1693,21 @@ tiers and rebases; a task whose outcome depends on either sets `cache = false`.
 A task with `cargo = true` runs once per crate of the Cargo workspace at the
 repository root, one crate at a time, with `QUEST_CRATE` naming it, such as
 `cargo nextest run -p "$QUEST_CRATE"`. Its output and reports carry
-`<task>:<crate>`, and `--report` copies them to `<dir>/<task>/<crate>/`. `quest run`
-reads the workspace with `cargo metadata --locked --all-features`, so a stale
-`Cargo.lock` fails the run and optional dependencies count. Each crate's
-digest reads its own directory and those of the workspace crates it depends
-on, without their dev-dependencies; the registry and git packages they
-resolve to, with their features; the root `Cargo.toml` with only the
-`[workspace.dependencies]` entries its closure uses; `.cargo/config.toml`,
-`rust-toolchain.toml`, and `.config/nextest.toml`; files outside every crate
-that the task's `paths` select; and the task's `inputs`. Editing crate B or
-bumping its dependency leaves crate A's pass in place unless A depends on B.
+`<task>:<crate>`, and `--report` copies them to `<dir>/<task>/<crate>/`.
+`quest run` reads the workspace with `cargo metadata --locked
+--all-features`, so a stale `Cargo.lock` fails the run and optional
+dependencies count. Each crate's digest reads:
+
+- its own directory, and those of the path crates it depends on, without
+  their dev-dependencies
+- the registry and git packages they resolve to, with their features
+- the root `Cargo.toml`, with only the `[workspace.dependencies]` entries its closure uses
+- `.cargo/config.toml`, `rust-toolchain.toml`, and `.config/nextest.toml`
+- files outside the member crates that the task's `paths` select
+- the task's `inputs`
+
+Editing crate B or bumping its dependency leaves crate A's pass in place
+unless A depends on B.
 
 Passes live in `$XDG_CACHE_HOME/quest/tasks`, or `~/.cache/quest/tasks`, at
 most 256 MiB, least recently used first out. A cached pass is trusted as if

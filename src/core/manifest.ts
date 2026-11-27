@@ -67,8 +67,8 @@ export interface ManifestTask {
 	cargo: boolean;
 	/**
 	 * Whether a passing result may be reused for the same inputs: by default a Nix task's that no task runs after,
-	 * since a reused result restores no files another task could read, outside the release tier, which publishes,
-	 * and never a task without Nix, whose host toolchain nothing pins.
+	 * since a reused result restores no files another task could read, that declares no metrics and is outside the
+	 * nightly and release tiers, and never a task without Nix, whose host toolchain nothing pins.
 	 */
 	cache: boolean;
 	/** Variables set for the task. */
@@ -288,10 +288,11 @@ function readTask(read: Reader, name: string, table: unknown): ManifestTask | nu
 		nix,
 		cargo: table.cargo === undefined ? false : (read.boolean(field("cargo"), table.cargo) ?? false),
 		// The default is settled once every task's `after` is known.
-		// A release task publishes, which a reused pass would skip.
+		// A nightly task, such as a benchmark or a live interop suite, must run again on the same code, a release
+		// task publishes, and metrics describe the run that wrote them: a reused pass would skip each.
 		cache:
 			table.cache === undefined
-				? nix && tier !== "release"
+				? nix && tier !== "nightly" && tier !== "release" && table.metrics === undefined
 				: (read.boolean(field("cache"), table.cache) ?? false),
 		environment,
 		junit: table.junit === undefined ? null : read.file(field("junit"), table.junit),

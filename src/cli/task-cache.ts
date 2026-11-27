@@ -17,15 +17,18 @@ export interface TreeFile {
 	path: string;
 	/** Git's mode: `100644`, `100755`, `120000` for a symlink, or `160000` for a submodule. */
 	mode: string;
-	/** The blob or commit id Git gives its content. */
+	/** The blob or commit id Git gives its content, or {@link DIRTY} for a submodule with uncommitted changes. */
 	oid: string;
 }
 
+/** The id of a submodule whose working tree holds changes no commit does, which no digest can name. */
+export const DIRTY = "dirty";
+
 /**
  * Every file of the working tree at `top` that Git tracks or would add, sorted by path, with the ids Git gives
- * them: the index's where the file matches it, so a clean checkout reads no file, and hashed from the working tree
- * where it is modified or untracked, so a local run and a clean checkout of the same content agree. Ignored and
- * deleted files are left out.
+ * them: the index's where the file matches it, so a clean checkout reads no file, and hashed from the working tree's
+ * own bytes, without Git's filters, where it is modified or untracked. Ignored and deleted files and untracked
+ * nested repositories are left out.
  */
 export function treeFiles(top: string): TreeFile[] {
 	const list = (args: string[]) => git(top, args).split("\0").filter(Boolean);
@@ -39,7 +42,8 @@ export function treeFiles(top: string): TreeFile[] {
 		if (stage === "0") files.set(path, { path, mode: mode!, oid: oid! });
 		else dirty.add(path);
 	}
-	// A submodule with edits inside it is listed too, so it fails below rather than passing as its gitlink.
+	const indexed = new Map(files);
+	// A submodule with edits inside it is listed too, rather than passing as its gitlink.
 	for (const path of list(["diff-files", "--name-only", "--ignore-submodules=none", "-z"])) dirty.add(path);
 	for (const path of list(["ls-files", "--others", "--exclude-standard", "-z"])) dirty.add(path);
 
@@ -54,21 +58,21 @@ export function treeFiles(top: string): TreeFile[] {
 				mode: "120000",
 				oid: git(top, ["hash-object", "--stdin"], readlinkSync(join(top, path), "utf8")),
 			});
-		else if (info.isDirectory())
-			throw new Error(
-				`${path} is a submodule or nested repository with changes the index does not hold; commit or ignore them, or pass --no-cache`,
-			);
-		else {
+		else if (info.isDirectory()) {
+			// An untracked nested repository, such as an agent's worktree, is no part of the tree.
+			if (indexed.get(path)?.mode === "160000") files.set(path, { path, mode: "160000", oid: DIRTY });
+		} else {
 			if (path.includes("\n")) throw new Error(`cannot hash ${JSON.stringify(path)}, whose name holds a newline`);
-			const file = { path, mode: info.mode & 0o111 ? "100755" : "100644", oid: "" };
+			// Git records only the owner's execute bit.
+			const file = { path, mode: info.mode & 0o100 ? "100755" : "100644", oid: "" };
 			regular.push(file);
 			files.set(path, file);
 		}
 	}
 	if (regular.length > 0) {
-		const oids = git(top, ["hash-object", "--stdin-paths"], regular.map((file) => file.path).join("\n")).split(
-			"\n",
-		);
+		// Unfiltered, so a file whose bytes differ from its commit's, such as with CRLF endings, never matches it.
+		const paths = regular.map((file) => file.path).join("\n");
+		const oids = git(top, ["hash-object", "--no-filters", "--stdin-paths"], paths).split("\n");
 		regular.forEach((file, index) => (file.oid = oids[index]!));
 	}
 	return [...files.values()].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
@@ -84,24 +88,34 @@ export function nixSystem(platform: NodeJS.Platform = process.platform, arch: st
 }
 
 /**
- * The store path of the derivation of the flake at `top`'s default dev shell, which pins every tool a Nix task
- * runs with. Evaluating it costs a few seconds, which a run pays once.
+ * The store path of the derivation of the shell `nix develop` enters for the flake at `top`, which pins every tool a
+ * Nix task runs with, trying the outputs it tries in its order. Evaluating it costs a few seconds, which a run pays
+ * once.
  */
 export function devShellDerivation(nix: string, top: string, env: NodeJS.ProcessEnv): string {
-	const attribute = `${top}#devShells.${nixSystem()}.default.drvPath`;
-	const result = spawnSync(nix, ["eval", "--raw", attribute], {
-		cwd: top,
-		env,
-		encoding: "utf8",
-		maxBuffer: 1 << 24,
-	});
-	if (result.error) throw result.error;
-	const path = result.stdout.trim();
-	if (result.status !== 0 || !/^\/\S+\.drv$/.test(path))
+	const system = nixSystem();
+	const outputs = [
+		`devShells.${system}.default`,
+		`devShell.${system}`,
+		`packages.${system}.default`,
+		`defaultPackage.${system}`,
+	];
+	for (const output of outputs) {
+		const result = spawnSync(nix, ["eval", "--raw", `${top}#${output}.drvPath`], {
+			cwd: top,
+			env,
+			encoding: "utf8",
+			maxBuffer: 1 << 24,
+		});
+		if (result.error) throw result.error;
+		const path = result.stdout.trim();
+		if (result.status === 0 && /^\/\S+\.drv$/.test(path)) return path;
+		if (result.status !== 0 && /does not provide attribute/.test(result.stderr)) continue;
 		throw new Error(
-			`cannot evaluate ${attribute} to fingerprint the dev shell for the task cache; pass --no-cache to run without it:\n${result.stderr.trim()}`,
+			`cannot evaluate ${output} to fingerprint the dev shell for the task cache; pass --no-cache to run without it:\n${result.stderr.trim()}`,
 		);
-	return path;
+	}
+	throw new Error(`the flake provides none of ${outputs.join(", ")} for nix develop to enter`);
 }
 
 /** One crate of a Cargo workspace and everything its tests build from. */
@@ -124,7 +138,14 @@ export interface CargoWorkspace {
 interface Metadata {
 	workspace_root: string;
 	workspace_members: string[];
-	packages: { id: string; name: string; version: string; source: string | null; manifest_path: string }[];
+	packages: {
+		id: string;
+		name: string;
+		version: string;
+		source: string | null;
+		manifest_path: string;
+		dependencies?: { kind: string | null; path?: string }[];
+	}[];
 	resolve: {
 		nodes: { id: string; features: string[]; deps: { pkg: string; dep_kinds: { kind: string | null }[] }[] }[];
 	};
@@ -155,6 +176,11 @@ export function cargoWorkspace(output: string, top: string): CargoWorkspace {
 			);
 		return path.split(sep).join("/");
 	};
+	// A path crate by its directory, so a declared path dependency the resolve graph leaves out, such as an optional
+	// one a task's feature flags enable on a crate outside the workspace, still joins the closure.
+	const byDir = new Map(
+		metadata.packages.flatMap((each) => (each.source === null ? [[dirname(each.manifest_path), each.id]] : [])),
+	);
 	const crates = metadata.workspace_members.map((member) => {
 		const seen = new Set<string>();
 		const visit = (id: string, root: boolean) => {
@@ -162,6 +188,10 @@ export function cargoWorkspace(output: string, top: string): CargoWorkspace {
 			seen.add(id);
 			for (const dep of nodes.get(id)?.deps ?? [])
 				if (root || dep.dep_kinds.some((kind) => kind.kind !== "dev")) visit(dep.pkg, false);
+			for (const dep of packages.get(id)!.dependencies ?? []) {
+				const path = dep.path === undefined ? undefined : byDir.get(dep.path);
+				if (path !== undefined && (root || dep.kind !== "dev")) visit(path, false);
+			}
 		};
 		visit(member, true);
 		const dirs: string[] = [];
@@ -228,17 +258,17 @@ export function inputFiles(
 	const reads = (path: string): boolean => {
 		if (task.inputs.some((pattern) => matches(pattern, path))) return true;
 		if (cargo === null) return task.paths === null || task.paths.some((pattern) => matches(pattern, path));
+		if (CARGO_SHARED.includes(path)) return true;
 		const dir = owner(path);
-		// Outside every crate: a shared Cargo file, or one the task's paths select, such as test configuration. The
-		// workspace's manifest and lockfile count only as far as the crate's closure reads them.
-		if (dir === undefined)
-			return (
-				CARGO_SHARED.includes(path) ||
-				(path !== "Cargo.toml" &&
-					path !== "Cargo.lock" &&
-					(task.paths?.some((pattern) => matches(pattern, path)) ?? false))
-			);
-		return cargo.crate.dirs.includes(dir);
+		if (dir !== undefined && cargo.crate.dirs.includes(dir)) return true;
+		// Outside the member crates, even where a root package owns it: a file the task's paths select, such as test
+		// configuration. The workspace's manifest and lockfile count only as far as the crate's closure reads them.
+		return (
+			(dir === undefined || dir === "") &&
+			path !== "Cargo.toml" &&
+			path !== "Cargo.lock" &&
+			(task.paths?.some((pattern) => matches(pattern, path)) ?? false)
+		);
 	};
 	return files.filter(
 		(file) =>

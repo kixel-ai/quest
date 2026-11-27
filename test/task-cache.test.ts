@@ -5,7 +5,8 @@ import { join } from "node:path";
 
 import { expect, test } from "vitest";
 
-import { cargoWorkspace, nixSystem, treeFiles, workspaceManifest } from "../src/cli/task-cache";
+import { DIRTY, cargoWorkspace, inputFiles, nixSystem, treeFiles, workspaceManifest } from "../src/cli/task-cache";
+import type { ManifestTask } from "../src/core";
 import { initRepository, tempDir } from "./fixture";
 
 const posix = process.platform !== "win32";
@@ -128,22 +129,90 @@ test("the root manifest a crate reads keeps only the workspace dependencies its 
 	expect(read(base)).not.toBe(read(base.replace("lto = true", "lto = false")));
 });
 
-test.runIf(posix)("a submodule with uncommitted changes cannot be hashed", () => {
-	const inner = initRepository(tempDir());
-	writeFileSync(join(inner, "file"), "1");
-	execFileSync("git", ["-C", inner, "add", "-A"], { stdio: "ignore" });
-	execFileSync("git", ["-C", inner, "commit", "-q", "-m", "inner"], { stdio: "ignore" });
-	const outer = initRepository(tempDir());
-	execFileSync("git", ["-C", outer, "-c", "protocol.file.allow=always", "submodule", "add", "-q", inner, "sub"], {
-		stdio: "ignore",
+test("a declared path dependency the resolve graph leaves out still joins the closure", () => {
+	const top = "/repo";
+	const id = (name: string) => `path+file:///repo/${name}#${name}@0.1.0`;
+	const crate = (name: string, dependencies: unknown[] = []) => ({
+		id: id(name),
+		name,
+		version: "0.1.0",
+		source: null,
+		manifest_path: `/repo/${name}/Cargo.toml`,
+		dependencies,
 	});
-	execFileSync("git", ["-C", outer, "commit", "-q", "-m", "outer"], { stdio: "ignore" });
-	expect(treeFiles(outer).map(({ path, mode }) => `${mode} ${path}`)).toEqual(["100644 .gitmodules", "160000 sub"]);
-	writeFileSync(join(outer, "sub", "file"), "2");
-	expect(() => treeFiles(outer)).toThrow(
-		"sub is a submodule or nested repository with changes the index does not hold",
-	);
+	// b, outside the workspace, has an optional c that only a task's --features b/extra enables.
+	const output = JSON.stringify({
+		workspace_root: top,
+		workspace_members: [id("a")],
+		packages: [
+			crate("a", [{ kind: null, path: "/repo/b" }]),
+			crate("b", [{ kind: null, path: "/repo/c" }]),
+			crate("c"),
+		],
+		resolve: {
+			nodes: [
+				{ id: id("a"), features: [], deps: [{ pkg: id("b"), dep_kinds: [{ kind: null }] }] },
+				{ id: id("b"), features: [], deps: [] },
+			],
+		},
+	});
+	expect(cargoWorkspace(output, top).crates[0]!.dirs).toEqual(["a", "b", "c"]);
 });
+
+test("a crate reads shared Cargo files and the task's selected files even where a root package owns them", () => {
+	const crate = { name: "a", dirs: ["a"], packages: [], names: ["a"] };
+	const workspace = { crates: [crate], dirs: ["", "a"] };
+	const task = { paths: ["rs/", "Cargo.*", "tests/"], inputs: [], exclude: [] } as unknown as ManifestTask;
+	const files = [
+		"Cargo.lock",
+		"Cargo.toml",
+		".cargo/config.toml",
+		".config/nextest.toml",
+		"a/src/lib.rs",
+		"src/main.rs",
+		"tests/vectors",
+	].map((path) => ({ path, mode: "100644", oid: path }));
+	expect(inputFiles(task, files, [], { crate, workspace }).map(({ path }) => path)).toEqual([
+		".cargo/config.toml",
+		".config/nextest.toml",
+		"a/src/lib.rs",
+		"tests/vectors",
+	]);
+});
+
+test.runIf(posix)("a file whose bytes differ from its commit's only by Git's filters still changes its id", () => {
+	const dir = initRepository(tempDir());
+	writeFileSync(join(dir, ".gitattributes"), "*.sh text eol=lf\n");
+	writeFileSync(join(dir, "run.sh"), "#!/bin/sh\n");
+	execFileSync("git", ["-C", dir, "add", "-A"], { stdio: "ignore" });
+	execFileSync("git", ["-C", dir, "commit", "-q", "-m", "lf"], { stdio: "ignore" });
+	const clean = treeFiles(dir).find(({ path }) => path === "run.sh")!.oid;
+	writeFileSync(join(dir, "run.sh"), "#!/bin/sh\r\n");
+	expect(treeFiles(dir).find(({ path }) => path === "run.sh")!.oid).not.toBe(clean);
+});
+
+test.runIf(posix)(
+	"a submodule with uncommitted changes has no id, and an untracked nested repository is left out",
+	() => {
+		const inner = initRepository(tempDir());
+		writeFileSync(join(inner, "file"), "1");
+		execFileSync("git", ["-C", inner, "add", "-A"], { stdio: "ignore" });
+		execFileSync("git", ["-C", inner, "commit", "-q", "-m", "inner"], { stdio: "ignore" });
+		const outer = initRepository(tempDir());
+		execFileSync("git", ["-C", outer, "-c", "protocol.file.allow=always", "submodule", "add", "-q", inner, "sub"], {
+			stdio: "ignore",
+		});
+		execFileSync("git", ["-C", outer, "commit", "-q", "-m", "outer"], { stdio: "ignore" });
+		expect(treeFiles(outer).map(({ path, mode }) => `${mode} ${path}`)).toEqual([
+			"100644 .gitmodules",
+			"160000 sub",
+		]);
+		writeFileSync(join(outer, "sub", "file"), "2");
+		initRepository(join(outer, "agent"));
+		writeFileSync(join(outer, "agent", "file"), "");
+		expect(treeFiles(outer).map(({ path, oid }) => (path === "sub" ? oid : path))).toEqual([".gitmodules", DIRTY]);
+	},
+);
 
 test("the Nix system names the host's CPU and OS as flakes do", () => {
 	expect(nixSystem("linux", "x64")).toBe("x86_64-linux");

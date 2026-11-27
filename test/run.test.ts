@@ -418,6 +418,18 @@ test.runIf(posix)("quest check reports a malformed quest.toml, and Nix tasks wit
 	});
 });
 
+test.runIf(posix)("a pass whose inputs changed while the task ran is not recorded", async () => {
+	const dir = repository({
+		"flake.nix": "{}",
+		"quest.toml": '[tasks.edit]\ntier = "pr"\nrun = "echo ran; date +%N >> src/a"\npaths = ["src/"]\n',
+		"src/a": "",
+	});
+	const env = { XDG_CACHE_HOME: tempDir() };
+	const first = await runIn(dir, { all: true, cache: true }, env);
+	expect(first.stderr).toContain("quest: edit is not cached, since its inputs changed while it ran\n");
+	expect((await runIn(dir, { all: true, cache: true }, env)).stdout).toBe("edit | ran\n");
+});
+
 /** `cargo metadata` output for a workspace at `top` of crates in their own directories, each with its dependencies. */
 function metadata(
 	top: string,
@@ -548,8 +560,8 @@ test.runIf(posix)(
 		write(dir, { "src/a": "2" });
 		expect(ran(await go())).toContain("test  | built");
 		expect(ran(await go({ cache: false }))).toContain("test  | built");
-		// Inside the repository's dev shell, which may predate a flake edit, the cached task still runs in the shell
-		// its digest names, while the uncached build runs directly.
+		// Inside the repository's dev shell, which may predate a flake edit, every Nix task, the build the cached task
+		// reads included, still runs in the shell the digests name.
 		write(dir, { "src/a": "3" });
 		const inside = await runIn(
 			dir,
@@ -557,9 +569,16 @@ test.runIf(posix)(
 			{ ...env, IN_NIX_SHELL: "impure", QUEST_DEV_SHELL: dir },
 		);
 		expect(ran(inside)).toContain("test  | built");
-		expect(inside.log.filter((line) => line.startsWith("nix develop"))).toEqual([
+		expect(inside.log.filter((line) => line.startsWith("nix develop")).sort()).toEqual([
 			`nix develop ${dir} --command bash -eo pipefail -c cat out/build; echo '<testsuites/>' > out/junit.xml`,
+			`nix develop ${dir} --command bash -eo pipefail -c echo linted`,
+			`nix develop ${dir} --command bash -eo pipefail -c mkdir -p out; echo built > out/build`,
 		]);
+
+		// A hit writes its recorded report where the task declares it, over whatever an earlier run left there.
+		writeFileSync(join(dir, "out", "junit.xml"), "<stale/>");
+		expect((await go()).stderr).toContain("quest: cached (hit) test\n");
+		expect(readFileSync(join(dir, "out", "junit.xml"), "utf8")).toBe("<testsuites/>\n");
 
 		// A cache another user can write is refused, since every pass in it is trusted.
 		chmodSync(join(env.XDG_CACHE_HOME, "quest", "tasks"), 0o777);

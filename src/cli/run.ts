@@ -29,7 +29,9 @@ import { programCommand, requireProgram } from "./program";
 import {
 	type CargoCrate,
 	type CargoWorkspace,
+	DIRTY,
 	type TaskResult,
+	type TreeFile,
 	cargoWorkspace,
 	devShellDerivation,
 	digest,
@@ -212,10 +214,10 @@ export async function run(options: RunOptions, io: RunIO): Promise<number> {
 	const caching = options.cache && tasks.some((task) => task.cache);
 	// The cache fingerprints the flake's dev shell with Nix even from inside a dev shell.
 	const fingerprint = caching && tasks.some((task) => task.nix);
-	// This repository's dev shell, already entered, runs Nix tasks directly with no evaluation, except a cached task,
-	// which runs in the shell its digest names: the entered one may predate an edit to the flake.
-	const inside = inDevShell(io.env, top);
-	const develop = (task: ManifestTask) => task.nix && (!inside || (caching && task.cache));
+	// This repository's dev shell, already entered, runs Nix tasks directly with no evaluation, except while the cache
+	// is in use: the entered shell may predate an edit to the flake, so every Nix task, a cached one's prerequisites
+	// included, runs in the shell the digests name.
+	const develop = (task: ManifestTask) => task.nix && (caching || !inDevShell(io.env, top));
 	const programs = {
 		quest: requireProgram("quest", io.env),
 		bash: requireProgram("bash", io.env),
@@ -254,14 +256,26 @@ export async function run(options: RunOptions, io: RunIO): Promise<number> {
 
 	const cache = caching ? taskCache(io.env) : null;
 	const hits = new Map<Unit, TaskResult>();
+	/**
+	 * The digest of everything `unit` reads in `files`, or null when no digest can name it: it reads a submodule
+	 * with uncommitted changes, or runs after a task that does.
+	 */
+	let digestOf: (unit: Unit, files: TreeFile[]) => string | null = () => null;
 	if (cache !== null) {
-		const files = treeFiles(top);
 		const shell = fingerprint ? devShellDerivation(programs.nix!, top, io.env) : null;
 		const cargoManifest = workspace === null ? null : readFileSync(join(top, "Cargo.toml"), "utf8");
-		// Tasks come after those they run after, whose digests each covers, since it may read what they wrote.
-		for (const unit of units) {
+		digestOf = (unit, files) => {
 			const { task, crate } = unit;
-			unit.digest = digest({
+			const read = inputFiles(
+				task,
+				files,
+				manifest.repo.invalidateAll,
+				crate === null ? null : { crate, workspace: workspace! },
+			);
+			// Tasks come after those they run after, whose digests each covers, since it may read what they wrote.
+			const after = units.filter((each) => task.after.includes(each.task.name)).map((each) => each.digest);
+			if (read.some((file) => file.oid === DIRTY) || after.includes(null)) return null;
+			return digest({
 				version: 1,
 				system: `${process.arch}-${process.platform}`,
 				shell: task.nix ? shell : null,
@@ -277,15 +291,18 @@ export async function run(options: RunOptions, io: RunIO): Promise<number> {
 								packages: crate.packages,
 								manifest: workspaceManifest(cargoManifest!, crate.names),
 							},
-				files: inputFiles(
-					task,
-					files,
-					manifest.repo.invalidateAll,
-					crate === null ? null : { crate, workspace: workspace! },
-				).map((file) => [file.path, file.mode, file.oid]),
-				after: units.filter((each) => task.after.includes(each.task.name)).map((each) => each.digest),
+				files: read.map((file) => [file.path, file.mode, file.oid]),
+				after,
 			});
-			if (!task.cache) continue;
+		};
+		const files = treeFiles(top);
+		for (const unit of units) {
+			unit.digest = digestOf(unit, files);
+			if (!unit.task.cache) continue;
+			if (unit.digest === null) {
+				io.stderr(`quest: ${unit.name} is not cached, since it reads a submodule with uncommitted changes\n`);
+				continue;
+			}
 			const hit = await cache.get(unit.digest);
 			if (hit !== undefined) hits.set(unit, hit);
 		}
@@ -395,10 +412,21 @@ export async function run(options: RunOptions, io: RunIO): Promise<number> {
 					signalAll("SIGTERM");
 				}
 			};
-			/** Pass `unit` on a recorded pass of the same inputs, copying the reports it recorded under --report. */
+			/**
+			 * Pass `unit` on a recorded pass of the same inputs, writing the reports it recorded where the task declares
+			 * them, so no earlier run's report stands in for them, and under --report.
+			 */
 			const replay = (unit: Unit, hit: TaskResult) => {
 				const destination = reportDir(report, unit);
 				try {
+					for (const { path, name } of declared(unit.task)) {
+						const file = join(top, path);
+						rmSync(file, { force: true });
+						const recorded = hit.reports.find((each) => each.name === name);
+						if (recorded === undefined) continue;
+						mkdirSync(dirname(file), { recursive: true });
+						writeFileSync(file, recorded.text);
+					}
 					if (destination !== null) {
 						mkdirSync(destination, { recursive: true });
 						for (const { name, text } of hit.reports) writeFileSync(join(destination, name), text);
@@ -457,10 +485,15 @@ export async function run(options: RunOptions, io: RunIO): Promise<number> {
 					}
 					if (status === null && problems.length === 0) {
 						finish(unit, "passed", ` in ${seconds.toFixed(1)}s`);
-						if (cache !== null && task.cache)
+						// A pass counts for the inputs the digest named only while nothing changed them as the task ran,
+						// such as an edit saved meanwhile.
+						const record = cache !== null && task.cache && unit.digest !== null;
+						if (record && digestOf(unit, treeFiles(top)) !== unit.digest)
+							io.stderr(`quest: ${unit.name} is not cached, since its inputs changed while it ran\n`);
+						else if (record)
 							// Caught at once, so a failed write fails the run once its tasks finish, not the process.
 							writes.push(
-								cache
+								cache!
 									.set(unit.digest!, {
 										task: task.name,
 										crate: unit.crate?.name ?? null,
