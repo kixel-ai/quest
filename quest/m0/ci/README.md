@@ -17,4 +17,4 @@ Decided 2026-11-26 (maintainer, `/quest-plan`):
 - **Three-layer caching.** ✅ Support Nix binary cache (`nix.kixel.quest`), shared S3/B2 `mbx` compilation caches, and content-addressed task/test result skipping in `quest run` (including `cargo metadata --locked` per-crate closure hashing) with strict public/private isolation (rejected: stopping at git-diff path selection).
 - **Milestone.** ✅ `m0`: unlocks CI consolidation across `moq-dev` and `kixel-ai` repositories before public release (`m1`).
 
-This epic finishes once all four children land and a real repository validates `quest.lib.mkFlake`, `quest fmt`, `quest run --tier gate`, `quest cache push`, and content-addressed crate skipping end to end.
+This epic finishes once every child lands and a real repository validates `quest.lib.mkFlake`, `quest fmt`, `quest run --tier gate`, `quest cache push`, and content-addressed crate skipping end to end.

@@ -15,3 +15,7 @@ Tests: against a local Worker, `quest logout` revokes the token and a later post
 ## Waiting
 
 - kixel-ai/kixel.quest: its logout quest (`quest/m0/insight/logout.md`, planned in [kixel-ai/kixel.quest#206](https://github.com/kixel-ai/kixel.quest/pull/206)) deploys the endpoint where a token revokes itself. Check that the file is gone from that repository's tree.
+
+## Related
+
+- [Git credential helper](/quest/m0/git-credential.md) - `quest logout` also removes the git config `quest login` writes

@@ -14,6 +14,7 @@ Decided in the [epic](/quest/m0/telemetry/README.md): ✅ `Implementer:` lines b
 
 - `quest agent` knows the routing decision; write it where the record sender finds it for that session.
 - `## Models` keeps its `Size:` line, which starting and reviewing need.
+- Read the writer through `quest/core`'s `writers` call: an iterate routes to the model with the largest share of the PR's writing cost, skipping a null model, as kixel-ai/kixel.quest's writer read (`quest/m0/insight/writer-read.md` there) plans.
 - Update the guide (`assets/AGENTS.md`'s iterate routing), `assets/CONTEXT.md`'s `## Models` rule, and the run, iterate, and review skills; this decision is the maintainer's request for that work.
 
 Tests: the sender's hourly heartbeat counts the sessions that ended; `culprits()` reads `(found by reviewer Pullfrog)` and `(found by reviewer Pullfrog; incident 123)` as a reviewer finder with its name, and still reads `(found by customer; incident 123)`; a session that fell from one writer to the next at a usage limit records both and the reason; an iterate routes to the writer Kixel Quest reports; and no skill writes an `Implementer:` line.
@@ -21,3 +22,7 @@ Tests: the sender's hourly heartbeat counts the sessions that ended; `culprits()
 ## Waiting
 
 - kixel-ai/kixel.quest: its [sessions](https://github.com/kixel-ai/kixel.quest/blob/main/quest/m0/insight/sessions.md) and [finder](https://github.com/kixel-ai/kixel.quest/blob/main/quest/m0/insight/finder.md) quests are deployed. Check that both files are gone from that repository's tree.
+
+## Required
+
+- [Writers call](/quest/m0/telemetry/writers-call.md) - the typed read of each PR's writers that replaces `Implementer:` lines

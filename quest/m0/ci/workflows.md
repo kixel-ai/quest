@@ -26,4 +26,4 @@ Tests: `actionlint` and `zizmor --offline` pass on all shipped actions and workf
 
 ## Required
 
-- [quest.lib.mkFlake and quest cache push](/quest/m0/ci/nix-lib.md) - establishes the `nix.kixel.quest` `nixConfig` trusted by `setup-nix`
+- [quest.lib.mkFlake](/quest/m0/ci/nix-lib.md) - establishes the `nix.kixel.quest` `nixConfig` trusted by `setup-nix`
