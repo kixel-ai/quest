@@ -389,7 +389,7 @@ export async function recordRounds(
 	const at = { repository: pull.repository, number: pull.number };
 	await postReviews(url, token, deps.fetch, {
 		runs: [reviewRun(reviewed, { ...at, base: pull.base, mergeBase })],
-		outcomes: reviewed.outcomes,
+		outcomes: reviewed.outcomes(at),
 	});
 	reviewed.posted?.(at);
 	// A status the token could not set before would fail the same way again.

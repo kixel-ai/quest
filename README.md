@@ -830,12 +830,10 @@ naming each. A head is high when a `quest review`
 status on any of its commits rates it high, or when its change from its merge
 base with the base touches a path the base's `RISK.md` holds high, as
 [Risk tiers](#risk-tiers) says, or reaches GitHub's 300-file compare limit. A
-high head lands only once a passing `quest review` status covers its diff: one a
-user with write access set on that head, or on the newest of the PR's commits
-to carry a passing one when its diff from the base is identical, its target the
-diff from the head's merge base, and its description naming the base's current
-`RISK.md`, unless the head itself carries a `quest review` status that is not a
-pass. So any push after the last review that changes the diff, a person's or a
+high head lands only once the newest `quest review` status, by when it was set,
+that a user with write access set on that head or on a commit with an identical
+diff from the base, its target the diff from the head's merge base, passes and
+names the base's current `RISK.md`. So any push after the last review that changes the diff, a person's or a
 helper's, and any change to the base's `RISK.md` since, waits for a new round.
 It enables auto-merge bound to that SHA, or merges at once when nothing is
 left to wait for. `--squash` or `--rebase` picks the method, and it refuses one

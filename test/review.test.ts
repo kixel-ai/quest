@@ -3146,6 +3146,63 @@ fakes(
 	},
 );
 
+fakes("the outcomes a failed post settled survive --new, which drops the sessions that settled them", async () => {
+	const s = setup();
+	const writes = onGitHub(s.repo, [{ number: 7, body: "" }]);
+	try {
+		expect((await quest("--root", s.repo, "review")).code).toBe(0);
+		write(s.repo, "src/lib.ts", "export const x = 4;\n");
+		git(s.repo, "commit", "-qam", "fix");
+		write(s.repo, ".tmp/responses.md", "1. Fixed at src/lib.ts:1.\n");
+		vi.stubEnv("FAKE_REPLY", JSON.stringify({ score: 9, rationale: "Fixed.", recommendation: null, findings: [] }));
+		const github = globalThis.fetch;
+		vi.stubGlobal("fetch", async (input: URL, init?: RequestInit) =>
+			new URL(input).pathname === "/reviews"
+				? new Response('{"error":"Try later."}', { status: 503 })
+				: github(input, init),
+		);
+		const failed = await quest("--root", s.repo, "review", "--responses", join(s.repo, ".tmp", "responses.md"));
+		expect(failed.code).toBe(1);
+		vi.stubGlobal("fetch", github);
+		const fresh = await quest("--root", s.repo, "review", "--new");
+		expect(fresh.code, fresh.stderr).toBe(0);
+		expect(writes.posts).toHaveLength(2);
+		expect(writes.posts[1]!.outcomes).toMatchObject([{ number: 7, round: 1, finding: 1, outcome: "fixed" }]);
+	} finally {
+		vi.unstubAllEnvs();
+		vi.unstubAllGlobals();
+	}
+});
+
+fakes("accepting a round whose post failed defers its findings on the PR the acceptance posts it to", async () => {
+	const s = setup();
+	const pulls = [{ number: 7, body: "" }];
+	const writes = onGitHub(s.repo, pulls);
+	const github = globalThis.fetch;
+	vi.stubGlobal("fetch", async (input: URL, init?: RequestInit) =>
+		new URL(input).pathname === "/reviews"
+			? new Response('{"error":"Try later."}', { status: 503 })
+			: github(input, init),
+	);
+	try {
+		expect((await quest("--root", s.repo, "review")).code).toBe(1);
+		vi.stubGlobal("fetch", github);
+		// The PR was replaced since, so the acceptance posts the round, and defers its finding, on the new one.
+		pulls[0]!.number = 8;
+		const accepted = await quest("--root", s.repo, "review", "--accept", "Fine.");
+		expect(accepted.code, accepted.stderr).toBe(0);
+		expect(writes.posts).toHaveLength(1);
+		expect(writes.posts[0]!.runs).toMatchObject([
+			{ number: 8, outcome: "findings accepted", rounds: [{ round: 1 }] },
+		]);
+		expect(writes.posts[0]!.outcomes).toMatchObject([
+			{ number: 8, session: "thread-1", round: 1, finding: 1, outcome: "deferred", reason: "Fine." },
+		]);
+	} finally {
+		vi.unstubAllGlobals();
+	}
+});
+
 fakes("a repository Kixel Quest does not serve runs no reviewer for a PR, since it would store no round", async () => {
 	const s = setup();
 	const pulls: FakePull[] = [];
@@ -3222,11 +3279,14 @@ test("the verdict is checked field by field, settling each earlier finding once"
 	expect(() => verdict({ structured: { ...scored, findings: [{ ...FINDING, line: 0 }] } }, 0)).toThrow(
 		"does not match",
 	);
-	// Kixel Quest stores each finding by its path and title, so neither may be blank.
-	for (const blank of [{ file: "" }, { title: " " }])
+	// Kixel Quest stores each finding by its path and title, so neither may be blank; a note is never posted.
+	for (const blank of [{ file: "" }, { title: " " }]) {
 		expect(() => verdict({ structured: { ...scored, findings: [{ ...FINDING, ...blank }] } }, 0)).toThrow(
 			"does not match",
 		);
+		const note = { ...FINDING, severity: "low", ...blank };
+		expect(verdict({ structured: { ...scored, findings: [note] } }, 0).findings).toEqual([note]);
+	}
 	expect(() => verdict({ text: '{"verdict":"approve"}' }, 0)).toThrow("no findings list");
 	for (const score of [-1, 11, 7.5, "7", undefined]) {
 		expect(() => verdict({ structured: { ...scored, score, findings: [] } }, 0)).toThrow("no score from 0 to 10");
