@@ -1625,7 +1625,7 @@ tasks start together and wait only for the host's room. A task that sets
 repository's `flake.nix`, a regular file, and runs in its dev shell: directly when `quest run`
 is already inside it, with no Nix evaluation, and through `nix develop
 --command` otherwise. The dev shell says it is the repository's by setting
-`QUEST_DEV_SHELL` to the repository's root, as `quest.lib.mkFlake` will; a
+`QUEST_DEV_SHELL` to the repository's root, as [`quest.lib.mkFlake`'s](#share-flake-boilerplate-with-questlibmkflake) does; a
 shell without it, such as another repository's, gets `nix develop` all the
 same. Each task gets `QUEST_TIER`, `QUEST_BASE` (the merge base, unless
 `--all`), and its `environment`, exported inside the dev shell, and every line
@@ -1653,6 +1653,77 @@ on every OS the task does, without a cycle, and that Nix tasks have a
 regular `flake.nix`. `quest/core` exports the parser, `parseQuestManifest`, with no
 Node or Nix dependency, so a service such as Kixel Quest can validate a
 manifest straight from a git tree.
+
+A `quest.toml` opts the repository into Kixel Quest, so beside a `flake.nix`
+`quest check` also requires that flake's `nixConfig` to substitute from Kixel
+Quest's binary cache. Nix reads `nixConfig` only from the top of `flake.nix`,
+and asks before using it unless the user trusts flake configuration
+(`accept-flake-config = true`):
+
+```nix
+nixConfig = {
+  extra-substituters = [ "https://nix.kixel.quest" ];
+};
+```
+
+## Share flake boilerplate with quest.lib.mkFlake
+
+`quest.lib.mkFlake` builds a repository's per-system flake outputs, so its
+`flake.nix` pins only `nixpkgs` and `quest`:
+
+```nix
+{
+  inputs = {
+    nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
+    quest = {
+      url = "github:kixel-ai/quest";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+  };
+
+  outputs =
+    { self, nixpkgs, quest }:
+    quest.lib.mkFlake {
+      inherit self nixpkgs;
+      # A treefmt-nix module; nixfmt is on unless it sets programs.nixfmt.enable = false.
+      fmt.programs.rustfmt.enable = true;
+      perSystem =
+        { pkgs, system }:
+        {
+          shell.packages = [ pkgs.cargo pkgs.just ];  # pkgs.mkShell's arguments
+          packages.default = pkgs.callPackage ./package.nix { };
+        };
+    };
+}
+```
+
+It adds to what `perSystem` returns, for each of `systems` (`x86_64-linux`,
+`aarch64-linux`, and `aarch64-darwin` unless set), with nixpkgs imported with
+`overlays`:
+
+- `devShells.default`, `pkgs.mkShell` called with `shell`, holding `quest`
+  and the repository's `treefmt`, and setting `QUEST_DEV_SHELL` to the nearest
+  directory up holding `flake.nix`, so `quest run` and `quest fmt` run there
+  without entering the shell again. `perSystem`'s `quest` replaces the `quest`
+  package.
+- `formatter`, the same `treefmt`, which `nix fmt` runs.
+- `checks.quest`, which runs `quest check` on the flake's source; a `checks`
+  entry of the same name replaces it.
+
+`treefmt-nix` builds `treefmt` inside Quest's flake, so `fmt` takes any of its
+[`programs`](https://github.com/numtide/treefmt-nix) and `settings` with no
+input of the repository's own.
+
+```sh
+quest fmt                        # format the repository
+quest fmt --fail-on-change src/  # treefmt's own arguments
+```
+
+`quest fmt` runs that `treefmt` from the repository root: directly inside
+its dev shell, with no Nix evaluation, and through `nix develop --command`
+outside it. A `[tasks.fmt]` in `quest.toml` replaces it: `quest fmt` runs the
+task's `run` script, with its `environment`, the arguments as `$1` onward,
+and the dev shell unless it sets `nix = false`.
 
 ## Route work by size
 

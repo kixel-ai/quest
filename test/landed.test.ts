@@ -189,6 +189,11 @@ describe("quest merge's landing check", () => {
 			rmSync(join(tree.path, "flake.nix"));
 			tree.write("flake.nix", "{}\n");
 			commit(tree, "flake");
+			expect((await inspect(tree, "fix/manifest")).map((finding) => finding.message)).toEqual([
+				expect.stringContaining("flake.nix's nixConfig must list https://nix.kixel.quest"),
+			]);
+			tree.write("flake.nix", '{ nixConfig.extra-substituters = [ "https://nix.kixel.quest" ]; }\n');
+			commit(tree, "cached flake");
 			expect(await inspect(tree, "fix/manifest")).toEqual([]);
 			// The commit holds a symlink as its target's path, which quest check refuses too.
 			tree.write("ci/tasks.toml", '[tasks.a]\ntier = "pr"\nrun = "x"\n');

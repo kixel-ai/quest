@@ -81,12 +81,19 @@ function parseRoot(read: (path: string) => RootFile): { manifest: Manifest | nul
 	return parsed.ok ? { manifest: parsed.manifest, problems: [] } : { manifest: null, problems: parsed.problems };
 }
 
-/** The working tree's manifest, failing with every problem it has. */
-function readManifest(top: string): Manifest {
+/** The working tree's manifest, or null when there is none, failing with every problem it has. */
+export function rootManifest(top: string): Manifest | null {
 	const parsed = parseRoot(workingTree(top));
-	if (parsed === null) throw new Error(`no ${MANIFEST_FILE} at ${top}`);
+	if (parsed === null) return null;
 	if (parsed.manifest === null) throw new Error(parsed.problems.join("\n"));
 	return parsed.manifest;
+}
+
+/** The working tree's manifest, failing when there is none or with every problem it has. */
+function readManifest(top: string): Manifest {
+	const manifest = rootManifest(top);
+	if (manifest === null) throw new Error(`no ${MANIFEST_FILE} at ${top}`);
+	return manifest;
 }
 
 /**
@@ -102,13 +109,47 @@ function flakeProblem(read: (path: string) => RootFile, tasks: ManifestTask[]): 
 	return `${MANIFEST_FILE}: ${nix.join(", ")} run in the Nix dev shell, but ${missing}; set nix = false on a task that runs without Nix`;
 }
 
+/** The Nix binary cache Kixel Quest serves, which a repository opting in with quest.toml substitutes from. */
+export const NIX_CACHE = "https://nix.kixel.quest";
+
+/**
+ * Why `flake` does not substitute from Kixel Quest's cache: its `nixConfig`, which Nix reads only as a literal at the
+ * top of flake.nix, must list the cache under `substituters` or `extra-substituters`, in a block or dotted.
+ */
+function cacheProblem(flake: string): string | null {
+	// Comments, where `#` starts a line or follows a space, so a URL's fragment is not one.
+	const code = flake.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/(^|\s)#.*$/gm, "$1");
+	const lists: string[] = [];
+	const list = /(?:^|[\s;{.])"?(?:extra-)?substituters"?\s*=\s*\[([^\]]*)\]/g;
+	for (const dotted of code.matchAll(/\bnixConfig(\.[^;]*;)/g))
+		lists.push(...[...dotted[1]!.matchAll(list)].map((each) => each[1]!));
+	const block = /\bnixConfig\s*=\s*\{/.exec(code);
+	if (block !== null) {
+		let depth = 0;
+		let end = block.index + block[0].length - 1;
+		for (; end < code.length; end++) {
+			if (code[end] === "{") depth++;
+			else if (code[end] === "}" && --depth === 0) break;
+		}
+		lists.push(...[...code.slice(block.index, end).matchAll(list)].map((each) => each[1]!));
+	}
+	const cache = new RegExp(`"${NIX_CACHE.replace(/\./g, "\\.")}/?"`);
+	if (lists.some((each) => cache.test(each))) return null;
+	return `${MANIFEST_FILE}: the repository opts into Kixel Quest, so flake.nix's nixConfig must list ${NIX_CACHE} in extra-substituters`;
+}
+
 /** What `quest check` and `quest merge` report about a repository's quest.toml, if it has one, read with `read`. */
 export function manifestProblems(read: (path: string) => RootFile): string[] {
 	const parsed = parseRoot(read);
 	if (parsed === null) return [];
 	if (parsed.manifest === null) return parsed.problems;
+	const problems: string[] = [];
 	const problem = flakeProblem(read, parsed.manifest.tasks);
-	return problem === null ? [] : [problem];
+	if (problem !== null) problems.push(problem);
+	const flake = read("flake.nix");
+	const cache = flake?.kind === "file" ? cacheProblem(flake.text) : null;
+	if (cache !== null) problems.push(cache);
+	return problems;
 }
 
 /**
@@ -118,7 +159,7 @@ export function manifestProblems(read: (path: string) => RootFile): string[] {
 export const DEV_SHELL = "QUEST_DEV_SHELL";
 
 /** Whether `env` is a dev shell entered for the repository at `top`. */
-function inDevShell(env: NodeJS.ProcessEnv, top: string): boolean {
+export function inDevShell(env: NodeJS.ProcessEnv, top: string): boolean {
 	const shell = env[DEV_SHELL];
 	if (!shell) return false;
 	try {

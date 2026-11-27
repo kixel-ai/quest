@@ -8,6 +8,11 @@
     # once `nixpkgs` reaches 1.4.4.
     nixpkgs-bun.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
     flake-utils.url = "github:numtide/flake-utils";
+    # Builds `lib.mkFlake`'s formatter, so a repository using it needs no input of its own for it.
+    treefmt-nix = {
+      url = "github:numtide/treefmt-nix";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
     # A reviewed quest for the dev shell's merge driver, so local merges resolve
     # link lists without running the checkout's own, possibly unreviewed, code.
     # Only its source is pinned, so the lock never chains older pins. Dependabot's
@@ -33,24 +38,52 @@
       nixpkgs,
       nixpkgs-bun,
       flake-utils,
+      treefmt-nix,
       quest-pinned,
       token-max,
       ...
     }:
-    # The pinned nixpkgs no longer evaluates on x86_64-darwin; Intel Macs use the release binary.
-    flake-utils.lib.eachSystem
-      [
-        "x86_64-linux"
-        "aarch64-linux"
-        "aarch64-darwin"
-      ]
-      (
-        system:
-        let
-          pkgs = import nixpkgs {
-            inherit system;
-            overlays = [ (_: _: { inherit (nixpkgs-bun.legacyPackages.${system}) bun; }) ];
+    let
+      lib.mkFlake = import ./nix/mk-flake.nix {
+        quest = self;
+        inherit treefmt-nix;
+      };
+    in
+    {
+      inherit lib;
+    }
+    // lib.mkFlake {
+      inherit self nixpkgs;
+      overlays = [
+        (_: prev: { inherit (nixpkgs-bun.legacyPackages.${prev.stdenv.hostPlatform.system}) bun; })
+      ];
+      fmt =
+        { pkgs, ... }:
+        {
+          programs.shfmt = {
+            enable = true;
+            # .editorconfig's.
+            indent_size = null;
           };
+          # The locked Prettier that `just install` puts in node_modules, as `bun run check` runs it.
+          settings.formatter.prettier = {
+            command = pkgs.lib.getExe pkgs.bun;
+            options = [
+              "run"
+              "--silent"
+              "prettier"
+              "--write"
+            ];
+            includes = [
+              "*.ts"
+              "*.mjs"
+              "*.json"
+            ];
+          };
+        };
+      perSystem =
+        { pkgs, system }:
+        let
           # A flake build cannot see tags, so it reports its commit.
           quest = pkgs.callPackage ./nix/package.nix { rev = self.shortRev or self.dirtyShortRev or null; };
           # A pin from before builds took `rev` reads its version from package.json instead.
@@ -65,40 +98,42 @@
           bunVersion = pkgs.lib.removePrefix "bun@" manifest.packageManager;
         in
         {
+          # The dev shell's: `quest resolve` for the merge driver; `just` and `bun run quest` run the checkout.
+          quest = questPinned;
           packages = {
             inherit quest;
             default = quest;
           };
           apps.default = flake-utils.lib.mkApp { drv = quest; };
-          devShells.default = pkgs.mkShell {
-            packages =
-              with pkgs;
-              [
-                # Installs dependencies, runs every script and tool, and compiles the release binaries.
-                bun
-                # `quest resolve` for the merge driver; `just` and `bun run quest` run the checkout.
-                questPinned
-                just
-                jq
-                git
-                gh
-                # Exports and prices `quest usage`'s sessions.
-                token-max.packages.${system}.default
-                direnv
-                actionlint
-                shellcheck
-                shfmt
-                nixfmt
-                # GNU time, which the gate's cancellation tests put between Bash and their leaf.
-                time
-              ]
-              # `flock` (the land daemon's repository lock) and `script` (the tests' terminal), which
-              # self-hosted NixOS runners don't otherwise provide.
-              ++ pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux [ pkgs.util-linux ];
-          };
-          formatter = pkgs.nixfmt;
+          shell.packages =
+            with pkgs;
+            [
+              # Installs dependencies, runs every script and tool, and compiles the release binaries.
+              bun
+              just
+              jq
+              git
+              gh
+              # Exports and prices `quest usage`'s sessions.
+              token-max.packages.${system}.default
+              direnv
+              actionlint
+              shellcheck
+              shfmt
+              nixfmt
+              # GNU time, which the gate's cancellation tests put between Bash and their leaf.
+              time
+            ]
+            # `flock` (the land daemon's repository lock) and `script` (the tests' terminal), which
+            # self-hosted NixOS runners don't otherwise provide.
+            ++ pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux [ pkgs.util-linux ];
           checks = {
             package = quest;
+            # The checkout's build checks the tree, since its rules may be newer than the pinned quest's.
+            quest = pkgs.runCommand "quest-check" { nativeBuildInputs = [ quest ]; } ''
+              quest --root ${self} check
+              touch "$out"
+            '';
             bun-version = pkgs.runCommand "bun-version" { } ''
               if [ "${pkgs.bun.version}" != "${bunVersion}" ]; then
                 echo "package.json pins bun@${bunVersion}, but the flake provides Bun ${pkgs.bun.version}" >&2
@@ -106,11 +141,34 @@
               fi
               touch "$out"
             '';
-            quest-tree = pkgs.runCommand "quest-tree" { nativeBuildInputs = [ quest ]; } ''
-              quest --root ${self} check
-              touch "$out"
-            '';
+            # `lib.mkFlake` as another repository calls it, with a stand-in quest: its dev shell carries quest and
+            # treefmt and names the root holding flake.nix, and it adds the formatter and the tree check.
+            mk-flake =
+              let
+                fixture = lib.mkFlake {
+                  self = ./nix;
+                  inherit nixpkgs;
+                  systems = [ system ];
+                  perSystem = _: { quest = pkgs.hello; };
+                };
+                shell = fixture.devShells.${system}.default;
+              in
+              assert fixture.checks.${system} ? quest;
+              pkgs.runCommand "mk-flake" { nativeBuildInputs = shell.nativeBuildInputs; } ''
+                hello --version >/dev/null
+                treefmt --version
+                [ "$(${pkgs.lib.getExe fixture.formatter.${system}} --version)" = "$(treefmt --version)" ]
+                mkdir -p repo/sub
+                touch repo/flake.nix
+                cd repo/sub
+                ${shell.shellHook}
+                [ "$QUEST_DEV_SHELL" = "$(dirname "$PWD")" ]
+                cd /
+                ${shell.shellHook}
+                [ -z "''${QUEST_DEV_SHELL+set}" ]
+                touch "$out"
+              '';
           };
-        }
-      );
+        };
+    };
 }

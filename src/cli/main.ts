@@ -64,6 +64,7 @@ import {
 	locate as locatePull,
 } from "./forge";
 import { PENDING_MS } from "./admission";
+import { fmt } from "./fmt";
 import { gate } from "./gate";
 import { manifestProblems, nativeOs, run as runTasks, workingTree } from "./run";
 import { gitHubDependencies, pullRequest, readRemote, remoteRepository, requireRemote } from "./github";
@@ -351,6 +352,30 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				});
 			},
 		);
+
+	program
+		.command("fmt")
+		.summary("Format the repository in its dev shell")
+		.description(
+			"Format the repository with the treefmt that quest.lib.mkFlake puts in its Nix dev shell, from the " +
+				"repository root, passing on every argument, such as paths or --fail-on-change. Inside the " +
+				"repository's dev shell, where QUEST_DEV_SHELL names its root, treefmt runs directly with no Nix " +
+				"evaluation; otherwise through nix develop --command, which needs flake.nix at the root. nix fmt runs " +
+				"the same treefmt.\n\n" +
+				"When quest.toml declares a fmt task, quest fmt runs its run script instead, with bash -eo pipefail " +
+				"-c, its environment table, the arguments as $1 onward, and the dev shell unless it sets nix = false. " +
+				"Exits with the formatter's status.",
+		)
+		.argument("[args...]", "Arguments for treefmt, or the fmt task's script")
+		.allowUnknownOption()
+		.action((args: string[]) => {
+			try {
+				code = fmt(root(), args, process.env);
+			} catch (error) {
+				warn(error instanceof Error ? error.message : String(error));
+				code = 1;
+			}
+		});
 
 	program
 		.command("check")
