@@ -58,6 +58,11 @@ export interface PostedRisk {
 	/** The risk file's `## Automatic` class the classifier found the change in, or null. */
 	class: string | null;
 	classifier: { harness: string; model: string; effort: string; session: string } | null;
+	/**
+	 * The base's risk file the classifier read, as {@link riskFileId} names it: 12 hex characters of its blob, or `none`.
+	 * Null where a run does not say, which Kixel Quest counts as it always has; the post may leave the field out.
+	 */
+	riskFile: string | null;
 }
 
 /** One `quest review` run on a PR's head: its classification, and each seat's round, none for a low head. */
@@ -156,7 +161,12 @@ function postedRound(value: unknown): PostedRound {
 function postedRisk(value: unknown): PostedRisk {
 	const { fail, isObject, text, maybe, oneOf, exact } = review;
 	if (!isObject(value)) return fail("the risk");
-	exact(value, ["tier", "reason", "classified", "class", "classifier"], "the risk");
+	exact(value, ["tier", "reason", "classified", "class", "classifier", "riskFile"], "the risk");
+	const named = value.riskFile ?? null;
+	const file =
+		named === null || (typeof named === "string" && /^(?:[0-9a-f]{12}|none)$/.test(named))
+			? named
+			: fail("the risk file is not 12 hex characters or none");
 	let classifier: PostedRisk["classifier"] = null;
 	if (value.classifier !== null) {
 		const c = value.classifier;
@@ -175,6 +185,7 @@ function postedRisk(value: unknown): PostedRisk {
 		classified: oneOf(value.classified, TIERS, "the classified tier"),
 		class: maybe(value.class, "the class"),
 		classifier,
+		riskFile: file,
 	};
 }
 
