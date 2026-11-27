@@ -271,7 +271,7 @@ export function busyCpus(proc: string, file: string, now: number): number | unde
 	const current: CpuSample = { at: now, busy: total - fields[3]! - fields[4]!, total };
 	// A clock stepped backward dates samples in the future; they are dropped with the stale ones.
 	const samples = readSamples(file).filter((sample) => sample.at <= now && sample.at > now - 2 * SETTLE_MS);
-	// The sample closest to SETTLE_MS old, so a longer span never dilutes a burst.
+	// The sample closest to SETTLE_MS old, so the span is about SETTLE_MS wherever samples allow.
 	const base = samples
 		.filter((sample) => sample.at <= now - CPU_SAMPLE_MS)
 		.reduce<CpuSample | undefined>(
