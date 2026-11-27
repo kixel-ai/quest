@@ -132,14 +132,14 @@ $ quest --root examples/export unblocked
 1	quest/m0/export.md
 
 $ quest --root examples/export unblocked --json --limit 1
-[{"path":"quest/m0/export.md","dependents":1,"hosts":[],"arm":"B","models":[{"harness":"claude","model":"claude-sonnet-5-5","effort":"high"},{"harness":"claude","model":"claude-opus-5-5","effort":"medium"}]}]
+[{"path":"quest/m0/export.md","dependents":1,"hosts":[],"arm":"B","cohort":"advisor-2026-11","models":[{"harness":"claude","model":"claude-sonnet-5-5","effort":"high","advisor":"claude-opus-5-5"},{"harness":"claude","model":"claude-opus-5-5","effort":"medium"}]}]
 ```
 
 Each plain output line contains the count, a tab, and the path. On a terminal,
 a heading explains the count. `--json` prints an ordered array, including `[]`
 when no quests are ready, and gives each quest the `hosts` its `## Hosts`
-section names (empty when it runs anywhere), its writer A/B `arm`, and the
-ranked `models` that write it, as [Route work by size](#route-work-by-size)
+section names (empty when it runs anywhere), its writer A/B `arm` and
+`cohort`, and the ranked `models` that write it, as [Route work by size](#route-work-by-size)
 describes; `--limit <count>`
 requires a positive integer.
 Invalid trees fail with diagnostics and no ranking.
@@ -1572,16 +1572,30 @@ to the next only while nothing is written: when the CLI is missing or logged
 out, or the agent stops at its usage limit with nothing beyond the claim
 commit. Once a model writes, the PR is its own.
 
-While the writer A/B runs, XS and S quests split 50/50 between two arms, to
-measure where published guidance disagrees: arm A runs the table's writer,
-and arm B runs Claude Code `claude-opus-5-5` medium for XS and
-`claude-sonnet-5-5` high for S. A hash of the quest's path picks the arm, so
-a restart or respawn keeps it; `quest unblocked --json` names it as `arm`, `A`
-or `B`, and puts its entry first in `models`. M, L, and XL run no arm, nor
-does a quest with a `Maintainer:` decision open, which runs the next size's
-list, so an arm always runs at its PR's size; their `arm` is `null`. The
-agent that runs that entry ends its `Implementer:` line with the arm, as
-`Implementer: Claude Code, claude-sonnet-5-5, high effort (arm B)`.
+While the writer A/B runs, every size's quests split 50/50 between two arms,
+to measure whether Claude Code's advisor tool, a stronger model the writer
+consults mid-task, pays for itself: arm A runs the table's writer, and arm B
+pairs a writer with an advisor.
+
+| Size | Arm B |
+|---|---|
+| XS | `claude-sonnet-5-5` high, advised by `claude-opus-5-5` |
+| S | `claude-sonnet-5-5` high, advised by `claude-opus-5-5` |
+| M | `claude-sonnet-5-5` high, advised by `claude-opus-5-5` |
+| L | `claude-opus-5-5` high, advised by `claude-fable-5-2` |
+| XL | `claude-opus-5-5` xhigh, advised by `claude-fable-5-2` |
+
+A hash of the quest's path picks the arm, so a restart or respawn keeps it;
+`quest unblocked --json` names it as `arm`, `A` or `B`, with the A/B's
+`cohort`, `advisor-2026-11`, and puts its entry first in `models`, an advised
+entry naming its `advisor`. Arm B falls to the size's own writer when its entry
+cannot run. A quest with a `Maintainer:` decision open runs no arm, since it
+runs the next size's list, so an arm always runs at its PR's size; its `arm`
+and `cohort` are `null`. An entry with an advisor runs through
+`quest agent --advisor`, since no native sub-agent takes one. The agent that
+runs the arm's entry ends its `Implementer:` line with the arm, cohort, and advisor, as
+`Implementer: Claude Code, claude-sonnet-5-5, high effort (arm B, cohort advisor-2026-11, advisor claude-opus-5-5)`,
+so the readout never mixes this cohort's PRs with an earlier A/B's.
 
 A `/quest-iterate` stays on the PR's writer, the model its `## Models`
 record's first `Implementer:` line names, so the other model can always
@@ -1601,10 +1615,13 @@ claude	claude-opus-5-5	medium
 nearest size that lists it, the larger on a tie. A model no list names, such
 as Codex's, is an error, and the coordinator then starts the iterate on its
 size's first entry that can run. An iterate on a PR whose first
-`Implementer:` line names an arm runs that arm's entry at the PR's size instead, as `quest models S --arm B`
-prints, and records it as `(iterate, XS, arm B)`. For an arm its size no
-longer runs, which `--arm` refuses, it runs the model and effort that line
-records. `--json` prints an array of `{harness, model, effort}` objects. The
+`Implementer:` line names an arm and cohort runs that arm's entry at the PR's size instead, as
+`quest models S --arm B --cohort advisor-2026-11` prints, and records it as
+`(iterate, XS, arm B, cohort advisor-2026-11, advisor claude-opus-5-5)`. For
+an arm its size or cohort no longer runs, which `--arm` refuses, or a line
+naming no cohort, it runs the model, effort, and advisor that line records.
+Plain output adds the advisor as a fourth column for an entry that pairs one,
+and `--json` prints an array of `{harness, model, effort, advisor?}` objects. The
 iterate records the size it was given in its `Implementer:` line, as
 `Implementer: Claude Code, claude-opus-5-5, medium effort (iterate, XS)`, so
 the model check can audit the routing. `quest review` still reviews the
@@ -2078,12 +2095,15 @@ findings measure an effort step rather than the writer. Since a branch's tallies
 PR whose record holds its latest tally, by the most rounds and then the newest,
 counts them, and a record written before tallies
 counts as unreviewed. An `Implementer:` line's own size, as
-`(iterate, XS)`, counts over the PR's. The writer A/B reports by size and arm,
-with the same outcomes and every session's spend, counting a sized PR only when
-each of its `Implementer:` lines names the same arm. Each implementer also carries its
+`(iterate, XS)`, counts over the PR's, and a line naming an advisor, as
+`(advisor claude-opus-5-5)`, is its own implementer. The writer A/B reports by size, cohort, and arm,
+with the same outcomes and every session's spend, its advisor's included, counting a sized PR only when
+each of its `Implementer:` lines names the same arm, cohort, model, and
+advisor; lines that name no cohort, written before cohorts, report under `-`. Each implementer also carries its
 writing sessions' cost on the merged PRs they were found on, so cost per merged
 PR divides by those PRs, not the ones no host reported: a PR's spend on a
-model goes to its line of that model, of the same effort where both name one,
+model goes to its line of that model or the line it advises, whose tokens
+token-max reports under the advisor's own model, of the same effort where both name one,
 and spend on a model no line names, such as a sub-agent on a smaller model,
 to the line that took the most. Spend that fits several lines goes to the
 first line when an implementing session spent it and to the later ones when an
@@ -2436,7 +2456,11 @@ with the user's environment minus the coordinating session's harness variables
 and credentials (keeping `CLAUDE_CONFIG_DIR` and `CODEX_HOME`), secret-manager
 tokens, and any `quest gate` admission or priority, so it uses the CLI's stored
 login rather than the session's. `--permission-mode` is Claude Code's
-permission mode, or Codex's sandbox mode; the agent cannot prompt. Each
+permission mode, or Codex's sandbox mode; the agent cannot prompt.
+`--advisor <model>` turns on Claude Code's advisor tool with that model and
+sets `CLAUDE_CODE_ENABLE_EXPERIMENTAL_ADVISOR_TOOL=1`, without which Claude
+Code drops the tool silently on an account its rollout has not reached; Codex
+refuses it. Each
 repository's running agents are recorded in a user-only directory under
 `$XDG_RUNTIME_DIR` (or the temporary directory), which `quest agent stop --all`
 deletes after stopping them.

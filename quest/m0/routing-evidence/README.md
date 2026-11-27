@@ -181,7 +181,8 @@ three hosts' saved review rounds:
     no list names Fable, Astra, or Neon. On 2026-11-24, Fable xhigh as a
     second reviewer took $976 of $1,430 of review spend, at $82 a PR
     against Sol xhigh's $8, for 23 high findings against 44.
-  - Amended 2026-11-26 (maintainer, `/quest-plan`): [Routine advisor A/B](/quest/m0/advisor-arms.md)
+  - Amended 2026-11-26 (maintainer, `/quest-plan`): the routine advisor A/B
+    ([kixel-ai/quest#934](https://github.com/kixel-ai/quest/pull/934))
     starts a separate advisor-trial cohort across `XS`–`XL` testing Claude's
     built-in `--advisor` tool (`XS`/`S`/`M` against `sonnet(high) + advisor opus`;
     `L` against `opus(high) + advisor fable`; `XL` against `opus(xhigh) + advisor fable`),
@@ -192,6 +193,23 @@ three hosts' saved review rounds:
     cohort below).
     [Stuck-agent advisor](/quest/m0/advise.md) tracks read-only frontier
     advisor escalations separately under `role: "advising"`.
+  - Advisor-trial readout, the implementer's choices for the readout to
+    revisit: the cohort is `advisor-2026-11` (`COHORT` in
+    `src/cli/models.ts`), which every armed `Implementer:` line names, as
+    `(arm B, cohort advisor-2026-11, advisor claude-opus-5-5)`; `quest usage`
+    keys its `arms` rows by cohort, size, and arm, and the legacy XS and S
+    arms, which stopped drawing when it merged, report under cohort `null`.
+    Read the trial out as the legacy arms are, from its own rows only: start
+    one week after it merged, compute each size's sample for 0.25 first-round
+    findings per PR, and reschedule for when the arms reach it, reporting XL's
+    counts rather than waiting. Its cost needs token-max to price advisor
+    iterations, as `## Waiting` tracks; until then arm B's cost is a lower
+    bound, its rows' spend `complete` false. Leave out a PR whose first line
+    names an arm but not that arm's entry. End it, as the legacy A/B ends,
+    by deleting `ARMS` and `COHORT` with `quest models --arm` and `--cohort`,
+    the `arm` and `cohort` fields of `quest unblocked --json`, `quest agent
+    --advisor` if no table then names an advisor, and the arm notes in the
+    README, guide, and `/quest-run` and `/quest-iterate`.
   - Cost metric? ✅ Mean spend per merged PR, every session's, plus the
     spend of later PRs that name it under `## Caused by`, with a bootstrap
     95% interval, the median reported beside it (rejected: the median
@@ -268,9 +286,13 @@ Baseline from the 2026-11-11 audit, at API list price:
   replacing the DeepSeek one in `quest review`
   (the token waste epic, 2026-11-13).
 
+## Waiting
+
+- kixel-ai/token-max: `token-max sessions` prices a Claude advisor iteration, which Claude Code 2.1.330 records with no service tier, under the advisor's model, rather than leaving it unpriced (cost 0, `complete` false); until then the advisor trial's arm B cost is a lower bound. Check by exporting a session run with `claude --advisor` and confirming its advisor model's `costUsd` is nonzero and `complete` true.
+
 ## Scheduled
 
-- 2026-12-01 - legacy XS and S writer A/B cohort reaches 26 and 115 first-round PRs each (separate from [Routine advisor A/B](/quest/m0/advisor-arms.md)'s advisor-trial cohort)
+- 2026-12-01 - legacy XS and S writer A/B cohort reaches 26 and 115 first-round PRs each (separate from the advisor trial's cohort, `advisor-2026-11`)
 
 ## Related
 

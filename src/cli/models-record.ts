@@ -23,6 +23,10 @@ export interface Implementer {
 	size: string | null;
 	/** The writer A/B arm its line ends with, as `(arm B)` or `(iterate, S, arm B)`. */
 	arm: Arm | null;
+	/** The writer A/B cohort its line ends with, as `(arm B, cohort advisor-2026-11)`. */
+	cohort: string | null;
+	/** The model its advisor tool consulted, as an ID, from a note such as `advisor claude-opus-5-5`. */
+	advisor: string | null;
 }
 
 /**
@@ -96,9 +100,11 @@ function modelId(name: string, harness: string, loose = false): string | null {
 
 /**
  * The fields of an `Implementer: <harness>, <model>, <effort> effort` item, as agents write it: the model by ID or
- * display name, the harness or effort left out, the effort bare or `effort not reported`, and a size and writer A/B
- * arm among the notes of a parenthetical it ends with, as `(iterate, XS, arm B)`. Null when it names no model or has more fields; a lone
- * field reads only as a listed model's ID or display name, or as an ID.
+ * display name, the harness or effort left out, the effort bare or `effort not reported`, and a size, writer A/B
+ * arm and cohort, and advisor model among the notes of a parenthetical it ends with, as
+ * `(iterate, XS, arm B, cohort advisor-2026-11, advisor claude-opus-5-5)`. Null when it names no model, has more
+ * fields, or names an advisor that reads as no model; a lone field reads only as a listed model's ID or display name,
+ * or as an ID.
  */
 export function implementer(item: string): Implementer | null {
 	let rest = item.trim().replace(/^Implementer:\s*/, "");
@@ -107,12 +113,22 @@ export function implementer(item: string): Implementer | null {
 	const parts = rest.split(/,\s*/).map((part) => part.trim());
 	if (parts.length > 3) return null;
 	const listed = notes?.[1]!.split(/,\s*/) ?? [];
+	const labeled = (label: string) =>
+		listed
+			.find((each) => each.startsWith(`${label} `))
+			?.slice(label.length + 1)
+			.trim();
 	const size = listed.find((note) => (SIZES as readonly string[]).includes(note)) ?? null;
 	const arm = ARM_NAMES.find((name) => listed.includes(`arm ${name}`)) ?? null;
+	const cohort = labeled("cohort") || null;
+	const advising = labeled("advisor");
+	const advisor = advising === undefined ? null : modelId(advising, "Claude Code", true);
+	if (advisor === "unknown" || (advising !== undefined && advisor === null)) return null;
+	const extra = { size, arm, cohort, advisor };
 	// A lone field is a model only as a listed name or an ID, since `unknown` or another name alone may be a harness.
 	if (parts.length === 1) {
 		const id = modelId(parts[0]!, "");
-		return id !== null && id !== "unknown" ? { harness: "unknown", model: id, effort: "unknown", size, arm } : null;
+		return id !== null && id !== "unknown" ? { harness: "unknown", model: id, effort: "unknown", ...extra } : null;
 	}
 	// The model is the last field, or the one before the effort; a second field `unknown` is the effort, since a
 	// two-field line names its model.
@@ -130,5 +146,5 @@ export function implementer(item: string): Implementer | null {
 		if (!named) return null;
 		effort = named[1]!;
 	}
-	return { harness, model, effort, size, arm };
+	return { harness, model, effort, ...extra };
 }

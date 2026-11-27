@@ -55,7 +55,7 @@ Amended 2026-11-26 (maintainer, `/quest-plan`): ✅ Routine writes stay on Claud
 and routine reviews stay on Codex+Claude, while [Stuck-agent advisor](/quest/m0/advise.md)
 adds read-only `quest advise` (`gemini-4-neon` via `agy` → `gpt-6.2-astra` via
 `codex` → `claude-fable-5-2` via `claude`) for stuck agents, and
-[Routine advisor A/B](/quest/m0/advisor-arms.md) runs Claude `--advisor` writer
+the routine advisor A/B ([kixel-ai/quest#934](https://github.com/kixel-ai/quest/pull/934)) runs Claude `--advisor` writer
 A/B arms across `XS`–`XL` (rejected: `opencode` for Neon; T3-only advisor;
 skipping routine `--advisor` arms).
 

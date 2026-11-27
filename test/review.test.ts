@@ -2707,11 +2707,27 @@ test("a Models record reads its size and every implementing model", () => {
 		implementers: [
 			{
 				item: "Implementer: Claude Code, claude-opus-5-5, high effort",
-				fields: { harness: "Claude Code", model: "claude-opus-5-5", effort: "high", size: null, arm: null },
+				fields: {
+					harness: "Claude Code",
+					model: "claude-opus-5-5",
+					effort: "high",
+					size: null,
+					arm: null,
+					cohort: null,
+					advisor: null,
+				},
 			},
 			{
 				item: "Implementer: Codex, unknown, unknown effort",
-				fields: { harness: "Codex", model: "unknown", effort: "unknown", size: null, arm: null },
+				fields: {
+					harness: "Codex",
+					model: "unknown",
+					effort: "unknown",
+					size: null,
+					arm: null,
+					cohort: null,
+					advisor: null,
+				},
 			},
 		],
 	});
@@ -2730,6 +2746,8 @@ test("an Implementer line reads as agents write it", () => {
 		effort,
 		size: null,
 		arm: null,
+		cohort: null,
+		advisor: null,
 	});
 	expect(read("Claude Code, Opus 5.5, high effort")).toEqual(opus("high"));
 	expect(read("Claude Code, Claude Opus 5.5, xhigh effort")).toEqual(opus("xhigh"));
@@ -2741,6 +2759,8 @@ test("an Implementer line reads as agents write it", () => {
 		effort: "low",
 		size: null,
 		arm: null,
+		cohort: null,
+		advisor: null,
 	});
 	expect(read("claude-haiku-5-5, effort not reported")).toEqual({
 		harness: "unknown",
@@ -2748,6 +2768,8 @@ test("an Implementer line reads as agents write it", () => {
 		effort: "unknown",
 		size: null,
 		arm: null,
+		cohort: null,
+		advisor: null,
 	});
 	expect(read("Codex, GPT-6.2 Sol, medium effort (iterate, XS)")).toEqual({
 		harness: "Codex",
@@ -2755,6 +2777,8 @@ test("an Implementer line reads as agents write it", () => {
 		effort: "medium",
 		size: "XS",
 		arm: null,
+		cohort: null,
+		advisor: null,
 	});
 	// A retired model's spellings still read as its ID, as older records name it; an unlisted ID reads as written.
 	for (const name of ["GPT-6.1 Sol", "GPT 6.1  Sol", "GPT-6.1-SOL", "openai/gpt-6.1-sol"])
@@ -2779,6 +2803,32 @@ test("an Implementer line reads as agents write it", () => {
 	expect(read("Claude Code, Opus 5.5, high effort (arm A)")).toEqual({ ...opus("high"), arm: "A" });
 	// Only an arm the A/B runs reads as one.
 	expect(read("Claude Code, Opus 5.5, high effort (arm C)")).toEqual(opus("high"));
+	// A cohort and advisor read from the notes, the advisor by any spelling of a model.
+	expect(
+		read(
+			"Claude Code, claude-sonnet-5-5, high effort (iterate, M, arm B, cohort advisor-2026-11, advisor Opus 5.5)",
+		),
+	).toEqual({
+		harness: "Claude Code",
+		model: "claude-sonnet-5-5",
+		effort: "high",
+		size: "M",
+		arm: "B",
+		cohort: "advisor-2026-11",
+		advisor: "claude-opus-5-5",
+	});
+	expect(read("Claude Code, Opus 5.5, xhigh effort (advisor claude-fable-5-2)")).toEqual({
+		...opus("xhigh"),
+		advisor: "claude-fable-5-2",
+	});
+	expect(read("claude-opus-5-5 (arm A, cohort advisor-2026-11)")).toEqual({
+		...opus("unknown", "unknown"),
+		arm: "A",
+		cohort: "advisor-2026-11",
+	});
+	// An advisor that names no model leaves the line unread rather than counted as unadvised.
+	expect(read("Claude Code, Opus 5.5, high effort (advisor unknown)")).toBeNull();
+	expect(read("Claude Code, Opus 5.5, high effort (advisor Some Model)")).toBeNull();
 	expect(read("unknown, Opus 5.5, high effort")).toEqual(opus("high", "unknown"));
 	expect(read("Claude Code, Fable 5.2, medium effort")?.model).toBe("claude-fable-5-2");
 	expect(read("Codex, openai/gpt-6.2-sol, high effort")?.model).toBe("gpt-6.2-sol");
