@@ -1,7 +1,7 @@
 // quest run: picking tasks from a change, running them in their order through the gate and the Nix dev shell,
 // and collecting their reports.
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -35,8 +35,9 @@ function write(dir: string, files: Record<string, string>): void {
 }
 
 /**
- * A PATH directory with a `quest` whose gate runs its command at once and a `nix` whose `develop <flake> --command`
- * runs its command in a dev shell, each logging its arguments.
+ * A PATH directory with a `quest` whose gate runs its command at once, a `nix` whose `develop <flake> --command`
+ * runs its command in a dev shell and whose `eval` prints `$STUB_SHELL`, and a `cargo` whose `metadata` prints the
+ * file `$STUB_METADATA` names, each logging its arguments.
  */
 function stubs(): { bin: string; log: string } {
 	const bin = tempDir();
@@ -45,8 +46,22 @@ function stubs(): { bin: string; log: string } {
 	writeFileSync(join(bin, "quest"), script('[ "$1" = gate ] || exit 99\nshift\nexec "$@"'), { mode: 0o755 });
 	writeFileSync(
 		join(bin, "nix"),
-		script('[ "$1" = develop ] && [ "$3" = --command ] || exit 98\nshift 3\nIN_NIX_SHELL=impure exec "$@"'),
+		script(
+			[
+				'if [ "$1" = eval ]; then printf %s "${STUB_SHELL:-/nix/store/stub-shell.drv}"; exit 0; fi',
+				'[ "$1" = develop ] && [ "$3" = --command ] || exit 98',
+				"shift 3",
+				'IN_NIX_SHELL=impure exec "$@"',
+			].join("\n"),
+		),
 		{ mode: 0o755 },
+	);
+	writeFileSync(
+		join(bin, "cargo"),
+		script('[ "$1" = metadata ] || exit 97\necho "shell hook says hi"\ncat "$STUB_METADATA"'),
+		{
+			mode: 0o755,
+		},
 	);
 	return { bin, log };
 }
@@ -86,6 +101,8 @@ async function runIn(
 			failFast: false,
 			query: false,
 			report: undefined,
+			// The cache's own tests turn it on, with a cache directory of their own.
+			cache: false,
 			...options,
 		},
 		{
@@ -474,4 +491,225 @@ test.runIf(posix)("quest check reports a malformed quest.toml, and Nix tasks wit
 	// A source outside any checkout, as a flake's checks.quest sees the Nix store's copy, is still the repository's.
 	rmSync(join(dir, ".git"), { recursive: true });
 	expect((await check()).stderr).toContain("flake.nix's nixConfig must list https://nix.kixel.quest");
+});
+
+test.runIf(posix)("a pass whose inputs changed while the task ran is not recorded", async () => {
+	const dir = repository({
+		"flake.nix": "{}",
+		"quest.toml": '[tasks.edit]\ntier = "pr"\nrun = "echo ran; date +%N >> src/a"\npaths = ["src/"]\n',
+		"src/a": "",
+	});
+	const env = { XDG_CACHE_HOME: tempDir() };
+	const first = await runIn(dir, { all: true, cache: true }, env);
+	expect(first.stderr).toContain("quest: edit is not cached, since its inputs changed while it ran\n");
+	expect((await runIn(dir, { all: true, cache: true }, env)).stdout).toBe("edit | ran\n");
+});
+
+/** `cargo metadata` output for a workspace at `top` of crates in their own directories, each with its dependencies. */
+function metadata(
+	top: string,
+	crates: Record<string, { deps?: string[]; dev?: string[]; registry?: Record<string, string> }>,
+): string {
+	const id = (name: string) => `path+file://${top}/${name}#${name}@0.1.0`;
+	const registry = "registry+https://github.com/rust-lang/crates.io-index";
+	const packages: unknown[] = [];
+	const nodes: unknown[] = [];
+	for (const [name, spec] of Object.entries(crates)) {
+		packages.push({
+			id: id(name),
+			name,
+			version: "0.1.0",
+			source: null,
+			manifest_path: `${top}/${name}/Cargo.toml`,
+		});
+		const deps = [
+			...(spec.deps ?? []).map((dep) => ({ pkg: id(dep), dep_kinds: [{ kind: null }] })),
+			...(spec.dev ?? []).map((dep) => ({ pkg: id(dep), dep_kinds: [{ kind: "dev" }] })),
+		];
+		for (const [dep, version] of Object.entries(spec.registry ?? {})) {
+			const pkg = `${registry}#${dep}@${version}`;
+			packages.push({
+				id: pkg,
+				name: dep,
+				version,
+				source: registry,
+				manifest_path: `/registry/${dep}/Cargo.toml`,
+			});
+			nodes.push({ id: pkg, features: ["default"], deps: [] });
+			deps.push({ pkg, dep_kinds: [{ kind: null }] });
+		}
+		nodes.push({ id: id(name), features: [], deps });
+	}
+	return JSON.stringify({
+		packages,
+		workspace_members: Object.keys(crates).map(id),
+		workspace_root: top,
+		resolve: { nodes, root: null },
+	});
+}
+
+const ran = (out: { stdout: string }) => out.stdout.split("\n").filter(Boolean).sort();
+
+test.runIf(posix)("a Cargo task runs once per crate, and reruns only the crates a change reaches", async () => {
+	const dir = repository({
+		"flake.nix": "{}",
+		"Cargo.toml": '[workspace]\nmembers = ["a", "b", "c"]\n\n[workspace.dependencies]\nserde = "1"\n',
+		"a/Cargo.toml": "",
+		"a/src/lib.rs": "",
+		"b/Cargo.toml": "",
+		"b/src/lib.rs": "",
+		"c/Cargo.toml": "",
+		"README.md": "docs",
+		"quest.toml": `[tasks.test]\ntier = "pr"\nrun = 'echo "testing $QUEST_CRATE"'\ncargo = true\n`,
+	});
+	const crates = { a: {}, b: { registry: { rand: "0.8.0" } }, c: { deps: ["a"] } };
+	const file = join(tempDir(), "metadata.json");
+	writeFileSync(file, metadata(dir, crates));
+	const env = { XDG_CACHE_HOME: tempDir(), STUB_METADATA: file };
+	const go = (extra: NodeJS.ProcessEnv = {}) => runIn(dir, { all: true, cache: true }, { ...env, ...extra });
+
+	const first = await go();
+	expect(first.code, first.stderr).toBe(0);
+	expect(ran(first)).toEqual(["test:a | testing a", "test:b | testing b", "test:c | testing c"]);
+	expect(first.stderr).toContain("quest: ran test:a (0.0s)\nquest: ran test:b (0.0s)\nquest: ran test:c (0.0s)\n");
+	// Cargo runs in the dev shell, whose hook may print first.
+	expect(first.log).toContain(
+		`nix develop ${dir} --command cargo metadata --locked --all-features --format-version 1`,
+	);
+
+	// An unchanged tree takes every pass.
+	const second = await go();
+	expect(ran(second)).toEqual([]);
+	expect(second.stderr).toContain("quest: test:a passed, cached (hit)\n");
+	expect(second.stderr).toContain(
+		"quest: cached (hit) test:a\nquest: cached (hit) test:b\nquest: cached (hit) test:c\n",
+	);
+	expect(second.stderr).toContain("quest: 3 passed (3 cached)\n");
+
+	// An edit reruns its crate and the crates that depend on it, untracked files counting as they are.
+	write(dir, { "b/src/lib.rs": "fn b() {}" });
+	expect(ran(await go())).toEqual(["test:b | testing b"]);
+	write(dir, { "a/src/new.rs": "" });
+	expect(ran(await go())).toEqual(["test:a | testing a", "test:c | testing c"]);
+	// Neither a file no crate owns nor the workspace's dependency table reruns anything.
+	write(dir, {
+		"README.md": "more docs",
+		"Cargo.toml": '[workspace]\nmembers = ["a", "b", "c"]\n\n[workspace.dependencies]\nserde = "1.0.1"\n',
+	});
+	expect(ran(await go())).toEqual([]);
+	// Bumping b's registry dependency reruns b alone.
+	writeFileSync(file, metadata(dir, { ...crates, b: { registry: { rand: "0.8.1" } } }));
+	expect(ran(await go())).toEqual(["test:b | testing b"]);
+	// So does a shared test configuration outside every crate.
+	write(dir, { ".config/nextest.toml": "[profile.ci]\n" });
+	expect(ran(await go())).toHaveLength(3);
+	// Another dev shell reruns every crate.
+	expect(ran(await go({ STUB_SHELL: "/nix/store/other-shell.drv" }))).toHaveLength(3);
+});
+
+test.runIf(posix)(
+	"a pass is reused for the same inputs, except under cache = false, --no-cache, or a change to what it runs after",
+	async () => {
+		const dir = repository({
+			"flake.nix": "{}",
+			"quest.toml": [
+				'[tasks.build]\ntier = "pr"\nrun = "mkdir -p out; echo built > out/build"\npaths = ["src/"]\n',
+				`[tasks.test]\ntier = "pr"\nrun = "cat out/build; echo '<testsuites/>' > out/junit.xml"\nafter = ["build"]\npaths = ["test/"]\njunit = "out/junit.xml"\n`,
+				'[tasks.lint]\ntier = "pr"\nrun = "echo linted"\ncache = false\n',
+				task("plain", "echo plain"),
+			].join(""),
+			"src/a": "1",
+			"test/a": "1",
+			".gitignore": "out/\n",
+		});
+		const env = { XDG_CACHE_HOME: tempDir() };
+		const go = (options: Partial<RunOptions> = {}) => runIn(dir, { all: true, cache: true, ...options }, env);
+		expect(ran(await go())).toEqual(["lint  | linted", "plain | plain", "test  | built"]);
+		// build, which test runs after, lint, and the task without Nix run again; test's pass holds, with its report.
+		const report = join(tempDir(), "report");
+		const second = await go({ report });
+		expect(ran(second)).toEqual(["lint  | linted", "plain | plain"]);
+		expect(second.stderr).toContain("quest: cached (hit) test\n");
+		expect(readFileSync(join(report, "test", "junit.xml"), "utf8")).toBe("<testsuites/>\n");
+		// A change only build reads reruns test, which may read what build wrote.
+		write(dir, { "src/a": "2" });
+		expect(ran(await go())).toContain("test  | built");
+		expect(ran(await go({ cache: false }))).toContain("test  | built");
+		// Inside the repository's dev shell, which may predate a flake edit, every Nix task, the build the cached task
+		// reads included, still runs in the shell the digests name.
+		write(dir, { "src/a": "3" });
+		const inside = await runIn(
+			dir,
+			{ all: true, cache: true },
+			{ ...env, IN_NIX_SHELL: "impure", QUEST_DEV_SHELL: dir },
+		);
+		expect(ran(inside)).toContain("test  | built");
+		expect(inside.log.filter((line) => line.startsWith("nix develop")).sort()).toEqual([
+			`nix develop ${dir} --command bash -eo pipefail -c cat out/build; echo '<testsuites/>' > out/junit.xml`,
+			`nix develop ${dir} --command bash -eo pipefail -c echo linted`,
+			`nix develop ${dir} --command bash -eo pipefail -c mkdir -p out; echo built > out/build`,
+		]);
+
+		// A hit writes its recorded report where the task declares it, over whatever an earlier run left there.
+		writeFileSync(join(dir, "out", "junit.xml"), "<stale/>");
+		expect((await go()).stderr).toContain("quest: cached (hit) test\n");
+		expect(readFileSync(join(dir, "out", "junit.xml"), "utf8")).toBe("<testsuites/>\n");
+
+		// A cache another user can write is refused, since every pass in it is trusted.
+		chmodSync(join(env.XDG_CACHE_HOME, "quest", "tasks"), 0o777);
+		await expect(go()).rejects.toThrow("must belong to this user and be writable by no one else");
+	},
+);
+
+test.runIf(posix)("a crate that may build a path crate cargo metadata lists nowhere is never cached", async () => {
+	const dir = repository({
+		"flake.nix": "{}",
+		"Cargo.toml": '[workspace]\nmembers = ["a"]\n',
+		"a/Cargo.toml": "",
+		"quest.toml": `[tasks.test]\ntier = "pr"\nrun = 'echo "testing $QUEST_CRATE"'\ncargo = true\n`,
+	});
+	// a declares b, which a task's --features may enable while Cargo, building with every feature of the workspace's
+	// own crates only, resolves no b.
+	const output = JSON.parse(metadata(dir, { a: {} }));
+	output.packages[0].dependencies = [{ name: "b", kind: null, optional: true, path: `${dir}/b` }];
+	const file = join(tempDir(), "metadata.json");
+	writeFileSync(file, JSON.stringify(output));
+	const env = { XDG_CACHE_HOME: tempDir(), STUB_METADATA: file };
+	const first = await runIn(dir, { all: true, cache: true }, env);
+	expect(first.stderr).toContain(
+		"quest: test:a is not cached, since cargo metadata lists no crate at b, a path dependency it may build\n",
+	);
+	expect(ran(await runIn(dir, { all: true, cache: true }, env))).toEqual(["test:a | testing a"]);
+});
+
+test.runIf(posix)("a pass whose inputs cannot be read again is not recorded, and the run finishes", async () => {
+	const dir = repository({
+		"flake.nix": "{}",
+		// A file whose name holds a newline, which the task cache cannot hash, appears as the task runs.
+		"quest.toml": `[tasks.odd]\ntier = "pr"\nrun = '''echo ran; touch "src/$(printf 'a\\nb')"'''\npaths = ["src/"]\n`,
+		"src/a": "",
+	});
+	const env = { XDG_CACHE_HOME: tempDir() };
+	const first = await runIn(dir, { all: true, cache: true }, env);
+	expect(first.code, first.stderr).toBe(0);
+	expect(first.stderr).toContain("quest: odd is not cached, since its inputs could not be read again: cannot hash");
+	rmSync(join(dir, "src", "a\nb"));
+	expect((await runIn(dir, { all: true, cache: true }, env)).stdout).toBe("odd | ran\n");
+});
+
+test.runIf(posix)("a hit replays its reports byte for byte, whatever their encoding", async () => {
+	const dir = repository({
+		"flake.nix": "{}",
+		// A UTF-16 JUnit report, with its byte order mark.
+		"quest.toml": `[tasks.test]\ntier = "pr"\nrun = '''mkdir -p out; printf '\\377\\376<\\000a\\000/\\000>\\000' > out/junit.xml'''\njunit = "out/junit.xml"\n`,
+		".gitignore": "out/\n",
+	});
+	const env = { XDG_CACHE_HOME: tempDir() };
+	const utf16 = Buffer.from([0xff, 0xfe, ...Buffer.from("<a/>", "utf16le")]);
+	expect((await runIn(dir, { all: true, cache: true }, env)).code).toBe(0);
+	expect(readFileSync(join(dir, "out", "junit.xml"))).toEqual(utf16);
+	const report = join(tempDir(), "report");
+	expect((await runIn(dir, { all: true, cache: true, report }, env)).stderr).toContain("quest: cached (hit) test\n");
+	expect(readFileSync(join(dir, "out", "junit.xml"))).toEqual(utf16);
+	expect(readFileSync(join(report, "test", "junit.xml"))).toEqual(utf16);
 });
