@@ -1933,9 +1933,9 @@ quest or dropping a link, keeps the tier the rest of the diff earns.
 
 Every repository also offers the built-in class `quest` (`quest/**`), for a
 change that only removes or cuts plans; a class the base's `RISK.md` lists by
-the same name replaces it, scope and rule. A base with no `RISK.md` makes
-every change no path holds high `medium`, unless a built-in class's scope
-holds every changed path.
+the same name replaces it, scope and rule. `RISK.md` is optional: a base with
+none classifies a change as an empty one would, by the always-high paths, the
+built-in classes, and the classifier's own scale.
 
 Otherwise a classifier reads the diff and the base's `RISK.md`, if any, in one read-only
 turn and replies with a tier, one sentence on why, and the `## Automatic`
@@ -1963,10 +1963,10 @@ defaults reuses it, and `--new` classifies again. The record names it after the 
 - Risk file: 3f9c2a7b1e04
 ```
 
-`Classified:` names `the always-high paths` or `default` when no model set the
-tier. A `- Class:` line follows when the classifier named a class, then
+`Classified:` names `the always-high paths` when no model set the tier. A
+`- Class:` line follows when the classifier named a class, then
 `- Risk file:`, the base's `RISK.md` the tier was set against by its blob's
-first 12 characters, or `none`.
+first 12 characters, or `none`, which a record without the line names too.
 
 A low head with no finding left to settle runs no local reviewer, unless
 `--harness`, `--model`, or `--effort` names one: the record names the head in

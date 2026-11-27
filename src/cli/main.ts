@@ -1838,8 +1838,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"RISK.md names, read from the base's tip so a change cannot lower its own tier. Each item of that list is a " +
 				"backticked path from the repository's root, where `*` and `?` stay within one segment and a whole `**` " +
 				"segment spans any number, then ` - ` and why its change is high; a RISK.md that cannot be read is a usage " +
-				"error. A base with no RISK.md makes every other change medium unless a built-in class's scope holds every " +
-				"changed path. Otherwise a classifier, " +
+				"error. Otherwise a classifier, " +
 				`${classifiers}, reads the diff and the base's RISK.md, if any, which says what is customer-facing, ` +
 				"in one read-only turn and replies with a tier and its reason. One that is logged out, whose login the " +
 				"API rejects, or at its usage limit passes the turn to the next; when none is left, the run fails on the " +
@@ -1861,7 +1860,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"tier grows riskier than the one overridden, other than to the override's own tier.\n\n" +
 				"Prints the size and where it came from, base, and head, its risk tier and reason, the classifier's tier, " +
 				"an overridden line with the tier the maintainer overrode, " +
-				"how it was set (model, paths, or default), and reason, a class line naming the class, and for a model a classifier line (harness, model, " +
+				"how it was set (model or paths), and reason, a class line naming the class, and for a model a classifier line (harness, model, " +
 				"effort, session) and its usage line, a skipped line (harness, model, effort, reason) for each reviewer passed over, then for each reviewer its harness, model, and " +
 				"effort, followed by second for the second reviewer, session, round, an " +
 				"unchanged line for a repeated round, or an accepted line for a round --accept repeats, a usage line per turn (input tokens, the " +

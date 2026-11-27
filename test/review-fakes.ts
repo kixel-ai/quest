@@ -1,10 +1,11 @@
 // The fake Codex and Claude Code CLIs and the fixture clone the review tests run them in.
 import { execFileSync } from "node:child_process";
-import { chmodSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test, vi } from "vitest";
 
 import { type Output, main } from "../src/cli/main";
+import { sessionFile } from "../src/cli/review";
 import { tempDir } from "./fixture";
 
 /** The fake CLIs are shebang scripts found on a POSIX PATH, which Windows cannot run. */
@@ -366,6 +367,20 @@ export function setup(host: "CLAUDECODE" | "CODEX_THREAD_ID" | null = "CLAUDECOD
 			.sort()
 			.map((name) => JSON.parse(readFileSync(join(path, name), "utf8")));
 	return { repo, bin, calls: () => read(log) };
+}
+
+/**
+ * Classify `s`'s head with the fakes as they stand and keep only that classification, which a later round on the same
+ * head reuses, so a test of how the reviewers' CLIs run sees no classifier turn and no earlier round.
+ */
+export async function classified(s: Setup): Promise<void> {
+	const first = await quest("--root", s.repo, "review");
+	if (first.code !== 0) throw new Error(first.stderr);
+	const path = sessionFile(join(s.repo, ".git"), "feature");
+	const { branch, classified } = JSON.parse(readFileSync(path, "utf8"));
+	writeFileSync(path, JSON.stringify({ branch, sessions: [], tallies: [], classified }));
+	const log = join(s.bin, "..", "calls");
+	for (const name of readdirSync(log)) rmSync(join(log, name));
 }
 
 /** The effort a Codex or Claude Code turn runs at, or null for a status check. */
