@@ -125,10 +125,11 @@ Read the root instructions with the new line in place:
 If the repository's CI runs checks on pull requests, recommend moving them into
 the merge queue's build, then dropping that trigger: agents run the checks
 locally before pushing, and the merge queue is the only synchronous gate. Check
-first that the queue's build runs every check the base requires and that each
-required context still reports. With GitHub's merge queue, keep a job that
-builds nothing and only reports a context the queue requires before admitting a
-PR; a repository landing through the watcher's own queue needs no such job.
+first that the queue's build runs every check the base requires, and that each
+context the base requires still reports on the PR's head, since GitHub's merge
+queue and the watcher's own queue both wait for those before building: keep a
+job that builds nothing and only reports such a context, and verify that a
+picked PR enters the queue before relying on it.
 Change workflows only if the user agrees.
 
 Agents push their quest branches to the repository itself, and GitHub gives
