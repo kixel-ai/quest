@@ -10,7 +10,7 @@ import { join } from "node:path";
 
 import { type Finding, MANIFEST_FILE, branchQuest, check, parse } from "../core";
 import { discoveryEnv } from "./git";
-import { manifestProblems } from "./run";
+import { type RootFile, manifestProblems } from "./run";
 import { committedSources, hasQuests } from "./tree";
 
 /**
@@ -180,12 +180,16 @@ function treeCheck(dir: string, commit: string): Keyed[] {
 			{ lines: source.text.split(/\r\n?|\n/), entries: docs[index].entries },
 		]),
 	);
-	// The repository's quest.toml, as `quest check` reads it from the working tree.
-	const blob = (path: string): string | null => {
-		if (git(dir, ["cat-file", "-e", `${commit}:${path}`]).status !== 0) return null;
+	// The repository's quest.toml and flake.nix, as `quest check` reads them from the working tree.
+	const blob = (path: string): RootFile => {
+		const entry = git(dir, ["ls-tree", commit, "--", path]);
+		if (entry.status !== 0) throw new Error(`git ls-tree ${commit} -- ${path}: ${entry.stderr.trim()}`);
+		if (entry.stdout === "") return null;
+		// A link, as `quest check` reads it, is the link and not its target.
+		if (entry.stdout.startsWith("120000 ")) return { kind: "link" };
 		const read = git(dir, ["cat-file", "blob", `${commit}:${path}`]);
 		if (read.status !== 0) throw new Error(`git cat-file ${commit}:${path}: ${read.stderr.trim()}`);
-		return read.stdout;
+		return { kind: "file", text: read.stdout };
 	};
 	const manifest = manifestProblems(blob).map((problem): Keyed => {
 		const [, line, message] = /^[^:]+(?::(\d+):\d+)?: (.*)$/s.exec(problem)!;

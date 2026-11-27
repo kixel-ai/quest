@@ -184,13 +184,21 @@ test("after names a declared task of the same or an earlier tier that runs where
 	]);
 });
 
-test("no two tasks declare the same report file", () => {
-	expect(
+test("two tasks declare the same report file, without case, only when one runs after the other", () => {
+	const reports = (after: string) =>
 		problems(
 			`[tasks.a]\ntier = "pr"\nrun = "x"\njunit = "out.xml"\n` +
-				`[tasks.b]\ntier = "pr"\nrun = "x"\nmetrics = "out.xml"\n`,
-		),
-	).toEqual(["quest.toml: [tasks.b] metrics: `a` also writes `out.xml`"]);
+				`[tasks.b]\ntier = "pr"\nrun = "x"\nafter = ${after}\n` +
+				`[tasks.c]\ntier = "pr"\nrun = "x"\nafter = ["b"]\nmetrics = "OUT.xml"\n`,
+		);
+	expect(reports("[]")).toEqual([
+		"quest.toml: [tasks.c] metrics: `a` may run at the same time and also writes `out.xml`",
+	]);
+	// c runs after b, which runs after a.
+	expect(reports('["a"]')).toEqual([]);
+	expect(problems(`[tasks.a]\ntier = "pr"\nrun = "x"\njunit = "out"\nmetrics = "out"\n`)).toEqual([
+		"quest.toml: [tasks.a] metrics: is also the task's junit report",
+	]);
 });
 
 const tasks = `

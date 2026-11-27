@@ -276,18 +276,41 @@ function readTask(read: Reader, name: string, table: unknown): ManifestTask | nu
 	return task;
 }
 
-/** Note each report path two tasks declare, since tasks that run at once would collect each other's file. */
+/**
+ * Note each report path two tasks declare that may run at once, which would collect each other's file: neither runs
+ * after the other. Paths compare without case, as macOS and Windows checkouts name files.
+ */
 function checkReports(read: Reader, tasks: ManifestTask[]): void {
-	const owners = new Map<string, string>();
+	const byName = new Map(tasks.map((task) => [task.name, task]));
+	/** Every task `task` runs after, directly or not. */
+	const before = (task: ManifestTask, seen = new Set<string>()): Set<string> => {
+		for (const name of task.after) {
+			const first = byName.get(name);
+			if (first === undefined || seen.has(name)) continue;
+			seen.add(name);
+			before(first, seen);
+		}
+		return seen;
+	};
+	const owners = new Map<string, { task: ManifestTask; path: string }[]>();
 	for (const task of tasks)
 		for (const [key, path] of [
 			["junit", task.junit],
 			["metrics", task.metrics],
 		] as const) {
 			if (path === null) continue;
-			const owner = owners.get(path);
-			if (owner === undefined) owners.set(path, task.name);
-			else read.problem(`[tasks.${task.name}] ${key}`, `\`${owner}\` also writes \`${path}\``);
+			const others = owners.get(path.toLowerCase()) ?? [];
+			const clash = others.find(
+				(other) =>
+					other.task === task || (!before(task).has(other.task.name) && !before(other.task).has(task.name)),
+			);
+			if (clash?.task === task) read.problem(`[tasks.${task.name}] ${key}`, "is also the task's junit report");
+			else if (clash !== undefined)
+				read.problem(
+					`[tasks.${task.name}] ${key}`,
+					`\`${clash.task.name}\` may run at the same time and also writes \`${clash.path}\``,
+				);
+			owners.set(path.toLowerCase(), [...others, { task, path }]);
 		}
 }
 

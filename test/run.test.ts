@@ -1,7 +1,7 @@
 // quest run: picking tasks from a change, running them in their order through the gate and the Nix dev shell,
 // and collecting their reports.
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -154,8 +154,14 @@ test.runIf(posix)("fail-fast stops the running tasks and starts no more", async 
 // Under an enclosing gate, whose group owner signals its whole process group, a task's own gate passes on no
 // signal it receives: fail-fast must still reach the command. The real gate, admitted at once.
 test.runIf(posix)("fail-fast stops a task's command under an enclosing gate", async () => {
+	// broken fails only once slow's gate runs its command, which the gate's signal handling then covers.
+	const fifo = join(tempDir(), "started");
+	execFileSync("mkfifo", [fifo]);
 	const dir = repository({
-		"quest.toml": [task("slow", "exec sleep 300"), task("broken", "exit 1")].join(""),
+		"quest.toml": [
+			task("slow", `echo > ${quote(fifo)}; exec sleep 300`),
+			task("broken", `read -r _ < ${quote(fifo)}; exit 1`),
+		].join(""),
 	});
 	const out = await runIn(
 		dir,
@@ -170,18 +176,20 @@ test.runIf(posix)("tasks get the tier, the merge base, and their environment ins
 	const dir = repository({
 		"quest.toml": task(
 			"env",
-			'echo "$QUEST_TIER $QUEST_BASE $FOO $PATH"',
-			`environment = { FOO = "it's", PATH = "/elsewhere" }`,
+			'echo "$QUEST_TIER $QUEST_BASE $FOO $PATH $(greet)"',
+			`environment = { FOO = "it's", PATH = "/elsewhere", BASH_ENV = "setup.sh" }`,
 		),
+		// The task's Bash reads it as it starts.
+		"setup.sh": "greet() { echo hello; }\n",
 	});
 	const base = execFileSync("git", ["-C", dir, "rev-parse", "HEAD"], { encoding: "utf8" }).trim();
 	write(dir, { "new.txt": "untracked" });
 	// The gate still finds its programs on the caller's PATH; the task sees its own.
 	const out = await runIn(dir, { tier: "gate" });
-	expect(out.stdout).toBe(`env | gate ${base} it's /elsewhere\n`);
+	expect(out.stdout).toBe(`env | gate ${base} it's /elsewhere hello\n`);
 	expect(out.stderr).toContain(`quest: base origin/main (${base.slice(0, 12)}), 1 changed paths\n`);
 	// --all sets no base, even one a run around this one set.
-	expect((await runIn(dir, { all: true }, { QUEST_BASE: "outer" })).stdout).toBe("env | pr  it's /elsewhere\n");
+	expect((await runIn(dir, { all: true }, { QUEST_BASE: "outer" })).stdout).toBe("env | pr  it's /elsewhere hello\n");
 });
 
 test.runIf(posix)("the base is --base, else QUEST_LAND_BASE, else origin and [repo] merge", async () => {
@@ -286,7 +294,7 @@ test.runIf(posix)("a task's reports are checked and copied, and a stale one neve
 		"out/lazy.xml": "<stale/>",
 	});
 	// A report directory already in use, such as the checkout itself, is refused before anything runs.
-	await expect(runIn(dir, { all: true, report: dir })).rejects.toThrow(`--report ${dir} must be a new or empty`);
+	await expect(runIn(dir, { all: true, report: dir })).rejects.toThrow(`--report ${dir} already exists`);
 	const report = join(tempDir(), "report");
 	const out = await runIn(dir, { all: true, report });
 	expect(out.code).toBe(1);
@@ -337,7 +345,7 @@ test.runIf(posix)("quest run runs a fixture repository's quest.toml end to end",
 	expect(readFileSync(join(report, "test", "junit.xml"), "utf8")).toBe("<testsuites/>\n");
 });
 
-test("quest check reports a malformed quest.toml, and Nix tasks without flake.nix", async () => {
+test.runIf(posix)("quest check reports a malformed quest.toml, and Nix tasks without flake.nix", async () => {
 	const dir = tempDir();
 	mkdirSync(join(dir, ".git"));
 	write(dir, { "AGENTS.md": `${REFERENCE_LINE}\n`, "quest/README.md": "# Quests\n\n## Goal\n\nWork.\n" });
@@ -358,4 +366,12 @@ test("quest check reports a malformed quest.toml, and Nix tasks without flake.ni
 	});
 	write(dir, { "flake.nix": "{}" });
 	expect((await check()).code).toBe(0);
+	// A commit holds a symlink as its target's path, so quest merge could not read one; neither does quest check.
+	write(dir, { "ci/tasks.toml": '[tasks.a]\ntier = "pr"\nrun = "x"\n' });
+	rmSync(join(dir, "quest.toml"));
+	symlinkSync("ci/tasks.toml", join(dir, "quest.toml"));
+	expect(await check()).toEqual({
+		code: 1,
+		stderr: "quest: quest.toml: must be a regular file, not a symlink\n",
+	});
 });

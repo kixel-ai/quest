@@ -1622,9 +1622,10 @@ it prints is prefixed with its name.
 A failed task skips the tasks that run after it, while independent ones finish;
 `--fail-fast` stops them too. A task that passes must write each `junit` and
 `metrics` file it declares, and `metrics` must hold a JSON object; a file left
-from an earlier run is deleted before the task starts, and no two tasks may
-declare the same file. `--report <dir>` copies them to `<dir>/<task>/junit.xml`
-and `<dir>/<task>/metrics.json` for upload; `<dir>` must be new or empty.
+from an earlier run is deleted before the task starts, and two tasks may declare
+the same file, compared without case, only when one runs after the other.
+`quest.toml` must be a regular file, not a symlink. `--report <dir>` copies them to `<dir>/<task>/junit.xml`
+and `<dir>/<task>/metrics.json` for upload; `<dir>` must not exist yet.
 
 `--query` prints the picked tasks and runs nothing, so a CI runner can plan
 its legs before installing a toolchain. Its JSON is one entry per task and

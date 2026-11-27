@@ -2,8 +2,8 @@
 // `quest gate` and, for a Nix task, in the repository's dev shell, with every task whose `after` tasks passed
 // running at once.
 import { type ChildProcess, spawn } from "node:child_process";
-import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { copyFileSync, existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, rmSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 
 import {
 	type Host,
@@ -54,12 +54,38 @@ export function nativeOs(platform: NodeJS.Platform = process.platform): Host {
 	throw new Error(`quest run supports linux, macos, and windows, not ${platform}`);
 }
 
-/** The repository's manifest, failing with every problem it has. */
+/**
+ * A file at a repository's root as the checks read it, from a working tree or a commit alike: its text, a symlink,
+ * or null when there is none.
+ */
+export type RootFile = { kind: "file"; text: string } | { kind: "link" } | null;
+
+/** How to read a file at the root of the working tree at `top`, without following a symlink. */
+export function workingTree(top: string): (path: string) => RootFile {
+	return (path) => {
+		const file = join(top, path);
+		const stat = lstatSync(file, { throwIfNoEntry: false });
+		if (stat === undefined) return null;
+		if (stat.isSymbolicLink()) return { kind: "link" };
+		return { kind: "file", text: readFileSync(file, "utf8") };
+	};
+}
+
+/** The manifest `read` finds, and every problem with it; a symlinked one, which a commit holds only as its target's path, is one. */
+function parseRoot(read: (path: string) => RootFile): { manifest: Manifest | null; problems: string[] } | null {
+	const file = read(MANIFEST_FILE);
+	if (file === null) return null;
+	if (file.kind === "link")
+		return { manifest: null, problems: [`${MANIFEST_FILE}: must be a regular file, not a symlink`] };
+	const parsed = parseQuestManifest(file.text);
+	return parsed.ok ? { manifest: parsed.manifest, problems: [] } : { manifest: null, problems: parsed.problems };
+}
+
+/** The working tree's manifest, failing with every problem it has. */
 function readManifest(top: string): Manifest {
-	const path = join(top, MANIFEST_FILE);
-	if (!existsSync(path)) throw new Error(`no ${MANIFEST_FILE} at ${top}`);
-	const parsed = parseQuestManifest(readFileSync(path, "utf8"));
-	if (!parsed.ok) throw new Error(parsed.problems.join("\n"));
+	const parsed = parseRoot(workingTree(top));
+	if (parsed === null) throw new Error(`no ${MANIFEST_FILE} at ${top}`);
+	if (parsed.manifest === null) throw new Error(parsed.problems.join("\n"));
 	return parsed.manifest;
 }
 
@@ -70,15 +96,11 @@ function flakeProblem(flake: boolean, tasks: ManifestTask[]): string | null {
 	return `${MANIFEST_FILE}: ${nix.join(", ")} run in the Nix dev shell, but there is no flake.nix; set nix = false on a task that runs without Nix`;
 }
 
-/**
- * What `quest check` reports about a repository's quest.toml, if it has one, given how to read a file at its root,
- * null for a file it lacks.
- */
-export function manifestProblems(read: (path: string) => string | null): string[] {
-	const text = read(MANIFEST_FILE);
-	if (text === null) return [];
-	const parsed = parseQuestManifest(text);
-	if (!parsed.ok) return parsed.problems;
+/** What `quest check` and `quest merge` report about a repository's quest.toml, if it has one, read with `read`. */
+export function manifestProblems(read: (path: string) => RootFile): string[] {
+	const parsed = parseRoot(read);
+	if (parsed === null) return [];
+	if (parsed.manifest === null) return parsed.problems;
 	const problem = flakeProblem(read("flake.nix") !== null, parsed.manifest.tasks);
 	return problem === null ? [] : [problem];
 }
@@ -163,7 +185,7 @@ export async function run(options: RunOptions, io: RunIO): Promise<number> {
 	}
 
 	// Every program is found before any task starts, so a missing one fails the run rather than one task.
-	const problem = flakeProblem(existsSync(join(top, "flake.nix")), tasks);
+	const problem = flakeProblem(workingTree(top)("flake.nix") !== null, tasks);
 	if (problem !== null) throw new Error(problem);
 	// This repository's dev shell, already entered, runs Nix tasks directly with no evaluation.
 	const enter = tasks.some((task) => task.nix) && !inDevShell(io.env, top);
@@ -172,12 +194,17 @@ export async function run(options: RunOptions, io: RunIO): Promise<number> {
 		bash: requireProgram("bash", io.env),
 		nix: enter ? requireProgram("nix", io.env) : null,
 	};
-	// A fresh directory, so no earlier run's report passes for this one's and nothing else in it is touched.
+	// A directory this run creates, so no other run's or earlier run's report passes for this one's, and nothing
+	// else is touched; creating it is atomic, so two runs cannot share it.
 	const report = options.report === undefined ? null : resolve(options.report);
 	if (report !== null) {
-		if (existsSync(report) && readdirSync(report).length > 0)
-			throw new Error(`--report ${options.report} must be a new or empty directory`);
-		mkdirSync(report, { recursive: true });
+		mkdirSync(dirname(report), { recursive: true });
+		try {
+			mkdirSync(report);
+		} catch (error) {
+			if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+			throw new Error(`--report ${options.report} already exists; name a new directory`);
+		}
 	}
 	const env: NodeJS.ProcessEnv = { ...io.env, QUEST_TIER: options.tier };
 	if (base !== null) env.QUEST_BASE = base;
@@ -191,8 +218,12 @@ export async function run(options: RunOptions, io: RunIO): Promise<number> {
 
 	const width = Math.max(...tasks.map((task) => task.name.length));
 	const command = (task: ManifestTask): string[] => {
-		// The environment applies inside the dev shell, so the gate and Nix keep the caller's PATH.
-		const script = ["-eo", "pipefail", "-c", exports(task.environment) + task.run];
+		// The environment applies inside the dev shell, so the gate and Nix keep the caller's PATH, and before the
+		// task's own Bash starts, so it reads a BASH_ENV the task sets: a first Bash exports it and runs the second.
+		const script =
+			Object.keys(task.environment).length === 0
+				? ["-eo", "pipefail", "-c", task.run]
+				: ["-c", `${exports(task.environment)}exec "$BASH" -eo pipefail -c "$0"`, task.run];
 		if (task.nix && programs.nix !== null) return [programs.nix, "develop", top, "--command", "bash", ...script];
 		return [programs.bash, ...script];
 	};
@@ -213,7 +244,10 @@ export async function run(options: RunOptions, io: RunIO): Promise<number> {
 				}
 		}
 	};
-	// As a group owner, the first signal goes to every group and a second kills them.
+	// As a group owner, the first signal goes to every group and a second kills them. A nested gate leaves that kill
+	// to this run, since its command is in its group; an outermost one owns its command in a group or scope of its
+	// own, which it kills at its own second signal, so it gets the signal again instead.
+	const nested = io.env.QUEST_GATE_ADMITTED === "1";
 	const unfollow = follow(
 		cancel,
 		() => {
@@ -221,7 +255,7 @@ export async function run(options: RunOptions, io: RunIO): Promise<number> {
 			if (detached) signalAll(requested(cancel.signal));
 		},
 		() => {
-			if (detached) signalAll("SIGKILL");
+			if (detached) signalAll(nested ? "SIGKILL" : requested(cancel.signal));
 		},
 	);
 	try {

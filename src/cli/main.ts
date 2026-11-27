@@ -65,7 +65,7 @@ import {
 } from "./forge";
 import { PENDING_MS } from "./admission";
 import { gate } from "./gate";
-import { manifestProblems, nativeOs, run as runTasks } from "./run";
+import { manifestProblems, nativeOs, run as runTasks, workingTree } from "./run";
 import { gitHubDependencies, pullRequest, readRemote, remoteRepository, requireRemote } from "./github";
 import { type GitHubDependencies, mergedHolds } from "../github/client";
 import { GitHubForge } from "../github/forge";
@@ -292,7 +292,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"must be on PATH.\n\n" +
 				"A task that passes must write the junit and metrics files it declares, and metrics must hold a JSON " +
 				"object; --report copies them to <dir>/<task>/junit.xml and <dir>/<task>/metrics.json, where <dir> " +
-				"must be new or empty. A failed task skips the tasks after it, and with --fail-fast also stops every " +
+				"must not exist yet. A failed task skips the tasks after it, and with --fail-fast also stops every " +
 				"running task. Exits 1 when a task fails.\n\n" +
 				"--query prints the picked tasks as JSON for a CI runner's matrix and runs nothing: " +
 				"{include: [{task, os, tier, after, nix, capabilities, caches}]}, one entry per task and operating " +
@@ -412,12 +412,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 			const repository = [
 				...(options.stubs && own ? stubFindings(root()) : []),
 				...(own && existsSync(risk) ? parseRiskFile(readFileSync(risk, "utf8")).problems : []),
-				...(own
-					? manifestProblems((path) => {
-							const file = join(root(), path);
-							return existsSync(file) ? readFileSync(file, "utf8") : null;
-						})
-					: []),
+				...(own ? manifestProblems(workingTree(root())) : []),
 			];
 			if (findings.length === 0 && repository.length === 0) {
 				const count = collect(root()).length;
