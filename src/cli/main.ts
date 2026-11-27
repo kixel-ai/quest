@@ -97,7 +97,7 @@ import {
 	nextStep,
 	roundLines,
 } from "./review";
-import { type Recorded, pullModels, recordRounds } from "./review-record";
+import { type Recorded, pullModels, recordRounds, requirePosting } from "./review-record";
 import {
 	BASH_MAX_TIMEOUT_MS,
 	CLAUDE_HOOKS,
@@ -117,7 +117,7 @@ import { installSender, uninstallSender } from "./service";
 import { heal, init, stubFindings, uninstall } from "./setup";
 import { describe, notUpstream, releaseQuest, startQuest } from "./start";
 import { login, logout } from "./login";
-import { KIXEL_QUEST_URL, kixelUrl, requireToken, tokensPath } from "./tokens";
+import { KIXEL_QUEST_URL, kixelUrl, tokensPath } from "./tokens";
 import { CONTEXT, GUIDE, GUIDE_SECTIONS, SKILLS, guideSections, sectionHeading, skill } from "./skills";
 import { CONTEXT_PACKS, contextPack, contextPacks } from "./context";
 import { type Terminal, Theme } from "./theme";
@@ -1883,19 +1883,19 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"one object: `rounds`, one per reviewer, `tallies`, every reviewer's findings across the branch's rounds, `risk`, the head's tier with its classification, `skipped`, each reviewer passed over with its reason, `accepted`, the maintainer's reason under --accept or null, `record`, and `next`.\n\n" +
 				"When quest runs from the source of the checkout it judges (bun src/cli/bin.ts, or a build there), the round still runs but posts nothing and sets no status: it prints `record skipped: ...` " +
 				"telling you to rerun with an installed quest, and `next stop` where the round found nothing to fix, so a PR can exercise its own review changes without marking itself reviewed.\n\n" +
-				"Every run that records needs this host signed in with quest login, checked before any reviewer runs. " +
+				"Every run that records needs this host signed in with quest login, and Kixel Quest serving the base's repository, both checked before any reviewer runs. " +
 				"After each run it finds the branch's open PR into the base: the one from the repository the base's remote pushes to, else the only one from another repository whose pushed head `HEAD` contains. " +
-				"On GitHub it first sets the `quest review` commit status on the head, on the GitHub token, so push the head first: success once no finding is open, else failure, " +
+				"On GitHub it first sets the `quest review` commit status on the head, on the GitHub token, so push the head first: failure while a finding is open, else pending, set to success once the post below is stored, " +
 				"its description the head's risk tier, class, and risk file and whether a local reviewer ran, its target the diff from the head's merge base with the PR's base, which the land gate counts only from a user who can push. " +
 				"For a token that cannot push, it sets none and prints `; status skipped: <why>` after the record's URL; a status GitHub refuses otherwise prints `; status refused: <why>` and exits 1. " +
 				"It then posts the run to Kixel Quest (POST /reviews, QUEST_KIXEL_URL naming another), and prints `record <url>`: the head, the base and merge base, the risk tier and reason, the classifier's tier, class, and who set it, " +
 				"and each reviewer's round, its seat (pick or second), session, round number, score and rationale, and findings with their file, line, and severity, " +
-				"with the outcome of each finding of an earlier posted round that this run fixed or refuted. Notes are not posted. A low head no reviewer ran on posts its classification alone. " +
+				"with the outcome of each finding of an earlier posted round that this run fixed or refuted, sent to the PR that round was posted on, and kept for the next run on the head when the post fails. Notes are not posted. A low head no reviewer ran on posts its classification alone. " +
 				"Kixel Quest counts a run toward merging only when its poster can push, and quest status reads the review from there; the PR body is left as is. " +
 				"--accept <reason> runs no reviewer or classifier: it repeats each reviewer's last round of the same head, base, and merge base, failing as a usage error " +
 				"when none classified and reviewed it, when a high head lacks its second reviewer's round, or when no finding is open; sets the status to success " +
 				"described `findings accepted`; then posts the rounds as accepted, their findings deferred with the reason, " +
-				"and prints `next done`. When no status is set, as for a token that cannot push, it posts nothing, prints `next stop`, and exits 1. With no " +
+				"and prints `next done`. When no status is set, as for a token that cannot push, or the post fails, it prints `next stop` and exits 1. With no " +
 				"such PR, several from other repositories that `HEAD` contains, or a remote off GitHub and Kixel Quest, it prints `record skipped: <why>` and changes nothing.\n\n" +
 				"Exits 0 once the round finishes, whatever it found, 2 for invalid arguments " +
 				"or a checkout that cannot be reviewed, 3 when no eligible reviewer could run, each not installed, logged " +
@@ -2010,7 +2010,9 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				// Decided once, before the round: a PR's own build never records its own review, whatever it finds.
 				const own = runsFromCheckout(root(), out.entry);
 				// Every run that records posts to Kixel Quest, so a host that cannot post spends no reviewer's round.
-				if (!own) requireToken(kixelUrl(process.env), process.env);
+				const posting = own
+					? undefined
+					: (dir: string, base: string) => requirePosting(dir, base, { ...forgeDependencies(), ...github });
 				const run = review(
 					{
 						...options,
@@ -2025,6 +2027,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 					{
 						env: process.env,
 						models: (dir, base, branch) => pullModels(dir, base, branch, github),
+						posting,
 						queue: (session) => started.push(session),
 					},
 				);
@@ -2053,7 +2056,9 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 								: nextStep(rounds)
 							: attested
 								? "next done: the maintainer accepted the findings left open on this head"
-								: "next stop: an acceptance counts only once a maintainer's token sets the quest review status on the pushed head";
+								: failure !== undefined
+									? "next stop: the acceptance was not recorded; fix what the error names, then accept again"
+									: "next stop: an acceptance counts only once a maintainer's token sets the quest review status on the pushed head";
 						if (options.json)
 							print(
 								JSON.stringify({

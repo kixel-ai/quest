@@ -1208,12 +1208,19 @@ describe("merge --land of a high head", () => {
 		review(pull, OLD, "high");
 		expect(await refused(land_(pull))).toContain("is high");
 		pull.diffs = { [OLD]: "diff", [HEAD]: "diff" };
-		// A failed round on the head itself since outweighs the earlier pass.
-		pull.statuses[HEAD] = { ...pull.statuses[OLD]!, state: "FAILURE", description: "Risk high: findings open" };
+		// A writer's failed round on the head itself since outweighs the earlier pass.
+		review(pull, HEAD, "high");
+		const failed = { ...pull.statuses[HEAD]!, state: "FAILURE", description: "Risk high: findings open" };
+		pull.statuses[HEAD] = failed;
 		expect(await refused(land_(pull))).toContain("is high");
+		// Anyone else's status on it says nothing, failed or bound to another diff.
+		pull.statuses[HEAD] = { ...failed, creator: { __typename: "Bot", login: "helper" } };
+		await land_(pull);
+		pull.statuses[HEAD] = { ...failed, targetUrl: pull.statuses[OLD]!.targetUrl };
+		await land_(pull);
 		delete pull.statuses[HEAD];
 		await land_(pull);
-		expect(pull.writes).toEqual([`enablePullRequestAutoMerge ${HEAD} MERGE`]);
+		expect(pull.writes).toEqual(Array(3).fill(`enablePullRequestAutoMerge ${HEAD} MERGE`));
 	});
 
 	test("refuses a head an earlier commit's status rates high", async () => {

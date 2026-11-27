@@ -1339,6 +1339,9 @@ fakes("a change to the applicable instructions starts a new session that weighs 
  * `upstream/widget`, whose root holds the quest tree, and the PRs are upstream's. Returns the PR bodies
  * each PATCH wrote.
  */
+/** What a run on GitHub alone prints, since `onGitHub` keeps the reads of a repository Kixel Quest serves there. */
+const OVERRIDDEN = `quest: QUEST_FORGE=github spends your GitHub quota on reads Kixel Quest (${KIXEL}) may serve; set it only to rerun a command Kixel Quest failed\n`;
+
 /** An open PR from `feature` into `main`, from `acme/widget` unless `head` names another repository. */
 type FakePull = { number: number; body: string | null; head?: string; sha?: string };
 function onGitHub(
@@ -1368,12 +1371,13 @@ function onGitHub(
 		ssh_url: `git@github.com:${login}/widget.git`,
 	});
 	vi.stubEnv("GH_TOKEN", "token");
+	vi.stubEnv("QUEST_FORGE", "github");
 	vi.stubGlobal("fetch", async (input: URL, init?: RequestInit) => {
 		const url = new URL(input);
 		if (url.origin === KIXEL) {
 			expect(new Headers(init?.headers).get("authorization")).toBe("Bearer secret");
-			// It serves this person no repository, so reads go to GitHub.
-			if (url.pathname === "/forge") return json({ login: "agent", repositories: [] });
+			// It serves the repository, whose reads QUEST_FORGE keeps on GitHub.
+			if (url.pathname === "/forge") return json({ login: "agent", repositories: [`${owner}/widget`] });
 			if (url.pathname === "/reviews" && init?.method === "POST") {
 				const upload = parseReviews(JSON.parse(String(init.body)));
 				writes.posts.push(upload);
@@ -1437,7 +1441,7 @@ fakes(
 		const writes = onGitHub(s.repo, [pull]);
 		try {
 			const first = await quest("--root", s.repo, "review");
-			expect(first.stderr).toBe("");
+			expect(first.stderr).toBe(OVERRIDDEN);
 			expect(first.code).toBe(0);
 			expect(first.stdout).toContain("record https://github.com/acme/widget/pull/7\n");
 			const head = git(s.repo, "rev-parse", "HEAD");
@@ -2377,15 +2381,16 @@ fakes(
 			expect(writes.posts[0]!.outcomes).toEqual([]);
 			// Named by its blob's first 12 characters, so the land gate can tell when the base's file changes.
 			const file = git(s.repo, "rev-parse", "origin/main:RISK.md").slice(0, 12);
-			// Its status attests the tier and class, which the land gate reads.
+			// Its status attests the tier and class, which the land gate reads, and passes only once the post is stored.
+			const attested = {
+				sha: head,
+				context: "quest review",
+				description: `Risk low, class constants, risk file ${file}: passed with no local reviewer`,
+				target_url: `https://github.com/acme/widget/compare/${git(s.repo, "merge-base", "origin/main", head)}...${head}`,
+			};
 			expect(writes.statuses).toEqual([
-				{
-					sha: head,
-					state: "success",
-					context: "quest review",
-					description: `Risk low, class constants, risk file ${file}: passed with no local reviewer`,
-					target_url: `https://github.com/acme/widget/compare/${git(s.repo, "merge-base", "origin/main", head)}...${head}`,
-				},
+				{ ...attested, state: "pending" },
+				{ ...attested, state: "success" },
 			]);
 
 			// The maintainer holds it high: both of its size's reviewers review it.
@@ -2548,7 +2553,7 @@ fakes("a review from a subdirectory of a fork records on the upstream PR", async
 	const writes = onGitHub(s.repo, [pull], true);
 	try {
 		const result = await quest("--root", join(s.repo, "src"), "review");
-		expect(result.stderr).toBe("");
+		expect(result.stderr).toBe(OVERRIDDEN);
 		expect(result.stdout).toContain("record https://github.com/upstream/widget/pull/11\n");
 		expect(writes.posts.at(-1)!.runs[0]).toMatchObject({ repository: "upstream/widget", number: 11 });
 	} finally {
@@ -2703,7 +2708,7 @@ fakes("the PR's Models record sizes the review and names its latest writer", asy
 	try {
 		// Sol reviews it at L's effort, whoever wrote it.
 		const wrote = await quest("--root", s.repo, "review");
-		expect(wrote.stderr).toBe("");
+		expect(wrote.stderr).toBe(OVERRIDDEN);
 		expect(wrote.stdout).toMatch(/^size L ## Models\n[\s\S]*\nreviewer codex gpt-6.2-sol xhigh\n/);
 
 		// Flags override the record.
@@ -2997,6 +3002,86 @@ fakes("a post Kixel Quest refuses fails the command after printing the round", a
 		);
 		// The status went first, so the failed head is attested as such.
 		expect(writes.statuses).toMatchObject([{ state: "failure" }]);
+		// A passing run's status waits pending for its post, so a refused post leaves no pass standing.
+		const accepted = await quest("--root", s.repo, "review", "--accept", "Fine.");
+		expect(accepted.code).toBe(1);
+		expect(accepted.stdout).toContain("\nnext stop: the acceptance was not recorded;");
+		expect(writes.statuses).toMatchObject([{ state: "failure" }, { state: "pending" }]);
+	} finally {
+		vi.unstubAllGlobals();
+	}
+});
+
+fakes(
+	"the outcomes a failed post settled reach Kixel Quest with the round's repeat, on the PR that holds them",
+	async () => {
+		const s = setup();
+		const pulls = [{ number: 7, body: "" }];
+		const writes = onGitHub(s.repo, pulls);
+		try {
+			expect((await quest("--root", s.repo, "review")).code).toBe(0);
+			expect(writes.posts).toHaveLength(1);
+			write(s.repo, "src/lib.ts", "export const x = 4;\n");
+			git(s.repo, "commit", "-qam", "fix");
+			write(s.repo, ".tmp/responses.md", "1. Fixed at src/lib.ts:1.\n");
+			vi.stubEnv(
+				"FAKE_REPLY",
+				JSON.stringify({ score: 9, rationale: "Fixed.", recommendation: null, findings: [] }),
+			);
+			const github = globalThis.fetch;
+			vi.stubGlobal("fetch", async (input: URL, init?: RequestInit) =>
+				new URL(input).pathname === "/reviews"
+					? new Response('{"error":"Try later."}', { status: 503 })
+					: github(input, init),
+			);
+			const failed = await quest("--root", s.repo, "review", "--responses", join(s.repo, ".tmp", "responses.md"));
+			expect(failed.code).toBe(1);
+			vi.stubGlobal("fetch", github);
+			const calls = s.calls().length;
+			// The PR was replaced since the first round was posted, so the outcome still goes to the one holding it.
+			pulls[0]!.number = 8;
+			const repeated = await quest("--root", s.repo, "review");
+			expect(repeated.code, repeated.stderr).toBe(0);
+			expect(s.calls()).toHaveLength(calls);
+			expect(writes.posts).toHaveLength(2);
+			expect(writes.posts[1]!.runs).toMatchObject([{ number: 8, outcome: "passed", rounds: [{ round: 2 }] }]);
+			expect(writes.posts[1]!.outcomes).toEqual([
+				{
+					repository: "acme/widget",
+					number: 7,
+					harness: "codex",
+					session: "thread-1",
+					round: 1,
+					finding: 1,
+					outcome: "fixed",
+					reason: "Checked against the head.",
+				},
+			]);
+			expect(writes.statuses.at(-1)).toMatchObject({ state: "success" });
+			// Once posted, a further repeat settles nothing again.
+			expect((await quest("--root", s.repo, "review")).code).toBe(0);
+			expect(writes.posts[2]!.outcomes).toEqual([]);
+		} finally {
+			vi.unstubAllEnvs();
+			vi.unstubAllGlobals();
+		}
+	},
+);
+
+fakes("a repository Kixel Quest does not serve runs no reviewer, since it would store no round", async () => {
+	const s = setup();
+	onGitHub(s.repo, [{ number: 7, body: "" }]);
+	const github = globalThis.fetch;
+	vi.stubGlobal("fetch", async (input: URL, init?: RequestInit) =>
+		new URL(input).pathname === "/forge"
+			? new Response(JSON.stringify({ login: "agent", repositories: [] }))
+			: github(input, init),
+	);
+	try {
+		const result = await quest("--root", s.repo, "review");
+		expect(result.code).toBe(1);
+		expect(result.stderr).toContain(`${KIXEL} does not serve acme/widget, so it would store no review of it`);
+		expect(s.calls()).toEqual([]);
 	} finally {
 		vi.unstubAllGlobals();
 	}
@@ -3052,6 +3137,11 @@ test("the verdict is checked field by field, settling each earlier finding once"
 	expect(() => verdict({ structured: { ...scored, findings: [{ ...FINDING, line: 0 }] } }, 0)).toThrow(
 		"does not match",
 	);
+	// Kixel Quest stores each finding by its path and title, so neither may be blank.
+	for (const blank of [{ file: "" }, { title: " " }])
+		expect(() => verdict({ structured: { ...scored, findings: [{ ...FINDING, ...blank }] } }, 0)).toThrow(
+			"does not match",
+		);
 	expect(() => verdict({ text: '{"verdict":"approve"}' }, 0)).toThrow("no findings list");
 	for (const score of [-1, 11, 7.5, "7", undefined]) {
 		expect(() => verdict({ structured: { ...scored, score, findings: [] } }, 0)).toThrow("no score from 0 to 10");

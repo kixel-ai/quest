@@ -1649,12 +1649,8 @@ saved, never text in the diff or a reply: a CLI that is not installed, logged
 out, or has its login rejected, or sent to a gateway with no credential,
 passes over every model of that CLI, and a
 model at its usage limit passes over only itself. The run prints a `skipped`
-line for each reviewer it passed over, and the record names it in its
-header:
-
-```markdown
-- Skipped: Codex, gpt-6.2-sol, high effort: usage limit, resets 2026-11-18T03:00:00Z
-```
+line for each reviewer it passed over, such as
+`skipped codex gpt-6.2-sol high usage limit, resets 2026-11-18T03:00:00Z`.
 
 The new reviewer settles the open findings of the one it replaces. Only when every eligible reviewer is out does the run fail,
 exiting 3 with each one's error. A reviewer `--harness`, `--model`, or
@@ -1815,14 +1811,17 @@ branch's rounds, `risk`, the head's tier with its classification, `skipped`,
 `next`.
 
 Every run that records needs the host signed in to Kixel Quest with
-[`quest login`](#read-through-kixel-quest), checked before any reviewer runs.
+[`quest login`](#read-through-kixel-quest), and Kixel Quest serving the base's
+repository, since it stores no post for one it does not: both are checked
+before any reviewer runs.
 After each run, `quest review` finds the open PR from the branch into the base,
 among the upstream's PRs: the one from the repository the base's remote pushes
 to, else the only one from another repository whose pushed head the
 checked-out `HEAD` contains, as in a maintainer's checkout of a contributor's
 fork PR. On GitHub it first sets the `quest review` commit status on the head,
 on the GitHub token (`GH_TOKEN`, `GITHUB_TOKEN`, or `gh auth token`), so push
-the head first: `success` once no finding is open, else `failure`, described
+the head first: `failure` while a finding is open, else `pending`, set to
+`success` only once the post below is stored, described
 by the head's risk tier, class, and risk file and whether a local reviewer
 ran, as `Risk low, class test, risk file 3f9c2a7b1e04: passed with no local
 reviewer`, or `findings accepted` after `--accept`, its target the diff from
@@ -1840,10 +1839,12 @@ second reviewer), session, round number, score and rationale, and findings,
 each with its file, line, severity, and title. Notes are not posted. Beside the
 run go the outcomes of the findings an earlier posted round raised that this
 one fixed or refuted, each with its reason, named by that round's session and
-number and the finding's place in it. A low head no reviewer ran on posts its
-classification alone. A round whose post failed, or that an older `quest`
-recorded in the PR body, was never stored, so the next run sends no outcome
-for its findings. Kixel Quest counts a run toward merging only when its poster
+number and the finding's place in it, and sent to the PR that round was posted
+on, even after a replacement PR took the branch. A low head no reviewer ran on
+posts its classification alone. A round whose post failed, or that an older
+`quest` recorded in the PR body, was never stored, so the next run sends no
+outcome for its findings; the outcomes a failed post carried are kept, and
+the next run on the same head, which repeats its round, sends them. Kixel Quest counts a run toward merging only when its poster
 can push, so a contributor's own runs are recorded but a maintainer's review
 decides, and `quest status` reads the review from there; the PR body is left
 as written. With no such PR, or a remote off GitHub and Kixel Quest, it posts
@@ -2134,8 +2135,9 @@ latest upload, since one sender sends a session's uploads in order. The type is
   it, with its sub-agents, once one opens: with the next session it sends from
   that repository, since only then does it read the repository's PRs. It
   forgets the session once the harness prunes its transcript.
-- `role` is classifying when a PR's `## Review` record names it as the
-  [risk classifier](#risk-tiers), reviewing when it names it as a reviewer or
+- `role` is classifying when `quest review` ran it as the
+  [risk classifier](#risk-tiers) or an earlier PR's `## Review` record names it
+  so, reviewing when it ran it as a reviewer, such a record names it so, or
   Codex marks it a review, else the one the first quest skill it ran gives: planning
   (`/quest-plan`, `/quest-recurring`, `/quest-import`,
   `/quest-grill`, `/quest-delete`, `/quest-export`), implementing

@@ -106,12 +106,12 @@ interface ReviewStatus {
 
 /**
  * Why `sha`, the head of `pr` about to land, must wait for a new `quest review` round, or null when it may land.
- * A head lands whatever its tier once a writer's passing `quest review` status covers it: one on the head, or on the
- * newest commit of the PR to carry a passing one when its diff is the head's and no round on the head has failed
- * since, classified against the base's current risk file, so any push after the last review that changes the diff,
- * whoever made it, and any change to the base's risk file since, waits for a new one. Otherwise it waits when it is
- * high: when a `quest review` status on any of the PR's commits rates it high, or when its diff from its merge base
- * with the base touches a path the base's risk file holds high.
+ * The newest `quest review` status a writer set on a commit of the PR whose diff is the head's decides it: the head
+ * lands whatever its tier when that status passed, classified against the base's current risk file, so a round that
+ * failed outweighs an earlier pass of the same diff, and any push after the last review that changes the diff, whoever
+ * made it, and any change to the base's risk file since, waits for a new one. Otherwise it waits when it is high: when
+ * a `quest review` status on any of the PR's commits rates it high, or when its diff from its merge base with the base
+ * touches a path the base's risk file holds high.
  */
 export async function unreviewedHigh(
 	github: GitHubReader,
@@ -121,17 +121,18 @@ export async function unreviewedHigh(
 	const head = sha.toLowerCase();
 	const risk = await baseRisk(github, pr);
 	const statuses = await reviewStatuses(github, pr);
-	const own = statuses.find((each) => each.oid === head);
-	const passing = (each: ReviewStatus) => each.status.state === "SUCCESS";
-	// A round that failed on the head outweighs an earlier pass of the same diff.
-	const covering = own === undefined ? statuses.find(passing) : passing(own) ? own : undefined;
-	if (covering !== undefined) {
-		const attested = await attestedStatus(github, pr, covering.oid, covering.status);
-		const covers =
-			typeof attested !== "string" &&
-			attested.riskFile === riskFileId(risk?.blob ?? null) &&
-			(covering.oid === head || (await sameDiff(github, pr, covering.oid, head)));
-		if (covers) return null;
+	let diff: Promise<string | null> | undefined;
+	for (const each of statuses) {
+		if (each.oid !== head) {
+			diff ??= baseDiff(github, pr, head);
+			const own = await diff;
+			if (own === null || (await baseDiff(github, pr, each.oid)) !== own) continue;
+		}
+		// Only a writer's status, bound to the diff it reviewed, says anything about the head.
+		const bound = await boundStatus(github, pr, each.oid, each.status);
+		if (typeof bound === "string") continue;
+		if (each.status.state === "SUCCESS" && bound.riskFile === riskFileId(risk?.blob ?? null)) return null;
+		break;
 	}
 	const high = statusHigh(statuses) ?? (await pathHigh(github, pr, head, risk?.text ?? null));
 	return high === null ? null : `${sha} is high, since ${high}, and no quest review status covers it`;
@@ -183,23 +184,13 @@ async function baseRisk(
 	return { text: blob.text, blob: string(blob.oid) };
 }
 
-/** Whether `a` and `b` have the same diff from their merge bases with the base. One GitHub cannot diff has none. */
-async function sameDiff(
-	github: GitHubReader,
-	pr: PullRequest & { base: string },
-	a: string,
-	b: string,
-): Promise<boolean> {
-	const diffs: string[] = [];
-	for (const sha of [a, b]) {
-		const response = await github.request(`${repositoryPath(pr)}/compare/${encodeURIComponent(pr.base)}...${sha}`, {
-			accept: "application/vnd.github.diff",
-			allow: [404, 406, 422],
-		});
-		if (!response.ok) return false;
-		diffs.push(await response.text());
-	}
-	return diffs[0] === diffs[1];
+/** `sha`'s diff from its merge base with the base, or null for one GitHub cannot diff. */
+async function baseDiff(github: GitHubReader, pr: PullRequest & { base: string }, sha: string): Promise<string | null> {
+	const response = await github.request(`${repositoryPath(pr)}/compare/${encodeURIComponent(pr.base)}...${sha}`, {
+		accept: "application/vnd.github.diff",
+		allow: [404, 406, 422],
+	});
+	return response.ok ? await response.text() : null;
 }
 
 /**
@@ -270,6 +261,14 @@ async function attestedOutcome(
 	return { localReview: attested.outcome !== "passed with no local reviewer" };
 }
 
+/** What a `quest review` status attests: the head's risk, and the run's outcome. */
+interface Attested {
+	tier: string;
+	class: string | null;
+	riskFile: string | null;
+	outcome: Outcome;
+}
+
 /**
  * The risk and outcome a writer's passing `quest review` status on `sha` attests for its diff from the merge base with
  * the PR's base, or why it attests nothing.
@@ -279,10 +278,23 @@ async function attestedStatus(
 	pr: PullRequest & { base: string },
 	sha: string,
 	status: ObjectValue,
-): Promise<{ tier: string; class: string | null; riskFile: string | null; outcome: Outcome } | string> {
-	const { state, description, targetUrl, creator } = status;
-	if (state !== "SUCCESS")
-		return `the ${REVIEW_CONTEXT} status on ${sha} is ${String(state).toLowerCase()}, not success`;
+): Promise<Attested | string> {
+	if (status.state !== "SUCCESS")
+		return `the ${REVIEW_CONTEXT} status on ${sha} is ${String(status.state).toLowerCase()}, not success`;
+	return boundStatus(github, pr, sha, status);
+}
+
+/**
+ * What a writer's `quest review` status on `sha`, in any state, attests for its diff from the merge base with the PR's
+ * base, or why it attests nothing.
+ */
+async function boundStatus(
+	github: GitHubReader,
+	pr: PullRequest & { base: string },
+	sha: string,
+	status: ObjectValue,
+): Promise<Attested | string> {
+	const { description, targetUrl, creator } = status;
 	if (creator == null) return `the account that set the ${REVIEW_CONTEXT} status on ${sha} is gone`;
 	const { __typename: kind, login } = object(creator);
 	const name = String(login);
