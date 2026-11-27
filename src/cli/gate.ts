@@ -136,7 +136,7 @@ export interface Precedence {
 export const COMMAND_MEMORY = 4 * 2 ** 30;
 
 /** Usable memory: physical RAM, or a smaller cgroup/container limit. */
-function usableMemory(uid?: number): number {
+export function usableMemory(uid?: number): number {
 	if (process.platform === "linux") return linuxMemory("/proc", "/sys/fs/cgroup", uid).total;
 	const constrained = process.constrainedMemory?.() ?? 0;
 	return constrained > 0 ? Math.min(totalmem(), constrained) : totalmem();
