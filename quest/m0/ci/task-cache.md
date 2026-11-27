@@ -22,7 +22,3 @@ Implementation notes:
 - Print a clear summary line (`cached (hit) <task>` vs `ran <task> (<duration>)`) and report hit counts in task telemetry.
 
 Tests: fixture multi-crate Cargo workspace test verifying (1) initial trusted run populates digests for crates A and B, (2) editing crate B skips crate A's tests and runs only crate B, (3) changing the `devShell` store path invalidates both, (4) bumping an unrelated dependency in crate B does not invalidate crate A, (5) `cache = false` and `--no-cache` always execute, and (6) untrusted runs read hits without uploading.
-
-## Required
-
-- [quest.toml manifest and quest run](/quest/m0/ci/manifest.md) - provides the task execution engine and manifest fields

@@ -1548,6 +1548,100 @@ Windows refuses the variable, since it cannot refuse a symlink atomically.
 The agent's own processes write the file, so a record is only as trustworthy
 as the agent.
 
+## Run CI tasks from quest.toml
+
+A repository declares its CI, caching, and release tasks in a root
+`quest.toml`, and `quest run` runs the ones a change affects, in place of a
+dispatch script of its own. Interactive development recipes stay in the
+`justfile`.
+
+```toml
+[repo]
+merge = "main"                    # the branch PRs merge into; main unless set
+release = "release"               # the branch release PRs merge into, if any
+cache = ["devShells.default"]     # flake outputs `quest cache push` publishes
+invalidate_all = ["flake.lock"]   # a change here runs every task
+
+[tasks.build]
+tier = "pr"                       # pr, gate, nightly, release-gate, or release
+run = "cargo build --locked"      # a Bash script, run from the repository root
+paths = ["rs/", "Cargo.*"]        # run when a change touches one; any change when unset
+
+[tasks.test]
+tier = "gate"
+run = "cargo nextest run --profile ci"
+after = ["build"]                 # starts once build passes, and pulls it in
+paths = ["rs/"]
+exclude = ["rs/**/*.md"]          # never selects the task
+inputs = ["test/vectors/"]        # read outside paths, so selects it too
+caches = ["mbx"]                  # shared build caches a runner provisions
+os = ["linux", "macos"]           # default: linux and macos, or all three with nix = false
+capabilities = ["kvm"]            # what a dispatcher routes the task's host on
+environment = { RUST_BACKTRACE = "1" }
+cache = true                      # whether a passing result may be reused (default)
+junit = "target/nextest/ci/junit.xml"
+
+[tasks.windows]
+tier = "nightly"
+run = "cargo build --target x86_64-pc-windows-msvc"
+nix = false                       # runs on the host's own tools
+os = ["windows"]
+```
+
+```sh
+quest run                                 # this host's pr tasks the branch affects
+quest run --tier gate --fail-fast         # the merge gate
+quest run --tier nightly --os macos --all # every nightly task for macOS
+quest run --only test                     # one task, whatever its tier
+quest run --tier gate --query --os linux --os macos   # a runner's matrix
+```
+
+`quest run` diffs the working tree, untracked files included, against the
+merge base of `HEAD` and a base ref: `--base`, else `$QUEST_LAND_BASE`, else
+`origin/` and `[repo] merge`. A task runs when a changed path matches one of
+its `paths` or `inputs`, written as [`RISK.md`'s patterns](#risk-tiers) are,
+and none of its `exclude` patterns. A change to `quest.toml` itself, or to a
+path `invalidate_all` matches, runs every task of the tier. `--all` skips the
+diff. A run of `pr`, `gate`, `nightly`, or `release-gate` also runs the tiers
+before it, so the gate repeats the PR's checks and a nightly on macOS runs the
+Linux gate's tests there; a `release` run runs only `release` tasks, which
+publish.
+
+Each task runs through [`quest gate`](#gate-cpu-heavy-commands), so independent
+tasks start together and wait only for the host's room. A task that sets
+`nix = false` runs on the host's own tools; every other task needs the
+repository's `flake.nix`, a regular file, and runs in its dev shell: directly when `quest run`
+is already inside it, with no Nix evaluation, and through `nix develop
+--command` otherwise. The dev shell says it is the repository's by setting
+`QUEST_DEV_SHELL` to the repository's root, as `quest.lib.mkFlake` will; a
+shell without it, such as another repository's, gets `nix develop` all the
+same. Each task gets `QUEST_TIER`, `QUEST_BASE` (the merge base, unless
+`--all`), and its `environment`, exported inside the dev shell, and every line
+it prints is prefixed with its name.
+
+A failed task skips the tasks that run after it, while independent ones finish;
+`--fail-fast` stops them too. A task that passes must write each `junit` and
+`metrics` file it declares, and `metrics` must hold a JSON object; a file left
+from an earlier run is deleted before the task starts, and two tasks may declare
+the same file, compared without case, only when one runs after the other.
+`quest.toml` must be a regular file, not a symlink. `--report <dir>` copies them to `<dir>/<task>/junit.xml`
+and `<dir>/<task>/metrics.json` for upload; `<dir>` must not exist yet.
+
+`--query` prints the picked tasks and runs nothing, so a CI runner can plan
+its legs before installing a toolchain. Its JSON is one entry per task and
+operating system, under `include` for a GitHub Actions matrix:
+
+```json
+{"include":[{"task":"test","os":"linux","tier":"gate","after":["build"],"nix":true,"capabilities":["kvm"],"caches":["mbx"]}]}
+```
+
+`quest check` validates `quest.toml` beside the quest tree: every key and
+value, that each `after` names a task of the same or an earlier tier that runs
+on every OS the task does, without a cycle, and that Nix tasks have a
+regular `flake.nix`. `quest/core` exports the parser, `parseQuestManifest`, with no
+Node or Nix dependency, so a service such as Kixel Quest can validate a
+manifest straight from a git tree.
+
 ## Route work by size
 
 `quest` ranks the harnesses, models, and efforts that write work of each size,

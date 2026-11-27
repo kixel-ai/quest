@@ -26,5 +26,4 @@ Tests: `actionlint` and `zizmor --offline` pass on all shipped actions and workf
 
 ## Required
 
-- [quest.toml manifest and quest run](/quest/m0/ci/manifest.md) - provides `quest run --tier` invoked by the reusable workflows
 - [quest.lib.mkFlake and quest cache push](/quest/m0/ci/nix-lib.md) - establishes the `nix.kixel.quest` `nixConfig` trusted by `setup-nix`
