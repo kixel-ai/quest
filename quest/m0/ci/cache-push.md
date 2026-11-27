@@ -28,7 +28,7 @@ Tests: against a local Worker and a mocked S3 store, a push from a `main` OIDC t
 
 ## Waiting
 
-- kixel-ai/kixel.quest: its nix-cache quest (`quest/m0/nix-cache.md`) deploys the exchange, the presigned uploads, `.narinfo` signing, and the in-place refresh of reused paths at `kixel.quest`. Check that the file is gone from that repository's tree.
+- kixel-ai/kixel.quest: its nix-cache quest (`quest/m0/nix-cache.md`) deploys the exchange, the presigned uploads, `.narinfo` signing, and the in-place refresh of reused paths at `kixel.quest`. Check that the file is gone from that repository's tree and that the deployed Worker answers the refresh request: this client uploads no NAR for a reused path, so it cannot ship before the refresh does, or a reused path past the Worker's recency window fails to sign.
 
 ## Related
 
