@@ -14,7 +14,3 @@ Tests: a posted run carries the risk file it was classified against.
 ## Waiting
 
 - kixel-ai/kixel.quest: its `quest/m0/posted-run-risk-file.md` quest accepts and checks `riskFile` on posted runs, and is deployed. Check that the file is gone from that repository's tree.
-
-## Required
-
-- [Review posts](/quest/m0/telemetry/review-posts.md) - posts review runs to Kixel Quest at all

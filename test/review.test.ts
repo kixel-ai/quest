@@ -13,7 +13,7 @@ import { basename, dirname, join } from "node:path";
 import { afterEach, expect, test, vi } from "vitest";
 
 import { REVIEWERS, weaker } from "../src/cli/models";
-import { type Class, DEFAULT_CLASSES, REFERENCE_LINE, recordedRisk } from "../src/core";
+import { type Class, DEFAULT_CLASSES, REFERENCE_LINE, type ReviewUpload, parseReviews } from "../src/core";
 import {
 	type Finding,
 	type Round,
@@ -40,7 +40,6 @@ import {
 	verdict,
 } from "../src/cli/review";
 import { runsFromCheckout, runsFromHead } from "../src/cli/own-build";
-import { withReview } from "../src/cli/review-record";
 import { implementer, recorded, sameModel } from "../src/cli/models-record";
 import { tempDir } from "./fixture";
 import { writeTokens } from "./kixel-fakes";
@@ -48,6 +47,7 @@ import {
 	CLAUDE_LOGGED_OUT,
 	CODEX_LOGGED_OUT,
 	FINDING,
+	KIXEL,
 	type Call,
 	at,
 	classified,
@@ -1363,6 +1363,9 @@ fakes("a change to the applicable instructions starts a new session that weighs 
  * `upstream/widget`, whose root holds the quest tree, and the PRs are upstream's. Returns the PR bodies
  * each PATCH wrote.
  */
+/** What a run on GitHub alone prints, since `onGitHub` keeps the reads of a repository Kixel Quest serves there. */
+const OVERRIDDEN = `quest: QUEST_FORGE=github spends your GitHub quota on reads Kixel Quest (${KIXEL}) may serve; set it only to rerun a command Kixel Quest failed\n`;
+
 /** An open PR from `feature` into `main`, from `acme/widget` unless `head` names another repository. */
 type FakePull = { number: number; body: string | null; head?: string; sha?: string };
 function onGitHub(
@@ -1371,6 +1374,7 @@ function onGitHub(
 	fork = false,
 ): { body: string }[] & {
 	statuses: { sha: string; state: string; context: string; description: string; target_url: string }[];
+	posts: ReviewUpload[];
 } {
 	const local = git(repo, "remote", "get-url", "origin");
 	git(repo, "remote", "set-url", "origin", "https://github.com/acme/widget.git");
@@ -1378,6 +1382,7 @@ function onGitHub(
 	const owner = fork ? "upstream" : "acme";
 	const writes = Object.assign([] as { body: string }[], {
 		statuses: [] as { sha: string; state: string; context: string; description: string; target_url: string }[],
+		posts: [] as ReviewUpload[],
 	});
 	const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status });
 	const info = (login: string, parent: string | null) => ({
@@ -1390,8 +1395,19 @@ function onGitHub(
 		ssh_url: `git@github.com:${login}/widget.git`,
 	});
 	vi.stubEnv("GH_TOKEN", "token");
+	vi.stubEnv("QUEST_FORGE", "github");
 	vi.stubGlobal("fetch", async (input: URL, init?: RequestInit) => {
 		const url = new URL(input);
+		if (url.origin === KIXEL) {
+			expect(new Headers(init?.headers).get("authorization")).toBe("Bearer secret");
+			// It serves the repository, whose reads QUEST_FORGE keeps on GitHub.
+			if (url.pathname === "/forge") return json({ login: "agent", repositories: [`${owner}/widget`] });
+			if (url.pathname === "/reviews" && init?.method === "POST") {
+				const upload = parseReviews(JSON.parse(String(init.body)));
+				writes.posts.push(upload);
+				return json({ runs: upload.runs.length, outcomes: upload.outcomes.length });
+			}
+		}
 		if (url.pathname === "/repos/acme/widget") return json(info("acme", fork ? "upstream" : null));
 		if (url.pathname === "/repos/upstream/widget") return json(info("upstream", null));
 		if (url.pathname.startsWith("/repos/upstream/widget/contents/"))
@@ -1433,167 +1449,203 @@ function onGitHub(
 	return writes;
 }
 
-fakes("each round rewrites the Review section of the branch's open PR, keeping the author's prose", async () => {
-	const s = setup();
-	const pull = {
-		number: 7,
-		body: [
+fakes(
+	"each run posts its rounds and the outcomes it settled to Kixel Quest, leaving the PR body as written",
+	async () => {
+		const s = setup();
+		const body = [
 			"Fixes averaging.",
-			"",
-			"## Review",
-			"",
-			"Hand-written record of an older head.",
 			"",
 			"## Models",
 			"",
 			"- Size: S",
 			"- Implementer: Claude Code, claude-opus-5-5, high effort",
-		].join("\r\n"),
-	};
-	const writes = onGitHub(s.repo, [pull]);
-	try {
-		const first = await quest("--root", s.repo, "review");
-		expect(first.stderr).toBe("");
-		expect(first.code).toBe(0);
-		expect(first.stdout).toContain("record https://github.com/acme/widget/pull/7\n");
-		const head = git(s.repo, "rev-parse", "HEAD");
-		const base = git(s.repo, "rev-parse", "origin/main");
-		const [classifier] = at(s.calls(), "low");
-		const session = classifier!.argv[classifier!.argv.indexOf("--session-id") + 1];
-		// The record's head carries a status saying it has not passed, which `quest status` reads before the body.
-		expect(writes.statuses).toEqual([
-			{
-				sha: head,
-				state: "failure",
-				context: "quest review",
-				description: "Risk medium, risk file none: findings open",
-				target_url: `https://github.com/acme/widget/compare/${base}...${head}`,
-			},
-		]);
-		expect(pull.body).toBe(
-			[
-				// The author's lines keep their line endings.
-				"Fixes averaging.\r\n\r\n## Review\r",
-				"",
-				"Rewritten by `quest review` after each round.",
-				"",
-				// The land gate counts a full SHA, which a head with an open finding does not earn.
-				`- Head: ${head.slice(0, 12)}, named in full once no reviewer reports a finding`,
-				`- Base: origin/main at ${base.slice(0, 12)}`,
-				"- Risk: medium, `It changes what the library returns.`",
-				`- Classified: medium by Claude Code, claude-haiku-5-5, low effort, session \`${session}\``,
-				"- Risk file: none",
-				"",
-				// The body's `## Models` record sizes the PR S.
-				"- Reviewer: Codex, gpt-6.2-sol, medium effort",
-				"- Session: `thread-1`, round 1",
-				"- Score: 8/10, `Lands once the off-by-one is fixed.`",
-				"- Rounds: 1; first round 1 (high 1); findings 1 (high 1): fixed 0, refuted 0, open 1",
-				"- Findings, open until the next round settles them:",
-				"  - High, `src/lib.ts:2`: `Off by one`",
-				"",
-				"## Models\r\n\r\n- Size: S\r\n- Implementer: Claude Code, claude-opus-5-5, high effort",
-			].join("\n"),
-		);
+		].join("\r\n");
+		const pull = { number: 7, body };
+		const writes = onGitHub(s.repo, [pull]);
+		try {
+			const first = await quest("--root", s.repo, "review");
+			expect(first.stderr).toBe(OVERRIDDEN);
+			expect(first.code).toBe(0);
+			expect(first.stdout).toContain("record https://github.com/acme/widget/pull/7\n");
+			const head = git(s.repo, "rev-parse", "HEAD");
+			const base = git(s.repo, "rev-parse", "origin/main");
+			// Haiku classifies each head in a session of its own, which the run names.
+			const classifierNow = () => {
+				const classifier = at(s.calls(), "low").at(-1)!;
+				const session = classifier.argv[classifier.argv.indexOf("--session-id") + 1];
+				return { harness: "claude", model: "claude-haiku-5-5", effort: "low", session };
+			};
+			// The head carries a status saying it has not passed, which the land gate reads.
+			expect(writes.statuses).toEqual([
+				{
+					sha: head,
+					state: "failure",
+					context: "quest review",
+					description: "Risk medium, risk file none: findings open",
+					target_url: `https://github.com/acme/widget/compare/${base}...${head}`,
+				},
+			]);
+			const run = (classifier = classifierNow()) => ({
+				repository: "acme/widget",
+				number: 7,
+				base: { ref: "main", sha: base },
+				risk: {
+					tier: "medium",
+					reason: "It changes what the library returns.",
+					classified: "medium",
+					class: null,
+					classifier,
+				},
+			});
+			// The body's `## Models` record sizes the PR S.
+			const seat = {
+				harness: "codex",
+				model: "gpt-6.2-sol",
+				effort: "medium",
+				seat: "pick",
+				session: "thread-1",
+			};
+			expect(writes.posts).toEqual([
+				{
+					runs: [
+						{
+							...run(),
+							head,
+							outcome: "findings open",
+							rounds: [
+								{
+									...seat,
+									round: 1,
+									score: 8,
+									rationale: "Lands once the off-by-one is fixed.",
+									findings: [
+										{ path: "src/lib.ts", start: 2, end: 2, severity: "high", title: "Off by one" },
+									],
+								},
+							],
+						},
+					],
+					outcomes: [],
+				},
+			]);
 
-		// The next round settles that finding from the responses; model text never mentions, links, or names a full SHA.
-		write(s.repo, "src/lib.ts", "export const x = 4;\n");
-		git(s.repo, "commit", "-qam", "fix");
-		write(s.repo, ".tmp/responses.md", "1. Fixed at src/lib.ts:1.\n");
-		vi.stubEnv("FAKE_DISPOSITION", "refuted");
-		const title = `Ping @someone about \`${base}\` in #12`;
-		vi.stubEnv(
-			"FAKE_REPLY",
-			JSON.stringify({
+			// The next round settles that finding from the responses, naming it by the round that raised it.
+			write(s.repo, "src/lib.ts", "export const x = 4;\n");
+			git(s.repo, "commit", "-qam", "fix");
+			write(s.repo, ".tmp/responses.md", "1. Fixed at src/lib.ts:1.\n");
+			vi.stubEnv("FAKE_DISPOSITION", "refuted");
+			vi.stubEnv(
+				"FAKE_REPLY",
+				JSON.stringify({
+					score: 9,
+					rationale: "Fixes #3.",
+					recommendation: null,
+					findings: [{ ...FINDING, line: null, title: "Still off" }],
+				}),
+			);
+			const second = await quest(
+				"--root",
+				s.repo,
+				"review",
+				"--responses",
+				join(s.repo, ".tmp", "responses.md"),
+				"--json",
+			);
+			expect(second.code, second.stderr).toBe(0);
+			expect(JSON.parse(second.stdout).record).toEqual({ url: "https://github.com/acme/widget/pull/7" });
+			const kept = git(s.repo, "rev-parse", "HEAD");
+			const secondRound = {
+				...seat,
+				round: 2,
 				score: 9,
 				rationale: "Fixes #3.",
-				recommendation: "Ask @someone to derive it\nin the query.",
-				findings: [{ ...FINDING, line: null, title }],
-			}),
-		);
-		const second = await quest(
-			"--root",
-			s.repo,
-			"review",
-			"--responses",
-			join(s.repo, ".tmp", "responses.md"),
-			"--json",
-		);
-		expect(second.code).toBe(0);
-		expect(JSON.parse(second.stdout).record).toEqual({ url: "https://github.com/acme/widget/pull/7" });
-		const record = pull.body.split("## Review\r\n\n")[1]!.split("\n\n## Models")[0];
-		expect(record).toContain(`- Head: ${git(s.repo, "rev-parse", "HEAD").slice(0, 12)},`);
-		expect(record).toContain("- Session: `thread-1`, round 2\n");
-		expect(record).toContain(
-			"- Score: 9/10, `Fixes #3.`\n- Recommendation: `Ask @someone to derive it in the query.`\n",
-		);
-		// The refuted finding counts beside the new one, across both rounds.
-		expect(record).toContain(
-			"- Rounds: 2; first round 1 (high 1); findings 2 (high 2): fixed 0, refuted 1, open 1\n",
-		);
-		expect(record).toContain(
-			`  - High, \`src/lib.ts\`: \`\`Ping @someone about \`${base.slice(0, 12)}\` in #12\`\`\n`,
-		);
-		expect(record).toContain(
-			`- The last round's findings, at ${head.slice(0, 12)}:\n  - Refuted: high, \`src/lib.ts:2\`: \`Off by one\`; \`Checked against the head.\``,
-		);
-		expect(record).not.toMatch(/\b[0-9a-f]{40}\b/);
-		expect(pull.body.startsWith("Fixes averaging.\r\n\r\n## Review\r\n\nRewritten")).toBe(true);
-		expect(writes).toHaveLength(2);
+				findings: [{ path: "src/lib.ts", start: null, end: null, severity: "high", title: "Still off" }],
+			};
+			expect(writes.posts[1]).toEqual({
+				runs: [{ ...run(), head: kept, outcome: "findings open", rounds: [secondRound] }],
+				outcomes: [
+					{
+						repository: "acme/widget",
+						number: 7,
+						harness: "codex",
+						session: "thread-1",
+						round: 1,
+						finding: 1,
+						outcome: "refuted",
+						reason: "Checked against the head.",
+					},
+				],
+			});
 
-		// The maintainer accepts the finding the reviewer keeps: no reviewer runs, and the head passes.
-		const refused = await quest(
-			"--root",
-			s.repo,
-			"review",
-			"--accept",
-			"Kept.",
-			"--responses",
-			join(s.repo, ".tmp", "responses.md"),
-		);
-		expect(refused.code).toBe(2);
-		const calls = s.calls().length;
-		// A token that cannot push records no acceptance, so the body keeps the open findings and the run fails.
-		const before = pull.body;
-		const github = globalThis.fetch;
-		vi.stubGlobal("fetch", async (input: URL, init?: RequestInit) => {
-			const path = new URL(input).pathname;
-			if (path.includes("/statuses/")) return new Response('{"message":"Not Found"}', { status: 404 });
-			const response = await github(input, init);
-			if (path !== "/repos/acme/widget") return response;
-			return new Response(
-				JSON.stringify({ ...((await response.json()) as object), permissions: { push: false } }),
+			// The maintainer accepts the finding the reviewer keeps: no reviewer runs, and the head passes.
+			const refused = await quest(
+				"--root",
+				s.repo,
+				"review",
+				"--accept",
+				"Kept.",
+				"--responses",
+				join(s.repo, ".tmp", "responses.md"),
 			);
-		});
-		const unpushed = await quest("--root", s.repo, "review", "--accept", "Fine.");
-		expect(unpushed.code).toBe(1);
-		expect(unpushed.stdout).toContain("\nnext stop: an acceptance counts only once a maintainer's token sets");
-		expect(pull.body).toBe(before);
-		// Nor does the branch remember its findings as accepted, which a later reviewer would then omit.
-		expect(readFileSync(sessionFile(join(s.repo, ".git"), "feature"), "utf8")).not.toContain('"accepted"');
-		vi.stubGlobal("fetch", github);
-		const accepted = await quest("--root", s.repo, "review", "--accept", "  It pings  no one. ");
-		expect(accepted.code, accepted.stderr).toBe(0);
-		expect(s.calls()).toHaveLength(calls);
-		expect(accepted.stdout).toContain(
-			"\naccepted round 2 of this head, for the maintainer's reason; no reviewer ran\n",
-		);
-		expect(accepted.stdout).toMatch(/\nnext done: the maintainer accepted the findings left open on this head\n$/);
-		const kept = git(s.repo, "rev-parse", "HEAD");
-		const final = pull.body.split("## Review\r\n\n")[1]!.split("\n\n## Models")[0];
-		expect(final).toContain(`- Head: ${kept}\n`);
-		expect(final).toContain("- Accepted by the maintainer: `It pings no one.`\n");
-		expect(final).toContain("- Session: `thread-1`, round 2\n");
-		expect(final).toContain("- Findings, accepted by the maintainer:\n  - High, `src/lib.ts`:");
-		expect(writes.statuses.at(-1)).toMatchObject({
-			sha: kept,
-			state: "success",
-			description: "Risk medium, risk file none: findings accepted",
-		});
-	} finally {
-		vi.unstubAllGlobals();
-	}
-});
+			expect(refused.code).toBe(2);
+			const calls = s.calls().length;
+			// A token that cannot push records no acceptance, so nothing is posted and the run fails.
+			const github = globalThis.fetch;
+			vi.stubGlobal("fetch", async (input: URL, init?: RequestInit) => {
+				const path = new URL(input).pathname;
+				if (path.includes("/statuses/")) return new Response('{"message":"Not Found"}', { status: 404 });
+				const response = await github(input, init);
+				if (path !== "/repos/acme/widget") return response;
+				return new Response(
+					JSON.stringify({ ...((await response.json()) as object), permissions: { push: false } }),
+				);
+			});
+			const unpushed = await quest("--root", s.repo, "review", "--accept", "Fine.");
+			expect(unpushed.code).toBe(1);
+			expect(unpushed.stdout).toContain("\nnext stop: an acceptance counts only once a maintainer's token sets");
+			expect(writes.posts).toHaveLength(2);
+			// Nor does the branch remember its findings as accepted, which a later reviewer would then omit.
+			expect(readFileSync(sessionFile(join(s.repo, ".git"), "feature"), "utf8")).not.toContain('"accepted"');
+			vi.stubGlobal("fetch", github);
+			const accepted = await quest("--root", s.repo, "review", "--accept", "  It pings  no one. ");
+			expect(accepted.code, accepted.stderr).toBe(0);
+			expect(s.calls()).toHaveLength(calls);
+			expect(accepted.stdout).toContain(
+				"\naccepted round 2 of this head, for the maintainer's reason; no reviewer ran\n",
+			);
+			expect(accepted.stdout).toMatch(
+				/\nnext done: the maintainer accepted the findings left open on this head\n$/,
+			);
+			expect(writes.statuses.at(-1)).toMatchObject({
+				sha: kept,
+				state: "success",
+				description: "Risk medium, risk file none: findings accepted",
+			});
+			// The accepted round is posted again as the run's, its finding left to later work for the maintainer's reason.
+			expect(writes.posts[2]).toEqual({
+				runs: [{ ...run(), head: kept, outcome: "findings accepted", rounds: [secondRound] }],
+				outcomes: [
+					{
+						repository: "acme/widget",
+						number: 7,
+						harness: "codex",
+						session: "thread-1",
+						round: 2,
+						finding: 1,
+						outcome: "deferred",
+						reason: "It pings no one.",
+					},
+				],
+			});
+			// No run edits the body.
+			expect(writes).toHaveLength(0);
+			expect(pull.body).toBe(body);
+		} finally {
+			vi.unstubAllGlobals();
+		}
+	},
+);
 
 /** A risk file whose `## High` list holds `high`, after a line of prose the classifier reads. */
 const riskFile = (high: string[]) =>
@@ -2337,28 +2389,34 @@ fakes(
 			const schema = JSON.parse(call!.argv[call!.argv.indexOf("--json-schema") + 1]!);
 			expect(schema.properties.class.enum).toEqual(["constants", null]);
 			const head = git(s.repo, "rev-parse", "HEAD");
-			// The head is named in full, so the record counts as its review.
-			expect(pull.body).toContain(`- Head: ${head}\n`);
-			// Named by its blob's first 12 characters, so `quest status` can tell when the base's file changes.
-			const file = git(s.repo, "rev-parse", "origin/main:RISK.md").slice(0, 12);
-			expect(pull.body).toContain(
-				`- Class: \`constants\`\n- Risk file: ${file}\n- Local review: none, since the head is low risk`,
-			);
-			expect(recordedRisk(pull.body)).toMatchObject({
-				tier: "low",
-				class: "constants",
-				overridden: null,
-				riskFile: file,
-			});
-			// Its status attests the tier and class the record names, which `quest status` checks the body against.
-			expect(writes.statuses).toEqual([
-				{
-					sha: head,
-					state: "success",
-					context: "quest review",
-					description: `Risk low, class constants, risk file ${file}: passed with no local reviewer`,
-					target_url: `https://github.com/acme/widget/compare/${git(s.repo, "merge-base", "origin/main", head)}...${head}`,
+			// The run posts its classification alone, which passes the head with no local reviewer.
+			expect(writes.posts).toHaveLength(1);
+			const [run] = writes.posts[0]!.runs;
+			expect(run).toMatchObject({
+				head,
+				outcome: "passed with no local reviewer",
+				risk: {
+					tier: "low",
+					reason: "Only a constant changes.",
+					classified: "low",
+					class: "constants",
+					classifier: { harness: "claude", effort: "low" },
 				},
+				rounds: [],
+			});
+			expect(writes.posts[0]!.outcomes).toEqual([]);
+			// Named by its blob's first 12 characters, so the land gate can tell when the base's file changes.
+			const file = git(s.repo, "rev-parse", "origin/main:RISK.md").slice(0, 12);
+			// Its status attests the tier and class, which the land gate reads, and passes only once the post is stored.
+			const attested = {
+				sha: head,
+				context: "quest review",
+				description: `Risk low, class constants, risk file ${file}: passed with no local reviewer`,
+				target_url: `https://github.com/acme/widget/compare/${git(s.repo, "merge-base", "origin/main", head)}...${head}`,
+			};
+			expect(writes.statuses).toEqual([
+				{ ...attested, state: "failure" },
+				{ ...attested, state: "success" },
 			]);
 
 			// The maintainer holds it high: both of its size's reviewers review it.
@@ -2367,11 +2425,10 @@ fakes(
 			expect(held.stdout).toContain("\nrisk high It ships tonight.\noverridden low by the maintainer\n");
 			expect(held.stdout).toContain("\nreviewer codex gpt-6.2-sol medium\n");
 			expect(held.stdout).toContain("\nreviewer claude claude-opus-5-5 medium second\n");
-			expect(recordedRisk(pull.body)).toMatchObject({
-				tier: "high",
-				overridden: "low",
-				reason: "It ships tonight.",
-			});
+			// The maintainer's tier is posted, beside the classifier's own, with both seats' rounds.
+			const [overridden] = writes.posts.at(-1)!.runs;
+			expect(overridden!.risk).toMatchObject({ tier: "high", reason: "It ships tonight.", classified: "low" });
+			expect(overridden!.rounds.map((round) => round.seat)).toEqual(["pick", "second"]);
 			// The override outlasts a new head whose change is no riskier.
 			write(s.repo, "src/lib.ts", "export const x = 3;\n");
 			git(s.repo, "commit", "-qam", "another constant");
@@ -2398,7 +2455,10 @@ fakes(
 			expect(same.code, same.stderr).toBe(0);
 			expect(same.stdout).toContain("\nrisk medium It changes the output.\n");
 			expect(same.stdout).not.toContain("\noverridden ");
-			expect(recordedRisk(pull.body)).toMatchObject({ tier: "medium", overridden: null });
+			expect(writes.posts.at(-1)!.runs[0]!.risk).toMatchObject({
+				tier: "medium",
+				reason: "It changes the output.",
+			});
 
 			expect((await quest("--root", s.repo, "review", "--override", "low")).stderr).toContain(
 				"--override and --reason go together",
@@ -2433,10 +2493,10 @@ fakes("a malformed risk file on the base fails before any model runs", async () 
 	expect(s.calls()).toEqual([]);
 });
 
-fakes("a branch with no open PR, or a body without a Review section, is reported as such", async () => {
+fakes("a branch with no open PR posts nothing, and a later run settles none of what it left unposted", async () => {
 	const s = setup();
 	const pulls: { number: number; body: string | null }[] = [];
-	onGitHub(s.repo, pulls);
+	const writes = onGitHub(s.repo, pulls);
 	try {
 		const none = await quest("--root", s.repo, "review");
 		expect(none.code).toBe(0);
@@ -2446,12 +2506,15 @@ fakes("a branch with no open PR, or a body without a Review section, is reported
 		vi.stubEnv("FAKE_REPLY", JSON.stringify({ score: 10, rationale: "Lands as is.", findings: [] }));
 		write(s.repo, ".tmp/responses.md", "Fixed.\n");
 		const recorded = await quest("--root", s.repo, "review", "--responses", join(s.repo, ".tmp", "responses.md"));
+		expect(recorded.code, recorded.stderr).toBe(0);
 		expect(recorded.stdout).toContain("record https://github.com/acme/widget/pull/8\n");
-		expect(pulls[0]!.body).toMatch(
-			/^## Review\n\nRewritten by `quest review` after each round\.\n[\s\S]*- Findings: none\n/,
-		);
-		// A round with no findings names its head in full, which the land gate counts.
-		expect(pulls[0]!.body!.match(/\b[0-9a-f]{40}\b/g)).toEqual([git(s.repo, "rev-parse", "HEAD")]);
+		expect(writes.posts).toHaveLength(1);
+		const [run] = writes.posts[0]!.runs;
+		expect(run).toMatchObject({ number: 8, head: git(s.repo, "rev-parse", "HEAD"), outcome: "passed" });
+		expect(run!.rounds.map((round) => round.round)).toEqual([2]);
+		// The first round reached no PR, so Kixel Quest never stored its finding, and an outcome for it would be refused.
+		expect(writes.posts[0]!.outcomes).toEqual([]);
+		expect(pulls[0]!.body).toBeNull();
 	} finally {
 		vi.unstubAllGlobals();
 	}
@@ -2469,7 +2532,7 @@ fakes("a maintainer's checkout records on a contributor's fork PR and reads its 
 		sha: "f".repeat(40),
 	};
 	const pulls: FakePull[] = [stranger];
-	onGitHub(s.repo, pulls);
+	const writes = onGitHub(s.repo, pulls);
 	vi.stubEnv("FAKE_REPLY", JSON.stringify({ score: 10, rationale: "Lands as is.", findings: [] }));
 	try {
 		const alone = await quest("--root", s.repo, "review");
@@ -2487,7 +2550,8 @@ fakes("a maintainer's checkout records on a contributor's fork PR and reads its 
 		expect(result.stdout).toContain("record https://github.com/acme/widget/pull/12\n");
 		// Size S picks Sol at medium.
 		expect(result.stdout).toContain("\nreviewer codex gpt-6.2-sol medium\n");
-		expect(pull.body).toMatch(/^Body\.\n\n## Models\n\n- Size: S\n\n## Review\n\nRewritten by `quest review`/);
+		expect(writes.posts.at(-1)!.runs[0]).toMatchObject({ repository: "acme/widget", number: 12 });
+		expect(pull.body).toBe("Body.\n\n## Models\n\n- Size: S\n");
 		expect(stranger.body).toBe("Stranger.\n\n## Models\n\n- Size: XS\n");
 
 		// A second contributor's PR whose head this checkout also holds leaves no way to tell them apart.
@@ -2512,12 +2576,12 @@ fakes("a maintainer's checkout records on a contributor's fork PR and reads its 
 fakes("a review from a subdirectory of a fork records on the upstream PR", async () => {
 	const s = setup();
 	const pull = { number: 11, body: "Body." };
-	onGitHub(s.repo, [pull], true);
+	const writes = onGitHub(s.repo, [pull], true);
 	try {
 		const result = await quest("--root", join(s.repo, "src"), "review");
-		expect(result.stderr).toBe("");
+		expect(result.stderr).toBe(OVERRIDDEN);
 		expect(result.stdout).toContain("record https://github.com/upstream/widget/pull/11\n");
-		expect(pull.body).toMatch(/^Body\.\n\n## Review\n\nRewritten by `quest review`/);
+		expect(writes.posts.at(-1)!.runs[0]).toMatchObject({ repository: "upstream/widget", number: 11 });
 	} finally {
 		vi.unstubAllGlobals();
 	}
@@ -2573,7 +2637,7 @@ fakes("a later round checks only what changed since the reviewed head, and the o
 
 const NOTE = { file: "src/lib.ts", line: 1, severity: "low", title: "Name the constant", body: "x says nothing." };
 
-fakes("a low finding is a note: printed and recorded, never numbered, answered, or held against the head", async () => {
+fakes("a low finding is a note: printed, never posted, numbered, answered, or held against the head", async () => {
 	const s = setup();
 	const pull = {
 		number: 7,
@@ -2587,9 +2651,7 @@ fakes("a low finding is a note: printed and recorded, never numbered, answered, 
 		expect(first.stdout).toContain(
 			"\nfindings 1\n\n1. high src/lib.ts:2 Off by one\n  average([3]) is 0.\n\nnotes 1\n\n- src/lib.ts:1 Name the constant\n  x says nothing.\n",
 		);
-		expect(pull.body).toContain(
-			"- Notes, the author's to take or leave:\n  - `src/lib.ts:1`: `Name the constant`\n",
-		);
+		expect(writes.posts[0]!.runs[0]!.rounds[0]!.findings.map((finding) => finding.title)).toEqual(["Off by one"]);
 
 		// One response answers the one numbered finding, and a round that reports only the note passes the head.
 		write(s.repo, "src/lib.ts", "export const x = 4;\n");
@@ -2604,7 +2666,9 @@ fakes("a low finding is a note: printed and recorded, never numbered, answered, 
 		);
 		expect(second.stdout).toMatch(/\nnext done: no finding holds this head; its notes are yours to take or leave/);
 		const head = git(s.repo, "rev-parse", "HEAD");
-		expect(pull.body).toContain(`- Head: ${head}\n`);
+		expect(writes.posts[1]!.runs[0]).toMatchObject({ head, outcome: "passed" });
+		expect(writes.posts[1]!.runs[0]!.rounds[0]!.findings).toEqual([]);
+		expect(writes.posts[1]!.outcomes).toMatchObject([{ round: 1, finding: 1, outcome: "fixed" }]);
 		expect(writes.statuses.at(-1)).toMatchObject({ sha: head, state: "success" });
 
 		// The note is carried to no later round, so the next head needs no responses.
@@ -2670,7 +2734,7 @@ fakes("the PR's Models record sizes the review and names its latest writer", asy
 	try {
 		// Sol reviews it at L's effort, whoever wrote it.
 		const wrote = await quest("--root", s.repo, "review");
-		expect(wrote.stderr).toBe("");
+		expect(wrote.stderr).toBe(OVERRIDDEN);
 		expect(wrote.stdout).toMatch(/^size L ## Models\n[\s\S]*\nreviewer codex gpt-6.2-sol xhigh\n/);
 
 		// Flags override the record.
@@ -2876,24 +2940,6 @@ test("an Implementer line reads as agents write it", () => {
 	expect(read("Claude Code, Opus 5.5, very high effort")).toBeNull();
 });
 
-test("the record replaces only a top-level Review section, never an example of one", () => {
-	const fenced = "Example:\n\n```md\n## Review\n\nold\n```\n\nAfter.\n";
-	expect(withReview(fenced, "new")).toBe(`${fenced.trimEnd()}\n\n## Review\n\nnew\n`);
-	const quoted = "> ## Review\n> quoted\n\n## Review\n\nold\n\n# Notes\n\n## Review\n\nsecond\n";
-	expect(withReview(quoted, "new")).toBe(
-		"> ## Review\n> quoted\n\n## Review\n\nnew\n\n# Notes\n\n## Review\n\nsecond\n",
-	);
-	// A level-3 heading stays inside the section, and a rewrite of the same record changes nothing.
-	const nested = "## Review\n\nold\n\n### Detail\n\nmore\n\n## Models\n\n- Size: S\n";
-	const once = withReview(nested, "new");
-	expect(once).toBe("## Review\n\nnew\n\n## Models\n\n- Size: S\n");
-	expect(withReview(once, "new")).toBe(once);
-	expect(withReview("", "new")).toBe("## Review\n\nnew\n");
-	// A heading appended inside an unclosed construct would be no section, which the land gate never reads.
-	for (const open of ["```md\nunclosed", "<!-- unclosed"])
-		expect(() => withReview(open, "new")).toThrow("unclosed code fence or HTML comment");
-});
-
 fakes("a status GitHub refuses fails the run, unless the token cannot push, where it counts for nothing", async () => {
 	for (const [status, message, push, line] of [
 		[
@@ -2917,7 +2963,7 @@ fakes("a status GitHub refuses fails the run, unless the token cannot push, wher
 	] as const) {
 		const s = setup();
 		const pull = { number: 9, body: "" };
-		onGitHub(s.repo, [pull]);
+		const writes = onGitHub(s.repo, [pull]);
 		const head = git(s.repo, "rev-parse", "HEAD");
 		const fetch = globalThis.fetch;
 		vi.stubGlobal("fetch", async (input: URL, init?: RequestInit) => {
@@ -2933,7 +2979,9 @@ fakes("a status GitHub refuses fails the run, unless the token cannot push, wher
 			expect(result.stdout).toContain(
 				`\nrecord https://github.com/acme/widget/pull/9; ${line.replace("HEAD", head)}\n`,
 			);
-			expect(pull.body).toContain("## Review");
+			// The run is posted whatever became of its status; Kixel Quest counts it only from a poster who can push.
+			expect(writes.posts).toHaveLength(1);
+			expect(pull.body).toBe("");
 		} finally {
 			vi.unstubAllGlobals();
 		}
@@ -3014,23 +3062,194 @@ fakes("--accept refuses another base's rounds, a high head without its second ro
 	}
 });
 
-fakes("a record GitHub refuses fails the command after printing the round", async () => {
+fakes("a post Kixel Quest refuses fails the command after printing the round", async () => {
 	const s = setup();
-	onGitHub(s.repo, [{ number: 9, body: "" }]);
+	const writes = onGitHub(s.repo, [{ number: 9, body: "" }]);
 	const fetch = globalThis.fetch;
 	vi.stubGlobal("fetch", async (input: URL, init?: RequestInit) =>
-		init?.method === "PATCH"
-			? new Response('{"message":"Must have admin rights"}', { status: 403 })
+		new URL(input).pathname === "/reviews"
+			? new Response('{"error":"Posted by another person, so only they may replace it."}', { status: 409 })
 			: fetch(input, init),
 	);
 	try {
 		const result = await quest("--root", s.repo, "review");
 		expect(result.code).toBe(1);
 		expect(result.stdout).toContain("findings 1\n");
-		expect(result.stderr).toContain("the round finished, but recording it failed: GitHub HTTP 403");
+		expect(result.stderr).toContain(
+			`the round finished, but recording it failed: ${KIXEL}/reviews answered HTTP 409: Posted by another person, so only they may replace it.`,
+		);
+		// The status went first, so the failed head is attested as such.
+		expect(writes.statuses).toMatchObject([{ state: "failure" }]);
+		// A passing run's status stays failing until its post is stored, so a refused post leaves no pass standing.
+		const accepted = await quest("--root", s.repo, "review", "--accept", "Fine.");
+		expect(accepted.code).toBe(1);
+		expect(accepted.stdout).toContain("\nnext stop: the acceptance was not recorded;");
+		expect(writes.statuses).toMatchObject([{ state: "failure" }, { state: "failure" }]);
 	} finally {
 		vi.unstubAllGlobals();
 	}
+});
+
+fakes(
+	"the outcomes a failed post settled reach Kixel Quest with the round's repeat, on the PR that holds them",
+	async () => {
+		const s = setup();
+		const pulls = [{ number: 7, body: "" }];
+		const writes = onGitHub(s.repo, pulls);
+		try {
+			expect((await quest("--root", s.repo, "review")).code).toBe(0);
+			expect(writes.posts).toHaveLength(1);
+			write(s.repo, "src/lib.ts", "export const x = 4;\n");
+			git(s.repo, "commit", "-qam", "fix");
+			write(s.repo, ".tmp/responses.md", "1. Fixed at src/lib.ts:1.\n");
+			vi.stubEnv(
+				"FAKE_REPLY",
+				JSON.stringify({ score: 9, rationale: "Fixed.", recommendation: null, findings: [] }),
+			);
+			const github = globalThis.fetch;
+			vi.stubGlobal("fetch", async (input: URL, init?: RequestInit) =>
+				new URL(input).pathname === "/reviews"
+					? new Response('{"error":"Try later."}', { status: 503 })
+					: github(input, init),
+			);
+			const failed = await quest("--root", s.repo, "review", "--responses", join(s.repo, ".tmp", "responses.md"));
+			expect(failed.code).toBe(1);
+			vi.stubGlobal("fetch", github);
+			const calls = s.calls().length;
+			// The PR was replaced since the first round was posted, so the outcome still goes to the one holding it.
+			pulls[0]!.number = 8;
+			const repeated = await quest("--root", s.repo, "review");
+			expect(repeated.code, repeated.stderr).toBe(0);
+			expect(s.calls()).toHaveLength(calls);
+			expect(writes.posts).toHaveLength(2);
+			expect(writes.posts[1]!.runs).toMatchObject([{ number: 8, outcome: "passed", rounds: [{ round: 2 }] }]);
+			expect(writes.posts[1]!.outcomes).toEqual([
+				{
+					repository: "acme/widget",
+					number: 7,
+					harness: "codex",
+					session: "thread-1",
+					round: 1,
+					finding: 1,
+					outcome: "fixed",
+					reason: "Checked against the head.",
+				},
+			]);
+			expect(writes.statuses.at(-1)).toMatchObject({ state: "success" });
+			// Once posted, a further repeat settles nothing again.
+			expect((await quest("--root", s.repo, "review")).code).toBe(0);
+			expect(writes.posts[2]!.outcomes).toEqual([]);
+		} finally {
+			vi.unstubAllEnvs();
+			vi.unstubAllGlobals();
+		}
+	},
+);
+
+fakes("the outcomes a failed post settled survive --new, which drops the sessions that settled them", async () => {
+	const s = setup();
+	const writes = onGitHub(s.repo, [{ number: 7, body: "" }]);
+	try {
+		expect((await quest("--root", s.repo, "review")).code).toBe(0);
+		write(s.repo, "src/lib.ts", "export const x = 4;\n");
+		git(s.repo, "commit", "-qam", "fix");
+		write(s.repo, ".tmp/responses.md", "1. Fixed at src/lib.ts:1.\n");
+		vi.stubEnv("FAKE_REPLY", JSON.stringify({ score: 9, rationale: "Fixed.", recommendation: null, findings: [] }));
+		const github = globalThis.fetch;
+		vi.stubGlobal("fetch", async (input: URL, init?: RequestInit) =>
+			new URL(input).pathname === "/reviews"
+				? new Response('{"error":"Try later."}', { status: 503 })
+				: github(input, init),
+		);
+		const failed = await quest("--root", s.repo, "review", "--responses", join(s.repo, ".tmp", "responses.md"));
+		expect(failed.code).toBe(1);
+		vi.stubGlobal("fetch", github);
+		const fresh = await quest("--root", s.repo, "review", "--new");
+		expect(fresh.code, fresh.stderr).toBe(0);
+		expect(writes.posts).toHaveLength(2);
+		expect(writes.posts[1]!.outcomes).toMatchObject([{ number: 7, round: 1, finding: 1, outcome: "fixed" }]);
+	} finally {
+		vi.unstubAllEnvs();
+		vi.unstubAllGlobals();
+	}
+});
+
+fakes("accepting a round posted on a since-replaced PR defers its findings on both PRs", async () => {
+	const s = setup();
+	const pulls = [{ number: 7, body: "" }];
+	const writes = onGitHub(s.repo, pulls);
+	expect((await quest("--root", s.repo, "review")).code).toBe(0);
+	pulls[0]!.number = 8;
+	const accepted = await quest("--root", s.repo, "review", "--accept", "Fine.");
+	expect(accepted.code, accepted.stderr).toBe(0);
+	expect(writes.posts[1]!.outcomes.map(({ number, outcome }) => ({ number, outcome }))).toEqual([
+		{ number: 8, outcome: "deferred" },
+		{ number: 7, outcome: "deferred" },
+	]);
+});
+
+fakes("accepting a round whose post failed defers its findings on the PR the acceptance posts it to", async () => {
+	const s = setup();
+	const pulls = [{ number: 7, body: "" }];
+	const writes = onGitHub(s.repo, pulls);
+	const github = globalThis.fetch;
+	vi.stubGlobal("fetch", async (input: URL, init?: RequestInit) =>
+		new URL(input).pathname === "/reviews"
+			? new Response('{"error":"Try later."}', { status: 503 })
+			: github(input, init),
+	);
+	try {
+		expect((await quest("--root", s.repo, "review")).code).toBe(1);
+		vi.stubGlobal("fetch", github);
+		// The PR was replaced since, so the acceptance posts the round, and defers its finding, on the new one.
+		pulls[0]!.number = 8;
+		const accepted = await quest("--root", s.repo, "review", "--accept", "Fine.");
+		expect(accepted.code, accepted.stderr).toBe(0);
+		expect(writes.posts).toHaveLength(1);
+		expect(writes.posts[0]!.runs).toMatchObject([
+			{ number: 8, outcome: "findings accepted", rounds: [{ round: 1 }] },
+		]);
+		expect(writes.posts[0]!.outcomes).toMatchObject([
+			{ number: 8, session: "thread-1", round: 1, finding: 1, outcome: "deferred", reason: "Fine." },
+		]);
+	} finally {
+		vi.unstubAllGlobals();
+	}
+});
+
+fakes("a repository Kixel Quest does not serve runs no reviewer for a PR, since it would store no round", async () => {
+	const s = setup();
+	const pulls: FakePull[] = [];
+	onGitHub(s.repo, pulls);
+	const github = globalThis.fetch;
+	vi.stubGlobal("fetch", async (input: URL, init?: RequestInit) =>
+		new URL(input).pathname === "/forge"
+			? new Response(JSON.stringify({ login: "agent", repositories: [] }))
+			: github(input, init),
+	);
+	try {
+		// A branch with no PR yet posts nothing, so it is reviewed all the same.
+		const local = await quest("--root", s.repo, "review");
+		expect(local.code, local.stderr).toBe(0);
+		expect(local.stdout).toContain("record skipped: no open PR from feature into main");
+		const calls = s.calls().length;
+		pulls.push({ number: 7, body: "" });
+		const result = await quest("--root", s.repo, "review");
+		expect(result.code).toBe(1);
+		expect(result.stderr).toContain(`${KIXEL} does not serve acme/widget, so it would store no review of it`);
+		expect(s.calls()).toHaveLength(calls);
+	} finally {
+		vi.unstubAllGlobals();
+	}
+});
+
+fakes("a host not signed in to Kixel Quest runs no reviewer, since it could not post the round", async () => {
+	const s = setup();
+	vi.stubEnv("XDG_CONFIG_HOME", join(s.repo, "..", "nobody"));
+	const result = await quest("--root", s.repo, "review");
+	expect(result.code).toBe(1);
+	expect(result.stderr).toContain(`this host is not signed in to ${KIXEL}; run \`quest login\``);
+	expect(s.calls()).toEqual([]);
 });
 
 /** Push a commit that `change` makes to origin's main, returning its SHA. */
@@ -3074,6 +3293,14 @@ test("the verdict is checked field by field, settling each earlier finding once"
 	expect(() => verdict({ structured: { ...scored, findings: [{ ...FINDING, line: 0 }] } }, 0)).toThrow(
 		"does not match",
 	);
+	// Kixel Quest stores each finding by its path and title, so neither may be blank; a note is never posted.
+	for (const blank of [{ file: "" }, { title: " " }]) {
+		expect(() => verdict({ structured: { ...scored, findings: [{ ...FINDING, ...blank }] } }, 0)).toThrow(
+			"does not match",
+		);
+		const note = { ...FINDING, severity: "low", ...blank };
+		expect(verdict({ structured: { ...scored, findings: [note] } }, 0).findings).toEqual([note]);
+	}
 	expect(() => verdict({ text: '{"verdict":"approve"}' }, 0)).toThrow("no findings list");
 	for (const score of [-1, 11, 7.5, "7", undefined]) {
 		expect(() => verdict({ structured: { ...scored, score, findings: [] } }, 0)).toThrow("no score from 0 to 10");

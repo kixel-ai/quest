@@ -18,6 +18,7 @@ import {
 	ALWAYS_HIGH,
 	type Class,
 	DEFAULT_CLASSES,
+	type FindingOutcome,
 	heldHigh,
 	highHits,
 	matches,
@@ -32,6 +33,7 @@ import {
 	codeSpan,
 	offeredClasses,
 	parse,
+	parseReviews,
 	parseRiskFile,
 	size as questSize,
 	riskier,
@@ -436,6 +438,8 @@ export interface ReviewDependencies {
 	 * it, as in the runner, only the options pick the reviewer.
 	 */
 	models?: (root: string, base: string, branch: string) => Promise<PullModels | null>;
+	/** Fails unless the run's record can be posted, before any reviewer spends a round; without it, nothing is checked. */
+	posting?: (root: string, base: string, branch: string) => Promise<void>;
 	/**
 	 * Queues a session for the record sender, as the stop hook does an interactive one, since no hook runs in a
 	 * reviewer. It says for itself anything the person must hear, and must not throw, so a round never fails on it.
@@ -495,9 +499,25 @@ export interface Reviewed {
 	sized: { size: Size; from: string };
 	/** The maintainer's reason for accepting the open findings of `rounds`, which repeat the head's last rounds. */
 	accepted?: string;
+	/**
+	 * The outcomes the run posts to PR `at`: those of earlier posted rounds it settled, each for the PR its round was
+	 * posted on, fixed or refuted by a round; the maintainer's accepted ones, deferred on `at`, which the acceptance posts
+	 * its rounds to; and those a failed post left for a later one.
+	 */
+	outcomes: (at: PostedOn) => FindingOutcome[];
 	/** Keeps the accepted findings among those the branch settled; for the caller to run once the acceptance is attested. */
 	remember?: () => void;
+	/** Marks the run's rounds as posted on PR `at`, so the next run settles their findings there; for the caller to run once they are. */
+	posted?: (at: PostedOn) => void;
 }
+
+/** The PR a session's round was posted on, as Kixel Quest names it: lowercase `owner/repo` and number. */
+export interface PostedOn {
+	repository: string;
+	number: number;
+}
+
+const samePull = (a: PostedOn, b: PostedOn) => a.repository === b.repository && a.number === b.number;
 
 /**
  * A branch's review sessions, one per reviewer, kept in the clone's common Git directory so every worktree
@@ -514,6 +534,11 @@ interface State {
 	classified?: { key: string; value: Omit<Classified, "usage" | "riskFile"> };
 	/** The maintainer's override of the branch's tier. */
 	override?: Override;
+	/**
+	 * The outcomes a failed post carried, for the next post: kept for the branch rather than a session, so a run that
+	 * drops sessions, as `--new` or a changed pick does, still posts them.
+	 */
+	pending?: FindingOutcome[];
 }
 
 /** One reviewer's session on a branch. */
@@ -528,6 +553,11 @@ interface Session {
 	rounds: { head: string; mergeBase: string; findings: Finding[] }[];
 	/** The session's last round, which a round on the same head with nothing to settle repeats. */
 	last: Round;
+	/**
+	 * The PR `last` was posted on. Kixel Quest refuses an outcome for a finding it never stored, as one a failed post or
+	 * an older quest left unposted, and takes one only for the PR that holds it.
+	 */
+	posted?: PostedOn;
 	/**
 	 * Digests of the instruction files and the REVIEW.md the session started
 	 * with. A resumed session keeps its first instructions and rules, so a change
@@ -1262,7 +1292,9 @@ export function verdict(reply: { structured?: unknown; text?: string }, earlier:
 			!(line === null || (Number.isSafeInteger(line) && (line as number) > 0)) ||
 			!SEVERITIES.includes(finding.severity as Finding["severity"]) ||
 			typeof finding.title !== "string" ||
-			typeof finding.body !== "string"
+			typeof finding.body !== "string" ||
+			// Kixel Quest stores a finding only by its path and title; a note is never posted.
+			(finding.severity !== "low" && (finding.file.trim() === "" || finding.title.trim() === ""))
 		) {
 			throw new Error(`the reviewer's finding ${index + 1} does not match the schema`);
 		}
@@ -1864,6 +1896,28 @@ const seatKey = (seat: SeatId) => `${seat.reviewer}${seat.second ? " second" : "
 /** Whether two reviewers hold the same seat: the same harness and role. */
 export const sameSeat = (a: SeatId, b: SeatId) => seatKey(a) === seatKey(b);
 
+/** Whether `value` names a PR as a session's `posted` does. */
+function postedOn(value: unknown): boolean {
+	const at = value as PostedOn | null;
+	return (
+		typeof at === "object" &&
+		at !== null &&
+		Object.keys(at).length === 2 &&
+		typeof at.repository === "string" &&
+		Number.isSafeInteger(at.number)
+	);
+}
+
+/** Whether `value` is a branch's `pending` outcomes, each one Kixel Quest would take. */
+function pendingOutcomes(value: unknown): boolean {
+	try {
+		parseReviews({ runs: [], outcomes: value });
+		return true;
+	} catch {
+		return false;
+	}
+}
+
 /**
  * A branch's saved sessions, read before any reviewer runs, so a file this
  * quest cannot resume is refused, naming `--new`, rather than failing after a
@@ -1895,6 +1949,7 @@ export function parseState(value: unknown): State {
 				typeof session?.reviewer === "string" &&
 				!("shadow" in session) &&
 				(session.second === undefined || session.second === true) &&
+				(session.posted === undefined || postedOn(session.posted)) &&
 				state.tallies!.some((tally) => sameSeat(tally, session)) &&
 				typeof session.session === "string" &&
 				typeof session.started === "number" &&
@@ -1908,6 +1963,7 @@ export function parseState(value: unknown): State {
 				session.given !== null,
 		) &&
 		state.sessions.filter((session) => session.second).length <= 1 &&
+		(state.pending === undefined || pendingOutcomes(state.pending)) &&
 		(state.history === undefined ||
 			(Array.isArray(state.history) &&
 				state.history.every((past) => typeof past?.title === "string" && typeof past.reason === "string"))) &&
@@ -2297,6 +2353,7 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 		: await fetchBase(root, options.base);
 	const { branch: baseBranch } = parseBase(root, baseRef);
 	const branch = sessionBranch(root, options.branch, baseBranch);
+	await deps.posting?.(root, baseRef, branch);
 	// The PR's own record names its size and implementers, so the author passes neither as a flag.
 	const needed = options.size === undefined || (options.exclude ?? []).length === 0;
 	const record = needed ? await deps.models?.(root, baseRef, branch) : undefined;
@@ -2415,11 +2472,20 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 	// `--new` drops the sessions, never what the branch already settled.
 	const past = saved?.history ?? [];
 	const { usage: _, riskFile: __, ...value } = classified.value;
-	const state = (kept: Session[], tallies: Tally[], risk: Risk, history: Past[]): State => ({
+	// What a failed post left, which `--new` keeps too.
+	const carried = saved?.pending ?? [];
+	const state = (
+		kept: Session[],
+		tallies: Tally[],
+		risk: Risk,
+		history: Past[],
+		pending: FindingOutcome[] = [],
+	): State => ({
 		branch,
 		sessions: kept,
 		tallies,
 		history,
+		...(pending.length > 0 && { pending }),
 		classified: { key: classified.key, value },
 		// A riskier change than the one the maintainer judged ends their override, unless it is riskier only up to the
 		// override's own tier, which agrees with it.
@@ -2458,6 +2524,27 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 		);
 		// An acceptance GitHub does not attest has not happened, so the caller saves it only once it is.
 		const kept = [...past, ...accepted.filter((each) => !past.some(same(each)))];
+		// Kixel Quest stores no outcome of an accepted finding, so it keeps one left to later work: on the PR this run
+		// posts the rounds to, which holds them even when an earlier post failed, and on a since-replaced PR that
+		// holds them too.
+		const outcomes = (at: PostedOn) => [
+			...carried,
+			...last.flatMap((round) => {
+				const posted = sessions.find((session) => session.last === round)?.posted;
+				const prs = posted === undefined || samePull(posted, at) ? [at] : [at, posted];
+				return prs.flatMap((pr) =>
+					round.findings.map((_, i) => ({
+						...pr,
+						harness: round.reviewer,
+						session: round.session,
+						round: round.round,
+						finding: i + 1,
+						outcome: "deferred" as const,
+						reason: options.accept!,
+					})),
+				);
+			}),
+		];
 		return {
 			rounds: last.map((round) => ({ ...round, usage: [], unchanged: true })),
 			tallies,
@@ -2468,12 +2555,26 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 			base,
 			sized,
 			accepted: options.accept,
+			outcomes,
+			// Run once the acceptance is attested, which is after its post.
 			remember: () => save(statePath, state(sessions, tallies, risk, kept)),
 		};
 	}
 	if (!named && !settling && risk.tier === "low") {
-		save(statePath, state(sessions, tallies, risk, past));
-		return { rounds: [], tallies, risk, skipped: [], branch, head, base, sized };
+		save(statePath, state(sessions, tallies, risk, past, carried));
+		// No round runs, but what an earlier run's failed post settled still goes with this one.
+		return {
+			rounds: [],
+			tallies,
+			risk,
+			skipped: [],
+			branch,
+			head,
+			base,
+			sized,
+			outcomes: () => carried,
+			posted: () => save(statePath, state(sessions, tallies, risk, past)),
+		};
 	}
 
 	const skipped: Skip[] = [];
@@ -2562,9 +2663,59 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 		past,
 		done.map((each) => each.round),
 	);
-	save(statePath, state([...done.map((each) => each.session), ...kept], after, risk, history));
+	const outcomes = [...carried, ...done.flatMap((each, i) => settledOutcomes(seats[i]!, each.round))];
+	// Until a post carries them, the branch keeps the outcomes, for the next run to post.
+	const store = (at: PostedOn | null) =>
+		save(
+			statePath,
+			state(
+				[...done.map(({ session }) => (at === null ? session : { ...session, posted: at })), ...kept],
+				after,
+				risk,
+				history,
+				at === null ? outcomes : [],
+			),
+		);
+	store(null);
 	const rounds = done.map((each) => each.round);
-	return { rounds, tallies: after, risk, skipped, branch, head, base, sized };
+	return {
+		rounds,
+		tallies: after,
+		risk,
+		skipped,
+		branch,
+		head,
+		base,
+		sized,
+		outcomes: () => outcomes,
+		posted: (at) => store(at),
+	};
+}
+
+/**
+ * The outcomes of the findings `round` settled in its seat's saved session, which raised them, for the PR that
+ * session's round was posted on, unless it never reached Kixel Quest: each fixed or refuted one, numbered within its
+ * round from 1. A repeated round settles nothing new; the branch keeps what its first run's failed post carried.
+ */
+function settledOutcomes(seat: Seat, round: Round): FindingOutcome[] {
+	const raised = seat.session;
+	const at = raised?.posted;
+	if (round.unchanged || at === undefined) return [];
+	return (round.earlier?.findings ?? []).flatMap(({ number, disposition, reason }) =>
+		disposition === "open"
+			? []
+			: [
+					{
+						...at,
+						harness: raised!.last.reviewer,
+						session: raised!.last.session,
+						round: raised!.last.round,
+						finding: number - seat.first + 1,
+						outcome: disposition,
+						reason,
+					},
+				],
+	);
 }
 
 /** Whether `past` is finding `a` settled before: the same title at the same file. */

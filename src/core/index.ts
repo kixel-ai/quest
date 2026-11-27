@@ -153,6 +153,21 @@ export {
 	parseUpload,
 } from "./record";
 export {
+	type FindingOutcome,
+	type PostedFinding,
+	type PostedRisk,
+	type PostedRound,
+	RUN_OUTCOMES,
+	type ReviewRun,
+	type ReviewUpload,
+	type RunOutcome,
+	SEATS,
+	SETTLED,
+	type SeatRole,
+	type Settled,
+	parseReviews,
+} from "./reviews";
+export {
 	type Answer,
 	type Check,
 	type Claim,

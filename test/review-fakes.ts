@@ -7,6 +7,10 @@ import { test, vi } from "vitest";
 import { type Output, main } from "../src/cli/main";
 import { sessionFile } from "../src/cli/review";
 import { tempDir } from "./fixture";
+import { writeTokens } from "./kixel-fakes";
+
+/** The Kixel Quest every review run posts to, signed in by `setup`. */
+export const KIXEL = "https://kixel.example";
 
 /** The fake CLIs are shebang scripts found on a POSIX PATH, which Windows cannot run. */
 export const fakes = test.skipIf(process.platform === "win32");
@@ -358,6 +362,12 @@ export function setup(host: "CLAUDECODE" | "CODEX_THREAD_ID" | null = "CLAUDECOD
 	]) {
 		vi.stubEnv(name, undefined);
 	}
+	// Every run that records posts to Kixel Quest, so the host is signed in.
+	const config = join(dir, "config");
+	vi.stubEnv("XDG_CONFIG_HOME", config);
+	vi.stubEnv("QUEST_KIXEL_URL", KIXEL);
+	vi.stubEnv("QUEST_FORGE", undefined);
+	writeTokens({ XDG_CONFIG_HOME: config }, { [KIXEL]: "secret" });
 	if (host === "CLAUDECODE") vi.stubEnv("CLAUDECODE", "1");
 	if (host === "CODEX_THREAD_ID") vi.stubEnv("CODEX_THREAD_ID", "parent");
 	// Only whole calls: a fake's unfinished write stays a .tmp file.
