@@ -2,7 +2,7 @@
 
 ## Goal
 
-Any repository opting into Kixel Quest requires Nix (`flake.nix`) and declares its CI, caching, and release lifecycle in a root `quest.toml` (keeping `justfile` only for interactive local dev menus), using `quest` as its single CLI for running tasks (`quest run`), fast formatting (`quest fmt`), Nix cache publishing (`quest cache push`), flake boilerplate (`quest.lib.mkFlake`), and thin reusable GitHub Actions workflows for non-Linux legs, outside contributor PRs, and npm OIDC publishing.
+Any repository opting into Kixel Quest requires Nix (`flake.nix`) and declares its CI, caching, and release lifecycle in a root `quest.toml` (keeping `justfile` only for interactive local dev menus), using `quest` as its single CLI for running tasks (`quest run`), fast formatting (`quest fmt`), Nix cache publishing (`quest cache push`), flake boilerplate (`quest.lib.mkFlake`), and thin reusable GitHub Actions workflows for non-Linux legs and npm OIDC publishing.
 
 Non-goals: configuring agent or review model routing in `quest.toml` (Quest keeps its single shipped model routing), moving interactive local dev menus (`just dev`, `just demo`) out of `justfile`, or owning the merge queue, host scheduler, or cache Worker (which live in Kixel Quest).
 

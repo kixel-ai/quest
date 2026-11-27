@@ -379,16 +379,10 @@ quest check --base origin/main --branch quest/m0/export
 ```
 
 Fetch the base first, since a stale one can predate the quest. `quest merge`
-runs this on the head it lands. A repository with
-`quest` installed in CI can also run it on pull requests, where the checkout is
-detached, so pass the head branch:
-
-```yaml
-- uses: actions/checkout@v7
-  with:
-    fetch-depth: 0
-- run: quest check --base "origin/$GITHUB_BASE_REF" --branch "$GITHUB_HEAD_REF"
-```
+runs this on the head it lands. A merge queue's build can run it too; its
+checkout is detached, so pass the PR's head branch, as this repository's
+[`queue-build.yml`](.github/workflows/queue-build.yml) does:
+`quest check --base "$BASE" --branch "$head_ref"`.
 
 The check is a floor, not a review: any edit to the quest passes, so reviewers
 still judge whether a rewrite matches what remains.
@@ -1003,12 +997,11 @@ A round whose collection fails three passes in a row, as when GitHub refuses its
 handback comment, is set aside with a logged warning, freeing its fixer slot.
 
 Only the base's required checks keep GitHub from enqueuing a head, and
-`quest context` asks that every check on a pull request be one, with anything
-that should not block a merge run on the default branch instead.
-`/quest-merge` still reports a failing optional check on the head it picks, and
-the land fixer reads every check as context. A public repository may run its
-checks on pull requests too, since GitHub's hosted runners are free there; a
-private one can skip them and rely on the merge queue's build on the host alone.
+`quest context` asks that pull requests run no checks: the merge queue's build
+is the only synchronous gate, and anything slower runs on the default branch.
+In a repository that still runs checks on pull requests, `/quest-merge` reports
+a failing one on the head it picks, and the land fixer reads every check as
+context.
 
 The watcher also keeps the repository's flaky tests in `flaky.json` in its
 state directory: each flaky verdict, across every PR, by the failure signature
@@ -2910,7 +2903,7 @@ just test
 just build
 ```
 
-CI runs the same checks. See [CONTRIBUTING.md](CONTRIBUTING.md) for the details.
+The merge queue runs the same checks. See [CONTRIBUTING.md](CONTRIBUTING.md) for the details.
 
 MIT or Apache-2.0, your choice. The CLI, initial skills, and development setup
 were extracted from [MoQ at `2bb3e6e`](https://github.com/moq-dev/moq/tree/2bb3e6e3f3f357be7bb5f7a8e7feb4348cfdefe4).
