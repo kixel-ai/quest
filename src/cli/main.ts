@@ -232,8 +232,10 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		.command("gate")
 		.summary("Run a CPU-heavy command once the host has room for it")
 		.description(
-			"Wait while the 1-minute load average exceeds the host's CPU count or available memory is below " +
-				"min(4 GiB, RAM/4). Each admission in the last minute counts as one more unit of load and one " +
+			"Wait while the host's CPU load exceeds its CPU count or available memory is below min(4 GiB, RAM/4). " +
+				"On Linux the load is the CPUs busy over about the last 5 seconds, from /proc/stat, leaving out I/O " +
+				"wait, and less than one idle CPU counts as over the limit; elsewhere it is the 1-minute load " +
+				"average. Each admission in the last minute counts as one more unit of load and one " +
 				"budget less memory: commands start at once while those still fit, and 5 seconds apart while " +
 				"only the raw measures do. The load limit applies only while a gated command still runs. Where a " +
 				"systemd scope owns each running command, the load counts as at least the sum of their peak CPU " +
@@ -1477,10 +1479,10 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		.description(
 			"Wait until this host can carry one more agent, for a coordinator to run before it starts or resumes " +
 				"an agent of its own, such as a sub-agent; start and resume do the same themselves. The host has room " +
-				"while quest gate would admit a command at once, counting every queued command and, as one recent " +
-				`admission each, every agent admitted in the last ${PENDING_MS / 60_000} minutes, since an agent adds ` +
-				"no gated load until its first build; an agent start or resume runs counts only until it exits. Agents " +
-				"already running are never paused.\n\n" +
+				"while its memory would admit a gated command at once, counting as one recent admission each every " +
+				`agent admitted in the last ${PENDING_MS / 60_000} minutes, since an agent adds no gated work until ` +
+				"its first build; an agent start or resume runs counts only until it exits. CPU load and commands " +
+				"queued for quest gate do not count. Agents already running are never paused.\n\n" +
 				"Exits 0 once admitted, 128 plus the signal number when interrupted, and 1 otherwise.",
 		)
 		.action(() => {

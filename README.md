@@ -1364,10 +1364,21 @@ otherwise would, so a repository's `.env.development` cannot override the
 variables a gated build was given.
 
 Admission is sized from the host, with no configuration. Every platform waits
-while the host-wide 1-minute load average exceeds the host's CPU count, or while
-available memory is below one command's budget: 4 GiB, or a quarter of RAM on
-smaller hosts, where RAM is capped by any container memory limit. On Linux,
-available memory includes reclaimable host and cgroup file cache and is bounded
+while the host's CPU load exceeds its CPU count, or while available memory is
+below one command's budget: 4 GiB, or a quarter of RAM on smaller hosts, where
+RAM is capped by any container memory limit.
+
+On Linux, the load is the CPUs busy over about the last 5 seconds, read from
+`/proc/stat`: user, system, interrupt, and steal time count, while idle and I/O
+wait do not, so tasks blocked on disk, which the load average counts, leave
+their CPUs free for the next command. Busy CPUs cannot show how much more work
+waits for them, so a host with less than one CPU idle counts as over its limit.
+Gates share their samples beside the admissions ledger, and each running gate
+samples every 5 seconds, so a command arriving on a busy host measures at once;
+only when no sample is at least a second old does it wait a second for one.
+Other platforms use the host-wide 1-minute load average.
+
+On Linux, available memory includes reclaimable host and cgroup file cache and is bounded
 by the remaining budget of each enclosing memory cgroup and of the user manager's
 `background.slice`, which gated commands run in, so a slice at its `memory.high` or
 `memory.max` queues the next command, and a slice's cap below RAM sizes the budget. Load and memory count
@@ -1408,7 +1419,7 @@ more, instead of a budget on top of it. The peak includes file cache the command
 wrote, so a build that writes large artifacts counts at their size too.
 Windows and Linux without a systemd user manager have no scope to measure, so
 available memory less one budget per recent command decides there, with the
-load average on Linux. macOS counts reclaimable cache as used, so the gate reads no
+busy CPUs on Linux. macOS counts reclaimable cache as used, so the gate reads no
 memory there and the load average alone decides.
 
 A user's admissions on one host are recorded under
@@ -2518,13 +2529,13 @@ native archival instead.
 
 Start and resume first wait until the host can carry one more agent, before
 claiming the worktree, and a coordinator runs `quest agent admit` before it
-starts or resumes a sub-agent of its own. The host has room while `quest gate`
-would admit a command at once, counting every command queued for it and, as one
-recent admission each, every agent admitted in the last 5 minutes: an agent adds
-no gated load until its first build, and three quarters of those that build at
-all reach it by then. An agent `start` or `resume` runs stops counting when it
-exits. As in the gate, a host loaded only by work no gate holds still starts one
-agent at a time.
+starts or resumes a sub-agent of its own. The host has room while its memory
+would admit a gated command at once, as `quest gate` counts it, with one more
+command's budget taken for every agent admitted in the last 5 minutes: an agent
+adds no gated work until its first build, and three quarters of those that build
+at all reach it by then. An agent `start` or `resume` runs stops counting when it
+exits. CPU load and commands queued for the gate do not hold agents back: an
+agent mostly waits on its model, and its builds wait in the gate.
 
 Admission only delays the next agent: none already running is paused or
 stopped, and `quest agent stop` does not see a launch still waiting, which ends

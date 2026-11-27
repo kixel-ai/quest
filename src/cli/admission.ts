@@ -1,5 +1,5 @@
-// Agent admission: a coordinator starts or resumes an agent only while the host's gate would admit
-// work at once. It only delays the next start: agents already running are never paused or stopped.
+// Agent admission: a coordinator starts or resumes an agent only while the host's memory has room
+// for it. It only delays the next start: agents already running are never paused or stopped.
 import { randomUUID } from "node:crypto";
 import { basename, dirname, join } from "node:path";
 
@@ -9,17 +9,16 @@ import {
 	type Limits,
 	LEDGER_VERSION,
 	SETTLE_MS,
-	type Waiting,
 	claimDirectory,
 	fileHost,
 	hostLimits,
+	memoryRoom,
 	processStart,
-	room,
 } from "./gate";
 
 /**
- * How long an admitted agent counts against the host's headroom, as one recent admission of the
- * gate's: an agent adds no gated load until its first build. Of 263 sub-agents on one host over three
+ * How long an admitted agent counts against the host's memory, as one recent admission of the
+ * gate's: an agent adds no gated work until its first build. Of 263 sub-agents on one host over three
  * weeks, the 126 that gated anything reached their first gated command in a median of 133 seconds,
  * and three quarters within 265; the rest never gated, so no later event ends the count.
  */
@@ -28,7 +27,7 @@ export const PENDING_MS = 5 * 60_000;
 /** What `admit` reads and writes, replaceable in tests. */
 export interface AdmissionDependencies {
 	limits: Limits;
-	/** The gate's ledger and the host's load and memory. */
+	/** The gate's ledger and the host's memory. */
 	gate: Host;
 	/** The agents' ledger; only its clock, ledger, liveness, and sleep are used. */
 	agents: Host;
@@ -36,23 +35,18 @@ export interface AdmissionDependencies {
 	notice(text: string): void;
 }
 
-const waits: Record<Waiting, string> = {
-	load: "the load average to fall",
-	memory: "free memory",
-	queue: "gated commands queued on this host to start",
-};
-
 /**
- * Wait until the host can carry one more agent, then record it. The host has room while the gate
- * would admit a command at once (see `room`), counting each agent admitted in the last PENDING_MS
- * whose launcher, if it has one, still runs.
+ * Wait until the host can carry one more agent, then record it. The host has room while its memory
+ * has room for one more command (see `memoryRoom`), counting each agent admitted in the last
+ * PENDING_MS whose launcher, if it has one, still runs. CPU load and the gate's queue do not count:
+ * an agent mostly waits on its model, and its builds wait in the gate.
  *
  * `held` is the process that runs the agent, as `quest agent start` does; without it, as for a
  * coordinator's own sub-agent, nothing reports the agent's end.
  */
 export async function admit(deps: AdmissionDependencies, signal: AbortSignal, held?: number): Promise<void> {
 	const holder = held === undefined ? {} : { pid: held, start: processStart(held) };
-	const shown = new Set<Waiting>();
+	let shown = false;
 	for (;;) {
 		signal.throwIfAborted();
 		const ledger = deps.agents.ledger();
@@ -68,15 +62,14 @@ export async function admit(deps: AdmissionDependencies, signal: AbortSignal, he
 		const pending = ledger.admissions.filter(
 			(entry) => entry.at > now - PENDING_MS && (entry.pid === undefined || deps.agents.running(entry)),
 		);
-		const reason = room(deps.limits, deps.gate, pending.length);
-		if (reason === null) {
+		if (memoryRoom(deps.limits, deps.gate, pending.length)) {
 			const entry: Admission = { id: randomUUID(), at: now, ...holder };
 			if (deps.agents.publish(ledger, [...pending, entry])) return;
 			continue;
 		}
-		if (!shown.has(reason)) {
-			shown.add(reason);
-			deps.notice(`waiting for ${waits[reason]} before starting an agent`);
+		if (!shown) {
+			shown = true;
+			deps.notice("waiting for free memory before starting an agent");
 		}
 		await deps.agents.sleep(SETTLE_MS, signal);
 	}
