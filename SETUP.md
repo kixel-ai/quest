@@ -122,10 +122,13 @@ Read the root instructions with the new line in place:
 - If `quest/README.md` was just created, ask the user what the project is
   working toward and write that as its Goal.
 
-If the repository's CI runs checks on pull requests, recommend dropping that
-trigger: agents run the checks locally before pushing, and the merge queue is
-the only synchronous gate. Keep a job that builds nothing and only reports a
-context GitHub's merge queue requires before admitting a PR.
+If the repository's CI runs checks on pull requests, recommend moving them into
+the merge queue's build, then dropping that trigger: agents run the checks
+locally before pushing, and the merge queue is the only synchronous gate. Check
+first that the queue's build runs every check the base requires and that each
+required context still reports. With GitHub's merge queue, keep a job that
+builds nothing and only reports a context the queue requires before admitting a
+PR; a repository landing through the watcher's own queue needs no such job.
 Change workflows only if the user agrees.
 
 Agents push their quest branches to the repository itself, and GitHub gives

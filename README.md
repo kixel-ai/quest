@@ -381,7 +381,8 @@ quest check --base origin/main --branch quest/m0/export
 Fetch the base first, since a stale one can predate the quest. `quest merge`
 runs this on the head it lands. A merge queue's build can run it too; its
 checkout is detached, so pass the PR's head branch, as this repository's
-`.github/workflows/queue-build.yml` does.
+[`queue-build.yml`](.github/workflows/queue-build.yml) does:
+`quest check --base "$BASE" --branch "$head_ref"`.
 
 The check is a floor, not a review: any edit to the quest passes, so reviewers
 still judge whether a rewrite matches what remains.
