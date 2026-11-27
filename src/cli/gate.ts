@@ -251,7 +251,7 @@ interface CpuSample {
 }
 
 /**
- * The CPUs busy over about the last SETTLE_MS, from `proc`'s `stat` and the samples every gate on
+ * The CPUs busy over the span closest to SETTLE_MS, from `proc`'s `stat` and the samples every gate on
  * the host shares in `file`, which this call adds to: user, nice, system, IRQ, and steal time count,
  * idle and I/O wait do not, so tasks blocked on disk leave their CPUs free. Undefined while no
  * sample is at least CPU_SAMPLE_MS old.
@@ -271,9 +271,16 @@ export function busyCpus(proc: string, file: string, now: number): number | unde
 	const current: CpuSample = { at: now, busy: total - fields[3]! - fields[4]!, total };
 	// A clock stepped backward dates samples in the future; they are dropped with the stale ones.
 	const samples = readSamples(file).filter((sample) => sample.at <= now && sample.at > now - 2 * SETTLE_MS);
-	const base =
-		samples.filter((sample) => sample.at <= now - SETTLE_MS).at(-1) ??
-		samples.find((sample) => sample.at <= now - CPU_SAMPLE_MS);
+	// The sample closest to SETTLE_MS old, so a longer span never dilutes a burst.
+	const base = samples
+		.filter((sample) => sample.at <= now - CPU_SAMPLE_MS)
+		.reduce<CpuSample | undefined>(
+			(best, sample) =>
+				best === undefined || Math.abs(now - sample.at - SETTLE_MS) < Math.abs(now - best.at - SETTLE_MS)
+					? sample
+					: best,
+			undefined,
+		);
 	const newest = samples.at(-1);
 	if (newest === undefined || newest.at <= now - CPU_SAMPLE_MS) {
 		mkdirSync(dirname(file), { recursive: true });

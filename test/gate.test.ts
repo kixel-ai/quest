@@ -297,6 +297,17 @@ test("busy CPUs leave out I/O wait, and are measured from samples every gate on 
 	expect(busyCpus(proc, file, SETTLE_MS + CPU_SAMPLE_MS)).toBeUndefined();
 });
 
+test("busy CPUs are measured from the sample nearest SETTLE_MS old, so a longer span never dilutes a burst", () => {
+	const { proc, advance } = procStat(4);
+	const file = join(tempDir(), "cpu");
+	expect(busyCpus(proc, file, 0)).toBeUndefined();
+	advance(SETTLE_MS, 0);
+	expect(busyCpus(proc, file, SETTLE_MS)).toBe(0);
+	// Of samples 9.9 and 4.9 seconds old, the younger spans only the burst since.
+	advance(SETTLE_MS - 100, 0.9);
+	expect(busyCpus(proc, file, 2 * SETTLE_MS - 100)).toBe(Infinity);
+});
+
 test("a host whose CPUs wait on disk admits, and one whose CPUs are all busy waits", async () => {
 	const { proc, advance } = procStat(4);
 	const file = join(tempDir(), "cpu");

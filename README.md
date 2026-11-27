@@ -1374,7 +1374,8 @@ wait do not, so tasks blocked on disk, which the load average counts, leave
 their CPUs free for the next command. Busy CPUs cannot show how much more work
 waits for them, so a host with less than one CPU idle counts as over its limit.
 Gates share their samples beside the admissions ledger, and each running gate
-samples every 5 seconds, so a command arriving on a busy host measures at once;
+that a systemd scope owns samples every 5 seconds, so a command arriving while
+one runs measures at once;
 only when no sample is at least a second old does it wait a second for one.
 Other platforms use the host-wide 1-minute load average.
 
@@ -2535,7 +2536,8 @@ command's budget taken for every agent admitted in the last 5 minutes: an agent
 adds no gated work until its first build, and three quarters of those that build
 at all reach it by then. An agent `start` or `resume` runs stops counting when it
 exits. CPU load and commands queued for the gate do not hold agents back: an
-agent mostly waits on its model, and its builds wait in the gate.
+agent mostly waits on its model, and its builds wait in the gate. On macOS,
+where the gate reads no memory, agents start without waiting.
 
 Admission only delays the next agent: none already running is paused or
 stopped, and `quest agent stop` does not see a launch still waiting, which ends
