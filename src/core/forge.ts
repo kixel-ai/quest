@@ -240,7 +240,10 @@ export interface PullFiles {
 	files: string[];
 }
 
-/** A PR the forge updated since an instant, open, merged, or closed, as the record sender reads it. */
+/**
+ * A PR the forge updated since an instant, open, merged, or closed, as the record sender reads it. A hosted
+ * repository has no forks, so its head repository is always the repository read.
+ */
 export interface UpdatedPull {
 	number: number;
 	/** The PR's page, which a session's recorded PR is matched by. */
@@ -422,8 +425,9 @@ export interface ForgeCalls {
 	status: { request: { pull: PullRequest }; value: Status };
 	pulls: { request: { repository: Repository }; value: OpenPull[] };
 	/**
-	 * The PRs updated since `since` (epoch milliseconds), merged and closed ones included. `cursor` is null for the
-	 * first page, then each page's `next`; Kixel Quest sets the page size and serves it only for a repository it hosts.
+	 * The PRs updated at or after `since` (epoch milliseconds), merged and closed ones included, as `updatedPulls`
+	 * reads GitHub's. `cursor` is null for the first page, then each page's `next`; a cursor never skips a PR when
+	 * others move to the front. Kixel Quest sets the page size and serves it only for a repository it hosts.
 	 */
 	updated: { request: { repository: Repository; since: number; cursor: string | null }; value: UpdatedPage };
 	files: { request: { repository: Repository }; value: PullFiles[] };
