@@ -28,10 +28,10 @@ The maintainer authorized the edits this needs in `assets/skills/review.md`,
 
 Recommended, for the implementer to confirm:
 
-- `src/core/reviews.ts`: add `"third"` to `SEATS` (`["pick", "shadow", "second", "third"]`).
-  Coordinate the `kixel.quest` server bump (`quest/core` pin + deploy) before
-  clients post `seat: "third"`, since `kixel.quest`'s `POST /reviews` validates
-  strictly through `parseReviews`.
+- `src/core/reviews.ts`: [Review rung ladder](/quest/m0/review-rungs.md)
+  already added `"third"` to `SEATS` without sending any `"third"` rounds, and
+  this quest's `## Waiting` item confirms `kixel.quest` has pinned and deployed
+  that `quest/core` release before clients begin posting `seat: "third"`.
 - `src/cli/models.ts`: add `agy("gemini-4-neon", "medium")` to rung `5` and
   `agy("gemini-4-neon", "high")` to rung `6` in `REVIEW_RUNGS`.
 - `src/cli/review.ts` & `src/cli/agent.ts`:

@@ -71,12 +71,15 @@ Recommended, for the implementer to confirm:
     rung, just as `unsettledSecond` does today.
 - `src/core/reviews.ts`, `src/cli/review-record.ts`, `src/github/status.ts`,
   `src/cli/main.ts`, `README.md`, and `assets/skills/{review,merge,run,afk}.md`:
-  update documentation and `quest status` / `/quest-merge` / `/quest-run` /
-  `/quest-afk` wording so `low` PRs require a passing local review (and
-  `## Automatic` classes auto-merge once that review passes). Keep
-  `"passed with no local reviewer"` readable in `src/core/reviews.ts` only if
-  needed for already-stored Kixel Quest records, or drop it cleanly if
-  `kixel.quest` no longer replays old payloads.
+  add `"third"` to `SEATS` in `src/core/reviews.ts` now (while sending no
+  `"third"` rounds yet) so `kixel.quest` can pin and deploy the updated
+  `quest/core` parser before [Neon third reviewer](/quest/m0/review-third-seat.md)
+  starts sending third-seat rounds. Update documentation and `quest status` /
+  `/quest-merge` / `/quest-run` / `/quest-afk` wording so `low` PRs require a
+  passing local review (and `## Automatic` classes auto-merge once that review
+  passes). Keep `"passed with no local reviewer"` readable in
+  `src/core/reviews.ts` only if needed for already-stored Kixel Quest records,
+  or drop it cleanly if `kixel.quest` no longer replays old payloads.
 
 Tests: unit tests for `reviewRung(size, tier)` across all 15 `(size, tier)`
 pairs, 1-seat vs 2-seat scheduling (including `XS high` = 1 seat Sol `xhigh`,
