@@ -296,6 +296,21 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"object; --report copies them to <dir>/<task>/junit.xml and <dir>/<task>/metrics.json, where <dir> " +
 				"must not exist yet. A failed task skips the tasks after it, and with --fail-fast also stops every " +
 				"running task. Exits 1 when a task fails.\n\n" +
+				"A task with cargo = true runs once per crate of the Cargo workspace at the repository root, which " +
+				"cargo metadata --locked lists, with QUEST_CRATE naming the crate, one crate at a time; its reports " +
+				"copy to <dir>/<task>/<crate>/.\n\n" +
+				"A task with cache, by default a Nix task no other task runs after, takes a pass this user recorded on " +
+				"this host for the same inputs instead of running, and records each pass, under " +
+				"$XDG_CACHE_HOME/quest/tasks (~/.cache/quest/tasks unless set), which must be writable by no other " +
+				"user. The inputs are the dev shell's derivation, which nix eval gives, the run script, environment " +
+				"table, report paths, OS and CPU, the tasks it runs after, and the Git ids of the files it reads: " +
+				"its paths and inputs, or every file without paths, less exclude, plus invalidate_all, counting " +
+				"uncommitted and untracked files as they are. A Cargo crate reads its own directory and those of " +
+				"the workspace crates it depends on, the registry and git packages it resolves to with their " +
+				"features, the root Cargo.toml without [workspace.dependencies], and inputs. A cached task must not " +
+				"depend on QUEST_TIER or QUEST_BASE, which the digest leaves out so a pass holds across tiers and " +
+				"rebases. A cached pass copies the reports it recorded under --report. --no-cache runs every task " +
+				"and records nothing. Each task's summary line reads cached (hit) or ran with its time.\n\n" +
 				"--query prints the picked tasks as JSON for a CI runner's matrix and runs nothing: " +
 				"{include: [{task, os, tier, after, nix, capabilities, caches}]}, one entry per task and operating " +
 				"system, each picking its own tasks and what they run after.",
@@ -321,6 +336,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		.option("--fail-fast", "Stop every running task once one fails")
 		.option("--query", "Print the picked tasks as JSON instead of running them")
 		.option("--report <dir>", "Copy each task's JUnit XML and metrics into <dir>/<task>/")
+		.option("--no-cache", "Run every task, taking and recording no cached pass")
 		.action(
 			(options: {
 				tier: TaskTier;
@@ -331,6 +347,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				failFast?: boolean;
 				query?: boolean;
 				report?: string;
+				cache: boolean;
 			}) => {
 				pending = runTasks(
 					{
@@ -343,6 +360,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 						failFast: options.failFast ?? false,
 						query: options.query ?? false,
 						report: options.report,
+						cache: options.cache,
 					},
 					{ stdout: out.stdout, stderr: out.stderr, env: process.env, now: Date.now },
 				).catch((error: unknown) => {
