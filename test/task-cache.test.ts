@@ -100,12 +100,14 @@ test("a crate's closure takes every kind of its own dependencies, and only what 
 			name: "app",
 			dirs: ["app", "lib"],
 			packages: ["serde 1.0.0 registry+https://github.com/rust-lang/crates.io-index [derive,std]"],
+			names: ["app", "lib", "serde"],
 		},
-		{ name: "fixtures", dirs: ["lib/fixtures"], packages: [] },
+		{ name: "fixtures", dirs: ["lib/fixtures"], packages: [], names: ["fixtures"] },
 		{
 			name: "lib",
 			dirs: ["lib", "lib/fixtures"],
 			packages: ["serde 1.0.0 registry+https://github.com/rust-lang/crates.io-index [derive,std]"],
+			names: ["fixtures", "lib", "serde"],
 		},
 	]);
 
@@ -116,11 +118,31 @@ test("a crate's closure takes every kind of its own dependencies, and only what 
 	expect(() => cargoWorkspace(outside, top)).toThrow("crate fixtures is a path dependency outside the repository");
 });
 
-test("the root manifest a crate reads leaves out the workspace's dependency table", () => {
+test("the root manifest a crate reads keeps only the workspace dependencies its closure uses", () => {
 	const base =
-		'[workspace]\nmembers = ["a"]\n\n[workspace.dependencies]\nserde = "1"\n\n[profile.release]\nlto = true\n';
-	expect(workspaceManifest(base)).toBe(workspaceManifest(base.replace('serde = "1"', 'serde = "2"')));
-	expect(workspaceManifest(base)).not.toBe(workspaceManifest(base.replace("lto = true", "lto = false")));
+		'[workspace]\nmembers = ["a"]\n\n[workspace.dependencies]\nserde = "1"\njson = { package = "serde_json", version = "1" }\nb = { path = "b" }\n\n[profile.release]\nlto = true\n';
+	const read = (text: string) => workspaceManifest(text, ["a", "serde_json"]);
+	// serde and b are outside a's closure; serde_json is in it under another name.
+	expect(read(base)).toBe(read(base.replace('serde = "1"', 'serde = "2"').replace('path = "b"', 'path = "b2"')));
+	expect(read(base)).not.toBe(read(base.replace('version = "1" }', 'version = "1", features = ["std"] }')));
+	expect(read(base)).not.toBe(read(base.replace("lto = true", "lto = false")));
+});
+
+test.runIf(posix)("a submodule with uncommitted changes cannot be hashed", () => {
+	const inner = initRepository(tempDir());
+	writeFileSync(join(inner, "file"), "1");
+	execFileSync("git", ["-C", inner, "add", "-A"], { stdio: "ignore" });
+	execFileSync("git", ["-C", inner, "commit", "-q", "-m", "inner"], { stdio: "ignore" });
+	const outer = initRepository(tempDir());
+	execFileSync("git", ["-C", outer, "-c", "protocol.file.allow=always", "submodule", "add", "-q", inner, "sub"], {
+		stdio: "ignore",
+	});
+	execFileSync("git", ["-C", outer, "commit", "-q", "-m", "outer"], { stdio: "ignore" });
+	expect(treeFiles(outer).map(({ path, mode }) => `${mode} ${path}`)).toEqual(["100644 .gitmodules", "160000 sub"]);
+	writeFileSync(join(outer, "sub", "file"), "2");
+	expect(() => treeFiles(outer)).toThrow(
+		"sub is a submodule or nested repository with changes the index does not hold",
+	);
 });
 
 test("the Nix system names the host's CPU and OS as flakes do", () => {

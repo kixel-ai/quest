@@ -486,7 +486,9 @@ test.runIf(posix)("a Cargo task runs once per crate, and reruns only the crates 
 	expect(ran(first)).toEqual(["test:a | testing a", "test:b | testing b", "test:c | testing c"]);
 	expect(first.stderr).toContain("quest: ran test:a (0.0s)\nquest: ran test:b (0.0s)\nquest: ran test:c (0.0s)\n");
 	// Cargo runs in the dev shell, whose hook may print first.
-	expect(first.log).toContain(`nix develop ${dir} --command cargo metadata --locked --format-version 1`);
+	expect(first.log).toContain(
+		`nix develop ${dir} --command cargo metadata --locked --all-features --format-version 1`,
+	);
 
 	// An unchanged tree takes every pass.
 	const second = await go();
@@ -511,6 +513,9 @@ test.runIf(posix)("a Cargo task runs once per crate, and reruns only the crates 
 	// Bumping b's registry dependency reruns b alone.
 	writeFileSync(file, metadata(dir, { ...crates, b: { registry: { rand: "0.8.1" } } }));
 	expect(ran(await go())).toEqual(["test:b | testing b"]);
+	// So does a shared test configuration outside every crate.
+	write(dir, { ".config/nextest.toml": "[profile.ci]\n" });
+	expect(ran(await go())).toHaveLength(3);
 	// Another dev shell reruns every crate.
 	expect(ran(await go({ STUB_SHELL: "/nix/store/other-shell.drv" }))).toHaveLength(3);
 });
@@ -543,6 +548,18 @@ test.runIf(posix)(
 		write(dir, { "src/a": "2" });
 		expect(ran(await go())).toContain("test  | built");
 		expect(ran(await go({ cache: false }))).toContain("test  | built");
+		// Inside the repository's dev shell, which may predate a flake edit, the cached task still runs in the shell
+		// its digest names, while the uncached build runs directly.
+		write(dir, { "src/a": "3" });
+		const inside = await runIn(
+			dir,
+			{ all: true, cache: true },
+			{ ...env, IN_NIX_SHELL: "impure", QUEST_DEV_SHELL: dir },
+		);
+		expect(ran(inside)).toContain("test  | built");
+		expect(inside.log.filter((line) => line.startsWith("nix develop"))).toEqual([
+			`nix develop ${dir} --command bash -eo pipefail -c cat out/build; echo '<testsuites/>' > out/junit.xml`,
+		]);
 
 		// A cache another user can write is refused, since every pass in it is trusted.
 		chmodSync(join(env.XDG_CACHE_HOME, "quest", "tasks"), 0o777);

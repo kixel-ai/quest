@@ -39,7 +39,8 @@ export function treeFiles(top: string): TreeFile[] {
 		if (stage === "0") files.set(path, { path, mode: mode!, oid: oid! });
 		else dirty.add(path);
 	}
-	for (const path of list(["diff-files", "--name-only", "--ignore-submodules=dirty", "-z"])) dirty.add(path);
+	// A submodule with edits inside it is listed too, so it fails below rather than passing as its gitlink.
+	for (const path of list(["diff-files", "--name-only", "--ignore-submodules=none", "-z"])) dirty.add(path);
 	for (const path of list(["ls-files", "--others", "--exclude-standard", "-z"])) dirty.add(path);
 
 	const regular: TreeFile[] = [];
@@ -55,7 +56,7 @@ export function treeFiles(top: string): TreeFile[] {
 			});
 		else if (info.isDirectory())
 			throw new Error(
-				`${path} is a submodule or nested repository at a commit the index does not hold; commit or ignore it, or pass --no-cache`,
+				`${path} is a submodule or nested repository with changes the index does not hold; commit or ignore them, or pass --no-cache`,
 			);
 		else {
 			if (path.includes("\n")) throw new Error(`cannot hash ${JSON.stringify(path)}, whose name holds a newline`);
@@ -110,6 +111,8 @@ export interface CargoCrate {
 	dirs: string[];
 	/** Each registry or git package it depends on, by name, version, source, and enabled features. */
 	packages: string[];
+	/** The name of every package in its closure, itself included. */
+	names: string[];
 }
 
 /** A workspace's crates, and the directory of every crate with a path source, members or not. */
@@ -172,7 +175,8 @@ export function cargoWorkspace(output: string, top: string): CargoWorkspace {
 				external.push(`${name} ${version} ${source} [${features}]`);
 			}
 		}
-		return { name: packages.get(member)!.name, dirs: dirs.sort(), packages: external.sort() };
+		const names = [...new Set([...seen].map((id) => packages.get(id)!.name))].sort();
+		return { name: packages.get(member)!.name, dirs: dirs.sort(), packages: external.sort(), names };
 	});
 	const dirs = metadata.packages.flatMap((each) => {
 		const path = dir(each.id);
@@ -181,17 +185,29 @@ export function cargoWorkspace(output: string, top: string): CargoWorkspace {
 	return { crates: crates.sort((a, b) => (a.name < b.name ? -1 : 1)), dirs };
 }
 
-/** Files at a Cargo workspace's root that every crate builds with. */
-const CARGO_SHARED = [".cargo/config.toml", ".cargo/config", "rust-toolchain.toml", "rust-toolchain"];
+/** Files at a Cargo workspace's root that every crate builds or tests with. */
+const CARGO_SHARED = [
+	".cargo/config.toml",
+	".cargo/config",
+	"rust-toolchain.toml",
+	"rust-toolchain",
+	".config/nextest.toml",
+];
 
 /**
- * The root `Cargo.toml` as every crate reads it, without `[workspace.dependencies]`: each crate's resolved packages
- * already say what it takes from there, so bumping one crate's dependency leaves the others' digests alone.
+ * The root `Cargo.toml` as a crate reads it: `[workspace.dependencies]` keeps only the entries for packages in its
+ * closure, which `names` lists, so bumping or retuning one crate's dependency leaves the others' digests alone.
  */
-export function workspaceManifest(text: string): string {
+export function workspaceManifest(text: string, names: readonly string[]): string {
 	const manifest = parse(text) as Record<string, unknown>;
 	const workspace = manifest.workspace as Record<string, unknown> | undefined;
-	if (workspace !== undefined) delete workspace.dependencies;
+	const dependencies = workspace?.dependencies as Record<string, unknown> | undefined;
+	if (dependencies !== undefined)
+		for (const [key, entry] of Object.entries(dependencies)) {
+			// An entry may rename its package.
+			const renamed = (entry as { package?: unknown } | null)?.package;
+			if (!names.includes(typeof renamed === "string" ? renamed : key)) delete dependencies[key];
+		}
 	return JSON.stringify(manifest);
 }
 
@@ -213,7 +229,16 @@ export function inputFiles(
 		if (task.inputs.some((pattern) => matches(pattern, path))) return true;
 		if (cargo === null) return task.paths === null || task.paths.some((pattern) => matches(pattern, path));
 		const dir = owner(path);
-		return CARGO_SHARED.includes(path) || (dir !== undefined && cargo.crate.dirs.includes(dir));
+		// Outside every crate: a shared Cargo file, or one the task's paths select, such as test configuration. The
+		// workspace's manifest and lockfile count only as far as the crate's closure reads them.
+		if (dir === undefined)
+			return (
+				CARGO_SHARED.includes(path) ||
+				(path !== "Cargo.toml" &&
+					path !== "Cargo.lock" &&
+					(task.paths?.some((pattern) => matches(pattern, path)) ?? false))
+			);
+		return cargo.crate.dirs.includes(dir);
 	};
 	return files.filter(
 		(file) =>

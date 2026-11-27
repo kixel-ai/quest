@@ -209,30 +209,31 @@ export async function run(options: RunOptions, io: RunIO): Promise<number> {
 	// Every program is found before any task starts, so a missing one fails the run rather than one task.
 	const problem = flakeProblem(workingTree(top), tasks);
 	if (problem !== null) throw new Error(problem);
-	// This repository's dev shell, already entered, runs Nix tasks directly with no evaluation.
-	const enter = tasks.some((task) => task.nix) && !inDevShell(io.env, top);
 	const caching = options.cache && tasks.some((task) => task.cache);
-	// The cache fingerprints the dev shell with Nix even from inside it.
+	// The cache fingerprints the flake's dev shell with Nix even from inside a dev shell.
 	const fingerprint = caching && tasks.some((task) => task.nix);
+	// This repository's dev shell, already entered, runs Nix tasks directly with no evaluation, except a cached task,
+	// which runs in the shell its digest names: the entered one may predate an edit to the flake.
+	const inside = inDevShell(io.env, top);
+	const develop = (task: ManifestTask) => task.nix && (!inside || (caching && task.cache));
 	const programs = {
 		quest: requireProgram("quest", io.env),
 		bash: requireProgram("bash", io.env),
-		nix: enter || fingerprint ? requireProgram("nix", io.env) : null,
+		nix: tasks.some(develop) || fingerprint ? requireProgram("nix", io.env) : null,
 	};
 	// Sets the environment of a task run outside `nix develop`, whose dev shell has its own `env`. It runs by name,
 	// since a multi-call coreutils, which its resolved path can be, picks the tool by the name it runs as.
-	if (tasks.some((task) => Object.keys(task.environment).length > 0 && !(task.nix && enter)))
-		requireProgram("env", io.env);
+	if (tasks.some((task) => Object.keys(task.environment).length > 0 && !develop(task))) requireProgram("env", io.env);
 
-	// A Cargo task runs once per crate, in the dev shell's Cargo for a Nix task.
+	// A Cargo task runs once per crate, in the dev shell's Cargo for a Nix task. Every feature is on, so each crate's
+	// closure holds the optional dependencies a task's own feature flags may build.
 	let workspace: CargoWorkspace | null = null;
 	const cargo = tasks.find((task) => task.cargo);
 	if (cargo !== undefined) {
-		const metadata = ["cargo", "metadata", "--locked", "--format-version", "1"];
-		const argv =
-			cargo.nix && enter
-				? [programs.nix!, "develop", top, "--command", ...metadata]
-				: [requireProgram("cargo", io.env), ...metadata.slice(1)];
+		const metadata = ["cargo", "metadata", "--locked", "--all-features", "--format-version", "1"];
+		const argv = develop(cargo)
+			? [programs.nix!, "develop", top, "--command", ...metadata]
+			: [requireProgram("cargo", io.env), ...metadata.slice(1)];
 		const result = spawnSync(argv[0]!, argv.slice(1), {
 			cwd: top,
 			env: io.env,
@@ -256,8 +257,7 @@ export async function run(options: RunOptions, io: RunIO): Promise<number> {
 	if (cache !== null) {
 		const files = treeFiles(top);
 		const shell = fingerprint ? devShellDerivation(programs.nix!, top, io.env) : null;
-		const cargoManifest =
-			workspace === null ? null : workspaceManifest(readFileSync(join(top, "Cargo.toml"), "utf8"));
+		const cargoManifest = workspace === null ? null : readFileSync(join(top, "Cargo.toml"), "utf8");
 		// Tasks come after those they run after, whose digests each covers, since it may read what they wrote.
 		for (const unit of units) {
 			const { task, crate } = unit;
@@ -269,7 +269,14 @@ export async function run(options: RunOptions, io: RunIO): Promise<number> {
 				environment: Object.entries(task.environment).sort(),
 				junit: task.junit,
 				metrics: task.metrics,
-				crate: crate === null ? null : { name: crate.name, packages: crate.packages, manifest: cargoManifest },
+				crate:
+					crate === null
+						? null
+						: {
+								name: crate.name,
+								packages: crate.packages,
+								manifest: workspaceManifest(cargoManifest!, crate.names),
+							},
 				files: inputFiles(
 					task,
 					files,
@@ -313,7 +320,7 @@ export async function run(options: RunOptions, io: RunIO): Promise<number> {
 		const script = ["-eo", "pipefail", "-c", task.run];
 		const variables = Object.entries(task.environment).map(([name, value]) => `${name}=${value}`);
 		const launch = variables.length === 0 ? [] : ["env", ...variables];
-		if (task.nix && enter) return [programs.nix!, "develop", top, "--command", ...launch, "bash", ...script];
+		if (develop(task)) return [programs.nix!, "develop", top, "--command", ...launch, "bash", ...script];
 		return [...launch, programs.bash, ...script];
 	};
 
@@ -322,6 +329,7 @@ export async function run(options: RunOptions, io: RunIO): Promise<number> {
 	/** How each unit that passed or ran got its outcome, for the summary: a cached pass, or its run's seconds. */
 	const results = new Map<Unit, "hit" | string>();
 	const writes: Promise<void>[] = [];
+	let writeFailure: unknown;
 	let stopping = false;
 	const cancel = interrupts();
 	/** Signal every task: each gate's whole process group, or on Windows end the gate, whose job ends the rest. */
@@ -450,13 +458,18 @@ export async function run(options: RunOptions, io: RunIO): Promise<number> {
 					if (status === null && problems.length === 0) {
 						finish(unit, "passed", ` in ${seconds.toFixed(1)}s`);
 						if (cache !== null && task.cache)
+							// Caught at once, so a failed write fails the run once its tasks finish, not the process.
 							writes.push(
-								cache.set(unit.digest!, {
-									task: task.name,
-									crate: unit.crate?.name ?? null,
-									seconds,
-									reports,
-								}),
+								cache
+									.set(unit.digest!, {
+										task: task.name,
+										crate: unit.crate?.name ?? null,
+										seconds,
+										reports,
+									})
+									.catch((error: unknown) => {
+										writeFailure ??= error;
+									}),
 							);
 					} else {
 						const why = [...(status === null ? [] : [status]), ...problems].join("; ");
@@ -477,6 +490,10 @@ export async function run(options: RunOptions, io: RunIO): Promise<number> {
 	}
 
 	await Promise.all(writes);
+	if (writeFailure !== undefined)
+		throw new Error(
+			`cannot record a pass in the task cache: ${writeFailure instanceof Error ? writeFailure.message : String(writeFailure)}`,
+		);
 
 	const counts = new Map<Outcome, number>();
 	for (const unit of units) {

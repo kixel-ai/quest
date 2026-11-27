@@ -116,12 +116,18 @@ run = "x"
 nix = false
 os = ["linux"]
 after = ["kept"]
+
+[tasks.publish]
+tier = "release"
+run = "x"
 `);
 	expect(parsed.tasks.map(({ name, cache, cargo }) => ({ name, cache, cargo }))).toEqual([
 		{ name: "build", cache: false, cargo: false },
 		{ name: "test", cache: true, cargo: true },
 		{ name: "kept", cache: true, cargo: false },
 		{ name: "host", cache: false, cargo: false },
+		// A reused pass would skip publishing.
+		{ name: "publish", cache: false, cargo: false },
 	]);
 	expect(
 		problems('[tasks.a]\ntier = "pr"\nrun = "x"\nnix = false\ncache = true\nenvironment = { QUEST_CRATE = "a" }\n'),
