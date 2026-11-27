@@ -693,15 +693,19 @@ Signing in again replaces the host's token.
 `quest login` also signs git in to the repositories Kixel Quest hosts, as
 `gh auth setup-git` does for GitHub: it writes two `credential.<url>.helper`
 entries to the global git config for that Kixel Quest's URL alone, an empty one
-that drops any helper set earlier for it, such as `osxkeychain`, then
-`!quest git-credential`. That hidden command answers git with user `quest` and
-the token in `login.json`, read on every call, so signing in again rotates it;
-without a token it names `quest login` and git fails. Git finds `quest` on
-`PATH`, so an upgrade keeps working. A global git config quest cannot write,
-such as one home-manager manages, fails the command naming both entries, to
-declare there instead.
-`quest logout` removes those two entries, then the token from the host; Kixel
-Quest takes the token until it is revoked on its Tokens page. A
+that masks any helper listed before it for that URL, such as `osxkeychain`,
+without deleting it, then `!quest git-credential`. That hidden command answers
+git with user `quest` and the token in `login.json`, read on every call, so
+signing in again rotates it; without a token it names `quest login` and git
+fails. Git finds `quest` on `PATH`, so an upgrade keeps working. A helper
+listed after quest's, such as a global `credential.helper` defined later in the
+file, still runs and may store the token. A global git config quest cannot
+write, such as one home-manager manages, fails the command naming both entries,
+to declare there instead; one that already ends with them is left alone.
+`quest logout` removes those two entries, failing on a config it cannot write
+while they are there, then the token from the host; Kixel Quest takes the token
+until it is revoked on its Tokens page. `QUEST_KIXEL_URL` must be a bare origin,
+since git's credential requests name only the protocol and host. A
 `records.json` beside it, where earlier versions read a pasted token, is moved
 into `login.json` on the first read, uploading no transcripts.
 

@@ -8,7 +8,7 @@ import { describe, expect, test } from "vitest";
 import { hostedForge } from "../src/cli/forge";
 import { HELPER, credential, helperKey } from "../src/cli/git-credential";
 import { type LoginDependencies, TRANSCRIPTS_QUESTION, login, logout } from "../src/cli/login";
-import { tokenFor, tokensPath } from "../src/cli/tokens";
+import { kixelUrl, tokenFor, tokensPath } from "../src/cli/tokens";
 import { tempDir } from "./fixture";
 import { FakeLogin, KIXEL, REPOSITORY, writeTokens } from "./kixel-fakes";
 
@@ -190,7 +190,8 @@ function fill(env: NodeJS.ProcessEnv, url: string) {
 describe.skipIf(process.platform === "win32")("git's sign-in", () => {
 	test("login answers git for its Kixel Quest alone, and logout leaves the config as before", async () => {
 		const env = user();
-		const before = "[credential]\n\thelper = cache\n[user]\n\tname = Someone\n";
+		// The person's own helpers, global and for this URL, which the empty entry masks without deleting.
+		const before = `[credential]\n\thelper = cache\n[credential "${KIXEL}"]\n\thelper = osxkeychain\n[user]\n\tname = Someone\n`;
 		writeFileSync(env.GIT_CONFIG_GLOBAL!, before);
 		await login(host(new FakeLogin(), "n", env).deps);
 		const answered = fill(env, `${KIXEL}/example/project.git`);
@@ -211,15 +212,40 @@ describe.skipIf(process.platform === "win32")("git's sign-in", () => {
 		expect(logout(env).removed).toBe(false);
 	});
 
-	test("a git config quest cannot write fails login and logout, naming the entries, and logout keeps the token", async () => {
+	test("a git config quest cannot write fails login, naming the entries, and one declaring them already passes", async () => {
 		const env = user();
-		env.GIT_CONFIG_GLOBAL = join(tempDir(), "missing", ".gitconfig");
 		const entries = `${helperKey(KIXEL)} = "", ${helperKey(KIXEL)} = ${HELPER}`;
+		const home = dirname(env.GIT_CONFIG_GLOBAL!);
+		env.GIT_CONFIG_GLOBAL = join(home, "missing", ".gitconfig");
 		await expect(login(host(new FakeLogin(), "n", env).deps)).rejects.toThrow(
 			`could not write git's global credential entries for ${KIXEL} (${entries})`,
 		);
-		expect(() => logout(env)).toThrow(`could not remove git's global credential entries for ${KIXEL} (${entries})`);
-		expect(tokenFor(KIXEL, env)).toBe("issued-1");
+		// Logout finds none of quest's entries, so it writes nothing and removes the token.
+		expect(logout(env).removed).toBe(true);
+		// A read-only config declaring the entries, as home-manager links into place.
+		const declared = join(home, "declared");
+		mkdirSync(declared);
+		env.GIT_CONFIG_GLOBAL = join(declared, ".gitconfig");
+		writeFileSync(env.GIT_CONFIG_GLOBAL, `[credential "${KIXEL}"]\n\thelper =\n\thelper = ${HELPER}\n`);
+		chmodSync(declared, 0o555);
+		try {
+			await login(host(new FakeLogin(), "n", env).deps);
+			expect(fill(env, KIXEL).stdout).toContain("password=issued-1\n");
+			expect(() => logout(env)).toThrow(
+				`could not remove git's global credential entries for ${KIXEL} (${entries})`,
+			);
+			expect(tokenFor(KIXEL, env)).toBe("issued-1");
+		} finally {
+			chmodSync(declared, 0o755);
+		}
+	});
+
+	test("logout leaves an empty helper the person set for the URL without quest's", () => {
+		const env = user();
+		const before = `[credential "${KIXEL}"]\n\thelper = \n`;
+		writeFileSync(env.GIT_CONFIG_GLOBAL!, before);
+		expect(logout(env).removed).toBe(false);
+		expect(readFileSync(env.GIT_CONFIG_GLOBAL!, "utf8")).toBe(before);
 	});
 });
 
@@ -234,5 +260,12 @@ test("the helper answers only get, and without a token tells git to stop, naming
 	expect(credential("get", "protocol=https\nhost=kixel.quest\n", env, (line) => warned.push(line))).toBe("quit=1\n");
 	expect(warned).toEqual(["this host is not signed in to https://kixel.quest; run `quest login`"]);
 	writeTokens(env, { [KIXEL]: "two\nlines" });
-	expect(() => credential("get", request, env, () => {})).toThrow("is not one line");
+	expect(credential("get", request, env, (line) => warned.push(line))).toBe("quit=1\n");
+	expect(warned.at(-1)).toBe(`the token this host holds for ${KIXEL} is not one line; run \`quest login\``);
+});
+
+test("a Kixel Quest URL is its origin, as git names it", () => {
+	expect(kixelUrl({ QUEST_KIXEL_URL: "https://Kixel.Quest:443/" })).toBe("https://kixel.quest");
+	expect(kixelUrl({ QUEST_KIXEL_URL: "http://localhost:8787" })).toBe(KIXEL);
+	expect(() => kixelUrl({ QUEST_KIXEL_URL: "https://kixel.quest/prefix" })).toThrow("is not an origin");
 });

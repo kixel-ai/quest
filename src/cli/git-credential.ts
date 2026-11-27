@@ -13,31 +13,52 @@ export const HELPER = "!quest git-credential";
 export const helperKey = (url: string) => `credential.${url}.helper`;
 
 /**
- * Point git's credentials for `url` at quest alone: an empty helper first drops any configured earlier, such as
- * `osxkeychain`, for that URL only. Returns the entries it wrote, as `key = value` lines.
+ * Point git's credentials for `url` at quest alone: an empty helper drops any configured before it, such as
+ * `osxkeychain`, for that URL only, without deleting them. Returns the entries, as `key = value` lines. A config that
+ * already ends with them, as one home-manager declares, is left unwritten.
  */
 export function signInGit(url: string, env: NodeJS.ProcessEnv): string[] {
 	const key = helperKey(url);
-	config(url, env, ["--replace-all", key, ""], "write");
+	const values = helpers(url, env);
+	if (values.filter((value) => value === HELPER).length === 1 && values.slice(-2).join("\n") === `\n${HELPER}`)
+		return entries(url);
+	unset(url, env, "write");
+	config(url, env, ["--add", key, ""], "write");
 	config(url, env, ["--add", key, HELPER], "write");
 	return entries(url);
 }
 
-/** Remove exactly the entries `signInGit` writes for `url`, leaving any other helper the person configured there. */
+/**
+ * Remove the entries `signInGit` writes for `url`, leaving any other helper the person configured there, and touching
+ * nothing when quest's helper is not among them.
+ */
 export function signOutGit(url: string, env: NodeJS.ProcessEnv): void {
-	// Git exits 5 when no entry matches, as after an earlier logout.
-	for (const value of ["", HELPER])
-		config(url, env, ["--fixed-value", "--unset-all", helperKey(url), value], "remove", [5]);
+	if (helpers(url, env).includes(HELPER)) unset(url, env, "remove");
 }
 
-function config(url: string, env: NodeJS.ProcessEnv, args: string[], verb: string, allowed: number[] = []): void {
+/** The helpers the global config lists for `url`, in order. */
+function helpers(url: string, env: NodeJS.ProcessEnv): string[] {
+	// Git exits 1 when the key is absent.
+	const listed = config(url, env, ["--get-all", helperKey(url)], "read", [1]);
+	return listed === "" ? [] : listed.replace(/\n$/, "").split("\n");
+}
+
+/** Remove quest's two values for `url`, matched whole, since `--fixed-value` needs git 2.30. */
+function unset(url: string, env: NodeJS.ProcessEnv, verb: string): void {
+	// Git exits 5 when no entry matches.
+	for (const pattern of ["^$", "^!quest git-credential$"])
+		config(url, env, ["--unset-all", helperKey(url), pattern], verb, [5]);
+}
+
+function config(url: string, env: NodeJS.ProcessEnv, args: string[], verb: string, allowed: number[] = []): string {
 	const result = spawnSync("git", ["config", "--global", ...args], {
 		encoding: "utf8",
 		env: { ...discoveryEnv(env), GIT_TERMINAL_PROMPT: "0" },
 		stdio: ["ignore", "pipe", "pipe"],
 	});
 	if (result.error) throw result.error;
-	if (result.status === 0 || allowed.includes(result.status ?? -1)) return;
+	if (result.status === 0) return result.stdout;
+	if (allowed.includes(result.status ?? -1)) return "";
 	// A read-only config, such as one home-manager links into place, gets the entries to declare there instead.
 	throw new Error(
 		`could not ${verb} git's global credential entries for ${url} (${entries(url).join(", ")}): ${result.stderr.trim()}`,
@@ -74,6 +95,9 @@ export function credential(
 		return "quit=1\n";
 	}
 	// A line break would let the token add fields of its own to the answer.
-	if (/[\n\0]/.test(token)) throw new Error(`the token this host holds for ${url} is not one line`);
+	if (/[\n\0]/.test(token)) {
+		warn(`the token this host holds for ${url} is not one line; run \`quest login\``);
+		return "quit=1\n";
+	}
 	return `username=quest\npassword=${token}\n`;
 }
