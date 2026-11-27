@@ -27,8 +27,8 @@ export const DIRTY = "dirty";
 /**
  * Every file of the working tree at `top` that Git tracks or would add, sorted by path, with the ids Git gives
  * them: the index's where the file matches it byte for byte, so a clean checkout reads no file, and hashed from the
- * working tree's own bytes, without Git's filters, where it is modified, untracked, or one that checkout may write
- * with CRLF line endings. Ignored and deleted files and untracked nested repositories are left out.
+ * working tree's own bytes, without Git's filters, where it is modified, untracked, or one whose bytes checkout may
+ * convert. Ignored and deleted files and untracked nested repositories are left out.
  */
 export function treeFiles(top: string): TreeFile[] {
 	const list = (args: string[]) => git(top, args).split("\0").filter(Boolean);
@@ -43,7 +43,7 @@ export function treeFiles(top: string): TreeFile[] {
 		else dirty.add(path);
 	}
 	const indexed = new Map(files);
-	for (const path of crlfCheckouts(
+	for (const path of convertedCheckouts(
 		top,
 		[...files.values()].filter((file) => file.mode.startsWith("100")).map((file) => file.path),
 	))
@@ -84,11 +84,13 @@ export function treeFiles(top: string): TreeFile[] {
 }
 
 /**
- * The paths among `paths` that checkout may write with CRLF line endings, by their attributes and this checkout's
- * `core.autocrlf` and `core.eol`, as Git's `convert.c` decides: such a file reads as clean while its bytes differ
- * from its blob's, and from another checkout's of the same commit. Asking costs no file reads, unlike `ls-files --eol`.
+ * The paths among `paths` whose bytes checkout may convert, by their attributes and this checkout's configuration:
+ * through a `filter` driver, such as Git LFS, whose smudge a checkout may skip, a `working-tree-encoding`, or to
+ * CRLF line endings by `core.autocrlf` and `core.eol`, as Git's `convert.c` decides. Such a file reads as clean
+ * while its bytes differ from its blob's, and maybe from another checkout's of the same commit. Asking costs no file
+ * reads, unlike `ls-files --eol`.
  */
-function crlfCheckouts(top: string, paths: string[]): string[] {
+function convertedCheckouts(top: string, paths: string[]): string[] {
 	if (paths.length === 0) return [];
 	const autocrlf = git(top, ["config", "--get", "core.autocrlf"]).toLowerCase();
 	const eol = git(top, ["config", "--get", "core.eol"]).toLowerCase();
@@ -96,7 +98,11 @@ function crlfCheckouts(top: string, paths: string[]): string[] {
 	const autoTrue = ["true", "yes", "on", "1"].includes(autocrlf);
 	const textCrlf =
 		autoTrue || (autocrlf !== "input" && (eol === "crlf" || (eol !== "lf" && process.platform === "win32")));
-	const out = git(top, ["check-attr", "-z", "--stdin", "text", "eol", "crlf"], paths.join("\0")).split("\0");
+	const out = git(
+		top,
+		["check-attr", "-z", "--stdin", "text", "eol", "crlf", "filter", "working-tree-encoding"],
+		paths.join("\0"),
+	).split("\0");
 	const attrs = new Map<string, Record<string, string>>();
 	for (let index = 0; index + 2 < out.length; index += 3) {
 		const [path, name, value] = [out[index]!, out[index + 1]!, out[index + 2]!];
@@ -104,7 +110,9 @@ function crlfCheckouts(top: string, paths: string[]): string[] {
 		attrs.get(path)![name] = value;
 	}
 	return paths.filter((path) => {
-		const { text, eol: attr, crlf } = attrs.get(path) ?? {};
+		const { text, eol: attr, crlf, filter, "working-tree-encoding": encoding } = attrs.get(path) ?? {};
+		const set = (value: string | undefined) => value !== undefined && value !== "unspecified" && value !== "unset";
+		if (set(filter) || set(encoding)) return true;
 		// The legacy `crlf` attribute stands in for an unspecified `text`.
 		const kind = text === "set" || text === "auto" || text === "unset" ? text : crlf === "input" ? "input" : crlf;
 		if (kind === "unset" || kind === "input") return false;

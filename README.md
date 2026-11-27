@@ -1620,7 +1620,7 @@ tasks start together and wait only for the host's room. A task that sets
 repository's `flake.nix`, a regular file, and runs in its dev shell: directly when `quest run`
 is already inside it, with no Nix evaluation, and through `nix develop
 --command` otherwise. The dev shell says it is the repository's by setting
-`QUEST_DEV_SHELL` to the repository's root, as `quest.lib.mkFlake` will; a
+`QUEST_DEV_SHELL` to the repository's root, as [`quest.lib.mkFlake`'s](#share-flake-boilerplate-with-questlibmkflake) does; a
 shell without it, such as another repository's, gets `nix develop` all the
 same. Each task gets `QUEST_TIER`, `QUEST_BASE` (the merge base, unless
 `--all`), and its `environment`, exported inside the dev shell, and every line
@@ -1644,10 +1644,23 @@ operating system, under `include` for a GitHub Actions matrix:
 
 `quest check` validates `quest.toml` beside the quest tree: every key and
 value, that each `after` names a task of the same or an earlier tier that runs
-on every OS the task does, without a cycle, and that Nix tasks have a
-regular `flake.nix`. `quest/core` exports the parser, `parseQuestManifest`, with no
+on every OS the task does, without a cycle, and the root `flake.nix` below.
+`quest/core` exports the parser, `parseQuestManifest`, with no
 Node or Nix dependency, so a service such as Kixel Quest can validate a
 manifest straight from a git tree.
+
+A `quest.toml` opts the repository into Kixel Quest, which needs Nix, so
+`quest check` also requires a regular root `flake.nix`, even when every task
+sets `nix = false`, whose `nixConfig` substitutes from Kixel Quest's binary
+cache. Nix reads `nixConfig` only from the top of `flake.nix`,
+and asks before using it unless the user trusts flake configuration
+(`accept-flake-config = true`):
+
+```nix
+nixConfig = {
+  extra-substituters = [ "https://nix.kixel.quest" ];
+};
+```
 
 ### Cached passes
 
@@ -1681,8 +1694,9 @@ The digest a pass is recorded under covers:
   when it declares no `paths`, less `exclude`, plus `invalidate_all`
 
 A modified or untracked file counts as its own bytes, unfiltered, as does a
-clean one that checkout may write with CRLF endings, by its attributes and
-`core.autocrlf` or `core.eol`. An untracked nested repository, such as an
+clean one whose bytes checkout may convert: through a `filter` driver, such as
+Git LFS, whose smudge a checkout can skip, a `working-tree-encoding`, or to
+CRLF endings by its attributes and `core.autocrlf` or `core.eol`. An untracked nested repository, such as an
 agent's worktree, counts as nothing.
 A pass is recorded only if the task's inputs are unchanged once it finishes,
 so an edit saved while it ran is never filed under the old contents. A task
@@ -1722,6 +1736,73 @@ the task ran, so the cache is trusted only as far as the user account that
 holds it, and `quest run` refuses a directory another user owns or can write.
 A host's merge queue keeps its passes under its runner's own user, and runs
 `--no-cache` when that user also runs code no one reviewed.
+
+## Share flake boilerplate with quest.lib.mkFlake
+
+`quest.lib.mkFlake` builds a repository's per-system flake outputs, so its
+`flake.nix` pins only `nixpkgs` and `quest`:
+
+```nix
+{
+  inputs = {
+    nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
+    quest = {
+      url = "github:kixel-ai/quest";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+  };
+
+  outputs =
+    { self, nixpkgs, quest }:
+    quest.lib.mkFlake {
+      inherit self nixpkgs;
+      # A treefmt-nix module; nixfmt is on unless it sets programs.nixfmt.enable = false.
+      fmt.programs.rustfmt.enable = true;
+      perSystem =
+        { pkgs, system }:
+        {
+          shell.packages = [ pkgs.cargo pkgs.just ];  # pkgs.mkShell's arguments
+          packages.default = pkgs.callPackage ./package.nix { };
+        };
+    };
+}
+```
+
+It adds to what `perSystem` returns, for each of `systems` (`x86_64-linux`,
+`aarch64-linux`, and `aarch64-darwin` unless set), with nixpkgs imported with
+`overlays`:
+
+- `devShells.default`, `pkgs.mkShell` called with `shell`, holding `quest`
+  and the repository's `treefmt`. It sets `QUEST_DEV_SHELL` to the nearest
+  directory up holding `flake.nix` when that `flake.nix` and its `flake.lock`
+  are the ones the shell was built from, so `quest run` and `quest fmt` run
+  there without entering the shell again, and a shell entered from another
+  checkout names none. `perSystem`'s `quest` replaces the `quest` package.
+- `formatter`, the same `treefmt`, which `nix fmt` runs.
+- `checks.quest`, which runs `quest check`, `quest.toml` and `nixConfig`
+  included, on the flake's source; a `checks` entry of the same name replaces
+  it.
+
+`devShells.default` and `formatter` are always these; `perSystem` adds other
+shells and outputs.
+
+`treefmt-nix` builds `treefmt` inside Quest's flake, so `fmt` takes any of its
+[`programs`](https://github.com/numtide/treefmt-nix) and `settings` with no
+input of the repository's own.
+
+```sh
+quest fmt                        # format the repository
+quest fmt --fail-on-change src/  # treefmt's own arguments
+```
+
+`quest fmt` passes every argument after `fmt` on, `--help` and `--root`
+included (`quest help fmt` prints its own help, and Quest's `--root` goes
+before `fmt`), and runs that `treefmt`, which finds the repository
+root itself and reads paths from the current directory: directly inside the dev shell, with
+no Nix evaluation, and through `nix develop --command` outside it. A
+`[tasks.fmt]` in `quest.toml` replaces it: `quest fmt` runs the task's `run`
+script from the repository root, with its `environment`, the arguments as
+`$1` onward, and the dev shell unless it sets `nix = false`.
 
 ## Route work by size
 
@@ -2846,7 +2927,7 @@ arrives with the guide sections and other skills it builds on, in one call:
 | `quest-review` | Review a PR's branch locally with a model no weaker than its latest writer, then mark it ready for review. |
 | `quest-merge` | Queue a PR to land, running `quest-iterate` first when it needs work. |
 | `quest-run` | Orchestrate a project from one session: start ready quests, take PRs to merge, and settle what quests and drafts wait on you, in a loop until only your decisions remain, then plan the follow-ups no quest owns yet. Pass a filter such as `prs` to start no quests. |
-| `quest-afk` | Keep a session such as `quest-run` going while you are away: it acts on its recommendations, defers merges, and walks you through the rest when you return. `afk merge` also merges low- and medium-risk PRs it strongly recommends, and `afk soon` asks pending questions in one batch before you leave. |
+| `quest-afk` | Keep a session such as `quest-run` going while you are away: it acts on its recommendations, defers merges, and walks you through the rest when you return. `afk merge` also merges low-risk PRs it recommends, implements the follow-ups it recommends doing now in the PRs that add them, and once idle merges a medium-risk PR that unblocks a quest it would start; and `afk soon` asks pending questions in one batch before you leave. |
 
 Use `/quest-plan` in Claude Code or `$quest-plan` in Codex. Skills coordinate
 within your agent session. A started quest stops at a pull request; merging is

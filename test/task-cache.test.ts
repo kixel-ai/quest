@@ -286,3 +286,31 @@ test("the Nix system names the host's CPU and OS as flakes do", () => {
 	expect(nixSystem("darwin", "arm64")).toBe("aarch64-darwin");
 	expect(() => nixSystem("win32", "x64")).toThrow("not x64 win32");
 });
+
+test.runIf(posix)("a clean file a checkout filter or encoding converts counts as its own bytes", () => {
+	const dir = initRepository(tempDir());
+	const git = (...args: string[]) => execFileSync("git", ["-C", dir, ...args], { stdio: "ignore" });
+	const hash = (bytes: Buffer) =>
+		execFileSync("git", ["hash-object", "--no-filters", "--stdin"], { input: bytes }).toString().trim();
+	// A filter driver standing in for Git LFS: what checkout writes is not the blob.
+	git("config", "filter.up.clean", "tr A-Z a-z");
+	git("config", "filter.up.smudge", "tr a-z A-Z");
+	writeFileSync(join(dir, ".gitattributes"), "*.dat filter=up\n*.txt working-tree-encoding=UTF-16LE\n");
+	writeFileSync(join(dir, "fixture.dat"), "abc\n");
+	const utf16 = Buffer.from("hi\n", "utf16le");
+	writeFileSync(join(dir, "note.txt"), utf16);
+	git("add", "-A");
+	git("commit", "-q", "-m", "filtered");
+	const oid = (path: string) => treeFiles(dir).find((file) => file.path === path)!.oid;
+	const checkout = () => {
+		rmSync(join(dir, "fixture.dat"));
+		git("checkout", "--", "fixture.dat");
+	};
+	checkout();
+	expect(oid("fixture.dat")).toBe(hash(Buffer.from("ABC\n")));
+	expect(oid("note.txt")).toBe(hash(utf16));
+	// A checkout that skips the smudge, as GIT_LFS_SKIP_SMUDGE=1 leaves pointer files, holds the blob's own bytes.
+	git("config", "filter.up.smudge", "cat");
+	checkout();
+	expect(oid("fixture.dat")).toBe(hash(Buffer.from("abc\n")));
+});
