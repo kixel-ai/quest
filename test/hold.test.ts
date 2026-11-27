@@ -144,6 +144,9 @@ class FakePull {
 		const compared = /^\/repos\/example\/project\/compare\/main\.\.\.(\w+)$/.exec(url.pathname);
 		const routed = compared?.[1] === this.head ? undefined : this.git?.(url, init);
 		if (routed) return routed;
+		// Without a repository, every commit is an ordinary one, merging nothing.
+		const read = /^\/repos\/example\/project\/git\/commits\/(\w+)$/.exec(url.pathname);
+		if (read) return json(200, { sha: read[1], tree: { sha: "0".repeat(40) }, parents: [{ sha: FORK }] });
 		if (compared && new Headers(init.headers).get("Accept") === "application/vnd.github.diff")
 			return new Response(this.diffs[compared[1]!] ?? compared[1]);
 		if (compared) {

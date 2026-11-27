@@ -107,11 +107,11 @@ interface ReviewStatus {
 
 /**
  * Why `sha`, the head of `pr` about to land, must wait for a new `quest review` round, or null when it may land.
- * The newest `quest review` status a writer set on a commit of the PR whose diff is the head's, or that the head
- * only cleanly merged the base since, decides it: the head
- * lands whatever its tier when that status passed, classified against the base's current risk file, so a round that
- * failed outweighs an earlier pass of the same diff, and any push after the last review that changes the diff, whoever
- * made it, and any change to the base's risk file since, waits for a new one. Otherwise it waits when it is high: when
+ * The newest `quest review` status a writer set on a commit of the PR whose diff is the head's, or that the head only
+ * cleanly merged the base since, decides it: the head lands whatever its tier when that status passed, classified
+ * against the base's current risk file, so a round that failed outweighs an earlier pass of the same diff, and any
+ * push after the last review that changes the diff other than a clean merge of the base, whoever made it, and any
+ * change to the base's risk file since, waits for a new one. Otherwise it waits when it is high: when
  * a `quest review` status on any of the PR's commits rates it high, or when its diff from its merge base with the base
  * touches a path the base's risk file holds high.
  */

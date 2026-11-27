@@ -63,11 +63,11 @@ export class BaseMerges {
 	/** The first parent of `sha` when `sha` is a clean merge of the base, which it is not when the base reaches it. */
 	async #step(sha: string): Promise<string | null> {
 		const history = this.#history;
-		if (await history.onBase(sha)) return null;
+		// The commit first, so a head that is no merge, the common case, costs one read.
 		const { tree, parents } = await history.commit(sha);
 		if (parents.length !== 2) return null;
 		const [ours, theirs] = parents as [string, string];
-		if (!(await history.onBase(theirs))) return null;
+		if ((await history.onBase(sha)) || !(await history.onBase(theirs))) return null;
 		const base = await history.mergeBase(ours, theirs);
 		if (base === null) return null;
 		const [b, o, t] = await Promise.all(

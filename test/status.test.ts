@@ -896,13 +896,18 @@ describe("the review record", () => {
 		const from = git(dir, "merge-base", "main", reviewed);
 		const passed = reviewStatus("SUCCESS", `Risk low, risk file ${RISK_ID}: passed`, reviewed);
 		const statuses = { [reviewed]: { ...passed, targetUrl: reviewTarget(pr, from, reviewed) } };
-		const read = async (head: string) => {
+		const routes = gitRoutes(dir);
+		const read = async (head: string, large = false) => {
 			const warnings: string[] = [];
 			const body = `${RECORD}- Head: ${reviewed}${RISK}`;
+			// A diff too large for GitHub to send.
+			const refused = (init?: RequestInit) =>
+				large && new Headers(init?.headers).get("Accept") === "application/vnd.github.diff";
 			const fixture = setup([pull({ head, body, checks: null, reviews: page([]), threads: page([]) })], {
 				statuses,
 				warnings,
-				git: gitRoutes(dir),
+				git: (url, init) =>
+					refused(init) ? Response.json({ message: "too large" }, { status: 406 }) : routes(url, init),
 			});
 			const lines = statusLines(await pullRequestStatus(pr, fixture.deps));
 			return { record: lines.find((l) => l.startsWith("review-record ")), warnings };
@@ -913,6 +918,10 @@ describe("the review record", () => {
 			record: `review-record diff-identical ${reviewed} local-review`,
 			warnings: [],
 		});
+		expect(await read(once, true)).toEqual({
+			record: `review-record diff-identical ${reviewed} local-review`,
+			warnings: [],
+		});
 		const twice = merge();
 		expect(await read(twice)).toEqual({
 			record: `review-record diff-identical ${reviewed} local-review`,
@@ -920,6 +929,12 @@ describe("the review record", () => {
 		});
 		const pushed = commit(dir, { "b.txt": "b\n" });
 		expect((await read(pushed)).record).toBe(`review-record stale ${reviewed} local-review`);
+		expect(await read(pushed, true)).toEqual({
+			record: `review-record unknown ${reviewed} local-review`,
+			warnings: [
+				`cannot compare ${pushed} with the base (HTTP 406), so whether the review of ${reviewed} carries is unknown`,
+			],
+		});
 	});
 });
 
