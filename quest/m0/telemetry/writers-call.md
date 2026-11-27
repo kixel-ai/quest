@@ -3,7 +3,7 @@
 ## Goal
 
 `quest/core`'s forge calls name `writers`, the read Kixel Quest already serves at `POST /forge/writers`, with its request and answer parsers, so Kixel Quest parses it as it does every other forge read and `quest` can read who wrote a PR.
-The PR sends nothing; reading writers in place of `Implementer:` lines is [sessions](/quest/m0/telemetry/sessions.md)' work.
+The PR sends nothing; reading writers in place of `Implementer:` lines is [Implementer cutover](/quest/m0/telemetry/implementer-cutover.md)'s work.
 
 ## Plan
 

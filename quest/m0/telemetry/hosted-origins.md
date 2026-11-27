@@ -12,13 +12,17 @@ Found 2026-11-27 while planning kixel-ai/kixel.quest's move of its first reposit
 
 - Read `origin` with `remoteHost` in `src/cli/github.ts`, passing `hostedRepository` from `src/cli/forge.ts` as `originHost` does, at all three of `send.ts`'s `remoteRepository` reads, so the stop hook, the sender's sub-agent routing, and incident reports agree on the repository.
 - A hosted repository has no fork parent and no GitHub rename, so its group skips `baseRepository` and `currentNamer`, and reads its PRs through Kixel Quest's forge (`hostedForge(...)`) rather than `updatedPulls` on GitHub.
-- Read the hosted repository's PRs updated since the sender's cursor, merged and closed ones included, with each one's head branch and body, as `updatedPulls` reads GitHub's: the store derives a session's PRs from the record's `pulls`, and the sender's breakage scan reads merged bodies' `## Caused by`, so the open-PR read (`pulls`) would lose a PR that merged before the pass. No forge read lists that today, so it is a new read in `quest/core`'s forge calls, served by Kixel Quest.
+- Read the hosted repository's PRs updated since the sender's cursor, merged and closed ones included, with each one's head branch and body, as `updatedPulls` reads GitHub's: the store derives a session's PRs from the record's `pulls`, and the sender's breakage scan reads merged bodies' `## Caused by`, so the open-PR read (`pulls`) would lose a PR that merged before the pass. No forge read lists that today; [hosted PRs read](/quest/m0/telemetry/hosted-pulls-read.md) adds it to `quest/core`.
 
 Tests: against a local Worker hosting a repository, a session stopped in its clone is queued, sent, and names its open PR; one in a clone of a repository the Worker does not serve is dropped with the existing notice; a session whose PR merged before the pass still names it; an incident report from a hosted clone posts.
 
 ## Waiting
 
-- kixel-ai/kixel.quest: its hosted forge answers a read of a repository's PRs updated since an instant, merged and closed ones included, with each one's number, head branch, state, and body; per the [telemetry epic](/quest/m0/telemetry/README.md)'s order its shape lands in `quest/core` first. Check that `FORGE_READS` in `src/core/forge.ts` names it and that Kixel Quest serves it for a hosted repository.
+- kixel-ai/kixel.quest: its hosted forge serves `quest/core`'s read of a repository's recently updated PRs, which [hosted PRs read](/quest/m0/telemetry/hosted-pulls-read.md) names. Check that `POST /forge/<that call>` answers for a hosted repository.
+
+## Required
+
+- [Hosted PRs read](/quest/m0/telemetry/hosted-pulls-read.md) - the shape of the read Kixel Quest serves
 
 ## Related
 
