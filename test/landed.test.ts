@@ -167,6 +167,23 @@ describe("quest merge's landing check", () => {
 		expect(findings.map((finding) => finding.path)).toEqual(["quest/m0/epic/one.md"]);
 	});
 
+	test("reports a malformed quest.toml in the head's tree, and Nix tasks without its flake.nix", async () => {
+		const tree = repo("fix/manifest");
+		tree.write("quest.toml", '[tasks.a]\ntier = "pr"\nrun = "x"\nbogus = 1\n');
+		commit(tree, "manifest");
+		expect((await inspect(tree, "fix/manifest")).map((finding) => [finding.path, finding.message])).toEqual([
+			["quest.toml", "[tasks.a]: unknown key `bogus`"],
+		]);
+		tree.write("quest.toml", '[tasks.a]\ntier = "pr"\nrun = "x"\n');
+		commit(tree, "valid manifest");
+		expect((await inspect(tree, "fix/manifest")).map((finding) => finding.message)).toEqual([
+			expect.stringContaining("a run in the Nix dev shell, but there is no flake.nix"),
+		]);
+		tree.write("flake.nix", "{}\n");
+		commit(tree, "flake");
+		expect(await inspect(tree, "fix/manifest")).toEqual([]);
+	});
+
 	/** A tree whose `main` had a dangling link when `branch` left it, checked out on `branch`. */
 	function brokenAtFork(branch: string): Tree {
 		const tree = Tree.committed();

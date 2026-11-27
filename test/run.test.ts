@@ -51,6 +51,19 @@ function stubs(): { bin: string; log: string } {
 	return { bin, log };
 }
 
+/** A PATH directory whose `quest` runs this checkout's CLI, for the real gate. */
+function realQuest(): string {
+	const bin = tempDir();
+	const entry = fileURLToPath(new URL("../src/cli/bin.ts", import.meta.url));
+	const config = fileURLToPath(new URL("../bunfig.toml", import.meta.url));
+	writeFileSync(
+		join(bin, "quest"),
+		`#!/bin/sh\nexec ${quote(process.execPath)} --config=${quote(config)} ${quote(entry)} "$@"\n`,
+		{ mode: 0o755 },
+	);
+	return bin;
+}
+
 const task = (name: string, script: string, extra = "") =>
 	`[tasks.${name}]\ntier = "pr"\nrun = ${JSON.stringify(script)}\nnix = false\n${extra}\n`;
 
@@ -138,17 +151,37 @@ test.runIf(posix)("fail-fast stops the running tasks and starts no more", async 
 	expect(out.stderr).toContain("quest: 1 failed, 1 cancelled, 1 skipped\n");
 });
 
-test.runIf(posix)("tasks get the tier, the merge base, and their environment", async () => {
+// Under an enclosing gate, whose group owner signals its whole process group, a task's own gate passes on no
+// signal it receives: fail-fast must still reach the command. The real gate, admitted at once.
+test.runIf(posix)("fail-fast stops a task's command under an enclosing gate", async () => {
 	const dir = repository({
-		"quest.toml": task("env", 'echo "$QUEST_TIER $QUEST_BASE $FOO"', 'environment = { FOO = "bar" }'),
+		"quest.toml": [task("slow", "exec sleep 300"), task("broken", "exit 1")].join(""),
+	});
+	const out = await runIn(
+		dir,
+		{ all: true, failFast: true },
+		{ PATH: `${realQuest()}:${process.env.PATH}`, QUEST_GATE_ADMITTED: "1", QUEST_GATE_GROUP: "1" },
+	);
+	expect(out.code).toBe(1);
+	expect(out.stderr).toContain("quest: slow cancelled in 0.0s: exit 143\n");
+});
+
+test.runIf(posix)("tasks get the tier, the merge base, and their environment inside the shell", async () => {
+	const dir = repository({
+		"quest.toml": task(
+			"env",
+			'echo "$QUEST_TIER $QUEST_BASE $FOO $PATH"',
+			`environment = { FOO = "it's", PATH = "/elsewhere" }`,
+		),
 	});
 	const base = execFileSync("git", ["-C", dir, "rev-parse", "HEAD"], { encoding: "utf8" }).trim();
 	write(dir, { "new.txt": "untracked" });
+	// The gate still finds its programs on the caller's PATH; the task sees its own.
 	const out = await runIn(dir, { tier: "gate" });
-	expect(out.stdout).toBe(`env | gate ${base} bar\n`);
+	expect(out.stdout).toBe(`env | gate ${base} it's /elsewhere\n`);
 	expect(out.stderr).toContain(`quest: base origin/main (${base.slice(0, 12)}), 1 changed paths\n`);
-	// --all sets no base.
-	expect((await runIn(dir, { all: true })).stdout).toBe("env | pr  bar\n");
+	// --all sets no base, even one a run around this one set.
+	expect((await runIn(dir, { all: true }, { QUEST_BASE: "outer" })).stdout).toBe("env | pr  it's /elsewhere\n");
 });
 
 test.runIf(posix)("the base is --base, else QUEST_LAND_BASE, else origin and [repo] merge", async () => {
@@ -182,35 +215,61 @@ test.runIf(posix)("query prints one matrix entry per task and operating system a
 	expect(JSON.parse(out.stdout)).toEqual({
 		include: [
 			{ task: "build", os: "linux", tier: "pr", after: [], nix: true, capabilities: [], caches: ["mbx"] },
-			{ task: "build", os: "macos", tier: "pr", after: [], nix: true, capabilities: [], caches: ["mbx"] },
 			{ task: "test", os: "linux", tier: "gate", after: ["build"], nix: true, capabilities: ["kvm"], caches: [] },
+			{ task: "build", os: "macos", tier: "pr", after: [], nix: true, capabilities: [], caches: ["mbx"] },
 		],
 	});
 	expect(existsSync(join(dir, "ran"))).toBe(false);
 	expect(out.log).toEqual([]);
 });
 
-test.runIf(posix)("a Nix task enters the dev shell unless already in one, and needs flake.nix", async () => {
-	const nixTask = '[tasks.nixed]\ntier = "pr"\nrun = "echo shell=$IN_NIX_SHELL"\n';
-	const dir = repository({ "flake.nix": "{}", "quest.toml": nixTask + task("plain", "echo shell=$IN_NIX_SHELL") });
-	const outside = await runIn(dir, { all: true });
-	expect(outside.code, outside.stderr).toBe(0);
-	expect(outside.stdout.split("\n").sort()).toEqual(["", "nixed | shell=impure", "plain | shell="]);
-	expect(outside.log).toContain(`nix develop ${dir} --command bash -eo pipefail -c echo shell=$IN_NIX_SHELL`);
-	// Inside a dev shell, no task calls nix.
-	const inside = await runIn(dir, { all: true }, { IN_NIX_SHELL: "impure" });
-	expect(inside.code).toBe(0);
-	expect(inside.log.filter((line) => line.startsWith("nix "))).toEqual([]);
-
-	const bare = repository({ "quest.toml": nixTask + task("plain", "echo plain") });
-	await expect(runIn(bare, { all: true })).rejects.toThrow(
-		"quest.toml: nixed run in the Nix dev shell, but there is no flake.nix",
+test.runIf(posix)("query picks each operating system's tasks and what they run after on its own", async () => {
+	const dir = repository({
+		"quest.toml": [
+			task("build", "true", 'paths = ["build/"]\nos = ["linux", "macos"]'),
+			task("test", "true", 'paths = ["test/"]\nafter = ["build"]\nos = ["linux"]'),
+		].join(""),
+	});
+	write(dir, { "test/a": "" });
+	const out = await runIn(dir, { query: true, os: ["linux", "macos"] });
+	// No change picks a macOS task, so the Linux test's build stays on Linux.
+	expect(JSON.parse(out.stdout).include.map(({ task, os }: { task: string; os: string }) => `${task}/${os}`)).toEqual(
+		["build/linux", "test/linux"],
 	);
-	// A run that picks only tasks without Nix needs neither the flake nor nix.
-	const plain = await runIn(bare, { only: ["plain"] });
-	expect(plain.code).toBe(0);
-	expect(plain.stdout).toBe("plain | plain\n");
+	const only = await runIn(dir, { query: true, os: ["linux", "macos"], only: ["test"] });
+	expect(JSON.parse(only.stdout).include).toHaveLength(2);
 });
+
+test.runIf(posix)(
+	"a Nix task enters the dev shell unless already in this repository's, and needs flake.nix",
+	async () => {
+		const nixTask = '[tasks.nixed]\ntier = "pr"\nrun = "echo shell=$IN_NIX_SHELL"\n';
+		const dir = repository({
+			"flake.nix": "{}",
+			"quest.toml": nixTask + task("plain", "echo shell=$IN_NIX_SHELL"),
+		});
+		const outside = await runIn(dir, { all: true });
+		expect(outside.code, outside.stderr).toBe(0);
+		expect(outside.stdout.split("\n").sort()).toEqual(["", "nixed | shell=impure", "plain | shell="]);
+		expect(outside.log).toContain(`nix develop ${dir} --command bash -eo pipefail -c echo shell=$IN_NIX_SHELL`);
+		// Inside this repository's dev shell, no task calls nix.
+		const inside = await runIn(dir, { all: true }, { IN_NIX_SHELL: "impure", QUEST_DEV_SHELL: dir });
+		expect(inside.code).toBe(0);
+		expect(inside.log.filter((line) => line.startsWith("nix "))).toEqual([]);
+		// Another repository's dev shell has the wrong toolchain.
+		const other = await runIn(dir, { all: true }, { IN_NIX_SHELL: "impure", QUEST_DEV_SHELL: tempDir() });
+		expect(other.log.filter((line) => line.startsWith("nix "))).toHaveLength(1);
+
+		const bare = repository({ "quest.toml": nixTask + task("plain", "echo plain") });
+		await expect(runIn(bare, { all: true })).rejects.toThrow(
+			"quest.toml: nixed run in the Nix dev shell, but there is no flake.nix",
+		);
+		// A run that picks only tasks without Nix needs neither the flake nor nix.
+		const plain = await runIn(bare, { only: ["plain"] });
+		expect(plain.code).toBe(0);
+		expect(plain.stdout).toBe("plain | plain\n");
+	},
+);
 
 test.runIf(posix)("a task's reports are checked and copied, and a stale one never counts", async () => {
 	const dir = repository({
@@ -226,9 +285,9 @@ test.runIf(posix)("a task's reports are checked and copied, and a stale one neve
 		// An earlier run's report, which lazy must not pass off as its own.
 		"out/lazy.xml": "<stale/>",
 	});
+	// A report directory already in use, such as the checkout itself, is refused before anything runs.
+	await expect(runIn(dir, { all: true, report: dir })).rejects.toThrow(`--report ${dir} must be a new or empty`);
 	const report = join(tempDir(), "report");
-	mkdirSync(join(report, "lazy"), { recursive: true });
-	writeFileSync(join(report, "lazy", "junit.xml"), "<stale/>");
 	const out = await runIn(dir, { all: true, report });
 	expect(out.code).toBe(1);
 	expect(out.stderr).toContain("quest: lazy failed in 0.0s: it did not write out/lazy.xml\n");
@@ -254,14 +313,7 @@ test.runIf(posix)("quest run runs a fixture repository's quest.toml end to end",
 		].join(""),
 	});
 	write(dir, { "test/a.ts": "" });
-	const bin = tempDir();
-	const entry = fileURLToPath(new URL("../src/cli/bin.ts", import.meta.url));
-	const config = fileURLToPath(new URL("../bunfig.toml", import.meta.url));
-	writeFileSync(
-		join(bin, "quest"),
-		`#!/bin/sh\nexec ${quote(process.execPath)} --config=${quote(config)} ${quote(entry)} "$@"\n`,
-		{ mode: 0o755 },
-	);
+	const bin = realQuest();
 	const report = join(tempDir(), "report");
 	const previous = { PATH: process.env.PATH, admitted: process.env.QUEST_GATE_ADMITTED };
 	process.env.PATH = `${bin}:${process.env.PATH}`;

@@ -1580,7 +1580,6 @@ capabilities = ["kvm"]            # what a dispatcher routes the task's host on
 environment = { RUST_BACKTRACE = "1" }
 cache = true                      # whether a passing result may be reused (default)
 junit = "target/nextest/ci/junit.xml"
-metrics = "target/metrics.json"
 
 [tasks.windows]
 tier = "nightly"
@@ -1612,16 +1611,20 @@ Each task runs through [`quest gate`](#gate-cpu-heavy-commands), so independent
 tasks start together and wait only for the host's room. A task that sets
 `nix = false` runs on the host's own tools; every other task needs the
 repository's `flake.nix` and runs in its dev shell: directly when `quest run`
-is already inside one (`IN_NIX_SHELL` is set, as `nix develop` and direnv do),
-with no Nix evaluation, and through `nix develop --command` otherwise. Each
-task gets `QUEST_TIER`, `QUEST_BASE` (the merge base, unless `--all`), and its
-`environment`, and every line it prints is prefixed with its name.
+is already inside it, with no Nix evaluation, and through `nix develop
+--command` otherwise. The dev shell says it is the repository's by setting
+`QUEST_DEV_SHELL` to the repository's root, as `quest.lib.mkFlake` will; a
+shell without it, such as another repository's, gets `nix develop` all the
+same. Each task gets `QUEST_TIER`, `QUEST_BASE` (the merge base, unless
+`--all`), and its `environment`, exported inside the dev shell, and every line
+it prints is prefixed with its name.
 
 A failed task skips the tasks that run after it, while independent ones finish;
 `--fail-fast` stops them too. A task that passes must write each `junit` and
 `metrics` file it declares, and `metrics` must hold a JSON object; a file left
-from an earlier run is deleted before the task starts. `--report <dir>` copies
-them to `<dir>/<task>/junit.xml` and `<dir>/<task>/metrics.json` for upload.
+from an earlier run is deleted before the task starts, and no two tasks may
+declare the same file. `--report <dir>` copies them to `<dir>/<task>/junit.xml`
+and `<dir>/<task>/metrics.json` for upload; `<dir>` must be new or empty.
 
 `--query` prints the picked tasks and runs nothing, so a CI runner can plan
 its legs before installing a toolchain. Its JSON is one entry per task and

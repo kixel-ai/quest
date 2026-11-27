@@ -193,6 +193,7 @@ export function parseQuestManifest(text: string): ParsedManifest {
 			if (task !== null) tasks.push(task);
 		}
 		checkAfter(read, tasks);
+		checkReports(read, tasks);
 	}
 	return read.problems.length > 0 ? { ok: false, problems: read.problems } : { ok: true, manifest: { repo, tasks } };
 }
@@ -273,6 +274,21 @@ function readTask(read: Reader, name: string, table: unknown): ManifestTask | nu
 		metrics: table.metrics === undefined ? null : read.file(field("metrics"), table.metrics),
 	};
 	return task;
+}
+
+/** Note each report path two tasks declare, since tasks that run at once would collect each other's file. */
+function checkReports(read: Reader, tasks: ManifestTask[]): void {
+	const owners = new Map<string, string>();
+	for (const task of tasks)
+		for (const [key, path] of [
+			["junit", task.junit],
+			["metrics", task.metrics],
+		] as const) {
+			if (path === null) continue;
+			const owner = owners.get(path);
+			if (owner === undefined) owners.set(path, task.name);
+			else read.problem(`[tasks.${task.name}] ${key}`, `\`${owner}\` also writes \`${path}\``);
+		}
 }
 
 /** Note each `after` entry naming no task, a later tier, or fewer operating systems, and each cycle. */

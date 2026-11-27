@@ -2,7 +2,7 @@
 // `quest gate` and, for a Nix task, in the repository's dev shell, with every task whose `after` tasks passed
 // running at once.
 import { type ChildProcess, spawn } from "node:child_process";
-import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 import {
@@ -15,7 +15,7 @@ import {
 	pickTasks,
 } from "../core";
 import { git } from "./git";
-import { cancelled, follow, forwards, interrupts, requested } from "./interrupt";
+import { GROUP, cancelled, follow, interrupts, requested } from "./interrupt";
 import { programCommand, requireProgram } from "./program";
 
 /** What `quest run` was asked for. */
@@ -63,21 +63,48 @@ function readManifest(top: string): Manifest {
 	return parsed.manifest;
 }
 
-/** Why `tasks` cannot run in the repository at `top`: Nix tasks need its flake.nix. */
-function flakeProblem(top: string, tasks: ManifestTask[]): string | null {
+/** Why `tasks` cannot run in a repository with or without a flake.nix: Nix tasks need one. */
+function flakeProblem(flake: boolean, tasks: ManifestTask[]): string | null {
 	const nix = tasks.filter((task) => task.nix).map((task) => task.name);
-	if (nix.length === 0 || existsSync(join(top, "flake.nix"))) return null;
+	if (nix.length === 0 || flake) return null;
 	return `${MANIFEST_FILE}: ${nix.join(", ")} run in the Nix dev shell, but there is no flake.nix; set nix = false on a task that runs without Nix`;
 }
 
-/** What `quest check` reports about the quest.toml at `top`, if there is one. */
-export function manifestProblems(top: string): string[] {
-	const path = join(top, MANIFEST_FILE);
-	if (!existsSync(path)) return [];
-	const parsed = parseQuestManifest(readFileSync(path, "utf8"));
+/**
+ * What `quest check` reports about a repository's quest.toml, if it has one, given how to read a file at its root,
+ * null for a file it lacks.
+ */
+export function manifestProblems(read: (path: string) => string | null): string[] {
+	const text = read(MANIFEST_FILE);
+	if (text === null) return [];
+	const parsed = parseQuestManifest(text);
 	if (!parsed.ok) return parsed.problems;
-	const problem = flakeProblem(top, parsed.manifest.tasks);
+	const problem = flakeProblem(read("flake.nix") !== null, parsed.manifest.tasks);
 	return problem === null ? [] : [problem];
+}
+
+/**
+ * The variable a repository's dev shell sets to its root. `IN_NIX_SHELL` alone cannot tell this repository's dev
+ * shell from another's, whose toolchain would then run the task.
+ */
+export const DEV_SHELL = "QUEST_DEV_SHELL";
+
+/** Whether `env` is a dev shell entered for the repository at `top`. */
+function inDevShell(env: NodeJS.ProcessEnv, top: string): boolean {
+	const shell = env[DEV_SHELL];
+	if (!shell) return false;
+	try {
+		return realpathSync(shell) === realpathSync(top);
+	} catch {
+		return false;
+	}
+}
+
+/** Bash that exports `environment`, each value single-quoted. */
+function exports(environment: Record<string, string>): string {
+	return Object.entries(environment)
+		.map(([name, value]) => `export ${name}='${value.replace(/'/g, `'\\''`)}'\n`)
+		.join("");
 }
 
 /** The merge base of `ref` and HEAD, and every path changed since, tracked or untracked, both sides of a rename. */
@@ -92,7 +119,7 @@ function changes(top: string, ref: string): { base: string; changed: string[] } 
 	}
 	const paths = (args: string[]) => git(top, args).split("\0").filter(Boolean);
 	const changed = new Set([
-		...paths(["diff", "--name-only", "--no-renames", "-z", base]),
+		...paths(["diff", "--name-only", "--no-renames", "--ignore-submodules=none", "-z", base]),
 		...paths(["ls-files", "--others", "--exclude-standard", "-z"]),
 	]);
 	return { base, changed: [...changed].sort() };
@@ -109,22 +136,24 @@ export async function run(options: RunOptions, io: RunIO): Promise<number> {
 		({ base, changed } = changes(top, ref));
 		io.stderr(`quest: base ${ref} (${base.slice(0, 12)}), ${changed.length} changed paths\n`);
 	}
-	const tasks = pickTasks(manifest, { tier: options.tier, only: options.only, changed, os: options.os });
+	const pick = (os: Host[], only: string[] | null) => pickTasks(manifest, { tier: options.tier, only, changed, os });
+	// Checks --only against every requested operating system at once.
+	const tasks = pick(options.os, options.only);
 
 	if (options.query) {
-		const include = tasks.flatMap((task) =>
-			task.os
-				.filter((host) => options.os.includes(host))
-				.map((os) => ({
-					task: task.name,
-					os,
-					tier: task.tier,
-					after: task.after,
-					nix: task.nix,
-					capabilities: task.capabilities,
-					caches: task.caches,
-				})),
-		);
+		// Each operating system picks its own tasks, and what they run after.
+		const include = options.os.flatMap((os) => {
+			const here = (name: string) => manifest.tasks.some((task) => task.name === name && task.os.includes(os));
+			return pick([os], options.only?.filter(here) ?? null).map((task) => ({
+				task: task.name,
+				os,
+				tier: task.tier,
+				after: task.after,
+				nix: task.nix,
+				capabilities: task.capabilities,
+				caches: task.caches,
+			}));
+		});
 		io.stdout(`${JSON.stringify({ include })}\n`);
 		return 0;
 	}
@@ -134,22 +163,36 @@ export async function run(options: RunOptions, io: RunIO): Promise<number> {
 	}
 
 	// Every program is found before any task starts, so a missing one fails the run rather than one task.
-	const problem = flakeProblem(top, tasks);
+	const problem = flakeProblem(existsSync(join(top, "flake.nix")), tasks);
 	if (problem !== null) throw new Error(problem);
-	// A dev shell already entered, by `nix develop` or direnv, runs Nix tasks directly with no evaluation.
-	const enter = tasks.some((task) => task.nix) && !io.env.IN_NIX_SHELL;
+	// This repository's dev shell, already entered, runs Nix tasks directly with no evaluation.
+	const enter = tasks.some((task) => task.nix) && !inDevShell(io.env, top);
 	const programs = {
 		quest: requireProgram("quest", io.env),
 		bash: requireProgram("bash", io.env),
 		nix: enter ? requireProgram("nix", io.env) : null,
 	};
+	// A fresh directory, so no earlier run's report passes for this one's and nothing else in it is touched.
 	const report = options.report === undefined ? null : resolve(options.report);
+	if (report !== null) {
+		if (existsSync(report) && readdirSync(report).length > 0)
+			throw new Error(`--report ${options.report} must be a new or empty directory`);
+		mkdirSync(report, { recursive: true });
+	}
 	const env: NodeJS.ProcessEnv = { ...io.env, QUEST_TIER: options.tier };
 	if (base !== null) env.QUEST_BASE = base;
+	else delete env.QUEST_BASE;
+	// Each task's gate leads a process group of its own, out of reach of a terminal's or an enclosing owner's group
+	// signals, and this run stands in for them as Quest's group owner does (see `GROUP`): it signals the whole group,
+	// so a gate whose enclosing owner holds its command, which then passes on nothing, still stops. Windows has no
+	// process groups; its console delivers Ctrl-C to every process.
+	const detached = process.platform !== "win32";
+	if (detached) env[GROUP] = "1";
 
 	const width = Math.max(...tasks.map((task) => task.name.length));
 	const command = (task: ManifestTask): string[] => {
-		const script = ["-eo", "pipefail", "-c", task.run];
+		// The environment applies inside the dev shell, so the gate and Nix keep the caller's PATH.
+		const script = ["-eo", "pipefail", "-c", exports(task.environment) + task.run];
 		if (task.nix && programs.nix !== null) return [programs.nix, "develop", top, "--command", "bash", ...script];
 		return [programs.bash, ...script];
 	};
@@ -158,18 +201,27 @@ export async function run(options: RunOptions, io: RunIO): Promise<number> {
 	const running = new Map<string, ChildProcess>();
 	let stopping = false;
 	const cancel = interrupts();
+	/** Signal every task: each gate's whole process group, or on Windows end the gate, whose job ends the rest. */
 	const signalAll = (signal: NodeJS.Signals) => {
-		for (const child of running.values()) child.kill(signal);
+		for (const child of running.values()) {
+			if (!detached || child.pid === undefined) child.kill(signal);
+			else
+				try {
+					process.kill(-child.pid!, signal);
+				} catch (error) {
+					if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
+				}
+		}
 	};
+	// As a group owner, the first signal goes to every group and a second kills them.
 	const unfollow = follow(
 		cancel,
 		() => {
 			stopping = true;
-			if (forwards(cancel.signal)) signalAll(requested(cancel.signal));
+			if (detached) signalAll(requested(cancel.signal));
 		},
-		// The gate takes a second signal as the order to kill everything its command started.
 		() => {
-			if (forwards(cancel.signal)) signalAll(requested(cancel.signal));
+			if (detached) signalAll("SIGKILL");
 		},
 	);
 	try {
@@ -189,17 +241,31 @@ export async function run(options: RunOptions, io: RunIO): Promise<number> {
 				}
 				if (running.size === 0) done();
 			};
+			/** Record how `task` ended, which `schedule` then acts on. */
+			const finish = (task: ManifestTask, outcome: Outcome, line: string) => {
+				outcomes.set(task.name, outcome);
+				io.stderr(`quest: ${task.name} ${outcome}${line}\n`);
+				if (outcome === "failed" && options.failFast && !stopping) {
+					stopping = true;
+					signalAll("SIGTERM");
+				}
+			};
 			const start = (task: ManifestTask) => {
 				const outputs = declared(task);
-				for (const { path } of outputs) rmSync(join(top, path), { force: true });
-				if (report !== null) rmSync(join(report, task.name), { recursive: true, force: true });
+				try {
+					for (const { path } of outputs) rmSync(join(top, path), { force: true });
+				} catch (error) {
+					finish(task, "failed", `: cannot remove an earlier report: ${(error as Error).message}`);
+					return;
+				}
 				const started = io.now();
 				const argv = programCommand(programs.quest, ["gate", ...command(task)], io.env);
 				io.stderr(`quest: ${task.name} started\n`);
 				const child = spawn(argv.file, argv.args, {
 					cwd: top,
-					env: { ...env, ...task.environment },
+					env,
 					stdio: ["ignore", "pipe", "pipe"],
+					detached,
 					windowsVerbatimArguments: argv.windowsVerbatimArguments,
 				});
 				running.set(task.name, child);
@@ -214,18 +280,16 @@ export async function run(options: RunOptions, io: RunIO): Promise<number> {
 					running.delete(task.name);
 					const seconds = ((io.now() - started) / 1000).toFixed(1);
 					const status = failure ?? (code === 0 ? null : `exit ${code ?? signal}`);
-					const problems = collect(top, task, outputs, status === null, report);
-					if (status === null && problems.length === 0) {
-						outcomes.set(task.name, "passed");
-						io.stderr(`quest: ${task.name} passed in ${seconds}s\n`);
-					} else {
-						outcomes.set(task.name, stopping && status !== null ? "cancelled" : "failed");
+					let problems: string[];
+					try {
+						problems = collect(top, task, outputs, status === null, report);
+					} catch (error) {
+						problems = [`cannot collect its reports: ${(error as Error).message}`];
+					}
+					if (status === null && problems.length === 0) finish(task, "passed", ` in ${seconds}s`);
+					else {
 						const why = [...(status === null ? [] : [status]), ...problems].join("; ");
-						io.stderr(`quest: ${task.name} ${outcomes.get(task.name)} in ${seconds}s: ${why}\n`);
-						if (options.failFast && !stopping) {
-							stopping = true;
-							signalAll("SIGTERM");
-						}
+						finish(task, stopping && status !== null ? "cancelled" : "failed", ` in ${seconds}s: ${why}`);
 					}
 					schedule();
 				});

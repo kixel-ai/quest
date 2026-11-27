@@ -184,6 +184,15 @@ test("after names a declared task of the same or an earlier tier that runs where
 	]);
 });
 
+test("no two tasks declare the same report file", () => {
+	expect(
+		problems(
+			`[tasks.a]\ntier = "pr"\nrun = "x"\njunit = "out.xml"\n` +
+				`[tasks.b]\ntier = "pr"\nrun = "x"\nmetrics = "out.xml"\n`,
+		),
+	).toEqual(["quest.toml: [tasks.b] metrics: `a` also writes `out.xml`"]);
+});
+
 const tasks = `
 [repo]
 invalidate_all = ["flake.lock"]

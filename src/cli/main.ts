@@ -285,17 +285,18 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"run of one of the first four also runs the tiers before it, and a release run only release tasks. " +
 				"--only runs the named tasks whatever their tier or the change. A picked task also runs every task it " +
 				"runs after.\n\n" +
-				"Each task gets QUEST_TIER, QUEST_BASE (the merge base, unless --all), and its environment table, and " +
-				"runs its run script with bash -eo pipefail -c from the repository root. A Nix task needs flake.nix " +
-				"there; inside a dev shell (IN_NIX_SHELL set) it runs directly, and otherwise through nix develop " +
-				"--command. quest, bash, and, outside a dev shell, nix must be on PATH.\n\n" +
+				"Each task runs its run script with bash -eo pipefail -c from the repository root, with QUEST_TIER, " +
+				"QUEST_BASE (the merge base, unless --all), and its environment table exported. A Nix task needs " +
+				"flake.nix there; inside the repository's dev shell, where QUEST_DEV_SHELL names its root, it runs " +
+				"directly, and otherwise through nix develop --command. quest, bash, and, outside that dev shell, nix " +
+				"must be on PATH.\n\n" +
 				"A task that passes must write the junit and metrics files it declares, and metrics must hold a JSON " +
-				"object; --report copies them to <dir>/<task>/junit.xml and <dir>/<task>/metrics.json. A failed task " +
-				"skips the tasks after it, and with --fail-fast also stops every running task. Exits 1 when a task " +
-				"fails.\n\n" +
+				"object; --report copies them to <dir>/<task>/junit.xml and <dir>/<task>/metrics.json, where <dir> " +
+				"must be new or empty. A failed task skips the tasks after it, and with --fail-fast also stops every " +
+				"running task. Exits 1 when a task fails.\n\n" +
 				"--query prints the picked tasks as JSON for a CI runner's matrix and runs nothing: " +
 				"{include: [{task, os, tier, after, nix, capabilities, caches}]}, one entry per task and operating " +
-				"system.",
+				"system, each picking its own tasks and what they run after.",
 		)
 		.addOption(new Option("--tier <tier>", "The tier to run").choices(TASK_TIERS).default("pr"))
 		.addOption(new Option("--all", "Run every task of the tier, whatever changed").conflicts("base"))
@@ -411,7 +412,12 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 			const repository = [
 				...(options.stubs && own ? stubFindings(root()) : []),
 				...(own && existsSync(risk) ? parseRiskFile(readFileSync(risk, "utf8")).problems : []),
-				...(own ? manifestProblems(root()) : []),
+				...(own
+					? manifestProblems((path) => {
+							const file = join(root(), path);
+							return existsSync(file) ? readFileSync(file, "utf8") : null;
+						})
+					: []),
 			];
 			if (findings.length === 0 && repository.length === 0) {
 				const count = collect(root()).length;
