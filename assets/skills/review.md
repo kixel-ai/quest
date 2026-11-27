@@ -14,7 +14,7 @@ The exception is a draft with no `## Waiting` section, which is still its starte
 Work in a checkout of the PR's head, detached when another worktree holds its branch.
 Whenever your checked-out branch is not the PR's head branch, pass `--branch <head-branch>` to each `quest review`, so its rounds and record follow the PR.
 Commit everything, and unless the repository's local checks already passed on that commit, run them and fix any failure the branch causes.
-A PR whose author lacks write access gets no local run: leave its checks to CI, and run a `quest` it cannot modify, such as an installed release, from outside its checkout with `--root`.
+A PR whose author lacks write access gets no local run: leave its checks to the merge queue, and run a `quest` it cannot modify, such as an installed release, from outside its checkout with `--root`.
 A check failure that reproduces unchanged in a checkout of the base branch is pre-existing rather than the PR's: record the command and both failures in the PR body's validation, go on to review and readiness, and add a follow-up for it unless an open PR already fixes it.
 Never alter the repository's harness to get a pass, such as by disabling a tool, unsetting its environment, or skipping a check, nor report an altered run as its checks.
 

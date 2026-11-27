@@ -2,7 +2,7 @@
 
 ## Goal
 
-Any repository opting into Kixel Quest requires Nix (`flake.nix`) and declares its CI, caching, and release lifecycle in a root `quest.toml` (keeping `justfile` only for interactive local dev menus), using `quest` as its single CLI for running tasks (`quest run`), fast formatting (`quest fmt`), Nix cache publishing (`quest cache push`), flake boilerplate (`quest.lib.mkFlake`), and thin reusable GitHub Actions workflows for non-Linux legs, outside contributor PRs, and npm OIDC publishing.
+Any repository opting into Kixel Quest requires Nix (`flake.nix`) and declares its CI, caching, and release lifecycle in a root `quest.toml` (keeping `justfile` only for interactive local dev menus), using `quest` as its single CLI for running tasks (`quest run`), fast formatting (`quest fmt`), Nix cache publishing (`quest cache push`), flake boilerplate (`quest.lib.mkFlake`), and thin reusable GitHub Actions workflows for non-Linux legs and npm OIDC publishing.
 
 Non-goals: configuring agent or review model routing in `quest.toml` (Quest keeps its single shipped model routing), moving interactive local dev menus (`just dev`, `just demo`) out of `justfile`, or owning the merge queue, host scheduler, or cache Worker (which live in Kixel Quest).
 
@@ -24,4 +24,4 @@ Decided 2026-11-27 (maintainer, `/quest-run`), since Kixel Quest has no task-res
 - **Crate granularity.** ✅ A Cargo task runs once per crate with `QUEST_CRATE` set, so each crate's pass is cached on its own (rejected: one run cached per workspace).
 - **Merge-queue trust in local passes.** Recommended, awaiting the maintainer: a host's cache is trusted exactly as far as the user account that holds it, since anything running as that user could already subvert its next run some other way. `quest run` refuses a cache directory another user owns or can write. The merge queue's runner user, separate from interactive and agent sessions, runs its gate with the cache only while it runs nothing but reviewed heads; a runner user that also runs unreviewed pull request code, such as an approved outside contributor's, runs its gate with `--no-cache` until the m1 remote cache, which only trusted runners write.
 
-This epic finishes once all four children land and a real repository validates `quest.lib.mkFlake`, `quest fmt`, `quest run --tier gate`, `quest cache push`, and content-addressed crate skipping end to end.
+This epic finishes once every child lands and a real repository validates `quest.lib.mkFlake`, `quest fmt`, `quest run --tier gate`, `quest cache push`, and content-addressed crate skipping end to end.
