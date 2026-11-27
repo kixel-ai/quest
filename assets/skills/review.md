@@ -28,7 +28,7 @@ Pass `--exclude-model` or `--size` only for a PR whose body cannot hold the reco
 Where the repository's root instructions name other reviewers, pass them with `--harness`, `--model`, and `--effort`, which runs that reviewer alone.
 Each round posts to Kixel Quest, which needs `quest login` on the host, and, on GitHub, sets the head's `quest review` commit status; it leaves the PR body alone. When it printed `record skipped`, run it again once the branch has its PR, since `quest status` counts only a round `quest review` posted, and only a maintainer's: a contributor's own round prints `status skipped`. At `status refused`, or a post Kixel Quest refused, fix what it names, such as pushing the head, and review it again.
 
-`quest review` sets the head's risk tier before any reviewer runs, from who a mistake in the change would reach: a low head gets no local reviewer, only its classification posted, a medium one gets its size's reviewer, and a high one gets a second reviewer from the other vendor beside it.
+`quest review` sets the head's risk tier before any reviewer runs, from who a mistake in the change would reach, then seats reviewers from its `(size + risk)` rung: every low head runs a local reviewer, rungs 0–2 (`XS low` through `XS high`, `S medium`, `M low`) run one reviewer, and rungs 3–6 (`S high`, `M medium`, `L low` through `XL high`) run both Sol and Opus beside each other.
 When the user overrides the tier, pass it with `--override <tier> --reason <their reason>`.
 
 Each round ends with a `next` line: follow it until a round of the head reports no finding you have not refuted; never block on the score.

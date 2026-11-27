@@ -31,7 +31,7 @@ On a GitHub PR, a review whose `quest review` commit status names a risk file, `
 Otherwise, the changes since the reviewed head need no new review only when they are conflict-free merges from the base branch, a reviewer's suggested patch applied unchanged, a land fixer's recorded mechanical fix, pushed by its bot, that changes no behavior, or the pick round's answers recorded in the PR's follow-ups.
 `quest status` counts only a maintainer's posted round, so a contributor's head needs a maintainer's local review; the repository's review policy may require more.
 An online reviewer's approval never stands in for that review.
-A low head's classification counts without a local reviewer; a later head's rise in tier ends the pick: tell the user.
+Every tier needs a passing local review; a later head's rise in tier ends the pick: tell the user.
 
 Queue the head with `quest merge <pr> --land <full 40-character head SHA>`, adding `--squash` or `--rebase` when the repository's root instructions name that method for the PR's base.
 Run a `quest` the PR cannot modify, such as an installed release rather than a build from the head's checkout: it refuses a head that leaves its quest inaccurate, a check the head's own code could skip.

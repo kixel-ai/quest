@@ -28,10 +28,10 @@ The maintainer authorized the edits this needs in `assets/skills/review.md`,
 
 Recommended, for the implementer to confirm:
 
-- `src/core/reviews.ts`: [Review rung ladder](/quest/m0/review-rungs.md)
-  already added `"third"` to `SEATS` without sending any `"third"` rounds, and
-  this quest's `## Waiting` item confirms `kixel.quest` has pinned and deployed
-  that `quest/core` release before clients begin posting `seat: "third"`.
+- `src/core/reviews.ts`: `"third"` is already in `SEATS` without sending any
+  `"third"` rounds yet, and this quest's `## Waiting` item confirms
+  `kixel.quest` has pinned and deployed that `quest/core` release before clients
+  begin posting `seat: "third"`.
 - `src/cli/models.ts`: add `agy("gemini-4-neon", "medium")` to rung `5` and
   `agy("gemini-4-neon", "high")` to rung `6` in `REVIEW_RUNGS`.
 - `src/cli/review.ts` & `src/cli/agent.ts`:
@@ -59,8 +59,6 @@ case-insensitive filesystem, `--accept` requiring all 3 seats on rungs `5`–`6`
 
 ## Required
 
-- [Review rung ladder](/quest/m0/review-rungs.md) - establishes the 7-rung
-  `size + risk` table and multi-seat routing
 - [Stuck-agent advisor](/quest/m0/advise.md) - restores the read-only `agy`
   runner, deny rules, limit parsing, and API-list pricing
 

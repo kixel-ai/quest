@@ -42,7 +42,7 @@ import { LINE_LIMIT, LOGINS, HARNESSES, type HarnessName, boundedLines, stripped
 import { REVIEW } from "./context";
 import { discoveryEnv, git } from "./git";
 import { LIMIT, codexReset } from "./limit";
-import { CLASSIFIERS, DEFAULT_SIZE, REVIEWERS, type Model, unfit, weaker } from "./models";
+import { CLASSIFIERS, DEFAULT_SIZE, reviewRung, type Model, unfit, weaker } from "./models";
 import { programEnvironment, requireProgram } from "./program";
 import { canonicalModel, type recorded, sameModel } from "./models-record";
 import { save } from "./worktree";
@@ -97,10 +97,11 @@ export interface Skip extends Model {
 	reason: string;
 }
 
-/** Every eligible reviewer of a size was unavailable, each for the reason `skipped` names. */
+/** Every eligible reviewer of a rung was unavailable, each for the reason `skipped` names. */
 export class ReviewOutageError extends Error {
 	constructor(
 		size: Size,
+		tier: Tier,
 		readonly skipped: Skip[],
 		messages: string[],
 	) {
@@ -109,7 +110,7 @@ export class ReviewOutageError extends Error {
 			const models = skipped.filter((_, i) => messages[i] === message).map((s) => `${s.model} ${s.effort}`);
 			return `${models.join(" and ")} (${message})`;
 		});
-		super(`no eligible ${size} reviewer could run: ${why.join(", ")}`);
+		super(`no eligible ${size} ${tier} reviewer could run: ${why.join(", ")}`);
 	}
 }
 
@@ -317,28 +318,28 @@ export function authored(choice: Choice, latest?: string): (entry: Model) => boo
 }
 
 /**
- * The reviewer for a PR of `size`: the first entry of its list whose model
- * is not avoided, or `--harness`'s first such entry, else its first, with
- * `--model` and `--effort` overriding its model and effort. A `--model` the
+ * The reviewer for a PR of `(size, tier)`: the first entry of its rung's list
+ * whose model is not avoided, or `--harness`'s first such entry, else its first,
+ * with `--model` and `--effort` overriding its model and effort. A `--model` the
  * list names runs on its own entry's harness and effort; one it does not
  * runs at `--harness`'s first entry. An override never brings back an
  * avoided model.
  */
-export function pickReviewer(size: Size, choice: Choice, avoided: (entry: Model) => boolean): Model {
-	const list = REVIEWERS[size];
+export function pickReviewer(size: Size, tier: Tier, choice: Choice, avoided: (entry: Model) => boolean): Model {
+	const list = reviewRung(size, tier).reviewers;
 	const ours = list.filter((e) => choice.harness === undefined || e.harness === choice.harness);
 	const named = choice.model === undefined ? undefined : ours.find((e) => sameModel(e.model, choice.model!));
 	const first = choice.harness === undefined ? undefined : ours[0];
 	const entry = named ?? (choice.model === undefined ? undefined : first) ?? ours.find((e) => !avoided(e)) ?? first;
 	if (entry === undefined && choice.harness === undefined) {
 		const models = [...new Set(list.map((e) => e.model))].join(", ");
-		throw new ReviewInputError(`every ${size} reviewer (${models}) is avoided; pass --harness and --model`);
+		throw new ReviewInputError(`every ${size} ${tier} reviewer (${models}) is avoided; pass --harness and --model`);
 	}
 	const harness = choice.harness ?? entry!.harness;
 	const model = choice.model ?? entry?.model;
 	const effort = choice.effort ?? entry?.effort;
 	if (model === undefined || effort === undefined) {
-		throw new ReviewInputError(`no ${harness} reviewer in the ${size} list; pass --model and --effort`);
+		throw new ReviewInputError(`no ${harness} reviewer in the ${size} ${tier} list; pass --model and --effort`);
 	}
 	const picked = { harness, model, effort };
 	if (avoided(picked))
@@ -348,19 +349,19 @@ export function pickReviewer(size: Size, choice: Choice, avoided: (entry: Model)
 	return picked;
 }
 
-/** The reviewers that may take a high head's second seat beside `pick`, ranked: its size's from another vendor. */
-export const secondsTo = (size: Size, pick: Model, avoided: (entry: Model) => boolean): Model[] =>
-	REVIEWERS[size].filter((each) => !avoided(each) && each.harness !== pick.harness);
+/** The reviewers that may take a two-seat rung's second seat beside `pick`, ranked: its rung's from another vendor. */
+export const secondsTo = (size: Size, tier: Tier, pick: Model, avoided: (entry: Model) => boolean): Model[] =>
+	reviewRung(size, tier).reviewers.filter((each) => !avoided(each) && each.harness !== pick.harness);
 
 /**
- * The reviewers a run tries in turn, each when those before it cannot run: every entry of the size's list whose
+ * The reviewers a run tries in turn, each when those before it cannot run: every entry of the rung's list whose
  * model is not avoided, or only the one `--harness`, `--model`, or `--effort` names, so a run that names its
  * reviewer never measures another.
  */
-export function rankedReviewers(size: Size, choice: Choice, avoided: (entry: Model) => boolean): Model[] {
-	const first = pickReviewer(size, choice, avoided);
+export function rankedReviewers(size: Size, tier: Tier, choice: Choice, avoided: (entry: Model) => boolean): Model[] {
+	const first = pickReviewer(size, tier, choice, avoided);
 	if (choice.harness !== undefined || choice.model !== undefined || choice.effort !== undefined) return [first];
-	return REVIEWERS[size].filter((entry) => !avoided(entry));
+	return reviewRung(size, tier).reviewers.filter((entry) => !avoided(entry));
 }
 
 /**
@@ -2359,8 +2360,9 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 	const record = needed ? await deps.models?.(root, baseRef, branch) : undefined;
 	const sized = reviewSize(root, baseSha, options.sizeBranch ?? branch, options.size, recordedSize(record, options));
 	const avoided = authored(options, recordedLatest(record, options));
-	// Accepting runs no reviewer, so it picks none.
-	let candidates = options.accept === undefined ? rankedReviewers(sized.size, options, avoided) : [];
+	// Accepting runs no reviewer, so it picks none. Every rung names the same two models, so pre-checking against
+	// `medium` rejects bad flags, avoided models, and missing `--responses` before the classifier spends a turn.
+	const pre = options.accept === undefined ? rankedReviewers(sized.size, "medium", options, avoided) : [];
 	// A named reviewer runs alone, as for a repository whose instructions name its own.
 	const auto = options.harness === undefined;
 
@@ -2404,7 +2406,7 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 
 	// The first candidate's seats are checked before the classifier spends a turn.
 	let at = 0;
-	if (options.accept === undefined) plan(candidates[0]!);
+	if (options.accept === undefined) plan(pre[0]!);
 
 	const head = git(root, ["rev-parse", "HEAD"]);
 	let mergeBase: string;
@@ -2494,10 +2496,8 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 				riskier(risk.overridden ?? risk.tier, override.from) && (risk.overridden ?? risk.tier) !== override.tier
 			) && { override }),
 	});
-	const named = !auto || options.model !== undefined || options.effort !== undefined;
-	const settling =
-		options.responses !== undefined || sessions.some((session) => session.rounds.at(-1)!.findings.length > 0);
 	const risk = overridden(before, override);
+	const rung = reviewRung(sized.size, risk.tier);
 	// Accepting runs no reviewer: it repeats each reviewer's last round of this diff, whose open findings it accepts.
 	if (options.accept !== undefined) {
 		const last = sessions
@@ -2509,9 +2509,9 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 			throw new ReviewInputError(
 				`no round reviewed ${head} against ${baseRef} from ${mergeBase}; review it before accepting its findings`,
 			);
-		if (risk.tier === "high" && !last.some((round) => round.second))
+		if (rung.seats === 2 && !last.some((round) => round.second))
 			throw new ReviewInputError(
-				`a high-risk head needs its second reviewer's round before its findings are accepted; review it again`,
+				`a ${sized.size} ${risk.tier} head needs its second reviewer's round before its findings are accepted; review it again`,
 			);
 		if (last.every((round) => round.findings.length === 0))
 			throw new ReviewInputError(`no finding is open on ${head}, so there is nothing to accept`);
@@ -2560,48 +2560,33 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 			remember: () => save(statePath, state(sessions, tallies, risk, kept)),
 		};
 	}
-	if (!named && !settling && risk.tier === "low") {
-		save(statePath, state(sessions, tallies, risk, past, carried));
-		// No round runs, but what an earlier run's failed post settled still goes with this one.
-		return {
-			rounds: [],
-			tallies,
-			risk,
-			skipped: [],
-			branch,
-			head,
-			base,
-			sized,
-			outcomes: () => carried,
-			posted: () => save(statePath, state(sessions, tallies, risk, past)),
-		};
-	}
 
+	const candidates = rankedReviewers(sized.size, risk.tier, options, avoided);
 	const skipped: Skip[] = [];
 	const messages: string[] = [];
-	// The second reviewer: the first of the size's list from a vendor other than the pick's that can run. A list with
-	// no such model, as when every other one is avoided, cannot review a high head; one whose others cannot run is
+	// The second reviewer: the first of the rung's list from a vendor other than the pick's that can run. A list with
+	// no such model, as when every other one is avoided, cannot review a two-seat rung; one whose others cannot run is
 	// out. It comes from the whole list, since --model or --effort narrows only the pick.
 	const secondTo = (routed: Model): Model => {
-		const others = secondsTo(sized.size, routed, avoided);
+		const others = secondsTo(sized.size, risk.tier, routed, avoided);
 		if (others.length === 0)
 			throw new ReviewInputError(
-				`a high-risk head needs a second reviewer from a vendor other than ${routed.harness}'s, and every such model of its size's list is avoided, as excluded or weaker than the latest writer`,
+				`a ${sized.size} ${risk.tier} head needs a second reviewer from a vendor other than ${routed.harness}'s, and every such model of its rung's list is avoided, as excluded or weaker than the latest writer`,
 			);
 		const next = others.find((each) => !out.has(each.model) && !down.has(each.harness));
-		if (next === undefined) throw new ReviewOutageError(sized.size, skipped, messages);
+		if (next === undefined) throw new ReviewOutageError(sized.size, risk.tier, skipped, messages);
 		return next;
 	};
-	// --model or --effort changes only the pick, so a high head still gets its second reviewer; --harness's runs alone.
-	const high = auto && risk.tier === "high";
-	// Below high, a second reviewer still settles the findings it left open: its own model while that may review,
+	// --model or --effort changes only the pick, so a two-seat rung still gets its second reviewer; --harness's runs alone.
+	const twoSeats = auto && rung.seats === 2;
+	// On a one-seat rung, a second reviewer still settles the findings it left open: its own model while that may review,
 	// else another, whose new session settles them by number as a replaced pick's does.
 	const seconded = sessions.find((session) => session.second);
 	const unsettledSecond = auto && seconded !== undefined && seconded.rounds.at(-1)!.findings.length > 0;
 	const secondFor = (routed: Model): Model | null => {
-		if (!high && !unsettledSecond) return null;
-		if (!high) {
-			const own = secondsTo(sized.size, routed, avoided).find(
+		if (!twoSeats && !unsettledSecond) return null;
+		if (!twoSeats) {
+			const own = secondsTo(sized.size, risk.tier, routed, avoided).find(
 				(each) =>
 					each.harness === seconded!.reviewer &&
 					sameModel(each.model, seconded!.last.model) &&
@@ -2649,7 +2634,7 @@ export async function review(options: ReviewOptions, deps: ReviewDependencies): 
 						? (down.get(candidates[at]!.harness) ?? out.get(candidates[at]!.model))
 						: undefined;
 			}
-			if (at === candidates.length) throw new ReviewOutageError(sized.size, skipped, messages);
+			if (at === candidates.length) throw new ReviewOutageError(sized.size, risk.tier, skipped, messages);
 			if (second !== null) second = secondFor(candidates[at]!);
 			planned = plan(candidates[at]!, second);
 		}
@@ -3107,7 +3092,6 @@ async function reviewWith(shared: Shared, seat: Seat, responses: string | undefi
  * some, handing the user the disagreement rather than starting a fourth.
  */
 export function nextStep(rounds: Round[]): string {
-	if (rounds.length === 0) return "next done: the head is low risk, so no local reviewer ran";
 	if (rounds.every((round) => round.findings.length === 0))
 		return rounds.some((round) => round.notes.length > 0)
 			? "next done: no finding holds this head; its notes are yours to take or leave, and need no answer"
