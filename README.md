@@ -618,7 +618,7 @@ comes last, and a missing value prints as `-`:
 | --- | --- |
 | `url`, `state`, `draft`, `head` | The PR URL; `open`, `closed`, or `merged`; `true` or `false`; the head SHA. |
 | `mergeable`, `merge-state`, `review-decision` | GitHub's values, lowercased. |
-| `review-record` | Whether the review that counts still covers the head, and the head it reviewed: `current` when it is the head, `diff-identical` when `git diff <base>...<head>` prints the same as for it, `stale` otherwise, or `unknown` when the forge cannot compare them, such as a diff too large; then `local-review`, or `no-local-review` for a low head no local reviewer ran on. The review that counts is the newest passing run [`quest review` posted](#review-locally) to Kixel Quest from someone who can push to the repository, read through Kixel Quest; a run with findings open counts for none. `-` when none counts. Read from GitHub, as with `QUEST_FORGE=github`, it is only a PR body's `## Review` record an earlier `quest review` wrote, with a warning saying so, counted only where a writer's passing `quest review` commit status on the head it names attests it, and `stale`, with a warning, once `RISK.md` at the base's tip is not the file the record names. |
+| `review-record` | Whether the review that counts still covers the head, and the head it reviewed: `current` when it is the head, `diff-identical` when `git diff <base>...<head>` prints the same as for it, `stale` otherwise, or `unknown` when the forge cannot compare them, such as a diff too large; then `local-review`, or `no-local-review` for an older run from before every tier ran a local reviewer. The review that counts is the newest passing run [`quest review` posted](#review-locally) to Kixel Quest from someone who can push to the repository, read through Kixel Quest; a run with findings open counts for none. `-` when none counts. Read from GitHub, as with `QUEST_FORGE=github`, it is only a PR body's `## Review` record an earlier `quest review` wrote, with a warning saying so, counted only where a writer's passing `quest review` commit status on the head it names attests it, and `stale`, with a warning, once `RISK.md` at the base's tip is not the file the record names. |
 | `risk` | The counted review's [risk tier](#risk-tiers), `low`, `medium`, or `high`; the same state as `review-record`; the tier its classifier set; and the reason. `-` when none counts, and `- malformed -` with why when a body record's risk lines do not parse. |
 | `class` | The class, built in or from the base's `RISK.md` `## Automatic` list, the counted review's classifier found the change in, or `-`. |
 | `auto-merge` | Method, who enabled it, when, and the head it was enabled on. |
@@ -1886,24 +1886,26 @@ whole branch at the PR's size.
 ## Review locally
 
 `quest review` has a model no weaker than the latest writer review the checkout's
-committed and pushed branch before it is marked ready for review, at an effort set by the PR's
-size. It needs Git 2.41 or later, whose `--attr-source` keeps a head's
+committed and pushed branch before it is marked ready for review, picking seats
+and effort from a 7-rung `(size + risk)` ladder (`XS=0`…`XL=4` plus `low=0`,
+`medium=1`, `high=2`). It needs Git 2.41 or later, whose `--attr-source` keeps a head's
 `.gitattributes` from hiding its hunks from the risk classifier and the diffs it writes for
 reviewers, and is a usage error
-before it; `--accept` runs no diff and is exempt. Each size has two reviewers,
-the same for every repository:
+before it; `--accept` runs no diff and is exempt. Every rung lists the same two
+models, the same for every repository:
 
-| PR size | Reviewer | When Sol is out, and a high head's second |
-|---|---|---|
-| XS | Codex `gpt-6.2-sol` low | Claude Code `claude-opus-5-5` medium |
-| S | Codex `gpt-6.2-sol` medium | Claude Code `claude-opus-5-5` medium |
-| M, or none | Codex `gpt-6.2-sol` high | Claude Code `claude-opus-5-5` high |
-| L | Codex `gpt-6.2-sol` xhigh | Claude Code `claude-opus-5-5` high |
-| XL | Codex `gpt-6.2-sol` xhigh | Claude Code `claude-opus-5-5` xhigh |
+| Rung | `(size, risk)` | Seats | Pick | Fallback (rungs 0–2) or second seat (rungs 3–6) |
+|---|---|---|---|---|
+| 0 | `XS low` | 1 | Codex `gpt-6.2-sol` medium | Claude Code `claude-opus-5-5` medium |
+| 1 | `XS medium`, `S low` | 1 | Codex `gpt-6.2-sol` high | Claude Code `claude-opus-5-5` medium |
+| 2 | `XS high`, `S medium`, `M low` | 1 | Codex `gpt-6.2-sol` xhigh | Claude Code `claude-opus-5-5` high |
+| 3 | `S high`, `M medium`, `L low` | 2 | Codex `gpt-6.2-sol` xhigh | Claude Code `claude-opus-5-5` medium |
+| 4 | `M high`, `L medium`, `XL low` | 2 | Codex `gpt-6.2-sol` xhigh | Claude Code `claude-opus-5-5` high |
+| 5 | `L high`, `XL medium` | 2 | Codex `gpt-6.2-sol` xhigh | Claude Code `claude-opus-5-5` high |
+| 6 | `XL high` | 2 | Codex `gpt-6.2-sol` xhigh | Claude Code `claude-opus-5-5` xhigh |
 
 A model may review its own work, in a session of its own, so the writer's model
-is never skipped for that alone, and Opus reviews at the effort it writes the
-size at.
+is never skipped for that alone. Every `low` PR runs a local review.
 
 A `quest` run from the source of the checkout it judges (`bun src/cli/bin.ts`, or
 a build made there) is that PR's own build, which never records its own review:
@@ -1915,8 +1917,10 @@ The reviewers run at once;
 the first to fail, such as on a usage limit, stops the others, and the round
 saves none.
 
-A reviewer that cannot run passes the round to the next eligible one, so
-Opus reviews while Sol is out. That is a failure the CLI or provider reports before any finding is
+On a one-seat rung (rungs `0`–`2`), a reviewer that cannot run passes the round
+to the next eligible one, so Opus reviews while Sol is out; on a two-seat rung
+(rungs `3`–`6`), both seats are required, so either being unavailable fails as
+an outage (exit 3). That is a failure the CLI or provider reports before any finding is
 saved, never text in the diff or a reply: a CLI that is not installed, logged
 out, or has its login rejected, or sent to a gateway with no credential,
 passes over every model of that CLI, and a
@@ -1924,9 +1928,10 @@ model at its usage limit passes over only itself. The run prints a `skipped`
 line for each reviewer it passed over, such as
 `skipped codex gpt-6.2-sol high usage limit, resets 2026-11-18T03:00:00Z`.
 
-The new reviewer settles the open findings of the one it replaces. Only when every eligible reviewer is out does the run fail,
-exiting 3 with each one's error. A reviewer `--harness`, `--model`, or
-`--effort` names never passes the round on.
+The new reviewer settles the open findings of the one it replaces. When no
+eligible reviewer is left (or either required reviewer on a two-seat rung is
+out), the run fails, exiting 3 with each one's error. A reviewer `--harness`,
+`--model`, or `--effort` names never passes the round on.
 
 A quest branch takes its quest's size, read from the base branch's tip so a
 change cannot lower its own review; any other PR, such as a skill's own, takes
@@ -1939,8 +1944,8 @@ names the latest writer, since each session moves its line last whenever it push
 `--exclude-model` names each model to avoid instead, with every model weaker
 than it. Without a record, or when its last line names an `unknown` model,
 none is avoided, so the never-weaker rule needs the record. `--harness` names the only reviewer instead of
-the pick and the second reviewer, at the model and effort of its first entry whose model is not avoided, and
-`--model` and `--effort` override the size pick's or that reviewer's, as a
+the rung's seats, at the model and effort of its first entry whose model is not avoided, and
+`--model` and `--effort` override the rung pick's or that reviewer's, as a
 repository whose `AGENTS.md` names other reviewers needs; a `--model` the list
 names, in any spelling such as `openai/gpt-6.2-sol`, runs on its own entry's
 harness and effort, passed to the CLI as given, and one it does not at
@@ -1948,9 +1953,9 @@ harness and effort, passed to the CLI as given, and one it does not at
 a listed model by any spelling too. A `--harness` run keeps the other
 reviewers' sessions for the pick's next run, and refuses while one has
 findings to settle, so a head never passes one reviewer alone while the other's
-findings are open. When the latest writer changes the size's pick to one with
+findings are open. When the latest writer changes the rung's pick to one with
 no session on the branch, its first session settles the open findings of the
-reviewer it replaces. A size whose every reviewer is avoided is an error. The reviewer reaches its model as the user's own CLI does:
+reviewer it replaces. A rung whose every reviewer is avoided is an error. The reviewer reaches its model as the user's own CLI does:
 Claude Code keeps `ANTHROPIC_BASE_URL`, `ANTHROPIC_CUSTOM_HEADERS`, and its
 cloud providers' `CLAUDE_CODE_USE_*` switches and settings, so a gateway such
 as CLIProxyAPI, Bedrock, Vertex, or Foundry works, and Codex keeps
@@ -2094,9 +2099,9 @@ fork PR. On GitHub it first sets the `quest review` commit status on the head,
 on the GitHub token (`GH_TOKEN`, `GITHUB_TOKEN`, or `gh auth token`), so push
 the head first: `failure`, which a run with no finding open sets to `success`
 only once the post below is stored, so a failed post leaves the head failing, described
-by the head's risk tier, class, and risk file and whether a local reviewer
-ran, as `Risk low, class test, risk file 3f9c2a7b1e04: passed with no local
-reviewer`, or `findings accepted` after `--accept`, its target the diff from
+by the head's risk tier, class, and risk file and its outcome, as
+`Risk low, class test, risk file 3f9c2a7b1e04: passed`, or `findings accepted`
+after `--accept`, its target the diff from
 the head's merge base with the PR's base. The land gate counts it only from
 someone who can push, and a failing one blocks `quest merge --land` as any
 failed check does. A token that cannot push sets none, printing `; status
@@ -2106,14 +2111,13 @@ It then posts the run to Kixel Quest's `POST /reviews` and prints `record
 <url>`: the PR, its head, base branch, and merge base, the head's risk tier and
 reason, the tier its classifier set, its class, and the classifier model and
 session, the run's outcome as the status names it, and each reviewer's round
-with its harness, model, effort, seat (`pick`, or `second` for a high head's
+with its harness, model, effort, seat (`pick`, or `second` for a two-seat rung's
 second reviewer), session, round number, score and rationale, and findings,
 each with its file, line, severity, and title. Notes are not posted. Beside the
 run go the outcomes of the findings an earlier posted round raised that this
 one fixed or refuted, each with its reason, named by that round's session and
 number and the finding's place in it, and sent to the PR that round was posted
-on, even after a replacement PR took the branch. A low head no reviewer ran on
-posts its classification alone. A round whose post failed, or that an older
+on, even after a replacement PR took the branch. A round whose post failed, or that an older
 `quest` recorded in the PR body, was never stored, so the next run sends no
 outcome for its findings; the outcomes a failed post carried are kept for
 the branch, and its next post sends them, after `--new` too. Kixel Quest counts a run toward merging only when its poster
@@ -2129,8 +2133,8 @@ logged out, its login rejected, at its usage limit, or unable to run on this hos
 failures. The only eligible reviewer's usage limit prints one line,
 `error: <harness> hit its usage limit; resets <time>`, where `<time>` is the
 reset as an ISO 8601 UTC timestamp, or `unknown` when the CLI named none; with
-several, it prints `error: no eligible <list> reviewer could run: <model>
-<effort> (<error>), ...`, where `<list>` is the PR's size.
+several, it prints `error: no eligible <size> <tier> reviewer could run: <model>
+<effort> (<error>), ...`.
 Through a gateway that pools accounts, such as CLIProxyAPI, the limit is the
 pool's: Claude Code shows its "All credentials for model ... are cooling down",
 and Codex, sent to `OPENAI_BASE_URL`, gives up on the gateway's 429 after its
@@ -2147,9 +2151,9 @@ run catches what those miss.
 
 | Tier | Local review | Lands on |
 |---|---|---|
-| Low | None, unless `--harness`, `--model`, or `--effort` names one | Its own, once it is in a built-in class or one in `RISK.md`'s `## Automatic` list; else the maintainer's pick |
-| Medium | The size's pick | The maintainer's pick |
-| High | Both of the size's reviewers | The maintainer's pick, with the full brief |
+| Low | Rung `0`–`4` (`XS`–`M`: Sol; `L`–`XL`: Sol + Opus) | Its own, once its local review passes and it is in a built-in class or one in `RISK.md`'s `## Automatic` list; else the maintainer's pick |
+| Medium | Rung `1`–`5` (`XS`–`S`: Sol; `M`–`XL`: Sol + Opus) | The maintainer's pick |
+| High | Rung `2`–`6` (`XS`: Sol; `S`–`XL`: Sol + Opus) | The maintainer's pick, with the full brief |
 
 `/quest-run` carries the picks.
 
@@ -2226,15 +2230,18 @@ classifier model and session, or none when the always-high paths set the
 tier; the status names the base's `RISK.md` the tier was set against by its
 blob's first 12 characters, or `none`, which a status without it names too.
 
-A low head with no finding left to settle runs no local reviewer, unless
-`--harness`, `--model`, or `--effort` names one: the run passes the head with
-no local reviewer, and `next done` says so. A high head gets a second reviewer: its size's entry from the other
+Every tier runs a local review. On rungs `0`–`2` (`XS low/medium/high`,
+`S low/medium`, and `M low`), one reviewer runs, falling from Sol to Opus when Sol
+cannot run. On rungs `3`–`6` (`S high`, `M medium`, `L low` and up),
+the head gets a second reviewer: its rung's entry from the other
 vendor, so Sol and Opus both review it. It is marked `second`, in a session
-of its own that reviews every head while the tier is high and settles its
-findings after. `--model` and `--effort` change only the pick, so the second
+of its own that reviews every head on a two-seat rung and settles its
+findings after even if a later head drops to a one-seat rung. `--model` and
+`--effort` change only the pick, so a two-seat rung's second
 reviewer still runs; the one reviewer `--harness` names runs alone. When the
-other vendor's model is avoided, as by `--exclude-model`, the run fails as a
-usage error; when it cannot run, as an outage.
+other vendor's model is avoided on a two-seat rung, as by `--exclude-model`,
+the run fails as a usage error (pass `--harness` to run one reviewer alone);
+when either seat cannot run on a two-seat rung, it fails as an outage.
 
 `--override <tier> --reason <text>` records the maintainer's tier for the
 branch in place of the reviewed one, posted as the run's tier and reason beside
@@ -2252,7 +2259,7 @@ the same head, base, and merge base, sets the `quest review` status to
 accepted, each open finding deferred for the maintainer's reason on the PR it
 posts to and on a since-replaced PR its round was posted on, and only once the
 post is stored sets the status to `success`. It is a usage error when no round
-classified and reviewed that diff, when a high head lacks its second
+classified and reviewed that diff, when a two-seat rung lacks its second
 reviewer's round, or when no finding is open, and it takes no option that
 would run or reset a round. Its status goes first, so a token that cannot
 push records nothing, printing `next stop` and exiting 1.

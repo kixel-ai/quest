@@ -65,9 +65,7 @@ risk-tier seating with one 7-rung `(size + risk)` reviewer ladder
 retired, and rungs `5`–`6` (`L high`, `XL med`, `XL high`) add `gemini-4-neon`
 via `agy` as a 3rd reviewer reusing [Stuck-agent advisor](/quest/m0/advise.md)'s
 read-only `agy` runner (rejected: a 15-cell 2D matrix; clamping `low`/`high`
-seats; keeping `low` unreviewed; 2 reviewers max without Neon). Planned in
-[Review rung ladder](/quest/m0/review-rungs.md) and
-[Neon third reviewer](/quest/m0/review-third-seat.md).
+seats; keeping `low` unreviewed; 2 reviewers max without Neon). Planned in [Neon third reviewer](/quest/m0/review-third-seat.md) (the 7-rung Codex/Claude ladder landed first).
 
 Decided 2026-11-21 (maintainer, `/quest-plan` in
 [kixel-ai/kixel.quest#85](https://github.com/kixel-ai/kixel.quest/pull/85)),
