@@ -75,11 +75,11 @@ const me = { pid: process.pid, start: processStart(process.pid) };
 afterEach(() => vi.unstubAllEnvs());
 
 test("limits derive from the host's CPUs and memory", () => {
-	// The host-wide load average is compared with every host CPU, not the
+	// The host-wide load average is compared with twice every host CPU, not the
 	// process's affinity subset, so an idle assigned CPU is not held back.
-	expect(hostLimits(24, 64 * GiB)).toEqual({ load: 24, memory: COMMAND_MEMORY });
-	// A small host still runs one command, and reserves a quarter of its RAM.
-	expect(hostLimits(4, 2 * GiB)).toEqual({ load: 4, memory: GiB / 2 });
+	expect(hostLimits(24, 64 * GiB)).toEqual({ load: 48, memory: COMMAND_MEMORY });
+	// A small host reserves a quarter of its RAM.
+	expect(hostLimits(4, 2 * GiB)).toEqual({ load: 8, memory: GiB / 2 });
 	expect(hostLimits().load).toBeGreaterThanOrEqual(1);
 });
 

@@ -1365,7 +1365,9 @@ otherwise would, so a repository's `.env.development` cannot override the
 variables a gated build was given.
 
 Admission is sized from the host, with no configuration. Every platform waits
-while the host-wide 1-minute load average exceeds the host's CPU count, or while
+while the host-wide 1-minute load average exceeds twice the host's CPU count,
+since gated builds idle between phases and on I/O and a host held at one per CPU
+sat mostly idle, or while
 available memory is below one command's budget: 4 GiB, or a quarter of RAM on
 smaller hosts, where RAM is capped by any container memory limit. On Linux,
 available memory includes reclaimable host and cgroup file cache and is bounded
@@ -1392,15 +1394,15 @@ its gate is cancelled, or its gate process exits.
 The load limit applies only while a gated command is still running. Otherwise
 the load comes from work the gate cannot wait out, so commands start one at a
 time as if the raw load had room. A freshly booted hosted macOS runner is one
-such host: work outside the job holds its load above its CPU count for the
-whole job. Available memory is still required.
+such host: work outside the job holds its load above the limit for the whole
+job. Available memory is still required.
 
 A running command's load can lull, as between a build's phases, though it will
 soon take the whole host again. So where a systemd scope owns the command, its
 gate samples the scope's CPU use every 5 seconds and records the most CPUs the
 command kept busy over one sample in the last minute. While gated commands run,
 the load counts as at least the sum of those records, and nothing starts while
-they kept every CPU busy. Its memory can lull the same way, so on Linux 5.19
+they reach the load limit. Its memory can lull the same way, so on Linux 5.19
 or later the gate also records the scope's cgroup, from which every gate reads
 the command's peak memory, and available memory counts less what each running
 command's peak adds beyond what it holds now, inactive file cache excluded. A

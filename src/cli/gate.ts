@@ -133,17 +133,24 @@ function usableMemory(uid?: number): number {
 }
 
 /**
+ * Runnable threads admitted per host CPU. Gated work idles between phases and
+ * on I/O, so a host held at one per CPU sat mostly idle; at two, builds keep it
+ * busy and the scheduler shares the CPUs among them.
+ */
+export const LOAD_PER_CPU = 2;
+
+/**
  * Derive the limits from the host: no configuration. The load average counts
  * runnable threads on every CPU, including ones outside this process's
- * affinity, so its limit is one per host CPU. Each admission reserves one
- * command's memory, though never more than a quarter of a small host's RAM.
+ * affinity, so its limit is LOAD_PER_CPU per host CPU. Each admission reserves
+ * one command's memory, though never more than a quarter of a small host's RAM.
  */
 export function hostLimits(
 	processors = Math.max(availableParallelism(), cpus().length),
 	memory = usableMemory(),
 ): Limits {
 	return {
-		load: processors,
+		load: processors * LOAD_PER_CPU,
 		memory: Math.min(COMMAND_MEMORY, memory / 4),
 	};
 }
@@ -593,8 +600,8 @@ export function room(limits: Limits, host: Host, reserved: number): Waiting | nu
  * A running command's load can lull, as between a build's phases, while it will
  * soon take the whole host again. So where gates measure their commands (see
  * `measure`), the load counts as at least the CPUs those commands kept busy at
- * their busiest in the last minute, and nothing is admitted while they kept
- * every CPU busy. Likewise its memory can lull, so available memory counts
+ * their busiest in the last minute, and nothing is admitted while those reach
+ * the load limit. Likewise its memory can lull, so available memory counts
  * less what each running command's peak adds beyond what it holds now, and a
  * measured recent admission reserves that, or one command's memory if more,
  * rather than one command's memory on top of it.
