@@ -56,7 +56,7 @@ Readout, the agent's choices for the implementer to revisit:
   arm's model, mostly quests resized after the arm was drawn; 13 did by
   11-21.
 - `quest usage`'s `arms` rollup counts each sized PR whose every
-  `Implementer:` line names the same arm, under its first line's writer,
+  `Implementer:` line names the same arm, cohort, and writer, under its first line's writer,
   with every session's spend on it. Escapes are too rare to separate the
   arms (about 2% of PRs): report them alongside, not as the measure.
 - For each writer arm, compare first-round findings from the fixed efforts in
@@ -69,10 +69,11 @@ Readout, the agent's choices for the implementer to revisit:
   `## Review` record keeps only tallies and the latest findings, so read
   each finding's location from the branch's saved rounds under the clones'
   `.git/quest/review/`. Recommend each table change to the
-  maintainer with its tally. End the writer A/B by deleting its arms from
-  `src/cli/models.ts`, with `quest models --arm`, the `arm` field of
-  `quest unblocked --json`, and the arm notes in the README, guide, and
-  `/quest-run` and `/quest-iterate`. The shadow reviewer
+  maintainer with its tally. The legacy writer A/B stopped drawing when the
+  advisor trial began, so read only its frozen sample, the `arms` rows whose
+  `cohort` is `null`, and leave `ARMS`, `quest models --arm`, and the arm
+  notes alone: they now run the advisor trial, which
+  [Advisor trial readout](/quest/m0/advisor-readout.md) ends. The shadow reviewer
   stopped running on 2026-11-25 (maintainer, rejecting keeping L's shadow
   until its 116 first rounds), so read the shadow pairs gathered before
   then, and compare reviewer models and efforts from `quest usage`'s
