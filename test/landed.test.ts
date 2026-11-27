@@ -179,12 +179,12 @@ describe("quest merge's landing check", () => {
 			tree.write("quest.toml", '[tasks.a]\ntier = "pr"\nrun = "x"\n');
 			commit(tree, "valid manifest");
 			expect((await inspect(tree, "fix/manifest")).map((finding) => finding.message)).toEqual([
-				expect.stringContaining("a run in the Nix dev shell, but there is no flake.nix"),
+				expect.stringContaining("which needs Nix, but there is no flake.nix at its root"),
 			]);
 			symlinkSync("missing.nix", join(tree.path, "flake.nix"));
 			commit(tree, "dangling flake");
 			expect((await inspect(tree, "fix/manifest")).map((finding) => finding.message)).toEqual([
-				expect.stringContaining("a run in the Nix dev shell, but flake.nix is a symlink, not a regular file"),
+				expect.stringContaining("which needs Nix, but flake.nix is a symlink, not a regular file at its root"),
 			]);
 			rmSync(join(tree.path, "flake.nix"));
 			tree.write("flake.nix", "{}\n");

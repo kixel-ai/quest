@@ -112,8 +112,11 @@ function flakeProblem(read: (path: string) => RootFile, tasks: ManifestTask[]): 
 /** The Nix binary cache Kixel Quest serves, which a repository opting in with quest.toml substitutes from. */
 export const NIX_CACHE = "https://nix.kixel.quest";
 
-/** A Nix token: a name, a string's literal text (interpolations left out), or one punctuation character. */
-type NixToken = { kind: "name" | "string" | "punct"; text: string };
+/** A Nix token: a name, a string's literal text (interpolations left out), a path, or one punctuation character. */
+type NixToken = { kind: "name" | "string" | "path" | "punct"; text: string };
+
+/** A path literal at the start of the text, such as `./in/default.nix`, `~/x`, or `<nixpkgs>`. */
+const NIX_PATH = /^(?:<[\w.+/-]+>|(?:~|[\w.+-]*)(?:\/[\w.+-]+)+\/?)/;
 
 /** The tokens of Nix source outside comments; an interpolation's code yields none. */
 function nixTokens(source: string): NixToken[] {
@@ -131,6 +134,10 @@ function nixTokens(source: string): NixToken[] {
 			else if (c === '"' || source.startsWith("''", i)) {
 				const text = string(c === '"' ? '"' : "''");
 				if (emit) tokens.push({ kind: "string", text });
+			} else if (NIX_PATH.test(source.slice(i, i + 4096))) {
+				const path = NIX_PATH.exec(source.slice(i, i + 4096))![0];
+				i += path.length;
+				if (emit) tokens.push({ kind: "path", text: path });
 			} else if (/[A-Za-z_]/.test(c)) {
 				const name = /^[A-Za-z_][\w'-]*/.exec(source.slice(i))![0];
 				i += name.length;
@@ -177,18 +184,23 @@ function substituters(flake: string): string[] {
 	const tokens = nixTokens(flake);
 	let p = 0;
 	const at = (text: string) => tokens[p]?.kind === "punct" && tokens[p]!.text === text;
-	/** Skip a binding's value through its `;`, over every bracket, `let` ... `in`, and `with` or `assert` and its `;`. */
+	/**
+	 * Skip a binding's value through its `;`, over every bracket, `let` ... `in`, and each `with` or `assert` and the
+	 * `;` that ends it at its own depth.
+	 */
 	const skip = () => {
-		for (let depth = 0, pending = 0; p < tokens.length; p++) {
+		const pending: number[] = [];
+		for (let depth = 0; p < tokens.length; p++) {
 			const { kind, text } = tokens[p]!;
 			if (kind === "name") {
 				if (text === "let") depth++;
 				else if (text === "in") depth--;
-				else if (text === "with" || text === "assert") pending++;
+				else if (text === "with" || text === "assert") pending.push(depth);
 			} else if (kind === "punct") {
 				if ("{[(".includes(text)) depth++;
 				else if ("}])".includes(text)) depth--;
-				else if (text === ";" && depth === 0 && pending-- === 0) break;
+				else if (text === ";" && pending.at(-1) === depth) pending.pop();
+				else if (text === ";" && depth === 0) break;
 			}
 		}
 		p++;
@@ -246,18 +258,22 @@ function cacheProblem(flake: string): string | null {
 	return `${MANIFEST_FILE}: the repository opts into Kixel Quest, so flake.nix's nixConfig must list ${NIX_CACHE} in extra-substituters`;
 }
 
-/** What `quest check` and `quest merge` report about a repository's quest.toml, if it has one, read with `read`. */
+/**
+ * What `quest check` and `quest merge` report about a repository's quest.toml, if it has one, read with `read`. A
+ * quest.toml opts the repository into Kixel Quest, which needs Nix: a regular root flake.nix substituting from its
+ * cache, even when every task sets `nix = false`.
+ */
 export function manifestProblems(read: (path: string) => RootFile): string[] {
 	const parsed = parseRoot(read);
 	if (parsed === null) return [];
 	if (parsed.manifest === null) return parsed.problems;
-	const problems: string[] = [];
-	const problem = flakeProblem(read, parsed.manifest.tasks);
-	if (problem !== null) problems.push(problem);
 	const flake = read("flake.nix");
-	const cache = flake?.kind === "file" ? cacheProblem(flake.text) : null;
-	if (cache !== null) problems.push(cache);
-	return problems;
+	if (flake?.kind !== "file") {
+		const missing = flake === null ? "there is no flake.nix" : "flake.nix is a symlink, not a regular file";
+		return [`${MANIFEST_FILE}: the repository opts into Kixel Quest, which needs Nix, but ${missing} at its root`];
+	}
+	const cache = cacheProblem(flake.text);
+	return cache === null ? [] : [cache];
 }
 
 /**

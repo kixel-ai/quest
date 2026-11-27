@@ -103,6 +103,7 @@ test.runIf(posix)("quest.toml's fmt task replaces treefmt, with its environment 
 test("every argument after fmt is the formatter's, even flags Quest also parses", () => {
 	expect(argumentBoundary(["fmt", "--version", "--help"])).toEqual(["fmt", "--", "--version", "--help"]);
 	expect(argumentBoundary(["--root", "r", "fmt"])).toEqual(["--root", "r", "fmt", "--"]);
-	expect(argumentBoundary(["fmt", "--root=r", "src/"])).toEqual(["fmt", "--root=r", "--", "src/"]);
+	// A --root after fmt is the formatter's too.
+	expect(argumentBoundary(["fmt", "--root", "packages/ui"])).toEqual(["fmt", "--", "--root", "packages/ui"]);
 	expect(argumentBoundary(["fmt", "--", "-x"])).toEqual(["fmt", "--", "-x"]);
 });

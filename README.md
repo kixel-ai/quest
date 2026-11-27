@@ -1642,14 +1642,15 @@ operating system, under `include` for a GitHub Actions matrix:
 
 `quest check` validates `quest.toml` beside the quest tree: every key and
 value, that each `after` names a task of the same or an earlier tier that runs
-on every OS the task does, without a cycle, and that Nix tasks have a
-regular `flake.nix`. `quest/core` exports the parser, `parseQuestManifest`, with no
+on every OS the task does, without a cycle, and the root `flake.nix` below.
+`quest/core` exports the parser, `parseQuestManifest`, with no
 Node or Nix dependency, so a service such as Kixel Quest can validate a
 manifest straight from a git tree.
 
-A `quest.toml` opts the repository into Kixel Quest, so beside a `flake.nix`
-`quest check` also requires that flake's `nixConfig` to substitute from Kixel
-Quest's binary cache. Nix reads `nixConfig` only from the top of `flake.nix`,
+A `quest.toml` opts the repository into Kixel Quest, which needs Nix, so
+`quest check` also requires a regular root `flake.nix`, even when every task
+sets `nix = false`, whose `nixConfig` substitutes from Kixel Quest's binary
+cache. Nix reads `nixConfig` only from the top of `flake.nix`,
 and asks before using it unless the user trusts flake configuration
 (`accept-flake-config = true`):
 
@@ -1696,8 +1697,8 @@ It adds to what `perSystem` returns, for each of `systems` (`x86_64-linux`,
 
 - `devShells.default`, `pkgs.mkShell` called with `shell`, holding `quest`
   and the repository's `treefmt`. It sets `QUEST_DEV_SHELL` to the nearest
-  directory up holding `flake.nix` when that `flake.nix` and its `flake.lock`
-  are the ones the shell was built from, so `quest run` and `quest fmt` run
+  directory up holding `flake.nix` when that `flake.nix`, its `flake.lock`,
+  and its git commit are the ones the shell was built from, so `quest run` and `quest fmt` run
   there without entering the shell again, and a shell entered from another
   checkout names none. `perSystem`'s `quest` replaces the `quest` package.
 - `formatter`, the same `treefmt`, which `nix fmt` runs.
@@ -1717,8 +1718,9 @@ quest fmt                        # format the repository
 quest fmt --fail-on-change src/  # treefmt's own arguments
 ```
 
-`quest fmt` passes every argument after `fmt` on, `--help` included (`quest
-help fmt` prints its own), and runs that `treefmt`, which finds the repository
+`quest fmt` passes every argument after `fmt` on, `--help` and `--root`
+included (`quest help fmt` prints its own help, and Quest's `--root` goes
+before `fmt`), and runs that `treefmt`, which finds the repository
 root itself and reads paths from the current directory: directly inside the dev shell, with
 no Nix evaluation, and through `nix develop --command` outside it. A
 `[tasks.fmt]` in `quest.toml` replaces it: `quest fmt` runs the task's `run`

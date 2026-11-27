@@ -151,12 +151,23 @@
             # treefmt and names the root holding this flake, and it adds the formatter and the tree check.
             mk-flake =
               let
-                fixture = lib.mkFlake {
-                  inherit self nixpkgs;
-                  systems = [ system ];
-                  perSystem = _: { quest = pkgs.hello; };
-                };
+                # This flake's source, outside git unless given a commit.
+                call =
+                  source:
+                  lib.mkFlake {
+                    self = source;
+                    inherit nixpkgs;
+                    systems = [ system ];
+                    perSystem = _: { quest = pkgs.hello; };
+                  };
+                fixture = call { outPath = "${self}"; };
                 shell = fixture.devShells.${system}.default;
+                # Built at a commit the sandbox's copy is not a checkout of.
+                committed =
+                  (call {
+                    outPath = "${self}";
+                    rev = "0000000000000000000000000000000000000000";
+                  }).devShells.${system}.default;
               in
               assert fixture.checks.${system} ? quest;
               pkgs.runCommand "mk-flake" { nativeBuildInputs = shell.nativeBuildInputs; } ''
@@ -168,6 +179,8 @@
                 cd repo/sub
                 ${shell.shellHook}
                 [ "$QUEST_DEV_SHELL" = "$(dirname "$PWD")" ]
+                ${committed.shellHook}
+                [ -z "''${QUEST_DEV_SHELL+set}" ]
                 # Another flake's checkout, and none at all.
                 { cat ${self}/flake.nix; echo "# other"; } > ../../other/flake.nix
                 for dir in ../../other /; do

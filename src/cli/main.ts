@@ -358,8 +358,8 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		.summary("Format the repository in its dev shell")
 		.description(
 			"Format the repository with the treefmt that quest.lib.mkFlake puts in its Nix dev shell, passing on " +
-				"every argument after fmt other than a leading --root, such as paths from the current directory, " +
-				"--fail-on-change, or --help (quest help fmt prints this). Inside the " +
+				"every argument after fmt, such as paths from the current directory, " +
+				"--fail-on-change, --help (quest help fmt prints this), or --root; Quest's own --root goes before fmt. Inside the " +
 				"repository's dev shell, where QUEST_DEV_SHELL names its root, treefmt runs directly with no Nix " +
 				"evaluation; otherwise through nix develop --command, which needs flake.nix at the root. nix fmt runs " +
 				"the same treefmt.\n\n" +
@@ -400,7 +400,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"backticked path pattern, ` - `, and a reason, and each item of its ## Automatic list that is not a " +
 				"backticked class name, an optional scope of backticked path patterns joined by `, ` in parentheses, " +
 				"` - `, and a rule. It also reads the repository's quest.toml, if any, as quest run does, and reports " +
-				"each problem with it, Nix tasks in a repository without flake.nix, and a flake.nix whose nixConfig " +
+				"each problem with it, a missing or symlinked root flake.nix, which opting into Kixel Quest needs, and a nixConfig that " +
 				"does not list https://nix.kixel.quest in extra-substituters.\n\n" +
 				"With --fix, first drop every Required, Related, or Closes entry that links to a quest deleted in " +
 				"the history of HEAD, and of MERGE_HEAD during a merge, that the working tree lacks, as quest rm " +
@@ -2576,7 +2576,7 @@ function positiveSeconds(value: string): number {
 
 /**
  * Stop option parsing before a gated executable, or the formatter's arguments after `fmt`, keeping their own flags
- * intact. Quest's global options still apply on either side of `gate` or `fmt`.
+ * intact. Quest's global options still apply on either side of `gate`, and before `fmt`.
  */
 export function argumentBoundary(argv: string[]): string[] {
 	const skip = (index: number) => {
@@ -2587,10 +2587,9 @@ export function argumentBoundary(argv: string[]): string[] {
 		}
 	};
 	const index = skip(0);
-	if (argv[index] === "fmt") {
-		const args = skip(index + 1);
-		return argv[args] === "--" ? argv : [...argv.slice(0, args), "--", ...argv.slice(args)];
-	}
+	// Every argument after fmt is the formatter's, a --root included; Quest's own goes before fmt.
+	if (argv[index] === "fmt")
+		return argv[index + 1] === "--" ? argv : [...argv.slice(0, index + 1), "--", ...argv.slice(index + 1)];
 	if (argv[index] !== "gate") return argv;
 	const command = skip(index + 1);
 	if (!argv[command] || argv[command].startsWith("-")) return argv;
