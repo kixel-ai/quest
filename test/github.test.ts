@@ -1,4 +1,4 @@
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 
 import { GitHub, GitHubDeadline, type GitHubDependencies, GitHubGraphQLError } from "../src/github/client";
 
@@ -265,13 +265,32 @@ describe("confirmed writes", () => {
 	test("a merge whose response was lost is confirmed from the PR at its pinned head", async () => {
 		const merged = { merged: true, merge_commit_sha: SQUASH, head: { sha: HEAD } };
 		const { github, calls } = fixture([bad(502), json(merged)]);
+		const resend = vi.fn(async () => {});
 		const response = await github.request(`${repo}/pulls/1/merge`, {
 			method: "PUT",
 			body: { merge_method: "squash", sha: HEAD },
 			allow: [405, 409],
+			resend,
 		});
 		expect(await response.json()).toMatchObject({ merged: true, sha: SQUASH });
 		expect(calls.map(({ method }) => method)).toEqual(["PUT", "GET"]);
+		// A merge that took effect is returned, not checked for whether it should be resent.
+		expect(resend).not.toHaveBeenCalled();
+	});
+
+	test("a resend check that throws stops a request after a rate-limit wait or a transient failure", async () => {
+		for (const failure of [json({ message: "rate limit" }, 429, { "retry-after": "60" }), bad(502)]) {
+			const { github, calls } = fixture([failure, ...(failure.status === 502 ? [json({ merged: false })] : [])]);
+			const request = github.request(`${repo}/pulls/1/merge`, {
+				method: "PUT",
+				body: { merge_method: "squash", sha: HEAD },
+				resend: async () => {
+					throw new Error("withdrawn");
+				},
+			});
+			await expect(request).rejects.toThrow("withdrawn");
+			expect(calls.filter(({ method }) => method === "PUT")).toHaveLength(1);
+		}
 	});
 
 	test("a merge not confirmed at its pinned head is sent again, for GitHub to merge or refuse", async () => {

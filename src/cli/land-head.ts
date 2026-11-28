@@ -363,28 +363,41 @@ export interface Pin {
 	pick: Pick<Entry, "id" | "number" | "enabledAt">;
 }
 
+/** Thrown before a merge request is resent once its pick no longer holds the PR's auto-merge. */
+class Withdrawn extends Error {}
+
 /**
  * Retry only GitHub's pending mergeability or base refresh. Any other refusal, such as `method` being
  * disabled or a rule the bot cannot bypass, would refuse every round after a full check, so it ejects.
- * Before every retry it re-reads the pick, since the pinned commit stays the head while a maintainer
- * withdraws the PR during the backoff, and a retry would still merge it.
+ * Before every retry, its own or the client's after a rate limit or a 5xx, it re-reads the pick, since
+ * the pinned commit stays the head while a maintainer withdraws the PR during the wait, and a retry would
+ * still merge it.
  */
 export async function mergePinned(
 	github: GitHub,
 	path: string,
 	{ method, head, previous, pick }: Pin,
 ): Promise<MergeResult> {
+	const withdraw = async () => {
+		if (!(await armed(github, pick))) throw new Withdrawn();
+	};
 	for (let attempt = 0; ; attempt++) {
-		if (attempt > 0 && !(await armed(github, pick)))
+		let response: Response;
+		try {
+			if (attempt > 0) await withdraw();
+			response = await github.request(`${path}/merge`, {
+				method: "PUT",
+				body: { merge_method: method, sha: head },
+				allow: [403, 405, 409],
+				resend: withdraw,
+			});
+		} catch (error) {
+			if (!(error instanceof Withdrawn)) throw error;
 			return {
 				reason: "left_queue",
 				detail: `PR #${pick.number} left the queue while its merge waited to retry`,
 			};
-		const response = await github.request(`${path}/merge`, {
-			method: "PUT",
-			body: { merge_method: method, sha: head },
-			allow: [403, 405, 409],
-		});
+		}
 		// The client waits out a rate limit; any other 403 is GitHub refusing this PR, which ends its
 		// landing rather than retrying.
 		const result = object(await response.json());

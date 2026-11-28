@@ -133,6 +133,11 @@ export interface RequestOptions {
 	accept?: string;
 	/** Overrides how the request repeats; the default follows its method and endpoint. */
 	repeat?: Repeat;
+	/**
+	 * Run before the client resends the request, after a rate-limit wait or after `repeat` finds no earlier
+	 * attempt took effect; it throws to stop the request when what it was sent for no longer holds.
+	 */
+	resend?: () => Promise<void>;
 }
 
 /** Whether GitHub turned a request away for a rate limit, which any request may wait out and repeat. */
@@ -302,6 +307,7 @@ export class GitHubReader {
 							limits++,
 							`GitHub HTTP ${response.status} for ${url.pathname}; rate limit persisted`,
 						);
+						await options.resend?.();
 						continue;
 					}
 					const reason = explanation(body);
@@ -324,6 +330,7 @@ export class GitHubReader {
 				const landed = await repeat(started);
 				if (landed) return landed;
 			}
+			await options.resend?.();
 		}
 	}
 
