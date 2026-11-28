@@ -132,10 +132,11 @@ class Cached implements History {
 type Driver = "text" | "quest" | "other";
 
 /**
- * How a merge took the files both sides changed: as a local merge with the quest driver does, on the paths it drives,
- * or as merge-ort does on every path, as GitHub's merges do.
+ * How a merge took the files both sides changed: as a local merge with the quest driver does on the paths it drives,
+ * its own side's link inserts first, run from the PR branch (`driver`) or, as the land watcher merges, from the base
+ * (`driver-base`), or as merge-ort does on every path, as GitHub's merges do.
  */
-type Mode = "driver" | "ort";
+type Mode = "driver" | "driver-base" | "ort";
 
 /** The check of one merge's tree against its parents' trees and their merge base's. */
 class TreeMerge {
@@ -143,7 +144,7 @@ class TreeMerge {
 	/** The root trees of the merge base, ours, and theirs, whose `.gitattributes` pick a path's driver. */
 	readonly #roots: [string, string, string];
 	/** The ways of merging that account for every file checked so far. */
-	readonly #modes = new Set<Mode>(["driver", "ort"]);
+	readonly #modes = new Set<Mode>(["driver", "driver-base", "ort"]);
 	/** Whether both sides deleted some path. */
 	#bothDeleted = false;
 
@@ -226,10 +227,9 @@ class TreeMerge {
 		// resolved, and without it, as on GitHub, git falls back to its own.
 		if (driver !== "quest") return ort;
 		if (!ort) this.#modes.delete("ort");
-		// The driver puts its own side's inserts first: the PR's in a merge on the PR branch, the base's in the land
-		// watcher's, which merges the PR into the base yet records the PR head as the first parent.
-		const driven = (first: string, second: string) => matches(resolveLists(path, merge(first, bt, second)));
-		if (!driven(ot, tt) && !driven(tt, ot)) this.#modes.delete("driver");
+		if (!matches(resolveLists(path, merge(ot, bt, tt)))) this.#modes.delete("driver");
+		// The land watcher merges the PR into the base, yet records the PR head as the first parent.
+		if (!matches(resolveLists(path, merge(tt, bt, ot)))) this.#modes.delete("driver-base");
 		return this.#modes.size > 0;
 	}
 

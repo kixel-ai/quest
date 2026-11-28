@@ -2202,7 +2202,7 @@ nothing and prints `record skipped: <why>`. A post Kixel Quest refuses, or a
 status GitHub refuses, fails the command after the round's report, with exit
 status 1, a status printing `; status refused: <why>`. It exits 0 once the
 round finishes, whatever it found, 2 for invalid arguments or a checkout that
-cannot be reviewed, 3 when no eligible reviewer could run, each not installed,
+cannot be reviewed, 3 when no eligible reviewer or no classifier could run, each not installed,
 logged out, its login rejected, at its usage limit, or unable to run on this host, and 1 for other
 failures. The only eligible reviewer's usage limit prints one line,
 `error: <harness> hit its usage limit; resets <time>`, where `<time>` is the

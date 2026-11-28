@@ -23,12 +23,17 @@ replaying [kixel-ai/quest#948](https://github.com/kixel-ai/quest/pull/948)
   the task; an uncached task keeps the caller's environment. This bounds the
   inputs by design, where hashing a list of known build flags would miss the
   next one.
+- The same environment contract covers every task whose digest feeds a cached
+  one through `after`, since an uncached build that saw a different
+  environment writes different output under the same digest; a cached task
+  after one that keeps the caller's environment runs uncached.
 - Raise the digest's `version` so passes recorded before this miss.
 - [Share task results across hosts](/quest/m1/task-cache-remote.md) sends this
   digest to other hosts, so it should land first.
 
 Tests: a pass recorded without `RUSTFLAGS` misses when it is set; a variable
-outside the passed-through list never reaches a cached task.
+outside the passed-through list never reaches a cached task or a task it
+runs after.
 
 ## Related
 

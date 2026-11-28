@@ -1948,7 +1948,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		return `rung ${index} (${cells}): ${rung.reviewers.map((e) => `${e.harness} ${e.model} ${e.effort}`).join(joiner)}`;
 	}).join("; ");
 	const classifiers = CLASSIFIERS.map((e) => `${e.harness} ${e.model} ${e.effort}`).join(", then ");
-	/** quest review's exit code for `error`: 2 for a usage error, 3 when no reviewer could run, else 1. */
+	/** quest review's exit code for `error`: 2 for a usage error, 3 when no reviewer or classifier could run, else 1. */
 	const reviewFailure = (error: unknown): number => {
 		const outage = error instanceof ReviewerUnavailableError || error instanceof ReviewOutageError;
 		if (error instanceof ReviewInputError || outage) {
@@ -2081,7 +2081,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"and prints `next done`. When no status is set, as for a token that cannot push, or the post fails, it prints `next stop` and exits 1. With no " +
 				"such PR, several from other repositories that `HEAD` contains, or a remote off GitHub and Kixel Quest, it prints `record skipped: <why>` and changes nothing.\n\n" +
 				"Exits 0 once the round finishes, whatever it found, 2 for invalid arguments " +
-				"or a checkout that cannot be reviewed, 3 when no eligible reviewer could run, each not installed, logged " +
+				"or a checkout that cannot be reviewed, 3 when no eligible reviewer or no classifier could run, each not installed, logged " +
 				"out, its login rejected, at its usage limit, or unable to run on this host, and 1 for other failures, including a PR GitHub will not show, a post Kixel Quest " +
 				"refuses, or a status GitHub refuses. A malformed `## Models` field the round reads, such as a Size line naming no size or an " +
 				"Implementer line naming no model it can read, is a usage error, unless --size or --exclude-model replaces it. A usage limit of the only " +

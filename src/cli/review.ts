@@ -80,6 +80,17 @@ export class ReviewerUnavailableError extends Error {
 	}
 }
 
+/** No model could run to answer a question, an outage, with the turns that failed partway, which the caller may still count. */
+export class UnrunError extends ReviewerUnavailableError {
+	constructor(
+		first: ReviewerUnavailableError,
+		message: string,
+		readonly spent: Answer<unknown>["spent"],
+	) {
+		super(first.harness, first.reason, message);
+	}
+}
+
 /** The reviewer's account hit its usage limit on `model`, which resets at `until` (epoch milliseconds) if the CLI named it. */
 export class ReviewLimitError extends ReviewerUnavailableError {
 	constructor(
@@ -2289,7 +2300,7 @@ export async function ask<T>(entries: readonly Model[], question: Question<T>): 
 
 /**
  * Why no model answered: the usage limit that resets first when every one whose CLI is installed hit its own, so a
- * caller waits for the earliest, else each model's reason.
+ * caller waits for the earliest, else an {@link UnrunError} when none could run at all, else each model's reason.
  */
 function unanswered(
 	failures: (ReviewInputError | ReviewerUnavailableError)[],
@@ -2309,8 +2320,7 @@ function unanswered(
 	// No model could run at all, as when every installed CLI is logged out: an outage the user signs in to clear, not a
 	// mistake in the arguments.
 	const down = failures.filter((each) => each instanceof ReviewerUnavailableError);
-	if (down.length > 0 && down.length === failures.length)
-		return new ReviewerUnavailableError(down[0]!.harness, down[0]!.reason, message);
+	if (down.length > 0 && down.length === failures.length) return new UnrunError(down[0]!, message, spent);
 	return new UnansweredError(message, spent);
 }
 
