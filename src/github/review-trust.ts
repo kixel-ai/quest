@@ -83,7 +83,8 @@ export async function unreviewedHigh(
 	const risk = await baseRisk(github, pr);
 	const statuses = await reviewStatuses(github, pr);
 	const { counted } = await countedReview(github, pr, head, statuses, { report: false, merged: false });
-	if (counted?.passed && counted.attested.riskFile === riskFileId(risk?.blob ?? null)) return null;
+	const covered = counted?.state === "current" || counted?.state === "diff-identical";
+	if (counted?.passed && covered && counted.attested.riskFile === riskFileId(risk?.blob ?? null)) return null;
 	const high = statusHigh(statuses) ?? (await pathHigh(github, pr, head, risk?.text ?? null));
 	return high === null ? null : `${sha} is high, since ${high}, and no quest review status covers it`;
 }
@@ -158,8 +159,15 @@ export async function countedReview(
 			skipped.push(bound);
 			continue;
 		}
-		// A newer status whose diff cannot be compared may supersede this one, so it is not known to cover the head.
-		const state = rest.some((other) => !other.known) ? "unknown" : each.oid === head ? "current" : "diff-identical";
+		// A newer writer's status whose diff cannot be compared may supersede this one, so it is not known to cover the
+		// head; anyone else's never could.
+		let doubted = false;
+		for (const other of rest)
+			if (!other.known && (await writerFault(github, pr, other.each.oid, other.each.status)) === null) {
+				doubted = true;
+				break;
+			}
+		const state = doubted ? "unknown" : each.oid === head ? "current" : "diff-identical";
 		return { counted: { oid: each.oid, state, passed: each.status.state === "SUCCESS", attested: bound }, skipped };
 	}
 	if (report)
@@ -285,18 +293,14 @@ export interface Attested {
 	outcome: Outcome;
 }
 
-/**
- * What a writer's `quest review` status on `sha`, in any state, attests for its diff from the merge base with the PR's
- * base, or why it attests nothing.
- */
-async function boundStatus(
+/** Why the user who set a `quest review` status on `sha` cannot count, or null when they have write access. */
+async function writerFault(
 	github: GitHubReader,
-	pr: PullRequest & { base: string },
+	pr: PullRequest,
 	sha: string,
 	status: ObjectValue,
-	bind: boolean,
-): Promise<Attested | string> {
-	const { description, targetUrl, creator } = status;
+): Promise<string | null> {
+	const { creator } = status;
 	if (creator == null) return `the account that set the ${REVIEW_CONTEXT} status on ${sha} is gone`;
 	const { __typename: kind, login } = object(creator);
 	const name = String(login);
@@ -311,6 +315,23 @@ async function boundStatus(
 	const found = permission.status === 404 ? "no" : string(object(await permission.json()).permission);
 	if (!WRITE.includes(found))
 		return `${name}, who set the ${REVIEW_CONTEXT} status on ${sha}, has ${found} access to ${pr.owner}/${pr.repo}, not write`;
+	return null;
+}
+
+/**
+ * What a writer's `quest review` status on `sha`, in any state, attests for its diff from the merge base with the PR's
+ * base, or why it attests nothing.
+ */
+async function boundStatus(
+	github: GitHubReader,
+	pr: PullRequest & { base: string },
+	sha: string,
+	status: ObjectValue,
+	bind: boolean,
+): Promise<Attested | string> {
+	const { description, targetUrl } = status;
+	const fault = await writerFault(github, pr, sha, status);
+	if (fault !== null) return fault;
 	// A retargeted PR, or a base reset under it, has another diff than the one reviewed, from another merge base. A
 	// merged PR has none to compare: its merge base moved with the landing, so only its writer binds a status.
 	if (bind) {

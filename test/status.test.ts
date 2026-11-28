@@ -937,6 +937,11 @@ describe("the review record", () => {
 		expect(await read({ statuses: { [A]: passed(A), [B]: failed }, diffs: { [A]: 403 } })).toMatchObject({
 			record: `review-record unknown ${A} local-review`,
 		});
+		// Anyone else's newer status could never supersede it, whatever its diff.
+		const bot = reviewStatus("FAILURE", "Risk low: findings open", B, "github-actions", "Bot");
+		expect(await read({ statuses: { [A]: passed(A), [B]: bot }, diffs: { [A]: 403 } })).toMatchObject({
+			record: `review-record current ${A} local-review`,
+		});
 		// Comparable, it is the same diff, and the failure outweighs the pass.
 		expect(
 			await read({ statuses: { [A]: passed(A), [B]: failed }, diffs: { [A]: "same", [B]: "same" } }),

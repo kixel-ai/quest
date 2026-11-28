@@ -80,6 +80,8 @@ class FakePull {
 	files: string[] = [];
 	/** Each commit's diff from the base, by SHA; its SHA by default, so no two commits share one. */
 	diffs: Record<string, string> = {};
+	/** The commits whose diff GitHub refuses to render, as one too large. */
+	unrenderable = new Set<string>();
 	/** The `quest review` status on each commit, as GraphQL's `StatusContext` gives it. */
 	statuses: Record<string, ObjectValue> = {};
 	private clock = Date.parse("2026-10-21T12:00:00Z");
@@ -140,7 +142,9 @@ class FakePull {
 			return json(200, { total_count: this.runs.length, workflow_runs: this.runs });
 		const compared = /^\/repos\/example\/project\/compare\/main\.\.\.(\w+)$/.exec(url.pathname);
 		if (compared && new Headers(init.headers).get("Accept") === "application/vnd.github.diff")
-			return new Response(this.diffs[compared[1]!] ?? compared[1]);
+			return this.unrenderable.has(compared[1]!)
+				? json(406, { message: "diff too large" })
+				: new Response(this.diffs[compared[1]!] ?? compared[1]);
 		if (compared) {
 			const files = this.files.map((filename) => ({ filename }));
 			// Only `quest merge`'s own check of the head against the base, which asks for one commit.
@@ -1248,6 +1252,16 @@ describe("merge --land of a high head", () => {
 			description: "Risk high: findings open",
 			createdAt: new Date(Date.UTC(2026, 11, 1)).toISOString(),
 		};
+		expect(await refused(land_(pull))).toContain("is high");
+		expect(pull.writes).toEqual([]);
+	});
+
+	test("refuses a high head whose pass a newer writer's uncomparable failure may supersede", async () => {
+		const pull = new FakePull();
+		review(pull, HEAD, "high");
+		review(pull, OLD, "high");
+		pull.statuses[OLD] = { ...pull.statuses[OLD]!, state: "FAILURE", description: "Risk high: findings open" };
+		pull.unrenderable.add(HEAD);
 		expect(await refused(land_(pull))).toContain("is high");
 		expect(pull.writes).toEqual([]);
 	});
