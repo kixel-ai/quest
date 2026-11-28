@@ -23,6 +23,10 @@ Tests: against a mocked Kixel Quest, a trusted run uploads a miss's pass, a seco
 
 - kixel-ai/kixel.quest: the task-result lookup and upload endpoints its `quest/m1/ci/task-cache.md` plans, which wait on its runner credential in `quest/m1/ci/runner.md`; check that quest file is gone and the endpoints are documented.
 
+## Required
+
+- [A cached task pass covers the environment the task ran with](/quest/m0/ci/task-cache-environment.md) - a digest that covers what reaches the task, before other hosts trust it
+
 ## Related
 
 - [CI epic](/quest/m0/ci/README.md) - the m0 client half and the merge queue's trust in local passes

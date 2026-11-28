@@ -1610,7 +1610,7 @@ paths = ["rs/", "Cargo.*"]        # run when a change touches one; any change wh
 tier = "gate"
 run = 'cargo nextest run --profile ci -p "$QUEST_CRATE"'
 after = ["build"]                 # starts once build passes, and pulls it in
-paths = ["rs/"]
+paths = ["rs/", "Cargo.*"]
 exclude = ["rs/**/*.md"]          # never selects the task
 inputs = ["test/vectors/"]        # read outside paths, so selects it too
 caches = ["mbx"]                  # shared build caches a runner provisions
@@ -1777,13 +1777,15 @@ dependencies count. Each crate's digest reads:
 - files outside the member crates that the task's `paths` select
 - the commit of a submodule holding any of those crates
 - the task's `inputs`
+- the digests of the tasks it runs `after`
 
 A crate whose closure declares a path crate that `cargo metadata` lists
 nowhere, such as an optional one only a task's `--features` enables on a
 crate outside the workspace, runs uncached.
 
 Editing crate B or bumping its dependency leaves crate A's pass in place
-unless A depends on B.
+unless A depends on B, or the task runs `after` one whose inputs B is among,
+such as a workspace-wide build.
 
 Passes live in `$XDG_CACHE_HOME/quest/tasks`, or `~/.cache/quest/tasks`, at
 most 256 MiB, least recently used first out. A cached pass is trusted as if
@@ -2220,7 +2222,7 @@ nothing and prints `record skipped: <why>`. A post Kixel Quest refuses, or a
 status GitHub refuses, fails the command after the round's report, with exit
 status 1, a status printing `; status refused: <why>`. It exits 0 once the
 round finishes, whatever it found, 2 for invalid arguments or a checkout that
-cannot be reviewed, 3 when no eligible reviewer could run, each not installed,
+cannot be reviewed, 3 when no eligible reviewer or no classifier could run, each not installed,
 logged out, its login rejected, at its usage limit, or unable to run on this host, and 1 for other
 failures. The only eligible reviewer's usage limit prints one line,
 `error: <harness> hit its usage limit; resets <time>`, where `<time>` is the
@@ -2311,7 +2313,7 @@ review of a high head until a review classifies the head again. It runs as Claud
 `claude-haiku-5-5` at low effort, then Codex `gpt-6.2-sol` at low when Claude Code is
 missing, logged out, has its login rejected, or hits its usage limit. When none can
 run, the review fails on the limit that resets first if every one whose CLI is
-installed hit its own, and otherwise as a usage error naming why each failed. Its diff ignores the head's
+installed hit its own, as an outage naming why each failed when none could run, and otherwise as a usage error naming why each failed. Its diff ignores the head's
 `.gitattributes` and treats every file as text, so a head cannot hide hunks by
 marking them binary. A diff past 200,000 characters, or one holding a NUL byte or bytes that are not
 UTF-8, gives it only the stat and a file of the whole diff in a scratch directory, which Claude Code is
