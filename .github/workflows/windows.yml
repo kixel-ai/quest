@@ -24,7 +24,7 @@ jobs:
     uses: ./.github/workflows/platform.yml # zizmor: ignore[self-repository] actionlint 1.7.12 cannot read `$/`.
     with:
       tier: nightly
-      os: '["macos", "windows"]'
+      os: '["windows"]'
       timeout-minutes: 20
   arm64:
     uses: ./.github/workflows/platform.yml # zizmor: ignore[self-repository] actionlint 1.7.12 cannot read `$/`.
