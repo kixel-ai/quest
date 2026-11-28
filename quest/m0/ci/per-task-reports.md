@@ -18,14 +18,15 @@ Recommendations:
 
 - Move the script's validation into `quest run`'s report collection (`collect` in `src/cli/run.ts`), the one writer of `--report`'s directory, so local runs fail on a malformed report too:
   - `metrics.json` holds `units`, an object of string units, and `samples`, an array.
-  - A JUnit file's root is `<testsuites>` or `<testsuite>`, closed at the end.
-  - Check against what Kixel Quest's reader refuses, so CI never passes an attempt Kixel Quest would refuse whole. Close the truncated-`<testsuite>` and `null`-measurement gaps that way if the reader refuses them. The other two gaps go with the merge.
-  - No XML parser dependency: a root-element check catches a truncated file.
+  - A JUnit file parses as XML and passes the reader's rules, such as every `<testcase>` having a name. A root-element check alone passes `<testsuite><testcase/></testsuite>`, which the reader refuses.
+  - Validate by Kixel Quest's reader's rules, so CI never passes an attempt the reader would refuse whole. This also closes #969's truncated-`<testsuite>` and `null`-measurement gaps where the reader refuses them. The other two gaps go away with the merge.
+  - A parser dependency is fine where the reader's rules need one, since the JUnit check is what keeps Kixel Quest's attempts whole.
 - A malformed report fails the run, not the task:
   - `quest run` names it in an error and leaves it out of `--report`'s directory.
   - It exits nonzero once its tasks finish.
   - The task still passes, so the tasks after it run.
-  - Its pass is not recorded in the cache, since a cached pass replays its reports verbatim.
+  - Its pass is not recorded in the cache, since `replay` writes a cached pass's reports verbatim without `collect`'s checks.
+  - Raise the cache digest's `version`, so passes recorded before this validation miss instead of replaying reports it would refuse.
   - Today a `metrics.json` that is not a JSON object fails the task and skips its dependents. Move that check to this rule too. A passing task that wrote no declared report still fails, as now.
 - `platform.yml` drops the merge step and uploads `$RUNNER_TEMP/quest-report`, still when `quest run` failed and not when cancelled.
 - Carry over `test/kixel-metrics.test.ts`'s refusal cases to `test/run.test.ts`, and add a dependent task that still runs after a malformed report.
