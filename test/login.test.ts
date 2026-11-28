@@ -8,7 +8,7 @@ import { describe, expect, test } from "vitest";
 import { hostedForge } from "../src/cli/forge";
 import { HELPER, credential, helperKey } from "../src/cli/git-credential";
 import { type LoginDependencies, TRANSCRIPTS_QUESTION, login, logout } from "../src/cli/login";
-import { kixelUrl, tokenFor, tokensPath } from "../src/cli/tokens";
+import { kixelPath, kixelUrl, tokenFor, tokensPath } from "../src/cli/tokens";
 import { tempDir } from "./fixture";
 import { FakeLogin, KIXEL, REPOSITORY, writeTokens } from "./kixel-fakes";
 
@@ -226,7 +226,7 @@ describe.skipIf(process.platform === "win32")("git's sign-in", () => {
 		const declared = join(home, "declared");
 		mkdirSync(declared);
 		env.GIT_CONFIG_GLOBAL = join(declared, ".gitconfig");
-		writeFileSync(env.GIT_CONFIG_GLOBAL, `[credential "${KIXEL}"]\n\thelper =\n\thelper = ${HELPER}\n`);
+		writeFileSync(env.GIT_CONFIG_GLOBAL, `[credential "${KIXEL}/"]\n\thelper =\n\thelper = ${HELPER}\n`);
 		chmodSync(declared, 0o555);
 		try {
 			await login(host(new FakeLogin(), "n", env).deps);
@@ -240,15 +240,21 @@ describe.skipIf(process.platform === "win32")("git's sign-in", () => {
 		}
 	});
 
-	test("login and logout keep an empty helper the person set for the URL", async () => {
+	test("login and logout leave every helper the person listed for the URL where it was", async () => {
 		const env = user();
-		const before = `[credential "${KIXEL}"]\n\thelper = \n\thelper = store\n`;
+		// An empty reset, an escaped multi-line helper, and URL sections on either side of a global one.
+		const before =
+			`[credential "${KIXEL}"]\n\thelper = \n\thelper = "!f() { echo; }\\nf"\n` +
+			`[credential]\n\thelper = store\n[credential "${KIXEL}"]\n\thelper = cache\n`;
 		writeFileSync(env.GIT_CONFIG_GLOBAL!, before);
 		expect(logout(env).removed).toBe(false);
 		expect(readFileSync(env.GIT_CONFIG_GLOBAL!, "utf8")).toBe(before);
 		await login(host(new FakeLogin(), "n", env).deps);
 		await login(host(new FakeLogin(), "n", env).deps);
-		expect(readFileSync(env.GIT_CONFIG_GLOBAL!, "utf8")).toBe(`${before}\thelper = \n\thelper = ${HELPER}\n`);
+		expect(readFileSync(env.GIT_CONFIG_GLOBAL!, "utf8")).toBe(
+			`${before}[credential "${KIXEL}/"]\n\thelper = \n\thelper = ${HELPER}\n`,
+		);
+		expect(fill(env, KIXEL).stdout).toContain("password=issued-1\n");
 		expect(logout(env).removed).toBe(true);
 		expect(readFileSync(env.GIT_CONFIG_GLOBAL!, "utf8")).toBe(before);
 	});
@@ -280,4 +286,7 @@ test("a Kixel Quest URL is its origin, as git names it", () => {
 	expect(kixelUrl({ QUEST_KIXEL_URL: "https://Kixel.Quest:443/" })).toBe("https://kixel.quest");
 	expect(kixelUrl({ QUEST_KIXEL_URL: "http://localhost:8787" })).toBe(KIXEL);
 	expect(() => kixelUrl({ QUEST_KIXEL_URL: "https://kixel.quest/prefix" })).toThrow("is not an origin");
+	expect(kixelPath("https://Kixel.Quest:443/o/r/pull/1?x#y", "https://kixel.quest")).toBe("o/r/pull/1?x#y");
+	expect(kixelPath("https://kixel.quest.example/o/r", "https://kixel.quest")).toBeNull();
+	expect(kixelPath("o/r", "https://kixel.quest")).toBeNull();
 });

@@ -45,6 +45,13 @@ export function kixelUrl(env: NodeJS.ProcessEnv): string {
 	return url.origin;
 }
 
+/** What follows the origin in `value`, without its leading slash, when `value` is a URL on the Kixel Quest at `base`. */
+export function kixelPath(value: string, base: string): string | null {
+	const url = URL.parse(value);
+	if (url === null || url.origin !== base) return null;
+	return `${url.pathname.slice(1)}${url.search}${url.hash}`;
+}
+
 /** The token this host signed in to `url` with, or null. */
 export function tokenFor(url: string, env: NodeJS.ProcessEnv = process.env): string | null {
 	return readLogins(env)[url]?.token ?? null;

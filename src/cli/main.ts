@@ -1699,7 +1699,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"Quest. The record sender, quest review, forge reads, and quest records incident use the token, and a " +
 				"command that needs Kixel Quest fails without it, naming quest login. It then signs git in to the " +
 				"repositories that Kixel Quest hosts, as gh auth setup-git does for GitHub: in the global git config, " +
-				"credential.<url>.helper for its URL gets an empty entry, masking any helper listed before it for that " +
+				"credential.<url>/.helper for its URL gets an empty entry, masking any helper listed before it for that " +
 				"URL, then `!quest git-credential`, which answers with the stored token. A git config that already ends " +
 				"with both is left alone; one quest cannot write otherwise fails the command, naming both entries.",
 		)
@@ -1740,7 +1740,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		.summary("Remove this host's Kixel Quest token")
 		.description(
 			`Remove the token quest login stored for Kixel Quest (https://kixel.quest, or the one ${KIXEL_QUEST_URL} ` +
-				"names) from this host, after removing the two credential.<url>.helper entries quest login wrote to the " +
+				"names) from this host, after removing the two credential.<url>/.helper entries quest login wrote to the " +
 				"global git config; a git config it cannot write fails the command and keeps the token. Kixel Quest " +
 				"still takes the token until it is revoked on its Tokens page.",
 		)

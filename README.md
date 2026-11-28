@@ -682,7 +682,7 @@ Upload this host's agent transcripts with its session records? A transcript hold
 Open https://kixel.quest/login, sign in with GitHub, and enter the code BCDF-GHJK.
 Waiting for its approval; the code expires in 10 minutes.
 signed in to https://kixel.quest as workstation; transcript uploads declined
-signed git in to https://kixel.quest's repositories: credential.https://kixel.quest.helper = "", credential.https://kixel.quest.helper = !quest git-credential
+signed git in to https://kixel.quest's repositories: credential.https://kixel.quest/.helper = "", credential.https://kixel.quest/.helper = !quest git-credential
 ```
 
 Kixel Quest issues the host a token named after its hostname, which `quest`
@@ -691,7 +691,7 @@ the user, with the answer about transcripts, where only a `y` or `yes` agrees;
 the record sender uploads no transcripts yet.
 Signing in again replaces the host's token.
 `quest login` also signs git in to the repositories Kixel Quest hosts, as
-`gh auth setup-git` does for GitHub: it writes two `credential.<url>.helper`
+`gh auth setup-git` does for GitHub: it writes two `credential.<url>/.helper`
 entries to the global git config for that Kixel Quest's URL alone, an empty one
 that masks any helper listed before it for that URL, such as `osxkeychain`,
 without deleting it, then `!quest git-credential`. That hidden command answers
@@ -701,7 +701,9 @@ fails. Git finds `quest` on `PATH`, so an upgrade keeps working. A helper
 listed after quest's, such as a global `credential.helper` defined later in the
 file, still runs and may store the token. A global git config quest cannot
 write, such as one home-manager manages, fails the command naming both entries,
-to declare there instead; one that already ends with them is left alone.
+to declare there instead; one that already holds just them is left alone.
+Git matches `<url>/` to the same remotes as `<url>`, but as a key of quest's
+own, so a helper the person lists under `<url>` is never moved or removed.
 `quest logout` removes those two entries, failing on a config it cannot write
 while they are there, then the token from the host; Kixel Quest takes the token
 until it is revoked on its Tokens page. `QUEST_KIXEL_URL` must be a bare origin,
