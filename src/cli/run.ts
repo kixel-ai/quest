@@ -137,7 +137,7 @@ function flakeProblem(read: (path: string) => RootFile, tasks: ManifestTask[]): 
 /** The Nix binary cache Kixel Quest serves, which a repository opting in with quest.toml substitutes from. */
 export const NIX_CACHE = "https://nix.kixel.quest";
 
-/** A Bash script that runs its arguments with `$MBX_CARGO_SHIM_DIR` first on PATH. */
+/** A POSIX `sh` script, which reads no inherited `BASH_ENV` the way Bash does, that runs its arguments with `$MBX_CARGO_SHIM_DIR` first on PATH. */
 const SHIM_FIRST = 'export PATH="$MBX_CARGO_SHIM_DIR:$PATH"; exec "$@"';
 
 /** A Nix token: a name, a string's literal text (interpolations left out), a path, or one punctuation character. */
@@ -407,7 +407,7 @@ export async function run(options: RunOptions, io: RunIO): Promise<number> {
 	// names, goes back in front of the shell's Cargo there.
 	const inShell = (argv: string[]): string[] =>
 		io.env.MBX_CARGO_SHIM_DIR
-			? [programs.nix!, "develop", top, "--command", "bash", "-c", SHIM_FIRST, "bash", ...argv]
+			? [programs.nix!, "develop", top, "--command", "sh", "-c", SHIM_FIRST, "sh", ...argv]
 			: [programs.nix!, "develop", top, "--command", ...argv];
 
 	// A Cargo task runs once per crate, in the dev shell's Cargo for a Nix task. Every feature is on, so each crate's

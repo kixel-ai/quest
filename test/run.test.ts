@@ -319,9 +319,14 @@ test.runIf(posix)("inside nix develop, mbx's Cargo shim goes back in front of th
 		"flake.nix": "{}",
 		"quest.toml": '[tasks.nixed]\ntier = "pr"\nrun = "echo first=${PATH%%:*}"\nenvironment = { A = "1" }\n',
 	});
-	const out = await runIn(dir, { all: true }, { MBX_CARGO_SHIM_DIR: "/shim" });
+	// The launcher runs an inherited BASH_ENV no second time before the task's own Bash.
+	const counter = join(tempDir(), "count");
+	const startup = join(tempDir(), "startup.sh");
+	writeFileSync(startup, `echo ran >> ${quote(counter)}\n`);
+	const out = await runIn(dir, { all: true }, { MBX_CARGO_SHIM_DIR: "/shim", BASH_ENV: startup });
 	expect(out.code, out.stderr).toBe(0);
 	expect(out.stdout).toBe("nixed | first=/shim\n");
+	expect(readFileSync(counter, "utf8")).toBe("ran\n");
 	// Without it, the command is the shell's own.
 	const plain = await runIn(dir, { all: true });
 	expect(plain.log).toContain(`nix develop ${dir} --command env A=1 bash -eo pipefail -c echo first=\${PATH%%:*}`);
