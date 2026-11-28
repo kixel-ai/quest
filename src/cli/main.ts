@@ -89,7 +89,7 @@ import {
 	type Model,
 	SPLITTERS,
 	SPLIT_CHECKERS,
-	REVIEWERS,
+	REVIEW_RUNGS,
 	WRITERS,
 	questWriters,
 	writerAt,
@@ -1923,9 +1923,13 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 			else for (const line of messageLines(found)) print(line);
 		});
 
-	const reviewers = SIZES.map(
-		(list) => `${list} ${REVIEWERS[list].map((e) => `${e.harness} ${e.model} ${e.effort}`).join(", then ")}`,
-	).join("; ");
+	const reviewers = REVIEW_RUNGS.map((rung, index) => {
+		const cells = SIZES.flatMap((size, s) =>
+			TIERS.filter((_, t) => s + t === index).map((tier) => `${size} ${tier}`),
+		).join("/");
+		const joiner = rung.seats === 2 ? " + " : ", then ";
+		return `rung ${index} (${cells}): ${rung.reviewers.map((e) => `${e.harness} ${e.model} ${e.effort}`).join(joiner)}`;
+	}).join("; ");
 	const classifiers = CLASSIFIERS.map((e) => `${e.harness} ${e.model} ${e.effort}`).join(", then ");
 	/** quest review's exit code for `error`: 2 for a usage error, 3 when no reviewer could run, else 1. */
 	const reviewFailure = (error: unknown): number => {
@@ -1941,20 +1945,20 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		.command("review")
 		.summary("Have a model no weaker than the latest writer review the committed branch, read-only")
 		.description(
-			"Review the checkout's committed branch against its base with a reviewer its size picks, never one " +
-				`weaker than the model that changed it last, which may review its own work. Each size ranks its two reviewers (harness, model, effort): ${reviewers}. The ` +
-				"first whose model is not avoided reviews. A Git older than 2.41, which has no --attr-source to keep the head's .gitattributes from hiding its hunks from the classifier and reviewers, is a usage error, except under --accept. One that cannot run, as its CLI or provider reports before any " +
+			"Review the checkout's committed branch against its base with reviewers picked by its (size + risk) rung, never one " +
+				`weaker than the model that changed it last, which may review its own work. The 7 rungs (harness, model, effort; rungs 0-2 run 1 seat with fallback, rungs 3-6 run both seats): ${reviewers}. The ` +
+				"first whose model is not avoided reviews. A Git older than 2.41, which has no --attr-source to keep the head's .gitattributes from hiding its hunks from the classifier and reviewers, is a usage error, except under --accept. On a one-seat rung, a reviewer that cannot run, as its CLI or provider reports before any " +
 				"finding is saved, passes the round to the next whose model is not avoided: a CLI that is not installed, " +
 				"logged out, or has its login rejected, or sent to a gateway with no credential, passes over every model of that CLI, and a model at its usage limit " +
-				"only itself; the run's report and record name each it passed over and why. A reviewer --harness, --model, " +
+				"only itself; the run's report and record name each it passed over and why. On a two-seat rung, both seats are required, so either being unavailable fails as an outage. A reviewer --harness, --model, " +
 				"or --effort names never passes the round on. " +
 				"--exclude-model names each model to avoid, with every model weaker than it; without it, every model " +
 				"weaker than the latest writer is avoided, which only Sonnet is, than any other, " +
 				"so a reviewer is never weaker than the writer: the model the last Implementer line names in the `## Models` record of the body of the branch's open PR. " +
 				"When it names none or an `unknown` model, none is avoided. " +
-				"--harness names the only reviewer instead of the pick and the second reviewer, at the model and effort of its first entry whose model is not avoided, and --model and " +
-				"--effort override that reviewer's, or without --harness, the size pick's; a --model the list names, in any spelling such as openai/gpt-6.2-sol, runs on its own entry's harness and effort, passed to the CLI as given, and one it does not at --harness's first entry; a repository whose AGENTS.md names other reviewers " +
-				"passes them. A --harness run keeps the other reviewers' sessions for the next run of the pick, and refuses while one has findings to settle, as a run of the pick does while a reviewer only --harness runs has some. When the latest writer changes the size's pick to one with no session on the branch, its first session settles the open findings of the reviewer it replaces. The reviewers run at once, and the first to fail stops the others and fails the " +
+				"--harness names the only reviewer instead of the rung's seats, at the model and effort of its first entry whose model is not avoided, and --model and " +
+				"--effort override that reviewer's, or without --harness, the rung pick's; a --model the list names, in any spelling such as openai/gpt-6.2-sol, runs on its own entry's harness and effort, passed to the CLI as given, and one it does not at --harness's first entry; a repository whose AGENTS.md names other reviewers " +
+				"passes them. A --harness run keeps the other reviewers' sessions for the next run of the pick, and refuses while one has findings to settle, as a run of the pick does while a reviewer only --harness runs has some. When the latest writer changes the rung's pick to one with no session on the branch, its first session settles the open findings of the reviewer it replaces. The reviewers run at once, and the first to fail stops the others and fails the " +
 				"run, saving no round. The " +
 				"size is --size, else the size of the quest a quest/ branch names, read from the base's tip so a " +
 				`change cannot lower its own review, else the PR record's Size line, else ${DEFAULT_SIZE}. ` +
@@ -2025,11 +2029,9 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"offered only the classes whose scope, backticked patterns in parentheses after the class's name, holds " +
 				"every changed path, either side of a rename: each path must match one pattern whole, so a directory " +
 				"needs a trailing / or /**, and a change that touches no path falls in no class. " +
-				"The tier scales the review: a low head with no finding to settle runs no reviewer unless --harness, " +
-				"--model, or --effort names one, and a high head gets a second reviewer: its size's entry from the other " +
-				"vendor, in its own session, which reviews every head while the tier is high and settles its findings after. " +
-				"--model and --effort change only the pick, so the second reviewer still runs; the one reviewer --harness " +
-				"names runs alone. " +
+				"The tier combines with size to pick the rung: every low head runs a local reviewer; rungs 0-2 (XS low/medium/high, S low/medium, M low) run one reviewer, falling from Sol to Opus when Sol cannot run; rungs 3-6 (S high, M medium, L low and up) run a second reviewer beside the pick: the rung's entry from the other " +
+				"vendor, in its own session, which reviews every head on a two-seat rung and settles its findings after. " +
+				"--model and --effort change only the pick, so a two-seat rung's second reviewer still runs; excluding either vendor's model on a two-seat rung requires --harness to run one reviewer alone. " +
 				"--override and --reason record the maintainer's tier for the branch, which holds until the reviewed " +
 				"tier grows riskier than the one overridden, other than to the override's own tier.\n\n" +
 				"Prints the size and where it came from, base, and head, its risk tier and reason, the classifier's tier, " +
@@ -2042,7 +2044,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"its one-sentence rationale, a recommendation line with the approach the reviewer would build instead when it recommends one, the finding count, each finding by its number, a notes line with the count and each note, then the last round's findings with " +
 				"their numbers and dispositions; then the `record` line below and a last `next` line naming the author's next step: " +
 				"`next decide` when a reviewer's third or later round still reports findings, to stop until the user picks " +
-				"fixing them as recommended, accepting them, or dropping the PR, `next respond` to fix or refute the findings, or `next done`, which for a low head no reviewer ran says so, and for --accept `next done` or `next stop`. A reply without a valid score " +
+				"fixing them as recommended, accepting them, or dropping the PR, `next respond` to fix or refute the findings, or `next done`, and for --accept `next done` or `next stop`. A reply without a valid score " +
 				"fails as any malformed reply does. --json prints " +
 				"one object: `rounds`, one per reviewer, `tallies`, every reviewer's findings across the branch's rounds, `risk`, the head's tier with its classification, `skipped`, each reviewer passed over with its reason, `accepted`, the maintainer's reason under --accept or null, `record`, and `next`.\n\n" +
 				"When quest runs from the source of the checkout it judges (bun src/cli/bin.ts, or a build there), the round still runs but posts nothing and sets no status: it prints `record skipped: ...` " +
@@ -2050,14 +2052,14 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"Every run that records needs this host signed in with quest login, and Kixel Quest serving the repository of the branch's open PR, both checked before any reviewer runs. " +
 				"After each run it finds the branch's open PR into the base: the one from the repository the base's remote pushes to, else the only one from another repository whose pushed head `HEAD` contains. " +
 				"On GitHub it first sets the `quest review` commit status on the head, on the GitHub token, so push the head first: failure, which a run with no finding open sets to success once the post below is stored, " +
-				"its description the head's risk tier, class, and risk file and whether a local reviewer ran, its target the diff from the head's merge base with the PR's base, which the land gate counts only from a user who can push. " +
+				"its description the head's risk tier, class, and risk file and its outcome, its target the diff from the head's merge base with the PR's base, which the land gate counts only from a user who can push. " +
 				"For a token that cannot push, it sets none and prints `; status skipped: <why>` after the record's URL; a status GitHub refuses otherwise prints `; status refused: <why>` and exits 1. " +
 				"It then posts the run to Kixel Quest (POST /reviews, QUEST_KIXEL_URL naming another), and prints `record <url>`: the head, the base and merge base, the risk tier and reason, the classifier's tier, class, and who set it, " +
 				"and each reviewer's round, its seat (pick or second), session, round number, score and rationale, and findings with their file, line, and severity, " +
-				"with the outcome of each finding of an earlier posted round that this run fixed or refuted, sent to the PR that round was posted on, and kept for the branch's next post when the post fails. Notes are not posted. A low head no reviewer ran on posts its classification alone. " +
+				"with the outcome of each finding of an earlier posted round that this run fixed or refuted, sent to the PR that round was posted on, and kept for the branch's next post when the post fails. Notes are not posted. " +
 				"Kixel Quest counts a run toward merging only when its poster can push, and quest status reads the review from there; the PR body is left as is. " +
 				"--accept <reason> runs no reviewer or classifier: it repeats each reviewer's last round of the same head, base, and merge base, failing as a usage error " +
-				"when none classified and reviewed it, when a high head lacks its second reviewer's round, or when no finding is open; sets the status to failure " +
+				"when none classified and reviewed it, when a two-seat rung lacks its second reviewer's round, or when no finding is open; sets the status to failure " +
 				"described `findings accepted`; posts the rounds as accepted, their findings deferred with the reason; sets the status to success once the post is stored; " +
 				"and prints `next done`. When no status is set, as for a token that cannot push, or the post fails, it prints `next stop` and exits 1. With no " +
 				"such PR, several from other repositories that `HEAD` contains, or a remote off GitHub and Kixel Quest, it prints `record skipped: <why>` and changes nothing.\n\n" +
@@ -2068,8 +2070,8 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"Implementer line naming no model it can read, is a usage error, unless --size or --exclude-model replaces it. A usage limit of the only " +
 				"eligible reviewer prints one line, " +
 				"`error: <harness> hit its usage limit; resets <time>`, where <time> is the reset as an ISO 8601 UTC " +
-				"timestamp, or `unknown` when the CLI named none; with several, it prints `error: no eligible <list> " +
-				"reviewer could run: <model> <effort> (<error>), ...`, where <list> is the PR's size, each error as the only reviewer's would read.",
+				"timestamp, or `unknown` when the CLI named none; with several, it prints `error: no eligible <size> <tier> " +
+				"reviewer could run: <model> <effort> (<error>), ...`, each error as the only reviewer's would read.",
 		)
 		.option("--base <remote/branch>", "Base branch to review against (default: origin's default branch)")
 		.addOption(

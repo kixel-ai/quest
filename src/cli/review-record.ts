@@ -71,7 +71,7 @@ export interface ReviewSummary {
 	effort: string;
 	/** Whether it is the shadow: the size's pick one effort away, beside it on the same heads. */
 	shadow: boolean;
-	/** Whether it is the second reviewer a high-risk head gets, from a vendor other than the pick's. */
+	/** Whether it is the second reviewer a two-seat rung gets, from a vendor other than the pick's. */
 	second: boolean;
 	/** Its latest session, null when the record names none; its round, null when the latest run left it out. */
 	session: string | null;
@@ -110,7 +110,7 @@ export function classifierSessions(body: string): string[] {
 
 /**
  * Each reviewer's latest round `body`'s `## Review` section records, or none when `quest review` wrote none
- * there, as for a low head's record or a section with only the land fixer's fixes.
+ * there, as for an older low head's record or a section with only the land fixer's fixes.
  */
 export function parseReview(body: string): ReviewSummary[] {
 	const section = reviewSection(body);
@@ -404,7 +404,7 @@ export async function recordRounds(
 function runOutcome(reviewed: Reviewed): RunOutcome {
 	if (!passed(reviewed)) return "findings open";
 	if (reviewed.accepted !== undefined) return "findings accepted";
-	return reviewed.rounds.length === 0 ? "passed with no local reviewer" : "passed";
+	return "passed";
 }
 
 /** A run as Kixel Quest stores it, for PR `number` of `repository` into `base`, its head diffed from `mergeBase`. */
