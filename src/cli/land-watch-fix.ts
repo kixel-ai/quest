@@ -210,11 +210,19 @@ export function readRemoval(state: string, number: number): Removal | undefined 
  * The heads the watcher put back in the queue for the pick `history` keeps, while that pick lasts: a
  * handback ends it. An enqueue of one of them by the App continues the pick, whether the watcher made
  * it, GitHub's auto-merge did, or a workflow that picks every push to its PRs, as moq's Dependabot one does.
+ * An `unreviewed` handback only pauses the pick at `paused`, which anyone's enqueue after its review continues.
  */
-export function requeuedHeads(state: string, number: number): { pick: string; heads: string[] } | undefined {
+export function requeuedHeads(
+	state: string,
+	number: number,
+): { pick: string; heads: string[]; paused?: string } | undefined {
 	const record = history(state, number);
 	if (!record || record.rounds.at(-1)?.outcome === "handback") return undefined;
-	return { pick: record.pick, heads: record.rounds.flatMap((round) => (round.after ? [round.after] : [])) };
+	return {
+		pick: record.pick,
+		heads: record.rounds.flatMap((round) => (round.after ? [round.after] : [])),
+		...(record.paused ? { paused: record.paused } : {}),
+	};
 }
 
 /**
@@ -745,8 +753,11 @@ async function collect(
 	// Anything else is a handback.
 	await note();
 	// Every handback ends the pick with a round of its own, a crash's or a timeout's too, so the App's
-	// next enqueue of a head this pick put back starts a new pick.
-	if (round?.outcome !== "handback") {
+	// next enqueue of a head this pick put back starts a new pick. One that only waits for a review of
+	// the head the round put back pauses the pick instead, keeping its rounds for the stop rules.
+	if (job.unreviewed && round && round.outcome !== "handback" && round.after) {
+		save(historyPath(state, number), { ...history(state, number)!, paused: round.after } satisfies History);
+	} else if (round?.outcome !== "handback") {
 		saveRound(state, number, history(state, number)!, {
 			...(round ?? { job: name, before: entry.head, failure }),
 			outcome: "handback",

@@ -1716,6 +1716,34 @@ describe.skipIf(process.platform === "win32")("the watcher's land fixer", () => 
 			expect(handback).toContain(`${why}, and no quest review status covers it.`);
 			expect(handback).toContain("Recommendation: run /quest-review on its head before picking it again.");
 			expect(handback).toContain("<!-- quest land: unreviewed -->");
+			// The handback only paused the pick: its fixed round stays, so the stop rules still see it.
+			expect(history(state, 5)).toMatchObject({ pick: at(1), paused: fixed, rounds: [{ outcome: "fixed" }] });
+
+			// Reviewed, the maintainer enqueues the same head again, and it fails the same way: the pick goes on,
+			// and the repeat reaches the maintainer instead of another fixer round.
+			pull.body = `${body}\n\n## Review\n\nreviewed by Codex (head ${fixed})\n`;
+			pull.enqueues.push({ createdAt: at(20), actor: "maintainer" });
+			pull.removals.push({
+				id: "R2",
+				createdAt: at(25),
+				reason: "failed_checks",
+				actor: "github-merge-queue",
+				before: fixed,
+			});
+			github.runs.push({ ...failedRun(5, at(22), base), id: 8, head_sha: "f".repeat(40) });
+			github.now = Date.parse(at(26));
+			fix.round(5, fixScript("again.txt"));
+			expect(await watchPass(REPOSITORY, { state }, deps(github), context)).toEqual([
+				"removed 5 failed_checks fix",
+				"fixing 5",
+			]);
+			expect(readRemoval(state, 5)!.pick).toEqual({ by: "maintainer", at: at(1) });
+			await exited(state);
+			expect(await watchPass(REPOSITORY, { state }, deps(github), context)).toEqual(["handback 5"]);
+			expect(git(repo.origin, "rev-parse", "refs/heads/branch-5")).toBe(fixed);
+			expect(github.comments[5].at(-1)!.body).toContain("stop rule (repeated failure)");
+			expect(history(state, 5)!.rounds.map((round) => round.outcome)).toEqual(["fixed", "handback"]);
+			expect(history(state, 5)!.paused).toBeUndefined();
 		}
 	});
 
