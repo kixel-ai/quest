@@ -137,6 +137,9 @@ function flakeProblem(read: (path: string) => RootFile, tasks: ManifestTask[]): 
 /** The Nix binary cache Kixel Quest serves, which a repository opting in with quest.toml substitutes from. */
 export const NIX_CACHE = "https://nix.kixel.quest";
 
+/** A POSIX `sh` script, which reads no inherited `BASH_ENV` the way Bash does, that runs its arguments with `$MBX_CARGO_SHIM_DIR` first on PATH. */
+const SHIM_FIRST = 'export PATH="$MBX_CARGO_SHIM_DIR:$PATH"; exec "$@"';
+
 /** A Nix token: a name, a string's literal text (interpolations left out), a path, or one punctuation character. */
 type NixToken = { kind: "name" | "string" | "path" | "punct"; text: string };
 
@@ -412,6 +415,12 @@ export async function run(options: RunOptions, io: RunIO): Promise<number> {
 	// Sets the environment of a task run outside `nix develop`, whose dev shell has its own `env`. It runs by name,
 	// since a multi-call coreutils, which its resolved path can be, picks the tool by the name it runs as.
 	if (tasks.some((task) => Object.keys(task.environment).length > 0 && !develop(task))) requireProgram("env", io.env);
+	// `nix develop` puts the dev shell's tools first on PATH, so mbx's Cargo shim, which Quest's setup-nix action
+	// names, goes back in front of the shell's Cargo there.
+	const inShell = (argv: string[]): string[] =>
+		io.env.MBX_CARGO_SHIM_DIR
+			? [programs.nix!, "develop", top, "--command", "sh", "-c", SHIM_FIRST, "sh", ...argv]
+			: [programs.nix!, "develop", top, "--command", ...argv];
 
 	// A Cargo task runs once per crate, in the dev shell's Cargo for a Nix task. Every feature is on, so each crate's
 	// closure holds the optional dependencies a task's own feature flags may build.
@@ -419,9 +428,7 @@ export async function run(options: RunOptions, io: RunIO): Promise<number> {
 	const cargo = tasks.find((task) => task.cargo);
 	if (cargo !== undefined) {
 		const metadata = ["cargo", "metadata", "--locked", "--all-features", "--format-version", "1"];
-		const argv = develop(cargo)
-			? [programs.nix!, "develop", top, "--command", ...metadata]
-			: [requireProgram("cargo", io.env), ...metadata.slice(1)];
+		const argv = develop(cargo) ? inShell(metadata) : [requireProgram("cargo", io.env), ...metadata.slice(1)];
 		const result = spawnSync(argv[0]!, argv.slice(1), {
 			cwd: top,
 			env: io.env,
@@ -531,7 +538,7 @@ export async function run(options: RunOptions, io: RunIO): Promise<number> {
 		const script = ["-eo", "pipefail", "-c", task.run];
 		const variables = Object.entries(task.environment).map(([name, value]) => `${name}=${value}`);
 		const launch = variables.length === 0 ? [] : ["env", ...variables];
-		if (develop(task)) return [programs.nix!, "develop", top, "--command", ...launch, "bash", ...script];
+		if (develop(task)) return inShell([...launch, "bash", ...script]);
 		return [...launch, programs.bash, ...script];
 	};
 

@@ -1,6 +1,12 @@
 {
   description = "Quest - versioned plans for repository work";
 
+  # Kixel Quest's binary cache, which quest.toml opts this repository into.
+  nixConfig = {
+    extra-substituters = [ "https://nix.kixel.quest" ];
+    extra-trusted-public-keys = [ "nix.kixel.quest-2:VxG5pPqlpBKsAoH+pudaBvTehL5DRBbkMtblKZnK8qY=" ];
+  };
+
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
     # Bun 1.4.4, ahead of `nixpkgs`: 1.4.2 passes its non-blocking stderr to the
@@ -124,6 +130,7 @@
               token-max.packages.${system}.default
               direnv
               actionlint
+              zizmor
               shellcheck
               shfmt
               nixfmt

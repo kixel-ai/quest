@@ -1648,7 +1648,10 @@ use `quest run` also needs `QUEST_DEV_SHELL_ID`, which `mkFlake`'s shell sets. A
 nested `nix shell` keeps both variables, so a task runs with its tools while
 the outer shell's identity still matches. Each task gets `QUEST_TIER`, `QUEST_BASE` (the merge base, unless
 `--all`), and its `environment`, exported inside the dev shell, and every line
-it prints is prefixed with its name.
+it prints is prefixed with its name. When `MBX_CARGO_SHIM_DIR` is set, as
+[Quest's setup-nix action](#shared-github-actions) sets it, `nix develop`
+runs the task with that directory back in front of the shell's tools, so
+mbx's Cargo shim, not the shell's Cargo, builds.
 
 A failed task skips the tasks that run after it, while independent ones finish;
 `--fail-fast` stops them too. A task that passes must write each `junit` and
@@ -1765,6 +1768,39 @@ the task ran, so the cache is trusted only as far as the user account that
 holds it, and `quest run` refuses a directory another user owns or can write.
 A host's merge queue keeps its passes under its runner's own user, and runs
 `--no-cache` when that user also runs code no one reviewed.
+
+### Shared GitHub Actions
+
+Linux tasks run on the repository's own hosts. For what those cannot run yet,
+Quest ships one action and two reusable workflows, which a repository calls at
+a release tag's commit, never a branch:
+
+- `.github/actions/setup-nix` installs Nix trusting the flake's `nixConfig`,
+  so `nix.kixel.quest` serves the dev shell, and with `mbx-remote` and its keys
+  puts [mbx](https://github.com/jdx/mr-boxington)'s Cargo shim on `PATH`
+  against that bucket, whose key every later step sees as `AWS_ACCESS_KEY_ID`
+  and `AWS_SECRET_ACCESS_KEY`. On Windows, where Nix does not run, it sets up
+  only mbx.
+- `.github/workflows/platform.yml` runs a tier's macOS and Windows tasks on
+  GitHub's runners, one job per operating system, with `quest` built from the
+  workflow's own commit, and uploads each job's `--report`, merged into one
+  `junit.xml` and `metrics.json` at the root as Kixel Quest reads them, as
+  `kixel-metrics-<os>-<arch>`. Without `base` it runs every task (`--all`).
+- `.github/workflows/npm-publish.yml` runs a publish script in the dev shell
+  on a GitHub-hosted runner with `id-token: write`, for npm's trusted
+  publishing, which accepts no other runner. npm checks the calling workflow's
+  file name.
+
+```yaml
+jobs:
+  platform:
+    uses: kixel-ai/quest/.github/workflows/platform.yml@<sha> # vX.Y.Z
+    with:
+      tier: nightly # or release-gate, with base: ${{ github.event.merge_group.base_sha }}
+```
+
+This repository's nightly `windows.yml` calls `platform.yml` for its own
+`quest.toml`.
 
 ## Share flake boilerplate with quest.lib.mkFlake
 
