@@ -9,8 +9,18 @@ import { fixes } from "../src/cli/land-fixer";
 import type { Risk, Round, Tally } from "../src/cli/review";
 import { classifierSessions, parseReview, reviewSessions } from "../src/cli/review-record";
 import { reviewRecord } from "./review-body";
-import { culprits } from "../src/cli/breakage";
-import { type Session, causes, fold, parseSessions, share, usage, usageLines } from "../src/cli/usage";
+import { causeLines, culprits } from "../src/cli/breakage";
+import {
+	type Pull,
+	type Session,
+	causes,
+	escapes,
+	fold,
+	parseSessions,
+	share,
+	usage,
+	usageLines,
+} from "../src/cli/usage";
 import type { LoggedWait } from "../src/cli/waits";
 import { SPLIT_CATEGORIES, type TimeSplit } from "../src/core";
 import { tempDir } from "./fixture";
@@ -171,11 +181,41 @@ describe("causes", () => {
 	});
 
 	test("reads who found it and the incident it closes from the parenthesis ending the line", () => {
-		const read = (line: string) => culprits(body(`- ${link(7)} - ${line}`), repository)[0];
+		const read = (line: string) => causeLines(body(`- ${link(7)} - ${line}`), repository)[0];
 		expect(read("lost a frame (found by canary; incident https://alerts.example/1)")).toEqual({
 			number: 7,
 			found: "canary",
 			incident: "https://alerts.example/1",
+			replaces: null,
+		});
+		expect(
+			read(`lost a frame (found by person; replaces https://github.com/moq-dev/moq/pull/9; incident x)`),
+		).toEqual({
+			number: 7,
+			found: "person",
+			incident: "x",
+			replaces: 9,
+		});
+		expect(read("lost a frame (replaces https://github.com/moq-dev/moq/pull/9)")).toMatchObject({ replaces: 9 });
+		expect(read(`lost a frame (replaces [moq-dev/moq#9](https://github.com/moq-dev/moq/pull/9))`)).toMatchObject({
+			replaces: 9,
+		});
+		// An unreadable replacement keeps the line's other parts.
+		expect(read("lost a frame (found by queue; replaces #9; incident x)")).toEqual({
+			number: 7,
+			found: "queue",
+			incident: "x",
+			replaces: null,
+		});
+		// Each line keeps the fix it replaces, though the culprits fold the lines together.
+		const two = body(
+			`- ${link(7)} - a (replaces https://github.com/moq-dev/moq/pull/9)\n- ${link(7)} - b (replaces https://github.com/moq-dev/moq/pull/8; incident x)`,
+		);
+		expect(causeLines(two, repository).map((line) => line.replaces)).toEqual([9, 8]);
+		expect(culprits(two, repository)).toEqual([{ number: 7, found: null, incident: "x" }]);
+		// Another repository's PR replaces nothing here.
+		expect(read("lost a frame (replaces https://github.com/moq-dev/quest/pull/9)")).toMatchObject({
+			replaces: null,
 		});
 		expect(read("lost a frame (incident deploy 42)\r")).toMatchObject({ found: null, incident: "deploy 42" });
 		expect(read("lost a frame (found by the Queue)")).toMatchObject({ found: "queue", incident: null });
@@ -192,6 +232,82 @@ describe("causes", () => {
 			{ number: 8, found: null, incident: null },
 		]);
 		expect(causes(lines, repository)).toEqual([7, 8]);
+	});
+});
+
+describe("escapes", () => {
+	const repository = { owner: "acme", repo: "proj" };
+	const day = (n: number) => Date.parse("2026-11-01T00:00:00Z") + n * 86_400_000;
+	const fix = (culprit: number, tail = "") =>
+		`## Caused by\n\n- [acme/proj#${culprit}](https://github.com/acme/proj/pull/${culprit}) - broke it${tail}\n`;
+	const pull = (number: number, state: Pull["state"], created: number, closed: number | null, body = ""): Pull => ({
+		number,
+		url: `https://github.com/acme/proj/pull/${number}`,
+		title: `PR ${number}`,
+		branch: `b${number}`,
+		repository: "acme/proj",
+		state,
+		draft: false,
+		created: day(created),
+		closed: closed === null ? null : day(closed),
+		body,
+	});
+	const culprit = pull(1, "merged", -1, 0);
+	const judged = (pulls: Pull[], now: number) => escapes([culprit, ...pulls], repository, day(-10), day(now)).get(1);
+
+	test("counts a fix still open by its opening, within each window", () => {
+		expect(judged([pull(2, "open", 6, null, fix(1))], 7)).toEqual({ 7: true, 28: null });
+		expect(judged([pull(2, "open", 8, null, fix(1))], 28)).toEqual({ 7: false, 28: true });
+		// A PR merged fewer than a window's days ago has no result for it, nor does an unmerged one.
+		expect(judged([pull(2, "open", 1, null, fix(1))], 6)).toEqual({ 7: null, 28: null });
+		expect(escapes([pull(3, "open", 0, null)], repository, day(-10), day(30)).get(3)).toEqual({
+			7: null,
+			28: null,
+		});
+		// Merged before the listing starts, its fixes may predate it, so it is not judged.
+		expect(escapes([culprit], repository, day(1), day(30)).get(1)).toEqual({ 7: null, 28: null });
+		// A fix opened before its culprit merged, such as a stacked PR, found no escape.
+		expect(judged([pull(2, "merged", -1, 3, fix(1))], 30)).toEqual({ 7: false, 28: false });
+	});
+
+	test("keeps a superseded fix's opening and drops an abandoned one", () => {
+		const closed = pull(2, "closed", 6, 9, fix(1, " (incident a)"));
+		// Replaced the day it closed, by a fix sharing its incident or naming it.
+		expect(judged([closed, pull(3, "merged", 9, 10, fix(1, " (incident a)"))], 30)).toEqual({ 7: true, 28: true });
+		const named = fix(1, " (replaces https://github.com/acme/proj/pull/2)");
+		expect(judged([pull(2, "closed", 6, 9), pull(3, "open", 9, null, named)], 30)).toMatchObject({ 7: true });
+		// The closed fix blamed another PR for the same incident.
+		const blamed = `## Caused by\n\n- [acme/proj#5](https://github.com/acme/proj/pull/5) - wrong (incident a)\n`;
+		expect(
+			judged([pull(2, "closed", 6, 9, blamed), pull(3, "merged", 9, 10, fix(1, " (incident a)"))], 30),
+		).toEqual({
+			7: true,
+			28: true,
+		});
+		// A shared incident ties back only to a fix opened earlier: a later attempt, abandoned, lends its chain nothing.
+		const later = pull(4, "closed", 12, 13, fix(5, " (replaces https://github.com/acme/proj/pull/2; incident a)"));
+		expect(judged([pull(2, "closed", 6, 7), pull(3, "merged", 9, 10, fix(1, " (incident a)")), later], 30)).toEqual(
+			{
+				7: false,
+				28: true,
+			},
+		);
+		// A later fix taking over one incident inherits only that line's replacement, not its sibling line's.
+		const sibling = `${fix(1, " (replaces https://github.com/acme/proj/pull/3; incident x)")}- [acme/proj#1](https://github.com/acme/proj/pull/1) - also (replaces https://github.com/acme/proj/pull/2)\n`;
+		const takeover = [pull(2, "closed", 6, 7), pull(3, "closed", 8, 9), pull(4, "closed", 9, 11, sibling)];
+		expect(judged([...takeover, pull(5, "open", 12, null, fix(1, " (incident x)"))], 30)).toEqual({
+			7: false,
+			28: true,
+		});
+		// A fix two paths reach is followed for each of its own lines: here only its incident x line replaces #2.
+		const both = `${fix(1, " (replaces https://github.com/acme/proj/pull/2; incident x)")}- [acme/proj#1](https://github.com/acme/proj/pull/1) - also (incident y)\n`;
+		const twice = `${fix(1, " (incident y)")}- [acme/proj#1](https://github.com/acme/proj/pull/1) - also (incident x)\n`;
+		const paths = [pull(2, "closed", 6, 7), pull(3, "closed", 8, 9, both), pull(4, "closed", 9, 10, twice)];
+		const over = fix(1, " (replaces https://github.com/acme/proj/pull/4)");
+		expect(judged([...paths, pull(6, "open", 12, null, over)], 30)).toMatchObject({ 7: true });
+		// Abandoned, it counts for nothing, nor backdates a later fix of the same culprit for another incident.
+		expect(judged([closed], 30)).toEqual({ 7: false, 28: false });
+		expect(judged([closed, pull(3, "merged", 9, 10, fix(1, " (incident b)"))], 30)).toEqual({ 7: false, 28: true });
 	});
 });
 
@@ -957,6 +1073,20 @@ describe("usage", () => {
 		expect(requests.filter((path) => path === "/repos/old/proj")).toHaveLength(1);
 		// A name GitHub does not serve stays as recorded, so another repository's branch of the same name is still no match.
 		expect(on).not.toContain(OTHER);
+	});
+
+	test("judges each merged PR's escapes at the injected clock", async () => {
+		const { root, deps } = setup();
+		const base = deps(null);
+		const now = Date.parse("2026-11-20T00:00:00Z");
+		const report = await usage(
+			root,
+			{ since: "2026-11-05" },
+			{ ...base, github: () => ({ ...base.github(), now: () => now }) },
+		);
+		// #10 merged on 2026-11-07; #11 names it, but opened the day before, so it found no escape.
+		expect(report.pulls.find((p) => p.number === 10)!.escaped).toEqual({ 7: false, 28: null });
+		expect(usageLines(report).join("\n")).toContain("  escaped: no within 7 days\n");
 	});
 
 	test("counts each session with no ID apart in the spend rollup", async () => {

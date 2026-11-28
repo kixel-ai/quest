@@ -18,4 +18,3 @@ Agent's choices, for the implementer to revisit:
 
 - [Advise replay](/quest/m0/advise-replay.md) - whether automatic advice helps, and the readout that picks the arms
 - [Advise stop](/quest/m0/advise-stop.md) - the stop the arms move
-- [Escape window](/quest/m0/escape-window.md) - the 7-day escape count the readout decides on
