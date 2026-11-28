@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { gunzipSync } from "node:zlib";
 
 import { expect, test } from "vitest";
 
@@ -15,7 +16,7 @@ import {
 	runSender,
 	sendPass,
 } from "../src/cli/send";
-import { tokensPath } from "../src/cli/tokens";
+import { saveLogin, tokensPath } from "../src/cli/tokens";
 import type { Session } from "../src/cli/usage";
 import { tempDir } from "./fixture";
 import { FakeLogin, writeTokens } from "./kixel-fakes";
@@ -114,8 +115,10 @@ function sender(
 	during: () => void = () => {},
 	pulls: object[] = [],
 	served: string[] = ["acme/proj"],
+	transcriptStatus = 200,
 ) {
 	const uploads: { token: string; body: unknown }[] = [];
+	const transcripts: { path: string; token: string; text: string }[] = [];
 	const asked: string[] = [];
 	const windows: Date[] = [];
 	const slept: number[] = [];
@@ -188,6 +191,18 @@ function sender(
 				asked.push(String((init?.headers as Record<string, string>).Authorization));
 				return json({ login: "me", repositories: served });
 			}
+			if (String(input).startsWith(`${URL_}/transcripts/`)) {
+				expect(init?.method).toBe("PUT");
+				const headers = init?.headers as Record<string, string>;
+				const body = init?.body as Uint8Array;
+				expect(headers["content-length"]).toBe(String(body.length));
+				transcripts.push({
+					path: String(input).slice(URL_.length),
+					token: headers.authorization!,
+					text: gunzipSync(body).toString("utf8"),
+				});
+				return new Response("", { status: transcriptStatus });
+			}
 			expect(String(input)).toBe(ENDPOINT);
 			uploads.push({
 				token: String((init?.headers as Record<string, string>).authorization),
@@ -197,7 +212,7 @@ function sender(
 			return new Response("", { status: typeof status === "number" ? status : status() });
 		}) as typeof fetch,
 	};
-	return { deps, uploads, asked, windows, slept, clock };
+	return { deps, uploads, transcripts, asked, windows, slept, clock };
 }
 
 /** A merged PR older than any window, which later PRs name as a culprit. */
@@ -259,6 +274,99 @@ test("the sender posts with the token quest login stored", async () => {
 	const { deps, uploads } = sender(env, 200, [session("s1", "quest/m0/a")]);
 	await sendPass(deps);
 	expect(uploads.map((upload) => upload.token)).toEqual(["Bearer issued-1"]);
+});
+
+/** A session's transcript file holding `text`. */
+function transcriptFile(text: string): string {
+	const path = join(tempDir(), "t.jsonl");
+	writeFileSync(path, text);
+	return path;
+}
+
+test("an opted-in session's transcript is uploaded, sub-agents' too, once until it changes", async () => {
+	const env = home();
+	saveLogin(URL_, { token: "secret", transcripts: true }, env);
+	const root = checkout();
+	const parent = transcriptFile("parent\n");
+	const sub = transcriptFile("sub\n");
+	const sessions = [
+		session("s1", "quest/m0/a", { files: [parent] }),
+		session("sub/1", "quest/m0/a", { parent: "s1", files: [sub] }),
+		// Not queued nor a sub-agent of one queued, so neither its record nor its transcript is sent.
+		session("other", "quest/m0/a", { files: [transcriptFile("other\n")] }),
+	];
+	const { deps, transcripts } = sender(env, 200, sessions);
+	queue(stopped(root), env);
+	await sendPass(deps);
+	expect(transcripts).toEqual([
+		{ path: "/transcripts/claude/s1", token: "Bearer secret", text: "parent\n" },
+		{ path: "/transcripts/claude/sub%2F1", token: "Bearer secret", text: "sub\n" },
+	]);
+	// The session stops again unchanged: its record is resent, its transcript is not.
+	queue(stopped(root), env);
+	await sendPass(deps);
+	expect(transcripts).toHaveLength(2);
+	// Once it grows, it is sent again whole.
+	writeFileSync(parent, "parent\nmore\n");
+	queue(stopped(root), env);
+	await sendPass(deps);
+	expect(transcripts.slice(2)).toEqual([
+		{ path: "/transcripts/claude/s1", token: "Bearer secret", text: "parent\nmore\n" },
+	]);
+});
+
+test("an opted-out session's transcript is not uploaded", async () => {
+	const env = home();
+	const root = checkout();
+	const { deps, uploads, transcripts } = sender(env, 200, [
+		session("s1", "quest/m0/a", { files: [transcriptFile("parent\n")] }),
+	]);
+	queue(stopped(root), env);
+	await sendPass(deps);
+	expect(uploads).toHaveLength(1);
+	expect(transcripts).toEqual([]);
+});
+
+test("a transcript Kixel Quest refuses with 403 stops uploads until a new sign-in, records still sent", async () => {
+	const env = home();
+	saveLogin(URL_, { token: "secret", transcripts: true }, env);
+	const root = checkout();
+	const sessions = [session("s1", "quest/m0/a", { files: [transcriptFile("parent\n")] })];
+	const refused = sender(env, 200, sessions, () => {}, [], ["acme/proj"], 403);
+	queue(stopped(root), env);
+	expect(await sendPass(refused.deps)).toEqual([
+		{ endpoint: ENDPOINT, repository: "acme/proj", records: 1, breakages: 0, refused: false },
+	]);
+	expect(refused.transcripts).toHaveLength(1);
+	expect(pending(env)).toEqual([]);
+	expect(queue(stopped(root), env).notices).toEqual([expect.stringContaining("uploads none until `quest login`")]);
+	await sendPass(refused.deps);
+	expect(refused.uploads).toHaveLength(2);
+	expect(refused.transcripts).toHaveLength(1);
+	// Signing in again, agreeing, issues a new token, which uploads again.
+	saveLogin(URL_, { token: "renewed", transcripts: true }, env);
+	const renewed = sender(env, 200, sessions);
+	queue(stopped(root), env);
+	await sendPass(renewed.deps);
+	expect(renewed.transcripts.map((t) => t.token)).toEqual(["Bearer renewed"]);
+});
+
+test("a transcript upload that fails keeps the session queued, records and all", async () => {
+	const env = home();
+	saveLogin(URL_, { token: "secret", transcripts: true }, env);
+	const root = checkout();
+	const { deps } = sender(
+		env,
+		200,
+		[session("s1", "quest/m0/a", { files: [transcriptFile("parent\n")] })],
+		() => {},
+		[],
+		["acme/proj"],
+		500,
+	);
+	queue(stopped(root), env);
+	await expect(sendPass(deps)).rejects.toThrow("/transcripts/claude/s1 answered 500");
+	expect(pending(env)).toHaveLength(1);
 });
 
 test("a session `quest review` queued is sent on the PR it recorded on, as the role it played", async () => {

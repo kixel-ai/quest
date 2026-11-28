@@ -687,8 +687,14 @@ signed git in to https://kixel.quest's repositories: credential.https://kixel.qu
 
 Kixel Quest issues the host a token named after its hostname, which `quest`
 keeps in `$XDG_CONFIG_HOME/quest/login.json` (`~/.config`), readable only by
-the user, with the answer about transcripts, where only a `y` or `yes` agrees;
-the record sender uploads no transcripts yet.
+the user, with the answer about transcripts, where only a `y` or `yes` agrees.
+After agreeing, the record sender uploads each session's transcript,
+sub-agents' included, gzipped as the harness wrote it, to
+`PUT /transcripts/<harness>/<session>` once its record is stored, and again
+only once its files change; one over 100 MiB gzipped is skipped and said.
+Signing in again and answering no stops uploads, and so does Kixel Quest
+answering 403, as after turning transcripts off on its Tokens page, until the
+next `quest login`.
 Signing in again replaces the host's token.
 `quest login` also signs git in to the repositories Kixel Quest hosts, as
 `gh auth setup-git` does for GitHub: it writes two `credential.<url>/.helper`
@@ -2563,7 +2569,8 @@ latest upload, since one sender sends a session's uploads in order. The type is
 - `split` is where the rest of its time went, as the next section describes;
   null until every step is labeled, and for a session on another host.
 
-The record holds no prompt, reply, or transcript text: skills and questions
+The record holds no prompt, reply, or transcript text, which only a
+[transcript upload](#read-through-kixel-quest) the person agreed to sends: skills and questions
 are read from the transcript on this host, and only their names and times
 leave it. The split's notes are lines a model wrote, told to name no one and
 quote no message.
