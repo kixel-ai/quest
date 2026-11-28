@@ -20,6 +20,7 @@ import { fileURLToPath } from "node:url";
 
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
+import { checkFixers, stopFixers, track } from "./fixers";
 import { ACTIONS_APP, type Pull, type World, fakeGitHub } from "./github";
 import { authenticatedRead, gitAuthentication } from "../src/cli/land-git";
 import {
@@ -80,6 +81,7 @@ const SQUASH: Target = { method: "squash" };
 const MERGE: Target = { method: "merge" };
 
 const PATH = process.env.PATH;
+afterEach(checkFixers);
 /** Each directory `quest` ran in, one per line. */
 let ran = "";
 beforeEach(() => {
@@ -1179,7 +1181,7 @@ ${options.raw ? `exec '${agent}' "$@"` : options.pipe ? `quest land fix --agent 
 	);
 	const fix: FixContext = {
 		root: queue.root,
-		fixer: options.missing ? join(tools, "missing") : wrapper,
+		fixer: track(options.missing ? join(tools, "missing") : wrapper),
 		jobs: 1,
 		effort: "medium",
 		tags: [],
@@ -1256,7 +1258,11 @@ describe.skipIf(process.platform === "win32")("asynchronous land fixer", () => {
 		expect(fixture.pull.landing).toBe(false);
 		expect(fixture.forge.comment(1)).toContain("fixer timed out");
 		fixture.finished.cancel();
+		// The watcher's timeout signals only a fixer it identified from /proc, which macOS lacks.
+		stopFixers();
 	}
+	// Telling a daemon restart from a crash reads process identities from /proc, so only Linux notes one.
+	const restarted = process.platform === "linux" ? "; the daemon restarted while it ran" : "";
 	const editJob = (state: string, change: (job: Record<string, unknown>) => void) => {
 		const path = join(
 			state,
@@ -1330,7 +1336,7 @@ ${requeueScript}`);
 		writeFileSync(join(fixture.queue.state, `${fixture.jobs()[0]}.error`), "launcher connection closed\n");
 		expect(await fixture.collect()).toEqual(["handback 1"]);
 		expect(fixture.forge.comment(1)).toContain(
-			"fixer stopped by SIGTERM (exit 143); the daemon restarted while it ran; run /quest-iterate. Recommendation: run /quest-iterate",
+			`fixer stopped by SIGTERM (exit 143)${restarted}; run /quest-iterate. Recommendation: run /quest-iterate`,
 		);
 	});
 	test("a crash with no error from its wrapper sends the PR to /quest-iterate", async () => {
@@ -1376,7 +1382,7 @@ ${requeueScript}`);
 		});
 		expect(await fixture.collect()).toEqual(["handback 1"]);
 		expect(fixture.forge.comment(1)).toContain(
-			"fixer stopped without recording an exit status; the daemon restarted while it ran",
+			`fixer stopped without recording an exit status${restarted}`,
 		);
 		writeFileSync(fixture.fifo, "continue\n");
 		await fixture.finished;
@@ -2755,7 +2761,7 @@ describe.skipIf(process.platform === "win32")("the watcher's own queue", () => {
 		);
 		const fix: FixContext = {
 			root: queue.root,
-			fixer: wrapper,
+			fixer: track(wrapper),
 			jobs: 1,
 			effort: "medium",
 			tags: [],
@@ -2790,7 +2796,7 @@ describe.skipIf(process.platform === "win32")("the watcher's own queue", () => {
 		);
 		const fix: FixContext = {
 			root: queue.root,
-			fixer: wrapper,
+			fixer: track(wrapper),
 			jobs: 1,
 			effort: "medium",
 			branches: [],
