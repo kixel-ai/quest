@@ -163,6 +163,8 @@ export interface History {
 	pick: string;
 	requeued?: string;
 	head?: string;
+	/** The head an `unreviewed` handback paused the pick at: any enqueue of it after its review continues the pick. */
+	paused?: string;
 	rounds: Round[];
 }
 function save(path: string, data: unknown): void {
@@ -221,9 +223,13 @@ export function carriedOf(state: string, pulls: ObjectValue[]): Map<number, Carr
 	);
 }
 
-/** Record `round` in `record`, replacing the same job's earlier one, and save it as PR `number`'s history. */
+/**
+ * Record `round` in `record`, replacing the same job's earlier one, and save it as PR `number`'s history.
+ * A new round resumes a paused pick.
+ */
 export function saveRound(state: string, number: number, record: History, round: Round): History {
-	const next = { ...record, rounds: [...record.rounds.filter((item) => item.job !== round.job), round] };
+	const { paused: _, ...rest } = record;
+	const next = { ...rest, rounds: [...record.rounds.filter((item) => item.job !== round.job), round] };
 	saveCarry(state, number, record.pick, round);
 	save(historyPath(state, number), next);
 	return next;

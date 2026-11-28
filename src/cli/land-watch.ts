@@ -232,7 +232,7 @@ async function removalsOf(github: GitHub, pull: ObjectValue, since: string): Pro
  * workflow enqueues Dependabot's PRs with its token, except one continuing the watcher's own pick: an
  * App enqueue since that pick began, of a head the watcher put back in the queue for it
  * (`requeuedHeads`), which is the watcher's re-enqueue, GitHub's auto-merge of it, or such a workflow
- * picking the fixer's push.
+ * picking the fixer's push, or anyone's enqueue of the head an `unreviewed` handback paused the pick at.
  */
 async function pickOf(
 	github: GitHub,
@@ -240,7 +240,7 @@ async function pickOf(
 	removal: ObjectValue,
 	head: string,
 	app: string,
-	own: { pick: string; heads: string[] } | undefined,
+	own: { pick: string; heads: string[]; paused?: string } | undefined,
 ): Promise<{ pick: QueuePick; queued?: string }> {
 	const at = string(removal.createdAt);
 	const data = await github.graphql(ENQUEUES, { id });
@@ -248,8 +248,14 @@ async function pickOf(
 		(node) => typeof node.createdAt === "string" && node.createdAt <= at,
 	);
 	const continues = own !== undefined && own.heads.includes(head);
+	// A pick paused for a review of `head` continues on anyone's enqueue of it.
 	const picks = enqueues.filter(
-		(node) => !(continues && account(login(node.actor)) === app && string(node.createdAt) > own.pick),
+		(node) =>
+			!(
+				continues &&
+				(account(login(node.actor)) === app || own.paused === head) &&
+				string(node.createdAt) > own.pick
+			),
 	);
 	const writer = picks.at(-1);
 	const queued = enqueues.at(-1)?.createdAt as string | undefined;
