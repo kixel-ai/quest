@@ -14,3 +14,28 @@ bun run test
 bun run build
 bun scripts/lifecycle-check.mjs dist/quest.js dev
 """
+
+# TEMPORARY smoke tasks for validating platform.yml; reverted before review.
+[tasks.smoke-macos]
+tier = "nightly"
+os = ["macos"]
+run = """
+nix --version
+mkdir -p .tmp
+printf '<testsuites><testsuite name="smoke" tests="1"><testcase name="macos"/></testsuite></testsuites>\\n' > .tmp/smoke-macos.xml
+printf '{"smoke": 1}\\n' > .tmp/smoke-macos.json
+"""
+junit = ".tmp/smoke-macos.xml"
+metrics = ".tmp/smoke-macos.json"
+
+[tasks.smoke-windows]
+tier = "nightly"
+nix = false
+os = ["windows"]
+run = """
+mkdir -p .tmp
+printf '<testsuites><testsuite name="smoke" tests="1"><testcase name="windows"/></testsuite></testsuites>\\n' > .tmp/smoke-windows.xml
+printf '{"smoke": 1}\\n' > .tmp/smoke-windows.json
+"""
+junit = ".tmp/smoke-windows.xml"
+metrics = ".tmp/smoke-windows.json"
