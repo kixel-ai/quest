@@ -225,7 +225,8 @@ test("a body file is read only for a command alone on its line", () => {
 	writeFileSync(join(cwd, "sub", "dash.md"), `Body ${DASH}\n`);
 	expect(bash("gh pr comment 5 --body-file good.md")).toEqual([]);
 	expect(bash("gh pr comment 5 --body-file bare.md")).toEqual([RULES.footer]);
-	expect(bash(`gh pr comment 5 --body-file ${join(cwd, "bare.md")}`)).toEqual([RULES.footer]);
+	// Backslashes in an unquoted word escape the next character, even in Git Bash on Windows.
+	expect(bash(`gh pr comment 5 --body-file ${join(cwd, "bare.md").replaceAll("\\", "/")}`)).toEqual([RULES.footer]);
 	expect(bash("gh pr comment 5 -Fbare.md")).toEqual([RULES.footer]);
 	expect(bash("gh pr comment 5 --body-file - < bare.md")).toEqual([RULES.footer]);
 	expect(bash("gh api repos/o/r/issues/5/comments -F body=@bare.md")).toEqual([RULES.footer]);

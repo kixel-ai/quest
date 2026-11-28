@@ -36,7 +36,7 @@ beforeEach(() => {
 /** Where a claim from `work`, on the default branch, puts the worktree for `BRANCH`. */
 function worktreeOf(work: string, branch = BRANCH): string {
 	const hash = createHash("sha256").update(branch).digest("hex").slice(0, 8);
-	return join(realpathSync(work), ".worktrees", `${branch.replaceAll("/", "-").slice(0, 100)}-${hash}`);
+	return join(realpathSync.native(work), ".worktrees", `${branch.replaceAll("/", "-").slice(0, 100)}-${hash}`);
 }
 
 function git(cwd: string, ...args: string[]): string {
@@ -359,7 +359,7 @@ describe("start on GitHub", () => {
 		const warnings: string[] = [];
 		const started = await start(work, new FakeGitHub(), warnings);
 		expect(warnings).toEqual([]);
-		expect(started.worktree).toBe(realpathSync(elsewhere));
+		expect(started.worktree).toBe(realpathSync.native(elsewhere));
 		expect(git(elsewhere, "rev-parse", "HEAD")).toBe(started.sha);
 		expect(existsSync(join(work, ".worktrees"))).toBe(false);
 	});
@@ -407,6 +407,8 @@ describe("start on GitHub", () => {
 	test("a branch too long for a filename still gets a worktree, named by its hash", async () => {
 		const bare = upstream();
 		const work = clone(UPSTREAM, { [UPSTREAM]: bare });
+		// The name stays under Windows' 255-character limit on a name, but its path passes MAX_PATH.
+		git(work, "config", "core.longpaths", "true");
 		const long = "a".repeat(245);
 		land(work, {
 			"quest/m0/epic/README.md": `${EPIC_README}- [Long](/quest/m0/epic/${long}.md)\n`,
