@@ -42,11 +42,17 @@ function groups(tracked: string[]): { leader: number; running: boolean }[] {
 			entry.args.includes(" quest-fixer ") &&
 			tracked.some((wrapper) => entry.args.includes(` ${wrapper} `)),
 	);
-	// Once the wrapper returns, the leader only records its status and exits, so it alone is no leak.
-	return leaders.map((leader) => ({
-		leader: leader.pid,
-		running: processes.some((entry) => entry.group === leader.pid && entry.pid !== leader.pid),
-	}));
+	// Once the wrapper returns, the leader only records its status with `mv` and exits, so neither is a leak.
+	return leaders.map((leader) => {
+		const exit = leader.args.split(" quest-fixer ")[1].split(" ")[0];
+		return {
+			leader: leader.pid,
+			running: processes.some(
+				(entry) =>
+					entry.group === leader.pid && entry.pid !== leader.pid && entry.args !== `mv ${exit}.new ${exit}`,
+			),
+		};
+	});
 }
 
 /** Kill the process group of every running fixer of one of `tracked`, returning those still running a wrapper. */
@@ -56,7 +62,13 @@ function stop(tracked: string[]): number[] {
 		try {
 			process.kill(-leader, "SIGKILL");
 		} catch (error) {
-			if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
+			const code = (error as NodeJS.ErrnoException).code;
+			// macOS refuses to signal a group whose every member is a zombie.
+			const exited =
+				code === "EPERM" &&
+				process.platform === "darwin" &&
+				!groups(tracked).some((group) => group.leader === leader);
+			if (code !== "ESRCH" && !exited) throw error;
 		}
 	return found.filter((group) => group.running).map((group) => group.leader);
 }
@@ -81,6 +93,23 @@ function registered(registry: string): string[] {
 	);
 }
 
+/**
+ * Kill the run's workers, this process's children, so none launches a fixer it tracked after the
+ * signal's sweep: a killed worker runs no more code.
+ */
+function killWorkers(): void {
+	if (process.platform === "win32") return;
+	for (const line of execFileSync("ps", ["-A", "-o", "pid=,ppid="], { encoding: "utf8" }).split("\n")) {
+		const [pid, parent] = line.trim().split(/\s+/).map(Number);
+		if (parent !== process.pid) continue;
+		try {
+			process.kill(pid, "SIGKILL");
+		} catch (error) {
+			if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
+		}
+	}
+}
+
 /** Vitest's global setup: gives the workers a registry, and stops every fixer they tracked when the run ends or is signalled. */
 export default function setup(): () => void {
 	const registry = mkdtempSync(join(tmpdir(), "quest-fixers-"));
@@ -97,6 +126,7 @@ export default function setup(): () => void {
 	for (const signal of ["SIGHUP", "SIGINT", "SIGTERM"] as const)
 		process.once(signal, () => {
 			try {
+				killWorkers();
 				sweep();
 			} catch (error) {
 				process.stderr.write(`cannot stop the test run's land fixers: ${error}\n`);
