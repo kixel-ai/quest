@@ -44,11 +44,16 @@ Decided 2026-11-26 (maintainer, `/quest-plan`):
   confirmation (rejected: closing too; keeping pivots and drops for the
   maintainer, as decided 2026-11-26; always stop and ask; split behavior
   between `/quest-afk` and interactive `/quest-run`). Why: of 210 `next decide`
-  stops in fedora's transcripts from 2026-11-25 to 11-28, about 30 reached the
-  maintainer as a prompt. 124 were handed back under `## Waiting` by
-  `/quest-run`'s dispatched threads, which an afk coordinator answers itself;
-  37 ran another round anyway and 28 ran `--accept` without a pick, many under
-  `/quest-afk`, whose "take your recommendation" covers the stop.
+  stops in the busiest agent host's transcripts from 2026-11-25 to 11-28, 124
+  were handed back under `## Waiting` by `/quest-run`'s dispatched threads,
+  which an afk coordinator answers itself; 37 ran another round anyway and 28
+  ran `--accept` without a pick, many under `/quest-afk`, whose "take your
+  recommendation" covers the stop; the other 21 asked or stopped. About 30 of
+  the maintainer's prompts in those days were checkpoints, counting the
+  handbacks a coordinator relayed. An accept the advisor recommended is
+  recorded as the advisor's, such as a reason prefixed `advisor:` or its own
+  field in the posted run, so `quest usage` and the land gate never read it as
+  the maintainer's.
   [Advise stop](/quest/m0/advise-stop.md) makes `quest review` enforce it, and
   [advise replay](/quest/m0/advise-replay.md) measures whether the advice helps.
 - Model order and harnesses? ✅ `gemini-4-neon` (`high`) via `agy` →
@@ -65,7 +70,8 @@ Decided 2026-11-26 (maintainer, `/quest-plan`):
 
 The maintainer authorized the edits this needs in `assets/` (`assets/skills/advise.md`,
 `assets/skills/review.md`, `assets/skills/iterate.md`, `assets/skills/run.md`,
-`assets/AGENTS.md`) and `README.md`.
+`assets/AGENTS.md`) and `README.md`, and on 2026-11-28 `assets/skills/afk.md`,
+which must stop taking its own recommendation at `next decide`.
 
 Recommended, for the implementer to confirm:
 

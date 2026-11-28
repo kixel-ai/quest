@@ -19,4 +19,10 @@ Agent's choices:
 - Extend `culprits()` in `src/cli/breakage.ts`, which [sessions](/quest/m0/telemetry/sessions.md) also changes to keep a reviewer's name; whichever lands second rebases onto the other's regex.
 - Kixel Quest's refusal waits on this wording, as its finder refusal waits on sessions' wording; the PR adds that as a follow-up for kixel-ai/kixel.quest.
 
-Tests: `culprits()` reads a severity with and without a finder and an incident around it, and a line without one still parses, with severity null.
+- Read the culprit's risk tier from its posted review runs, since a PR reviewed after [kixel-ai/quest#931](https://github.com/kixel-ai/quest/pull/931) has no body record and `culpritOf()` gives it a null tier today.
+
+Tests: `culprits()` reads a severity with and without a finder and an incident around it, and a line without one still parses, with severity null; a breakage whose culprit's review exists only as posted runs reports its tier beside its severity.
+
+## Required
+
+- [Usage reviews](/quest/m0/telemetry/usage-reviews.md) - `quest usage` reads posted review runs, which hold the culprit's tier

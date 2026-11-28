@@ -17,7 +17,9 @@ Decided 2026-11-23 (maintainer, `/quest-run`): "please stop doing evals",
 and drop only the quests' eval steps; drop only `AGENTS.md`'s eval rule).
 Reviewer routing is judged from real PRs instead: `quest usage`'s per-reviewer
 findings, share fixed, and cost, and the `## Caused by` escapes it lists
-against each culprit's reviewers.
+against each culprit's reviewers. Excepted 2026-11-28 (maintainer,
+`/quest-plan`) for one replay of the stuck-agent advisor on merged PRs:
+[advise replay](/quest/m0/advise-replay.md).
 
 Decided 2026-11-22 (maintainer, `/quest-plan` in
 [kixel-ai/kixel.quest#104](https://github.com/kixel-ai/kixel.quest/pull/104)),
@@ -45,7 +47,10 @@ when low, Sol when medium, and Sol and Opus when high, each at its size's
 effort; Opus writes every size above XS, S's Sonnet arm aside while the
 writer A/B runs; and no rung, shadow, or vendor
 quorum runs. A high head waits for both: while either cannot run, its round
-fails as an outage (rejected: review with the one left).
+fails as an outage (rejected: review with the one left). Excepted 2026-11-28
+(maintainer, `/quest-plan`): half of rung 3-4 PRs run Sol alone while the
+[second-seat ablation](/quest/m0/second-seat-ablation.md) measures what the
+second seat buys.
 Narrowed 2026-11-25 (maintainer, closing
 [kixel-ai/quest#898](https://github.com/kixel-ai/quest/pull/898) and
 [kixel-ai/quest#891](https://github.com/kixel-ai/quest/pull/891)): ✅ "keep it

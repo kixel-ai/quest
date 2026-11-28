@@ -15,10 +15,11 @@ Decided 2026-11-28 (maintainer, `/quest-plan` of the agent audit's follow-ups), 
 
 Agent's choices, for the implementer to revisit:
 
-- Stuck means four or more review rounds on the branch, or a `next decide` stop, among PRs merged since 2026-11-01 in the eight repositories the 2026-11-28 audit read ([routing evidence](/quest/m0/routing-evidence/README.md)). Find the round-3 head in the clones' saved rounds under `.git/quest/review/` and fetch it from `refs/pull/<n>/head`'s history; count and replace a PR whose head is gone.
-- Run `quest advise` read-only on that head with what the agent had then: the quest's Goal and Plan as of that head, the PR body, and rounds 1-3. Show it nothing later.
+- Stuck means four or more review rounds on the branch, or a `next decide` stop, among PRs merged since 2026-11-01 in the eight repositories the 2026-11-28 audit read ([routing evidence](/quest/m0/routing-evidence/README.md)). Take the branch's third run's head from the review runs posted to Kixel Quest, each of which names its head, and fall back to the clones' saved rounds under `.git/quest/review/` only where no run was posted: a saved session keeps only its own rounds, so the local state loses the round-3 head of exactly the PRs whose sessions restarted. Fetch the head from `refs/pull/<n>/head`'s history, and count and replace a PR whose head is gone, reporting how many by repository.
+- Run `quest advise` read-only on that head with a snapshot of what the agent had then: the quest's Goal and Plan as of that head, the PR body as of the third run (GitHub keeps a body's edit history), and rounds 1-3 only. Keep the current PR body and any later saved round out of its reach, and count each PR whose snapshot cannot be recovered.
+- Pin the advisor with `--harness agy --model gemini-4-neon --effort high` and fail rather than fall through, since the maintainer asked about Neon; price each call from the model its record names.
 - Judge with Opus high, which reads the advice, the later rounds, the merged diff, and any later fix naming the PR: would it have saved rounds (it names the direction that eventually converged), prevented an escape (it names the cause of a later fix), changed nothing, or misled (it points away from what merged, with no later fix showing the merged approach wrong). Check 20 judgments by hand and report the agreement.
-- Price Neon at its list rate ($3 per million input tokens, $15 per million output, $0.15 per million cached), since token-max reads no `agy` transcripts.
+- Neon's list rate is $3 per million input tokens, $15 per million output, and $0.15 per million cached; token-max reads no `agy` transcripts, so price from the token counts advise records.
 - Record the readout in this quest's PR and carry its numbers into the [trigger A/B](/quest/m1/advise-trigger.md)'s Plan.
 
 ## Required

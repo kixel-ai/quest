@@ -236,8 +236,8 @@ three hosts' saved review rounds:
 Agent audit of 2026-11-28, from `quest usage --since 2026-11-01 --json`
 over moq-dev/moq, moq-dev/moq.pro, kixel-ai/quest, kixel-ai/kixel.quest,
 kixel-ai/dotfiles, kixel-ai/kixel.ai, kixel-ai/token-max, and
-moq-dev/hang.live, with fedora's, nixos's, desktop's, and mini's sessions
-(kixtop's token-max refused the SSH audit). 5,038 non-bot PRs merged
+moq-dev/hang.live, with the sessions of every maintainer host but the laptop,
+whose token-max refused the SSH audit. 5,038 non-bot PRs merged
 2026-11-01 to 11-28. An escape is a later PR naming it under `## Caused by`,
 opened within 7 days of its merge, counted over PRs merged 11-09 to 11-21:
 detection lag was a median 6 days and a 75th percentile of 25, and the
