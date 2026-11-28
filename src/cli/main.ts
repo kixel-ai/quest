@@ -101,6 +101,7 @@ import {
 	ReviewOutageError,
 	type Started,
 	ReviewerUnavailableError,
+	UnansweredError,
 	ask,
 	review,
 	nextStep,
@@ -2378,6 +2379,11 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 						if (unavailable(error)) {
 							out.stderr(`error: ${(error as Error).message}\n`);
 							return 3;
+						}
+						// Every advisor ran but none answered usably: a failure, not a usage error.
+						if (error instanceof UnansweredError) {
+							warn(error.message);
+							return 1;
 						}
 						return reviewFailure(error);
 					},

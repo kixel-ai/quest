@@ -252,7 +252,7 @@ export function advisePrompt(input: {
 			"goes past the request's limit below, and false when there is none. Do not edit code.",
 		`The change is \`git diff ${input.mergeBase}..${input.head}\`, branch ${input.branch} against ${input.base.ref} at ${input.base.sha}.`,
 		`## What the agent tried and where it is stuck\n\n${input.question}`,
-		`## The request's limit\n\n${input.limit ?? "The request sets no limit beyond the quest's Goal."}`,
+		`## The request's limit\n\n${input.limit ?? "None: the request sets no limit, so `beyond` is false."}`,
 		input.quest
 			? `## Quest ${input.quest.path}\n\n${input.quest.text}`
 			: "## Quest\n\nNo quest file names this branch.",
@@ -274,7 +274,7 @@ function shown(root: string, path: string, refs: string[]): string | null {
 	return null;
 }
 
-/** The quest file a branch names, from its head, else the base, or null. */
+/** The quest file a branch names, as the base assigned it, else as the head adds it, or null. */
 function questText(root: string, branch: string, refs: string[]): { path: string; text: string } | null {
 	if (!branch.startsWith("quest/")) return null;
 	const path = branchQuest(branch);
@@ -297,7 +297,11 @@ export interface Advised {
  */
 export async function advise(options: AdviseOptions, deps: AdviseDependencies): Promise<Advised> {
 	const now = deps.now ?? Date.now;
+	// Native Windows installs the advisor CLIs as batch shims, which `run` cannot start without a shell.
+	if (process.platform === "win32")
+		throw new ReviewInputError("quest advise does not support native Windows yet; use WSL");
 	const question = options.question.trim();
+	const limit = options.limit?.trim() || undefined;
 	if (question === "") throw new ReviewInputError("say what you tried and where you are stuck");
 	const candidates = advisors(options);
 	requireAttrSource();
@@ -325,11 +329,11 @@ export async function advise(options: AdviseOptions, deps: AdviseDependencies): 
 		mergeBase,
 		head,
 		question,
-		quest: questText(root, branch, [head, base.sha]),
+		quest: questText(root, branch, [base.sha, head]),
 		pull,
 		rounds: savedRounds(common, branch),
 		rules: shown(root, "REVIEW.md", [base.sha]),
-		...(options.limit !== undefined && { limit: options.limit }),
+		...(limit !== undefined && { limit }),
 	});
 	// The reply's schema is saved apart from the calls, which `savedAdvice` reads every file of.
 	const dir = join(common, "quest", "advise", "schema");
@@ -353,7 +357,8 @@ export async function advise(options: AdviseOptions, deps: AdviseDependencies): 
 			parse: parseAdvice,
 		});
 	} finally {
-		const end = now();
+		// A clock stepped back mid-call would otherwise end the record before it starts, which the store refuses.
+		const end = Math.max(start, now());
 		const sessions: AdviseSession[] = spent.flatMap(({ entry, usage, session }) =>
 			session === undefined
 				? []
@@ -366,7 +371,7 @@ export async function advise(options: AdviseOptions, deps: AdviseDependencies): 
 				branch,
 				pull: pull?.url ?? null,
 				head,
-				limit: options.limit ?? null,
+				limit: limit ?? null,
 				sessions,
 				advice: answer?.value ?? null,
 			};

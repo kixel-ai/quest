@@ -20,7 +20,7 @@ import {
 import { ADVISORS } from "../src/cli/models";
 import { ReviewInputError, UnansweredError } from "../src/cli/review";
 import { type Pull, sessionRecords } from "../src/cli/usage";
-import { type Setup, agyFakes, fakes, quest, setup } from "./review-fakes";
+import { type Setup, agyFakes, fakes, git, quest, setup, write } from "./review-fakes";
 
 const ADVICE: Advice = {
 	approaches: [
@@ -205,6 +205,26 @@ agyFakes("agy answers first, read-only from a private export, and its tokens are
 	]);
 });
 
+agyFakes("the advisor reads the quest as the base assigned it, not as the branch rewrote it", async () => {
+	const s = setup();
+	git(s.repo, "checkout", "-q", "main");
+	write(s.repo, "quest/m0/a.md", "# [L] BASE-QUEST goal\n");
+	git(s.repo, "add", ".");
+	git(s.repo, "commit", "-qm", "quest");
+	git(s.repo, "push", "-q", "origin", "main");
+	git(s.repo, "checkout", "-qb", "quest/m0/a");
+	write(s.repo, "quest/m0/a.md", "# [S] HEAD-QUEST remainder\n");
+	git(s.repo, "commit", "-qam", "rewrite");
+	vi.stubEnv("FAKE_ASK", JSON.stringify(ADVICE));
+	// A blank limit is no limit.
+	const { advised } = await asked(s, { limit: " " });
+	expect(advised.call.limit).toBeNull();
+	const [turn] = s.calls().filter((call) => call.argv[0] !== "models");
+	expect(turn!.stdin).toContain("BASE-QUEST goal");
+	expect(turn!.stdin).not.toContain("HEAD-QUEST");
+	expect(turn!.stdin).toContain("None: the request sets no limit");
+});
+
 agyFakes("a second call on a branch refuses before any advisor runs, unless forced", async () => {
 	const s = setup();
 	vi.stubEnv("FAKE_ASK", JSON.stringify(ADVICE));
@@ -262,6 +282,8 @@ agyFakes("an unusable reply passes the question on, and only answered calls coun
 	const path = adviseFile(join(s.repo, ".git"), "feature");
 	const state = JSON.parse(readFileSync(path, "utf8"));
 	expect(state.calls.map((call: { advice: unknown }) => call.advice)).toEqual([null]);
+	// Every advisor ran, so it is a failure, not the usage error a corrupt state file is below.
+	expect((await quest("--root", s.repo, "advise", "stuck")).code).toBe(1);
 	vi.stubEnv("FAKE_ASK", JSON.stringify(ADVICE));
 	const run = await quest("--root", s.repo, "advise", "stuck", "again");
 	expect(run.code).toBe(0);

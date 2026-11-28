@@ -1319,6 +1319,7 @@ export function agyTurn(context: Context, prompt: string, flags: string[]): Turn
 			"--no-ext-diff",
 			"--no-textconv",
 			"--no-color",
+			"--ignore-submodules=none",
 			...range.split(" "),
 		]);
 	// Created last, since a turn that is never run leaves its directory behind.
