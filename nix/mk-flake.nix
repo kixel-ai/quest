@@ -45,6 +45,50 @@ let
           programs.nixfmt.enable = lib.mkDefault true;
         }).config.build.wrapper;
       shell = own.shell or { };
+      # Everything the repository gave the shell, which nothing else names: its packages, environment
+      # attributes, hook, and whatever Nix files they import.
+      inner = pkgs.mkShell (
+        shell
+        // {
+          packages = [
+            questPackage
+            treefmt
+          ]
+          ++ shell.packages or [ ];
+          # Names the repository's root, the nearest directory up that holds flake.nix, so `quest run` and
+          # `quest fmt` run here without entering the shell again: only when its flake.nix and flake.lock
+          # are the ones this shell was built from, so `nix develop ../other` names no checkout. It checks
+          # them once, as the shell is entered; `questShell` below is what `quest run` compares afterwards.
+          shellHook = ''
+            QUEST_DEV_SHELL=$PWD
+            while [ ! -f "$QUEST_DEV_SHELL/flake.nix" ] && [ "$QUEST_DEV_SHELL" != / ]; do
+              QUEST_DEV_SHELL=$(dirname "$QUEST_DEV_SHELL")
+            done
+            if [ -f "$QUEST_DEV_SHELL/flake.nix" ] && [ "$(
+              {
+                cat "$QUEST_DEV_SHELL/flake.nix"
+                [ ! -f "$QUEST_DEV_SHELL/flake.lock" ] || cat "$QUEST_DEV_SHELL/flake.lock"
+              } | sha256sum
+            )" = "${flakeHash}  -" ]; then
+              export QUEST_DEV_SHELL
+            else
+              unset QUEST_DEV_SHELL
+            fi
+          ''
+          + shell.shellHook or "";
+        }
+      );
+      # The shell's identity is `inner`'s derivation, which changes with any of its inputs. The shell exports
+      # it as `QUEST_DEV_SHELL_ID` and carries it as `passthru.questShell`, which leaves its derivation alone,
+      # so `quest run` finds out whether an entered shell is the one `nix develop` enters now.
+      default = inner.overrideAttrs (old: {
+        passthru = old.passthru or { } // {
+          questShell = inner.drvPath;
+        };
+        shellHook = old.shellHook + ''
+          export QUEST_DEV_SHELL_ID=${inner.drvPath}
+        '';
+      });
     in
     removeAttrs own [
       "quest"
@@ -52,36 +96,7 @@ let
     ]
     // {
       devShells = own.devShells or { } // {
-        default = pkgs.mkShell (
-          shell
-          // {
-            packages = [
-              questPackage
-              treefmt
-            ]
-            ++ shell.packages or [ ];
-            # Names the repository's root, the nearest directory up that holds flake.nix, so `quest run` and
-            # `quest fmt` run here without entering the shell again: only when its flake.nix and flake.lock are
-            # the ones this shell was built from, so `nix develop ../other` names no checkout.
-            shellHook = ''
-              QUEST_DEV_SHELL=$PWD
-              while [ ! -f "$QUEST_DEV_SHELL/flake.nix" ] && [ "$QUEST_DEV_SHELL" != / ]; do
-                QUEST_DEV_SHELL=$(dirname "$QUEST_DEV_SHELL")
-              done
-              if [ -f "$QUEST_DEV_SHELL/flake.nix" ] && [ "$(
-                {
-                  cat "$QUEST_DEV_SHELL/flake.nix"
-                  [ ! -f "$QUEST_DEV_SHELL/flake.lock" ] || cat "$QUEST_DEV_SHELL/flake.lock"
-                } | sha256sum
-              )" = "${flakeHash}  -" ]; then
-                export QUEST_DEV_SHELL
-              else
-                unset QUEST_DEV_SHELL
-              fi
-            ''
-            + shell.shellHook or "";
-          }
-        );
+        inherit default;
       };
       formatter = treefmt;
       checks = {

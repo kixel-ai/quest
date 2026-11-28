@@ -291,7 +291,9 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"Each task runs its run script with bash -eo pipefail -c from the repository root, with QUEST_TIER, " +
 				"QUEST_BASE (the merge base, unless --all), and its environment table exported. A Nix task needs " +
 				"flake.nix there, a regular file; inside the repository's dev shell, where QUEST_DEV_SHELL names its " +
-				"root, it runs directly unless the run uses the cache, and otherwise through nix develop --command. " +
+				"root, it runs directly, while the run uses the cache only if QUEST_DEV_SHELL_ID, which " +
+				"quest.lib.mkFlake's shell exports, names the toolchain nix develop enters now; otherwise it runs " +
+				"through nix develop --command. " +
 				"quest and bash must be on PATH, env when a task run outside nix develop has an environment table, " +
 				"and nix outside that dev shell or while the run uses the cache.\n\n" +
 				"A task that passes must write the junit and metrics files it declares, and metrics must hold a JSON " +

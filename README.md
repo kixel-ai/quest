@@ -1622,7 +1622,9 @@ is already inside it, with no Nix evaluation, and through `nix develop
 --command` otherwise. The dev shell says it is the repository's by setting
 `QUEST_DEV_SHELL` to the repository's root, as [`quest.lib.mkFlake`'s](#share-flake-boilerplate-with-questlibmkflake) does; a
 shell without it, such as another repository's, gets `nix develop` all the
-same. Each task gets `QUEST_TIER`, `QUEST_BASE` (the merge base, unless
+same. That shell may predate an edit to the flake, which the marker, checked as
+the shell is entered, cannot tell, so while [the cache](#cached-passes) is in
+use `quest run` also needs `QUEST_DEV_SHELL_ID`, which `mkFlake`'s shell sets. Each task gets `QUEST_TIER`, `QUEST_BASE` (the merge base, unless
 `--all`), and its `environment`, exported inside the dev shell, and every line
 it prints is prefixed with its name.
 
@@ -1680,10 +1682,15 @@ to the task's `junit` and `metrics` paths and under `--report`.
 - a task declaring `metrics`, which describe the run that wrote them
 
 A task without Nix is never cached, since nothing pins the host's toolchain.
-While the cache is in use, every Nix task runs through `nix develop` even
-inside the repository's dev shell, so it runs with the toolchain the digests
-name rather than one entered before an edit to the flake. `--no-cache` runs
-every task and records nothing.
+A Nix task runs with the toolchain its digest names, so inside the
+repository's dev shell, which may predate an edit to the flake, `quest run`
+still runs it directly only if the shell is `quest.lib.mkFlake`'s and built
+from the toolchain `nix develop` enters now: the shell's `QUEST_DEV_SHELL_ID`
+must equal the identity the same `nix eval` that fingerprints it prints. It
+covers everything the repository gave the shell, so an edit to an imported Nix
+file moves it. Any other shell, or a stale one, runs each Nix task, and
+`cargo metadata`, through `nix develop`. `--no-cache` runs every task and
+records nothing.
 
 The digest a pass is recorded under covers:
 
@@ -1777,7 +1784,11 @@ It adds to what `perSystem` returns, for each of `systems` (`x86_64-linux`,
   directory up holding `flake.nix` when that `flake.nix` and its `flake.lock`
   are the ones the shell was built from, so `quest run` and `quest fmt` run
   there without entering the shell again, and a shell entered from another
-  checkout names none. `perSystem`'s `quest` replaces the `quest` package.
+  checkout names none. It checks them only as the shell is entered. It also
+  sets `QUEST_DEV_SHELL_ID` to an identity of everything `shell` holds, which
+  `quest run` compares with the identity `nix develop` would enter now before
+  it runs cached Nix tasks directly. `perSystem`'s `quest` replaces the `quest`
+  package.
 - `formatter`, the same `treefmt`, which `nix fmt` runs.
 - `checks.quest`, which runs `quest check`, `quest.toml` and `nixConfig`
   included, on the flake's source; a `checks` entry of the same name replaces
