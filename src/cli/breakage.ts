@@ -20,8 +20,8 @@ export interface Cause {
 	found: Finder | null;
 	/** The ID of the incident the fix closes, as `quest records incident` reported it. */
 	incident: string | null;
-	/** An earlier fix, closed unmerged, that this one redoes, so an escape keeps the earlier opening. */
-	replaces: number | null;
+	/** Earlier fixes, closed unmerged, that this one redoes, so an escape keeps the earlier opening. */
+	replaces: number[];
 }
 
 /**
@@ -57,20 +57,20 @@ export function culprits(body: string, repository: Repository): Cause[] {
 			number: Number(match[1]),
 			found: (by?.toLowerCase() as Finder | undefined) ?? null,
 			incident: named?.trim() || null,
-			replaces: Number(replacement.exec(replaced?.trim() ?? "")?.[1]) || null,
+			replaces: [Number(replacement.exec(replaced?.trim() ?? "")?.[1])].filter((n) => n > 0),
 		};
 		const id = JSON.stringify([cause.number, cause.incident]);
 		const kept = found.get(id);
 		if (!kept) found.set(id, cause);
-		else kept.replaces ??= cause.replaces;
+		else kept.replaces = [...new Set([...kept.replaces, ...cause.replaces])];
 	}
 	// A line naming an incident records its culprit's breakage, so the culprit's line naming none would count it twice;
-	// the culprit's first line keeps what fix it replaces.
+	// the culprit's first line keeps the fixes it replaces.
 	const named = new Set([...found.values()].filter((c) => c.incident !== null).map((c) => c.number));
 	const kept = [...found.values()].filter((c) => c.incident !== null || !named.has(c.number));
 	for (const dropped of [...found.values()].filter((c) => !kept.includes(c))) {
 		const first = kept.find((c) => c.number === dropped.number)!;
-		first.replaces ??= dropped.replaces;
+		first.replaces = [...new Set([...first.replaces, ...dropped.replaces])];
 	}
 	return kept;
 }

@@ -619,13 +619,17 @@ function escapeOpenings(pulls: Pull[], repository: Repository): Map<number, numb
 		for (const earlier of closed) {
 			if (seen.has(earlier.number)) continue;
 			const own = lines.get(earlier.number)!;
-			// An incident ID is the repository's, so it ties the fixes even when the earlier one blamed another PR.
-			const shared = cause.incident === null ? undefined : own.find((each) => each.incident === cause.incident);
+			// An incident ID is the repository's, so it ties the fixes even when the earlier one blamed another PR; only
+			// a fix opened earlier can be the one redone.
+			const shared =
+				cause.incident === null || earlier.created >= fix.created
+					? undefined
+					: own.find((each) => each.incident === cause.incident);
 			// A named replacement counts even when the earlier fix's body never named the culprit.
 			const line =
 				shared ??
-				(cause.replaces === earlier.number
-					? (own.find((each) => each.number === cause.number) ?? { ...cause, incident: null, replaces: null })
+				(cause.replaces.includes(earlier.number)
+					? (own.find((each) => each.number === cause.number) ?? { ...cause, incident: null, replaces: [] })
 					: undefined);
 			if (line) at.push(...opened(earlier, line, seen));
 		}

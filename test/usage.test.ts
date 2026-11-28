@@ -186,7 +186,7 @@ describe("causes", () => {
 			number: 7,
 			found: "canary",
 			incident: "https://alerts.example/1",
-			replaces: null,
+			replaces: [],
 		});
 		expect(
 			read(`lost a frame (found by person; replaces https://github.com/moq-dev/moq/pull/9; incident x)`),
@@ -194,31 +194,31 @@ describe("causes", () => {
 			number: 7,
 			found: "person",
 			incident: "x",
-			replaces: 9,
+			replaces: [9],
 		});
-		expect(read("lost a frame (replaces https://github.com/moq-dev/moq/pull/9)")).toMatchObject({ replaces: 9 });
+		expect(read("lost a frame (replaces https://github.com/moq-dev/moq/pull/9)")).toMatchObject({ replaces: [9] });
 		expect(read(`lost a frame (replaces [moq-dev/moq#9](https://github.com/moq-dev/moq/pull/9))`)).toMatchObject({
-			replaces: 9,
+			replaces: [9],
 		});
 		// An unreadable replacement keeps the line's other parts.
 		expect(read("lost a frame (found by queue; replaces #9; incident x)")).toEqual({
 			number: 7,
 			found: "queue",
 			incident: "x",
-			replaces: null,
+			replaces: [],
 		});
-		// A culprit's dropped line keeps the fix it replaces on the line kept.
+		// A culprit's dropped line adds the fixes it replaces to the line kept.
 		expect(
 			culprits(
 				body(
-					`- ${link(7)} - a (replaces https://github.com/moq-dev/moq/pull/9)\n- ${link(7)} - b (incident x)`,
+					`- ${link(7)} - a (replaces https://github.com/moq-dev/moq/pull/9)\n- ${link(7)} - b (replaces https://github.com/moq-dev/moq/pull/8; incident x)`,
 				),
 				repository,
 			),
-		).toEqual([{ number: 7, found: null, incident: "x", replaces: 9 }]);
+		).toEqual([{ number: 7, found: null, incident: "x", replaces: [8, 9] }]);
 		// Another repository's PR replaces nothing here.
 		expect(read("lost a frame (replaces https://github.com/moq-dev/quest/pull/9)")).toMatchObject({
-			replaces: null,
+			replaces: [],
 		});
 		expect(read("lost a frame (incident deploy 42)\r")).toMatchObject({ found: null, incident: "deploy 42" });
 		expect(read("lost a frame (found by the Queue)")).toMatchObject({ found: "queue", incident: null });
@@ -230,9 +230,9 @@ describe("causes", () => {
 			`- ${link(7)} - lost a frame (incident a)\n- ${link(7)} - again (found by person; incident b)\n- ${link(7)} - plain\n- ${link(7)} - dup (incident a)\n- ${link(8)} - other`,
 		);
 		expect(culprits(lines, repository)).toEqual([
-			{ number: 7, found: null, incident: "a", replaces: null },
-			{ number: 7, found: "person", incident: "b", replaces: null },
-			{ number: 8, found: null, incident: null, replaces: null },
+			{ number: 7, found: null, incident: "a", replaces: [] },
+			{ number: 7, found: "person", incident: "b", replaces: [] },
+			{ number: 8, found: null, incident: null, replaces: [] },
 		]);
 		expect(causes(lines, repository)).toEqual([7, 8]);
 	});
@@ -287,6 +287,14 @@ describe("escapes", () => {
 			7: true,
 			28: true,
 		});
+		// A shared incident ties back only to a fix opened earlier: a later attempt, abandoned, lends its chain nothing.
+		const later = pull(4, "closed", 12, 13, fix(5, " (replaces https://github.com/acme/proj/pull/2; incident a)"));
+		expect(judged([pull(2, "closed", 6, 7), pull(3, "merged", 9, 10, fix(1, " (incident a)")), later], 30)).toEqual(
+			{
+				7: false,
+				28: true,
+			},
+		);
 		// Abandoned, it counts for nothing, nor backdates a later fix of the same culprit for another incident.
 		expect(judged([closed], 30)).toEqual({ 7: false, 28: false });
 		expect(judged([closed, pull(3, "merged", 9, 10, fix(1, " (incident b)"))], 30)).toEqual({ 7: false, 28: true });
