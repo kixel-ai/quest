@@ -82,7 +82,7 @@ export async function unreviewedHigh(
 	const head = sha.toLowerCase();
 	const risk = await baseRisk(github, pr);
 	const statuses = await reviewStatuses(github, pr);
-	const { counted } = await countedReview(github, pr, head, statuses, { report: false, open: true });
+	const { counted } = await countedReview(github, pr, head, statuses, { report: false, merged: false });
 	if (counted?.passed && counted.attested.riskFile === riskFileId(risk?.blob ?? null)) return null;
 	const high = statusHigh(statuses) ?? (await pathHigh(github, pr, head, risk?.text ?? null));
 	return high === null ? null : `${sha} is high, since ${high}, and no quest review status covers it`;
@@ -106,8 +106,11 @@ export interface Reading {
 	 * diff, `stale`, or `unknown` where a diff cannot be compared, which is also what a refused compare gives.
 	 */
 	report: boolean;
-	/** Whether the PR is open; a merged one's merge base is no longer the one a status was bound to. */
-	open: boolean;
+	/**
+	 * Whether the PR is merged: a merge or rebase landing makes its merge base the head, so no status binds to one, and
+	 * no earlier commit's diff compares against the base, so only a status on the head counts, and any other is `unknown`.
+	 */
+	merged: boolean;
 }
 
 /**
@@ -120,7 +123,7 @@ export async function countedReview(
 	pr: PullRequest & { base: string },
 	head: string,
 	statuses: ReviewStatus[],
-	{ report, open }: Reading,
+	{ report, merged }: Reading,
 ): Promise<{ counted: Counted | null; skipped: string[] }> {
 	const skipped: string[] = [];
 	const rest: { each: ReviewStatus; known: boolean }[] = [];
@@ -136,6 +139,10 @@ export async function countedReview(
 	};
 	let diff: Promise<string | null> | undefined;
 	for (const each of statuses) {
+		if (each.oid !== head && merged) {
+			rest.push({ each, known: false });
+			continue;
+		}
 		if (each.oid !== head) {
 			diff ??= diffOf(head);
 			const own = await diff;
@@ -146,18 +153,19 @@ export async function countedReview(
 			}
 		}
 		// Only a writer's status, bound to the diff it reviewed, says anything about the head.
-		const bound = await boundStatus(github, pr, each.oid, each.status, open);
+		const bound = await boundStatus(github, pr, each.oid, each.status, !merged);
 		if (typeof bound === "string") {
 			skipped.push(bound);
 			continue;
 		}
-		const state = each.oid === head ? "current" : "diff-identical";
+		// A newer status whose diff cannot be compared may supersede this one, so it is not known to cover the head.
+		const state = rest.some((other) => !other.known) ? "unknown" : each.oid === head ? "current" : "diff-identical";
 		return { counted: { oid: each.oid, state, passed: each.status.state === "SUCCESS", attested: bound }, skipped };
 	}
 	if (report)
 		for (const { each, known } of rest) {
 			if (each.status.state !== "SUCCESS") continue;
-			const bound = await boundStatus(github, pr, each.oid, each.status, open);
+			const bound = await boundStatus(github, pr, each.oid, each.status, !merged);
 			if (typeof bound === "string") skipped.push(bound);
 			else
 				return {

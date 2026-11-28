@@ -923,8 +923,24 @@ describe("the review record", () => {
 			record: `review-record current ${A} local-review`,
 			warnings: [],
 		});
-		// An open PR still holds it to the merge base the status names.
-		expect((await read({ statuses: { [A]: moved } })).record).toBe("review-record -");
+		// An open PR, or one closed without merging, still holds it to the merge base the status names.
+		for (const state of ["OPEN", "CLOSED"])
+			expect((await read({ statuses: { [A]: moved } }, { state })).record).toBe("review-record -");
+		// Merged by a merge commit, an earlier commit's diff against the base is empty too, so it covers nothing known.
+		expect(await read({ statuses: { [B]: passed(B) } }, { state: "MERGED" })).toMatchObject({
+			record: `review-record unknown ${B} local-review`,
+		});
+	});
+
+	test("does not call a pass current when a newer status cannot be compared with the head", async () => {
+		const failed = reviewStatus("FAILURE", `Risk low, risk file ${RISK_ID}: findings open`, B);
+		expect(await read({ statuses: { [A]: passed(A), [B]: failed }, diffs: { [A]: 403 } })).toMatchObject({
+			record: `review-record unknown ${A} local-review`,
+		});
+		// Comparable, it is the same diff, and the failure outweighs the pass.
+		expect(
+			await read({ statuses: { [A]: passed(A), [B]: failed }, diffs: { [A]: "same", [B]: "same" } }),
+		).toMatchObject({ record: "review-record -" });
 	});
 
 	test("lets the newest status bound to the head's diff decide, and falls back to a stale pass only without one", async () => {

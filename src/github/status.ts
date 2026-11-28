@@ -171,7 +171,7 @@ export async function pullRequestStatus(
 	// The review that counts is a writer's `quest review` status, as the land gate reads it, so no edit of the body drops it.
 	const pull = { ...pr, base: baseRef };
 	const open = first!.state === "OPEN";
-	const reading = { report: true, open };
+	const reading = { report: true, merged: first!.state === "MERGED" };
 	const { counted, skipped } = await countedReview(github, pull, head, await reviewStatuses(github, pull), reading);
 	const where = `${pr.owner}/${pr.repo}#${pr.number}`;
 	if (skipped.length > 0) deps.warn(`${where}: a quest review status does not count: ${skipped.join("; ")}`);
