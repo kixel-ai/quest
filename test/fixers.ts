@@ -3,7 +3,7 @@
 // agent blocked on its fifo would wait forever. test/scopes.ts does the same for the gate's scopes.
 // A group is found by its `quest-fixer` leader running a wrapper path only one test created.
 
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { appendFileSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -26,33 +26,41 @@ export function track(path: string): string {
 /** The leader of each running fixer group of one of `tracked`, and whether anything besides it still runs. */
 function groups(tracked: string[]): { leader: number; running: boolean }[] {
 	if (!tracked.length) return [];
-	const processes = execFileSync("ps", ["-ww", "-A", "-o", "pid=,pgid=,stat=,args="], { encoding: "utf8" })
+	// The leader runs `sh -c <script> quest-fixer <exit> <wrapper> <log> <numbers...>` (src/cli/land-fixer.ts).
+	// pgrep prints only PIDs: every process's arguments, on a busy host, would overflow a buffer.
+	const escaped = tracked.map((wrapper) => wrapper.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+	const found = spawnSync("pgrep", ["-f", "--", ` quest-fixer .* (${escaped.join("|")}) `], { encoding: "utf8" });
+	// pgrep exits 1 when nothing matches.
+	if (found.status === 1) return [];
+	if (found.status !== 0) throw new Error(`pgrep failed: ${found.error ?? found.stderr}`);
+	const matched = new Set(found.stdout.split("\n").filter(Boolean).map(Number));
+	const processes = execFileSync("ps", ["-A", "-o", "pid=,pgid=,stat="], { encoding: "utf8" })
 		.split("\n")
 		.flatMap((line) => {
-			const match = /^\s*(\d+)\s+(\d+)\s+(\S+)\s(.*)$/.exec(line);
+			const match = /^\s*(\d+)\s+(\d+)\s+(\S+)/.exec(line);
 			// A zombie has exited and only waits for its parent to reap it.
-			return match && !match[3].startsWith("Z")
-				? [{ pid: Number(match[1]), group: Number(match[2]), args: match[4] }]
-				: [];
+			return match && !match[3].startsWith("Z") ? [{ pid: Number(match[1]), group: Number(match[2]) }] : [];
 		});
-	// The leader runs `sh -c <script> quest-fixer <exit> <wrapper> <log> <numbers...>` (src/cli/land-fixer.ts).
-	const leaders = processes.filter(
-		(entry) =>
-			entry.pid === entry.group &&
-			entry.args.includes(" quest-fixer ") &&
-			tracked.some((wrapper) => entry.args.includes(` ${wrapper} `)),
+	const leaders = processes.filter((entry) => entry.pid === entry.group && matched.has(entry.pid));
+	const members = processes.filter(
+		(entry) => entry.pid !== entry.group && leaders.some((leader) => leader.pid === entry.group),
 	);
 	// Once the wrapper returns, the leader only records its status with `mv` and exits, so neither is a leak.
-	return leaders.map((leader) => {
-		const exit = leader.args.split(" quest-fixer ")[1].split(" ")[0];
-		return {
-			leader: leader.pid,
-			running: processes.some(
-				(entry) =>
-					entry.group === leader.pid && entry.pid !== leader.pid && entry.args !== `mv ${exit}.new ${exit}`,
-			),
-		};
-	});
+	const writers = new Set<number>();
+	if (members.length) {
+		// ps exits 1 when a listed process has gone since, which is no leak either.
+		const listed = spawnSync("ps", ["-ww", "-o", "pid=,args=", "-p", members.map((entry) => entry.pid).join(",")], {
+			encoding: "utf8",
+		});
+		for (const line of listed.stdout.split("\n")) {
+			const match = /^\s*(\d+)\s+(.*)$/.exec(line);
+			if (match && /^mv (.+\.exit)\.new \1$/.test(match[2])) writers.add(Number(match[1]));
+		}
+	}
+	return leaders.map((leader) => ({
+		leader: leader.pid,
+		running: members.some((entry) => entry.group === leader.pid && !writers.has(entry.pid)),
+	}));
 }
 
 /** Kill the process group of every running fixer of one of `tracked`, returning those still running a wrapper. */
