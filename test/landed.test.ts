@@ -416,8 +416,10 @@ describe("quest merge's landing check", () => {
 		// A temporary directory of its own, since other processes make and remove scratch repositories in the host's.
 		const scratch = tempDir();
 		const state = tempDir();
-		const host = process.env.TMPDIR;
-		process.env.TMPDIR = scratch;
+		// os.tmpdir() reads TMPDIR on Unix and TEMP or TMP on Windows.
+		const names = ["TMPDIR", "TEMP", "TMP"] as const;
+		const host = names.map((name) => process.env[name]);
+		for (const name of names) process.env[name] = scratch;
 		try {
 			const check = landingCheck(state)({
 				remote: tree.path,
@@ -429,8 +431,10 @@ describe("quest merge's landing check", () => {
 			});
 			await expect(check).rejects.toThrow("git fetch failed");
 		} finally {
-			if (host === undefined) delete process.env.TMPDIR;
-			else process.env.TMPDIR = host;
+			names.forEach((name, i) => {
+				if (host[i] === undefined) delete process.env[name];
+				else process.env[name] = host[i];
+			});
 		}
 		expect(readdirSync(scratch)).toEqual([]);
 	});
