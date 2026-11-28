@@ -850,7 +850,7 @@ describe("the review record", () => {
 		const line = (type: string) => lines.find((l) => l.startsWith(`${type} `));
 		return { record: line("review-record"), risk: line("risk"), class: line("class"), warnings, fixture, status };
 	};
-	const none = (why: string) => [`example/project#1: no quest review status counts: ${why}`];
+	const none = (why: string) => [`example/project#1: a quest review status does not count: ${why}`];
 
 	test("counts a writer's passing status on the head, with the tier and class it attests", async () => {
 		for (const login of ["maintainer", "writer"]) {
@@ -907,6 +907,26 @@ describe("the review record", () => {
 		});
 	});
 
+	test("reads a refused diff as unknown, with a warning, and still prints the PR", async () => {
+		const found = await read({ statuses: { [B]: passed(B) }, diffs: { [A]: 403 } });
+		expect(found.record).toBe(`review-record unknown ${B} local-review`);
+		expect(found.warnings).toHaveLength(1);
+		expect(found.warnings[0]).toContain(
+			`a quest review status does not count: GitHub cannot compare ${A} with main`,
+		);
+		expect(found.status.head).toBe(A);
+	});
+
+	test("binds no merge base once the PR is merged, whose own moved with the landing", async () => {
+		const moved = { ...passed(A), targetUrl: `https://github.com/example/project/compare/${C}...${A}` };
+		expect(await read({ statuses: { [A]: moved } }, { state: "MERGED" })).toMatchObject({
+			record: `review-record current ${A} local-review`,
+			warnings: [],
+		});
+		// An open PR still holds it to the merge base the status names.
+		expect((await read({ statuses: { [A]: moved } })).record).toBe("review-record -");
+	});
+
 	test("lets the newest status bound to the head's diff decide, and falls back to a stale pass only without one", async () => {
 		const failed = (sha: string) => reviewStatus("FAILURE", `Risk low, risk file ${RISK_ID}: findings open`, sha);
 		const same = { diffs: { [A]: "same", [B]: "same" } };
@@ -914,7 +934,7 @@ describe("the review record", () => {
 		expect(await read({ statuses: { [B]: passed(B), [A]: failed(A) }, ...same })).toMatchObject({
 			record: "review-record -",
 			risk: "risk -",
-			warnings: [],
+			warnings: [`example/project#1: the newest quest review status on the head's diff, on ${A}, did not pass`],
 		});
 		expect(await read({ statuses: { [A]: failed(A), [B]: passed(B) }, ...same })).toMatchObject({
 			record: `review-record diff-identical ${B} local-review`,
@@ -929,10 +949,12 @@ describe("the review record", () => {
 			}),
 		).toMatchObject({ record: `review-record stale ${C} local-review` });
 		// A newer status that counts for none, as a non-writer's, does not outweigh a writer's.
-		const outsider = { [A]: passed(A, "alice"), [B]: passed(B) };
-		expect(await read({ statuses: outsider, ...same })).toMatchObject({
-			record: `review-record diff-identical ${B} local-review`,
-		});
+		const outsider = { [B]: passed(B), [A]: passed(A, "alice") };
+		const outvoted = await read({ statuses: outsider, ...same });
+		expect(outvoted).toMatchObject({ record: `review-record diff-identical ${B} local-review` });
+		expect(outvoted.warnings).toEqual([
+			`example/project#1: a quest review status does not count: alice, who set the quest review status on ${A}, has read access to example/project, not write`,
+		]);
 	});
 
 	test("counts no status from a non-writer or bound to another base, and says why", async () => {

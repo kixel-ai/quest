@@ -170,15 +170,18 @@ export async function pullRequestStatus(
 	const status = summarize(first!, rollup, current, needs, reviewNodes, threadNodes);
 	// The review that counts is a writer's `quest review` status, as the land gate reads it, so no edit of the body drops it.
 	const pull = { ...pr, base: baseRef };
-	const { counted, skipped } = await countedReview(github, pull, head, await reviewStatuses(github, pull), true);
-	if (counted === null && skipped.length > 0)
-		deps.warn(`${pr.owner}/${pr.repo}#${pr.number}: no quest review status counts: ${skipped.join("; ")}`);
+	const open = first!.state === "OPEN";
+	const reading = { report: true, open };
+	const { counted, skipped } = await countedReview(github, pull, head, await reviewStatuses(github, pull), reading);
+	const where = `${pr.owner}/${pr.repo}#${pr.number}`;
+	if (skipped.length > 0) deps.warn(`${where}: a quest review status does not count: ${skipped.join("; ")}`);
+	if (counted !== null && !counted.passed)
+		deps.warn(`${where}: the newest quest review status on the head's diff, on ${counted.oid}, did not pass`);
 	if (counted?.passed) {
 		// The tier set how much review the head got, so a review classified against a risk file the base no longer has
 		// covers it no longer; only an open PR can still land, and a closed one's base may be gone.
-		const moved = first!.state === "OPEN" ? riskFileMoved(counted.attested.riskFile, baseRiskFile(first!)) : null;
-		if (moved !== null)
-			deps.warn(`${pr.owner}/${pr.repo}#${pr.number}'s quest review status on ${counted.oid} ${moved}`);
+		const moved = open ? riskFileMoved(counted.attested.riskFile, baseRiskFile(first!)) : null;
+		if (moved !== null) deps.warn(`${where}'s quest review status on ${counted.oid} ${moved}`);
 		const state = moved === null ? counted.state : "stale";
 		status.reviewRecord = {
 			state,

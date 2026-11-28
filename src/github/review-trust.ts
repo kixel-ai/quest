@@ -82,7 +82,7 @@ export async function unreviewedHigh(
 	const head = sha.toLowerCase();
 	const risk = await baseRisk(github, pr);
 	const statuses = await reviewStatuses(github, pr);
-	const { counted } = await countedReview(github, pr, head, statuses, false);
+	const { counted } = await countedReview(github, pr, head, statuses, { report: false, open: true });
 	if (counted?.passed && counted.attested.riskFile === riskFileId(risk?.blob ?? null)) return null;
 	const high = statusHigh(statuses) ?? (await pathHigh(github, pr, head, risk?.text ?? null));
 	return high === null ? null : `${sha} is high, since ${high}, and no quest review status covers it`;
@@ -99,34 +99,54 @@ export interface Counted {
 	attested: Attested;
 }
 
+/** How {@link countedReview} reads: for the land gate, which fails closed, or for `quest status`, which reports. */
+export interface Reading {
+	/**
+	 * A read that reports, not gates: a head no status covers falls back to the newest passing writer's status on another
+	 * diff, `stale`, or `unknown` where a diff cannot be compared, which is also what a refused compare gives.
+	 */
+	report: boolean;
+	/** Whether the PR is open; a merged one's merge base is no longer the one a status was bound to. */
+	open: boolean;
+}
+
 /**
  * The review that counts for `head` from `statuses`, the PR's `quest review` statuses newest first: the newest writer's
- * status bound to a diff equal to the head's, so a round that failed outweighs an earlier pass of the same diff. With
- * `older`, a head no such status covers falls back to the newest passing writer's status on another diff, `stale`, or
- * `unknown` where a diff cannot be compared. `skipped` says why each status that counts for none does not.
+ * status bound to a diff equal to the head's, so a round that failed outweighs an earlier pass of the same diff.
+ * `skipped` says why each status that counts for none does not.
  */
 export async function countedReview(
 	github: GitHubReader,
 	pr: PullRequest & { base: string },
 	head: string,
 	statuses: ReviewStatus[],
-	older: boolean,
+	{ report, open }: Reading,
 ): Promise<{ counted: Counted | null; skipped: string[] }> {
 	const skipped: string[] = [];
 	const rest: { each: ReviewStatus; known: boolean }[] = [];
+	const diffOf = async (sha: string): Promise<string | null> => {
+		try {
+			return await baseDiff(github, pr, sha);
+		} catch (error) {
+			// A deadline is the caller's to handle; a refused compare leaves one status unread, not the PR.
+			if (!report || error instanceof GitHubDeadline || !(error instanceof Error)) throw error;
+			skipped.push(`GitHub cannot compare ${sha} with ${pr.base}: ${error.message}`);
+			return null;
+		}
+	};
 	let diff: Promise<string | null> | undefined;
 	for (const each of statuses) {
 		if (each.oid !== head) {
-			diff ??= baseDiff(github, pr, head);
+			diff ??= diffOf(head);
 			const own = await diff;
-			const theirs = own === null ? null : await baseDiff(github, pr, each.oid);
+			const theirs = own === null ? null : await diffOf(each.oid);
 			if (own === null || theirs !== own) {
 				rest.push({ each, known: own !== null && theirs !== null });
 				continue;
 			}
 		}
 		// Only a writer's status, bound to the diff it reviewed, says anything about the head.
-		const bound = await boundStatus(github, pr, each.oid, each.status);
+		const bound = await boundStatus(github, pr, each.oid, each.status, open);
 		if (typeof bound === "string") {
 			skipped.push(bound);
 			continue;
@@ -134,10 +154,10 @@ export async function countedReview(
 		const state = each.oid === head ? "current" : "diff-identical";
 		return { counted: { oid: each.oid, state, passed: each.status.state === "SUCCESS", attested: bound }, skipped };
 	}
-	if (older)
+	if (report)
 		for (const { each, known } of rest) {
 			if (each.status.state !== "SUCCESS") continue;
-			const bound = await boundStatus(github, pr, each.oid, each.status);
+			const bound = await boundStatus(github, pr, each.oid, each.status, open);
 			if (typeof bound === "string") skipped.push(bound);
 			else
 				return {
@@ -266,6 +286,7 @@ async function boundStatus(
 	pr: PullRequest & { base: string },
 	sha: string,
 	status: ObjectValue,
+	bind: boolean,
 ): Promise<Attested | string> {
 	const { description, targetUrl, creator } = status;
 	if (creator == null) return `the account that set the ${REVIEW_CONTEXT} status on ${sha} is gone`;
@@ -282,23 +303,26 @@ async function boundStatus(
 	const found = permission.status === 404 ? "no" : string(object(await permission.json()).permission);
 	if (!WRITE.includes(found))
 		return `${name}, who set the ${REVIEW_CONTEXT} status on ${sha}, has ${found} access to ${pr.owner}/${pr.repo}, not write`;
-	// A retargeted PR, or a base reset under it, has another diff than the one reviewed, from another merge base.
-	let compared: Response;
-	try {
-		compared = await github.request(
-			`/repos/${pr.owner}/${pr.repo}/compare/${encodeURIComponent(pr.base)}...${sha}?per_page=1`,
-			{ allow: [404, 422] },
-		);
-	} catch (error) {
-		// A deadline is the caller's to handle; any other failure leaves the status unverified, not the PR unread.
-		if (error instanceof GitHubDeadline || !(error instanceof Error)) throw error;
-		return `GitHub cannot compare ${sha} with ${pr.base}: ${error.message}`;
+	// A retargeted PR, or a base reset under it, has another diff than the one reviewed, from another merge base. A
+	// merged PR has none to compare: its merge base moved with the landing, so only its writer binds a status.
+	if (bind) {
+		let compared: Response;
+		try {
+			compared = await github.request(
+				`/repos/${pr.owner}/${pr.repo}/compare/${encodeURIComponent(pr.base)}...${sha}?per_page=1`,
+				{ allow: [404, 422] },
+			);
+		} catch (error) {
+			// A deadline is the caller's to handle; any other failure leaves the status unverified, not the PR unread.
+			if (error instanceof GitHubDeadline || !(error instanceof Error)) throw error;
+			return `GitHub cannot compare ${sha} with ${pr.base}: ${error.message}`;
+		}
+		if (!compared.ok) return `GitHub cannot compare ${sha} with ${pr.base} (HTTP ${compared.status})`;
+		const from = string(object(object(await compared.json()).merge_base_commit).sha);
+		// The status lives in this repository, so its target's diff binds it, whatever name the reader's remote gives it.
+		if (!String(targetUrl).toLowerCase().endsWith(`/compare/${from}...${sha}`))
+			return `the ${REVIEW_CONTEXT} status on ${sha} attests another diff than ${pr.base}'s, from ${from}: ${String(targetUrl)}`;
 	}
-	if (!compared.ok) return `GitHub cannot compare ${sha} with ${pr.base} (HTTP ${compared.status})`;
-	const from = string(object(object(await compared.json()).merge_base_commit).sha);
-	// The status lives in this repository, so its target's diff binds it, whatever name the reader's remote gives it.
-	if (!String(targetUrl).toLowerCase().endsWith(`/compare/${from}...${sha}`))
-		return `the ${REVIEW_CONTEXT} status on ${sha} attests another diff than ${pr.base}'s, from ${from}: ${String(targetUrl)}`;
 	// The tier, class, and risk file gate a standing pick. A status that names no risk file came before it was
 	// attested, and names none, as a record without the line does.
 	const attested = ATTESTED.exec(typeof description === "string" ? description : "");
