@@ -331,6 +331,8 @@ test("stress-ng, stress, and yes into /dev/null are blocked, while help and yes 
 	expect(bash("yes &> /dev/null")).toEqual([RULES.load]);
 	expect(bash("yes >> /dev/null")).toEqual([RULES.load]);
 	expect(bash("command -v stress-ng")).toEqual([]);
+	expect(bash("command -p -v stress-ng")).toEqual([]);
+	expect(bash("command -p stress-ng --cpu 4")).toEqual([RULES.load]);
 	expect(bash("stress-ng --help")).toEqual([]);
 	expect(bash("yes | sdkmanager --licenses")).toEqual([]);
 	expect(bash("yes 2>/dev/null | head -3")).toEqual([]);

@@ -335,7 +335,11 @@ function unwrap(argv: string[], env: Set<string>): string[] | null {
 		const name = basename(path);
 		if (KEYWORDS.has(path)) rest = args;
 		// `command -v` only looks the name up.
-		else if (name === "command" && /^-p?[vV]/.test(args[0] ?? "")) return null;
+		else if (
+			name === "command" &&
+			args.slice(0, args.length - dropOptions(args).length).some((arg) => /^-p*[vV]/.test(arg))
+		)
+			return null;
 		else if (["command", "exec", "nohup", "time", "builtin", "env", "nice"].includes(name))
 			rest = dropOptions(args);
 		else if (name === "timeout") rest = dropOptions(args).slice(1);
