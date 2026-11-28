@@ -116,7 +116,8 @@ Recommended, for the implementer to confirm:
     complete exception: they run one `quest advise` escalation, and when the
     enclosing task already authorizes PR edits, they apply it, post a
     `Design change:` PR comment, and run `quest review --new`; only advice to
-    drop the PR hands back for the maintainer's pick.
+    drop the PR, or advice beyond an explicit limit the enclosing request
+    states, hands back for the maintainer's pick.
   - Ship `/quest-advise` (installed by `quest init` like the other skills) with
     generic guidance: call `quest advise` when stuck (such as failing review
     convergence, repeated findings, or non-converging implementation loops),
@@ -129,7 +130,8 @@ Recommended, for the implementer to confirm:
     repeated findings across rounds) the agent runs `quest advise` once instead
     of handing back to the user, applying the advice (`Design change:` PR
     comment + `quest review --new`) and handing back only when it recommends
-    dropping the PR. `/quest-afk` no longer takes its own recommendation at the
+    dropping the PR or goes beyond an explicit limit the request states, such
+    as a CLI change on a packaging-only request. `/quest-afk` no longer takes its own recommendation at the
     stop; the advisor's stands in for it.
 
 Tests: unit tests for `ADVISORS` fall-through (missing/logged-out/limited/sandbox-unsupported),
@@ -137,7 +139,8 @@ hard 1-call-per-branch cap and `--force` override, read-only invocation flags
 for `agy`/`codex`/`claude`, persisted `agy` token counts priced at API list
 rates (and marked `complete: false` when a rate is missing) feeding both
 `quest usage` and `quest send`, `"advising"` role attribution and spend rollup,
-`next decide` wording, and `quest init` installing the `/quest-advise` stub.
+`next decide` wording, a packaging-only request handing back advice to
+change the CLI, and `quest init` installing the `/quest-advise` stub.
 Add an `advise` sandbox case alongside `just review-sandbox` verifying no write
 or untrusted code execution.
 

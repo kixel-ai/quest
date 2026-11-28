@@ -14,7 +14,7 @@ Why fixed windows: the audit measured detection lag from a culprit's merge to it
 
 Agent's choices, for the implementer to revisit:
 
-- `fixBreakages()` reads only merged fixes today. Also read open PRs naming a culprit, by opening time.
-- A fix closed unmerged counts only when a later fix naming the same culprit merged or is open, and the culprit's escape takes the earliest opening among them, so a superseded fix keeps its date and an abandoned one, often a regression that wasn't, adds nothing.
+- `fixBreakages()` reads only merged fixes today. Count open PRs naming a culprit in the usage metric only, by opening time: `quest send` also uploads `fixBreakages()`'s results (`src/cli/send.ts`), and a fix record there closes its incident (`src/core/breakage.ts`), so the sender keeps reading merged fixes alone.
+- A fix closed unmerged counts only when a later fix replaces it, merged or open: both name the same incident, or the later one names the earlier as the fix it replaces. The escape then takes the earlier opening, so a superseded fix keeps its date, while an abandoned one, often a regression that wasn't, adds nothing, even when a later fix names the same culprit for another regression.
 
-Tests: a fix opened on day 6 and open at day 7 counts; a fix opened on day 6, closed on day 9, and replaced the same day still counts at day 6; a fix closed unmerged with no replacement does not count; a PR merged fewer than N days ago reports no N-day result.
+Tests: a fix opened on day 6 and open at day 7 counts; a fix opened on day 6, closed on day 9, and replaced the same day still counts at day 6; a fix closed unmerged with no replacement does not count, nor does it backdate a later fix naming the same culprit for another incident; `quest send` uploads no open fix; a PR merged fewer than N days ago reports no N-day result.
