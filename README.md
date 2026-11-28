@@ -691,7 +691,9 @@ the user, with the answer about transcripts, where only a `y` or `yes` agrees.
 After agreeing, the record sender uploads each session's transcript,
 sub-agents' included, gzipped as the harness wrote it, to
 `PUT /transcripts/<harness>/<session>` once its record is stored, and again
-only once its files change; one over 100 MiB gzipped is skipped and said.
+only once its files change; one over 100 MiB gzipped, or that Kixel Quest
+refuses for good, is skipped and said, and a server error retries it with the
+records.
 Signing in again and answering no stops uploads, and so does Kixel Quest
 answering 403, as after turning transcripts off on its Tokens page, until the
 next `quest login`.
@@ -2684,7 +2686,8 @@ unusable replies included.
 
 The labels are kept under `$XDG_STATE_HOME/quest/records/splits`, so each stop
 labels only the new steps, and `quest usage` reads them without asking a model.
-The transcript text reaches only the labeling model, never the store. Labeling
+The transcript text reaches only the labeling model, never the store, unless
+the person agreed at `quest login` to upload transcripts. Labeling
 never holds a record back: a session no model could label, such as with every
 model logged out, is sent without its split, the next stop says why, and the
 session's next stop labels the steps still unlabeled.

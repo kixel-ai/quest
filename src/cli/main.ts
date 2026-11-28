@@ -1782,7 +1782,8 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"transcript not labeled yet with a category of work, and about one part in ten is labeled again by " +
 				`${SPLIT_CHECKERS.map((e) => `${e.harness} ${e.model} ${e.effort}`).join(", then ")}; the record's split sums each ` +
 				"category's time, less its timed waits, and tokens, with a line on what went wrong. Only the categories and " +
-				"notes leave the host. A session no model could label is sent without its split, and the next stop says why. " +
+				"notes leave the host, except for a person who agreed at quest login to upload transcripts: each sent session's " +
+				"transcript is then uploaded gzipped too, and again only once it changes. A session no model could label is sent without its split, and the next stop says why. " +
 				"Exactly one sender runs per user, " +
 				"as the service quest records install sets up; start no other.\n\nUses GH_TOKEN, GITHUB_TOKEN, or gh auth token.",
 		)

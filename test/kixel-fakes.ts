@@ -298,6 +298,8 @@ class Refused extends Error {}
 export class FakeLogin {
 	/** The label each code was asked for. */
 	readonly labels: string[] = [];
+	/** Whether each code's person agreed to store their transcripts, as its request said. */
+	readonly transcripts: unknown[] = [];
 	/** How many times a host asked for its token. */
 	polls = 0;
 	#approved = new Set<string>();
@@ -315,13 +317,14 @@ export class FakeLogin {
 
 	readonly fetch = (async (input: string | URL | Request, init?: RequestInit) => {
 		const path = new URL(String(input)).pathname;
-		const body = JSON.parse(String(init?.body)) as Record<string, string>;
+		const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
 		const json = (value: unknown, status = 200) =>
 			new Response(JSON.stringify(value), { status, headers: { "content-type": "application/json" } });
 		if (init?.method !== "POST") return json({ error: "invalid_request" }, 405);
 		if (path === "/login/device") {
 			if (typeof body.label !== "string" || body.label === "") return json({ error: "invalid_request" }, 400);
 			this.labels.push(body.label);
+			this.transcripts.push(body.transcripts);
 			return json({
 				device_code: `device-${this.labels.length}`,
 				user_code: "BCDF-GHJK",
@@ -333,7 +336,7 @@ export class FakeLogin {
 		}
 		if (path === "/login/token") {
 			this.polls++;
-			if (!this.#approved.delete(body.device_code!)) return json({ error: "authorization_pending" }, 400);
+			if (!this.#approved.delete(String(body.device_code))) return json({ error: "authorization_pending" }, 400);
 			return json({ access_token: `issued-${++this.#issued}`, token_type: "Bearer" });
 		}
 		return json({ error: "not found" }, 404);

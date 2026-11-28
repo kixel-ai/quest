@@ -578,6 +578,7 @@ async function sendTo(
 					fetch: deps.fetch,
 					url,
 					token,
+					repository: key(repository),
 					state: dir,
 					sessions: records.keys(),
 				})),

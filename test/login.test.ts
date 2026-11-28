@@ -58,6 +58,7 @@ test("an approved code stores a token named after the host, readable only by the
 	});
 	expect(asked).toEqual([TRANSCRIPTS_QUESTION]);
 	expect(server.labels).toEqual(["workstation"]);
+	expect(server.transcripts).toEqual([false]);
 	expect(said).toEqual([
 		`Open ${KIXEL}/login, sign in with GitHub, and enter the code BCDF-GHJK.`,
 		"Waiting for its approval; the code expires in 10 minutes.",
@@ -76,8 +77,11 @@ test("only a yes uploads transcripts, and no answer signs nothing in", async () 
 		["", false],
 		["sure", false],
 	] as const) {
-		const { deps, env } = host(new FakeLogin(), answer);
+		const server = new FakeLogin();
+		const { deps, env } = host(server, answer);
 		expect((await login(deps)).transcripts).toBe(transcripts);
+		// Kixel Quest stores transcripts only for a person whose code said they agreed.
+		expect(server.transcripts).toEqual([transcripts]);
 		expect(JSON.parse(readFileSync(tokensPath(env), "utf8"))[KIXEL].transcripts).toBe(transcripts);
 	}
 	const server = new FakeLogin();

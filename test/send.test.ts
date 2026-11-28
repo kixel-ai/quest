@@ -351,6 +351,27 @@ test("a transcript Kixel Quest refuses with 403 stops uploads until a new sign-i
 	expect(renewed.transcripts.map((t) => t.token)).toEqual(["Bearer renewed"]);
 });
 
+test("a transcript Kixel Quest refuses for good is said and not sent again until it changes", async () => {
+	const env = home();
+	saveLogin(URL_, { token: "secret", transcripts: true }, env);
+	const root = checkout();
+	const { deps, transcripts } = sender(
+		env,
+		200,
+		[session("s1", "quest/m0/a", { files: [transcriptFile("parent\n")] })],
+		() => {},
+		[],
+		["acme/proj"],
+		413,
+	);
+	queue(stopped(root), env);
+	await sendPass(deps);
+	expect(pending(env)).toEqual([]);
+	expect(queue(stopped(root), env).notices).toEqual([expect.stringContaining("/transcripts/claude/s1 answered 413")]);
+	await sendPass(deps);
+	expect(transcripts).toHaveLength(1);
+});
+
 test("a transcript upload that fails keeps the session queued, records and all", async () => {
 	const env = home();
 	saveLogin(URL_, { token: "secret", transcripts: true }, env);
