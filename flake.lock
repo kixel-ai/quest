@@ -53,11 +53,11 @@
     "quest-pinned": {
       "flake": false,
       "locked": {
-        "lastModified": 1795644737,
-        "narHash": "sha256-pBIdZ9uKOU8so/VNeKk5RvQnfJmXKoBYwJfgHIbQtog=",
+        "lastModified": 1795840975,
+        "narHash": "sha256-wTFrHEBy+vErfFGDlgcbVbdMJzi3yo7bBB6Fan2IN70=",
         "owner": "kixel-ai",
         "repo": "quest",
-        "rev": "8bb9506515a99a2002ee596df6ab2b294948210c",
+        "rev": "bfbed11d2157375acc5c2768149ddf2d313660e3",
         "type": "github"
       },
       "original": {
