@@ -605,58 +605,68 @@ export type EscapeWindow = (typeof ESCAPE_WINDOWS)[number];
 const DAY = 86_400_000;
 
 /**
- * When each culprit's escape was found: the opening of each open or merged fix naming it under `## Caused by`, or of
- * the earliest fix closed unmerged that it replaces, by sharing the line's incident or naming it as `replaces`. A
- * closed fix nothing replaced, often a regression that wasn't, counts for nothing.
+ * When each culprit's escape may have been found: the opening of each open or merged fix naming it under
+ * `## Caused by`, and of each fix closed unmerged that one replaces, by sharing an incident or being named as
+ * `replaces`. A closed fix nothing replaced, often a regression that wasn't, counts for nothing.
  */
 function escapeOpenings(pulls: Pull[], repository: Repository): Map<number, number[]> {
 	const closed = pulls.filter((each) => each.state === "closed");
 	const lines = new Map(pulls.map((each) => [each.number, culprits(each.body, repository)]));
-	// The earliest opening along the closed fixes `fix`'s line for `culprit` replaces, each fix visited once.
-	const opened = (fix: Pull, cause: Cause, seen: Set<number>): number => {
+	// The openings along the closed fixes `cause` replaces, each fix visited once.
+	const opened = (fix: Pull, cause: Cause, seen: Set<number>): number[] => {
 		seen.add(fix.number);
-		let earliest = fix.created;
+		const at = [fix.created];
 		for (const earlier of closed) {
 			if (seen.has(earlier.number)) continue;
-			const own = lines.get(earlier.number)!.filter((each) => each.number === cause.number);
+			const own = lines.get(earlier.number)!;
+			// An incident ID is the repository's, so it ties the fixes even when the earlier one blamed another PR.
 			const shared = cause.incident === null ? undefined : own.find((each) => each.incident === cause.incident);
 			// A named replacement counts even when the earlier fix's body never named the culprit.
 			const line =
 				shared ??
 				(cause.replaces === earlier.number
-					? (own[0] ?? { number: cause.number, found: null, incident: null, replaces: null })
+					? (own.find((each) => each.number === cause.number) ?? { ...cause, incident: null, replaces: null })
 					: undefined);
-			if (line) earliest = Math.min(earliest, opened(earlier, line, seen));
+			if (line) at.push(...opened(earlier, line, seen));
 		}
-		return earliest;
+		return at;
 	};
 	const openings = new Map<number, number[]>();
 	for (const fix of pulls.filter((each) => each.state !== "closed"))
 		for (const cause of lines.get(fix.number)!) {
 			if (cause.number === fix.number) continue;
-			openings.set(cause.number, [...(openings.get(cause.number) ?? []), opened(fix, cause, new Set())]);
+			openings.set(cause.number, [...(openings.get(cause.number) ?? []), ...opened(fix, cause, new Set())]);
 		}
 	return openings;
 }
 
-/** Each PR's record, without its sessions yet, its escapes judged at `now`, epoch ms. */
-function pullRows(pulls: Pull[], repository: Repository, now: number): PullRow[] {
+/** Each PR's record, without its sessions yet, its escapes judged at `now` over PRs updated since `since`, epoch ms. */
+function pullRows(pulls: Pull[], repository: Repository, since: number, now: number): PullRow[] {
 	const fixedBy = new Map<number, number[]>();
 	// A fix counts once it lands: an open or abandoned one, such as a closed duplicate, fixed nothing.
 	for (const each of pulls.filter((pull) => pull.state === "merged"))
 		for (const cause of causes(each.body, repository))
 			if (cause !== each.number) fixedBy.set(cause, [...(fixedBy.get(cause) ?? []), each.number]);
-	const escaped = escapes(pulls, repository, now);
+	const escaped = escapes(pulls, repository, since, now);
 	return pulls.map((each) => pullRow(each, fixedBy, escaped.get(each.number)!));
 }
 
-/** Each PR's escapes among `pulls`, judged at `now`, epoch ms: none until it has been merged a window's length. */
-export function escapes(pulls: Pull[], repository: Repository, now: number): Map<number, PullRow["escaped"]> {
+/**
+ * Each PR's escapes among `pulls`, the PRs updated since `since`, judged at `now`, epoch ms: none until it has been
+ * merged a window's length, and none for a PR merged before `since`, whose fixes may predate the listing.
+ */
+export function escapes(
+	pulls: Pull[],
+	repository: Repository,
+	since: number,
+	now: number,
+): Map<number, PullRow["escaped"]> {
 	const openings = escapeOpenings(pulls, repository);
 	return new Map(
 		pulls.map((each) => {
-			const merged = each.state === "merged" ? each.closed : null;
-			const found = openings.get(each.number) ?? [];
+			const merged = each.state === "merged" && each.closed !== null && each.closed >= since ? each.closed : null;
+			// A fix opened before its culprit merged, such as a stacked PR, found no escape.
+			const found = (openings.get(each.number) ?? []).filter((at) => at >= (merged ?? Infinity));
 			const windows = ESCAPE_WINDOWS.map((days) => [
 				days,
 				merged === null || now - merged < days * DAY ? null : found.some((at) => at - merged <= days * DAY),
@@ -1396,7 +1406,7 @@ export async function usage(root: string, options: UsageOptions, deps: UsageDepe
 			(branch === undefined || each.branch === branch),
 	);
 	const narrowed = options.pr !== undefined || branch !== undefined;
-	const allRows = pullRows(all, repository, deps.github().now());
+	const allRows = pullRows(all, repository, since, deps.github().now());
 	const rows = allRows.filter((row) => pulls.some((each) => each.number === row.number));
 	const byNumber = new Map(rows.map((row) => [row.number, row]));
 	const read = deps.sessions(new Date(since), options.ssh ?? []);

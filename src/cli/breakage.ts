@@ -44,9 +44,11 @@ export function culprits(body: string, repository: Repository): Cause[] {
 		"gim",
 	);
 	const tail = new RegExp(
-		`\\((?:found by (?:an? |the )?(${FINDERS.join("|")})(?:; |(?=\\))))?(?:replaces https://github\\.com/${name}/pull/(\\d+)(?:; |(?=\\))))?(?:incident ([^\\r\\n]+?))?\\)\\s*$`,
+		`\\((?:found by (?:an? |the )?(${FINDERS.join("|")})(?:; |(?=\\))))?(?:replaces ([^;\\r\\n]+?)(?:; |(?=\\))))?(?:incident ([^\\r\\n]+?))?\\)\\s*$`,
 		"i",
 	);
+	// The PR a `replaces` part names, as its URL or a Markdown link to it; another form names none.
+	const replacement = new RegExp(`^(?:\\[${name}#\\d+\\]\\()?https://github\\.com/${name}/pull/(\\d+)\\)?$`, "i");
 	const found = new Map<string, Cause>();
 	for (const match of section.matchAll(culprit)) {
 		if (match[1] !== match[2]) continue;
@@ -55,14 +57,22 @@ export function culprits(body: string, repository: Repository): Cause[] {
 			number: Number(match[1]),
 			found: (by?.toLowerCase() as Finder | undefined) ?? null,
 			incident: named?.trim() || null,
-			replaces: replaced === undefined ? null : Number(replaced),
+			replaces: Number(replacement.exec(replaced?.trim() ?? "")?.[1]) || null,
 		};
 		const id = JSON.stringify([cause.number, cause.incident]);
-		if (!found.has(id)) found.set(id, cause);
+		const kept = found.get(id);
+		if (!kept) found.set(id, cause);
+		else kept.replaces ??= cause.replaces;
 	}
-	// A line naming an incident records its culprit's breakage, so the culprit's line naming none would count it twice.
+	// A line naming an incident records its culprit's breakage, so the culprit's line naming none would count it twice;
+	// the culprit's first line keeps what fix it replaces.
 	const named = new Set([...found.values()].filter((c) => c.incident !== null).map((c) => c.number));
-	return [...found.values()].filter((c) => c.incident !== null || !named.has(c.number));
+	const kept = [...found.values()].filter((c) => c.incident !== null || !named.has(c.number));
+	for (const dropped of [...found.values()].filter((c) => !kept.includes(c))) {
+		const first = kept.find((c) => c.number === dropped.number)!;
+		first.replaces ??= dropped.replaces;
+	}
+	return kept;
 }
 
 /**
