@@ -89,6 +89,14 @@ export async function moveQuest(
 }
 
 /**
+ * `path` as a pathspec that matches only itself: git reads `*`, `?`, and `[...]` in a
+ * pathspec as a pattern even after `--`, so `[S] x.md` would also match `S x.md`.
+ */
+function literal(path: string): string {
+	return `:(literal)${path}`;
+}
+
+/**
  * Delete a quest, or an epic with the quests under it, and drop every list
  * entry that links to what was deleted, as `remove` does. The root and
  * milestones are permanent.
@@ -114,13 +122,41 @@ export function removeQuest(root: string, arg: string, recursive: boolean): Repo
 		throw new Error(`${arg} is an epic holding ${doomed.length} quest documents; pass -r to remove them all`);
 	}
 
-	const gone = new Set(doomed.map((doc) => doc.path));
+	// A quest document git does not track is a draft: rm keeps it on disk and names it,
+	// since git cannot restore what it never held.
+	const tracked = new Set(git(root, ["ls-files", "-z", "--", "quest"]).split("\0").filter(Boolean));
+	const removed = doomed.filter((doc) => tracked.has(doc.path));
+	const drafts = doomed.filter((doc) => !tracked.has(doc.path));
+	if (removed.length === 0) {
+		throw new Error(
+			whole
+				? `${arg} holds only untracked drafts; delete them by hand if they should go`
+				: `${arg} is an untracked draft; delete it by hand if it should go`,
+		);
+	}
+
+	const gone = new Set(removed.map((doc) => doc.path));
 	const edited = remove(docs, (path) => gone.has(path));
-	git(root, ["rm", "-q", ...(whole ? ["-r"] : []), "--", whole ? epic! : target]);
+	// Drafts may reference a removed quest. Leave their contents and index status alone.
+	for (const path of edited.keys()) if (!tracked.has(path)) edited.delete(path);
+	// Only the quest documents go: notes, designs, and other files beside them stay.
+	git(root, ["rm", "-q", "--", ...removed.map((doc) => literal(doc.path))]);
 	write(root, edited);
+	const kept = whole
+		? git(root, ["ls-files", "-z", "--", literal(epic!)])
+				.split("\0")
+				.filter(Boolean)
+				.map(
+					(path) =>
+						`${path} is not a quest document, so rm kept it; delete it with git rm if it should go too`,
+				)
+		: [];
+	const keptDrafts = drafts.map(
+		(doc) => `${doc.path} is an untracked draft, so rm kept it; delete it by hand if it should go too`,
+	);
 	return {
-		changes: [...doomed.map((doc) => `D ${doc.path}`), ...modified(edited)],
-		warnings: mentions(root, whole ? epic! : target),
+		changes: [...removed.map((doc) => `D ${doc.path}`), ...modified(edited)],
+		warnings: [...keptDrafts, ...kept, ...mentions(root, whole ? epic! : target)],
 		findings: findings(root),
 	};
 }
@@ -217,7 +253,7 @@ function workTree(root: string, why = "quest mv and rm stage their change with g
 function write(root: string, texts: Map<string, string>) {
 	if (texts.size === 0) return;
 	for (const [path, text] of texts) writeFileSync(join(root, path), text);
-	git(root, ["add", "--", ...texts.keys()]);
+	git(root, ["add", "--", ...[...texts.keys()].map(literal)]);
 }
 
 function modified(texts: Map<string, string>): string[] {
