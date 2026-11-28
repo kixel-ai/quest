@@ -8,6 +8,8 @@ Non-goals: rungs 0-2 and 5-6, whose seat counts stay as they are; the Neon third
 
 ## Plan
 
+Parked 2026-11-28 (maintainer, `/quest-plan` raising the bar: "Never lower rungs"): ✅ park this ablation until [Post-hoc frontier PR audits](/quest/m0/audit-pr.md) and agreement calibration justify testing 1-seat rungs 3–4 (rejected: keeping it active in m0 while raising the bar).
+
 Decided 2026-11-28 (maintainer, `/quest-plan` of the agent audit's follow-ups, recorded in [routing evidence](/quest/m0/routing-evidence/README.md)):
 
 - Risk tier? ✅ Keep the model-classified tier and let this ablation decide what its extra seat buys (rejected: a size-only ladder now, keeping path-held high and low auto-land; keeping it with no test). The audit found tier adds no escape signal once size is known: a likelihood-ratio test of size plus tier against size alone gave 10.4 on 9 degrees of freedom (p about 0.3), over the 775 sized and tiered PRs merged 2026-11-09 to 11-21 and at least 7 days old. Within S and M, high-tier PRs escaped about 1.6 times as often as medium ones, which was not significant. At L there was no gap.
@@ -24,6 +26,10 @@ Agent's choices, for the implementer to revisit:
 Audit baseline for the second seat, by PR size, 2026-11-01 to 11-28: Opus high as second seat found 2.2 first-round findings per PR at M for $4.03 a PR, beside Sol 6.2 high's 2.6 for $1.41 as the pick; at L Opus high found 3.7 for $5.19, beside Sol 6.2 xhigh's 3.8 for $2.84. A quarter of Opus's findings were refuted, against 15-18% of Sol 6.2's.
 
 Tests: the draw is stable across heads and tier changes; an arm-B head on rung 3 or 4 runs one seat and `--accept` needs only it; `quest usage` reports each arm's escapes within 7 days, an open fix included, and leaves out PRs merged less than 7 days ago; a PR raised from rung 4 to rung 5 stays in its arm.
+
+## Parked
+
+- until post-hoc frontier PR audits ([audit-pr](/quest/m0/audit-pr.md)) justify testing 1-seat rungs 3–4 - parked 2026-11-28 while raising the review bar ("never lower rungs")
 
 ## Required
 

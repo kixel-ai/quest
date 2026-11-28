@@ -1,51 +1,38 @@
-# [S] Record an advisor's acceptance as the advisor's
+# [M] Make quest advise manual and offer it in decision prompts
 
 ## Goal
 
-When `quest advise`'s advisor recommends accepting a review's open findings (verdict `accept`), the agent at the
-`next decide` stop accepts them itself, and `quest review --accept` records that acceptance as the advisor's, never
-the maintainer's: its posted run's outcome and its `quest review` commit status read `findings accepted by advisor`,
-which the land gate passes as it passes the maintainer's acceptance and `quest usage` counts apart from it.
+Make `quest advise` and `/quest-advise` strictly manual — keeping [kixel-ai/quest#993](https://github.com/kixel-ai/quest/pull/993)'s read-only `agy` runner, sandbox, and `advising` telemetry, while stripping every automatic trigger from review stops and stripping all hands-off advisor authority (`revise` auto-pivots and advisor `--accept`). Whenever a skill prompts the maintainer on a stalled PR, review dispute, or merge pick, offer `/quest-advise` as a choice (replacing `"Rethink it"` and bare `/quest-iterate`, keeping `/quest-iterate` only when the maintainer gives concrete fix instructions).
 
-Non-goals: the stop's enforcement, cross-host advise records, and the `QUEST_USER_ASKED` attestation, which
-[advise stop](/quest/m0/advise-stop.md) owns.
+Non-goals: automatic rung step-up on review stalls ([Score-progress and dispute stall detection](/quest/m0/advise-stop.md)); Neon and Astra as regular review-rung seats ([Add Neon and Astra to top review rungs](/quest/m0/review-third-seat.md)).
 
 ## Plan
 
-Decided 2026-11-28 (maintainer, `/quest-plan` of the agent audit's follow-ups: "I don't really want to be in the
-loop; I just want to fix poor directions early"): ✅ the advisor's verdict replaces the maintainer's pick at
-`next decide` for everything but closing the PR, and an accept the advisor recommended is recorded as the advisor's,
-in the posted run and in the `quest review` commit status the GitHub land gate reads, so `quest usage` and the gate
-never read it as the maintainer's; the gate lands it as it lands the maintainer's (rejected: keeping pivots and drops
-for the maintainer, as decided 2026-11-26; always stop and ask).
+Decided 2026-11-28 (maintainer, `/quest-plan` raising the bar — reversing the earlier 2026-11-28 decision in [kixel-ai/quest#993](https://github.com/kixel-ai/quest/pull/993) that made `quest advise` automatic at round 3 and let the advisor replace the maintainer on pivots and `--accept`):
 
-The rest of that decision shipped in [kixel-ai/quest#993](https://github.com/kixel-ai/quest/pull/993): `quest advise`,
-its `revise`/`accept`/`drop` verdict and `--limit`, and the readers of `findings accepted by advisor` (`RUN_OUTCOMES` in
-`src/core/reviews.ts` and the status parser in `src/github/review-trust.ts`). Until this quest lands, an `accept`
-verdict prints `next decide` and hands the PR back, since `quest review --accept` would record it as the
-maintainer's.
+- Advisor authority & triggers? ✅ Make `quest advise` / `/quest-advise` manual; use the regular review rung ladder for automatic escalation instead of automatic advisors; strip hands-off advisor pivots and advisor `--accept`; when prompting the maintainer on what to do, offer `/quest-advise` (replacing `"Rethink it"` and bare `/quest-iterate`, keeping `/quest-iterate` only when the maintainer supplies fix instructions) (rejected: automatic round-3 `quest advise`; hands-off advisor pivots; recording advisor `--accept` as passing the land gate).
+- Reuse #993 plumbing? ✅ Keep #993's read-only `agy` runner, deny rules, API-list pricing, and `role: "advising"` telemetry (rejected: reverting #993 and rebuilding from scratch).
+
+Why: letting an advisor silently pivot scope or `--accept` findings without the maintainer conflicts with keeping important decisions visible while calibrating agreement metrics. Keeping `quest advise` manual as a clean second-opinion button gives the maintainer on-demand architectural advice while regular rung step-ups handle review escalation.
+
+This decision authorizes the edits needed in `assets/skills/advise.md`, `assets/skills/review.md`, `assets/skills/iterate.md`, `assets/skills/merge.md`, `assets/skills/run.md`, `assets/skills/afk.md`, and `README.md`.
 
 Recommended, for the implementer to confirm:
 
-- `quest review --accept` reads the branch's latest answered call under `.git/quest/advise/` (or wherever
-  [advise stop](/quest/m0/advise-stop.md) moves it); when that call's head is the accepted head, its verdict is
-  `accept`, and the run carries no `QUEST_USER_ASKED=1` attestation, `runOutcome` in `src/cli/review-record.ts` and
-  the status `attestation` record `findings accepted by advisor`.
-- `adviceNext` in `src/cli/advise.ts` then prints `next apply: run quest review --accept "<the advisor's rationale>"`
-  for an `accept` verdict within the request's limit, and `/quest-advise` and `/quest-review` say so.
+- **`src/cli/advise.ts` & `assets/skills/advise.md`:**
+  - Strip automatic `next apply` / auto-iteration and advisor `--accept` handling: `quest advise` is read-only and always returns its approaches, recommendation, and rationale for the maintainer (or the caller who manually invoked it) to decide.
+  - Drop the 1-call-per-branch hard cap (no arbitrary caps; keep per-branch advice history under `.git/quest/advise/` for audit/telemetry and context).
+- **`src/core/reviews.ts` & `src/github/review-trust.ts`:**
+  - Remove `"findings accepted by advisor"` from `RUN_OUTCOMES` and the land-gate status parser (nothing writes it yet, per `AGENTS.md`'s no-back-compat rule; coordinate with `kixel-ai/kixel.quest` if its pin imported it).
+- **`assets/skills/review.md`, `assets/skills/iterate.md`, `assets/skills/merge.md`, `assets/skills/run.md`, `src/cli/review.ts`:**
+  - Remove automatic `/quest-advise` invocation at `next decide` in `/quest-review` and `/quest-iterate`, and remove `quest advise` from `nextStep()`'s automatic stop text (stall handling belongs to [Score-progress and dispute stall detection](/quest/m0/advise-stop.md)).
+  - In `/quest-merge`, `/quest-review`, and `/quest-run` pick/stall prompts, replace `"Rethink it"` and bare `/quest-iterate` with `/quest-advise` (keeping `/quest-iterate` when the maintainer provides specific fix instructions or answers).
 
-Tests: an `accept` verdict on the head records `findings accepted by advisor` in the post and the status, and the land
-gate passes it; an attested `--accept`, or one on another head than the advice's, stays the maintainer's.
-
-## Waiting
-
-- kixel-ai/kixel.quest: pins a `quest` commit whose `RUN_OUTCOMES` in `src/core/reviews.ts` includes
-  `findings accepted by advisor`, from [kixel-ai/quest#993](https://github.com/kixel-ai/quest/pull/993) on, and
-  deploys it, so its Worker stores such a run instead of refusing the post. Check the `quest` pin in
-  `kixel-ai/kixel.quest`'s lockfile against that commit.
+Tests: `quest advise` never prints `next apply` or authorizes `--accept`; `RUN_OUTCOMES` and `review-trust.ts` do not treat advisor acceptance as a passing land status; skill tests verify `/quest-review` and `/quest-iterate` do not auto-invoke `quest advise`, and pick/stall prompts offer `/quest-advise`.
 
 ## Related
 
-- [Advise replay](/quest/m0/advise-replay.md) - measures whether the advice helps
-- [Routing evidence](/quest/m0/routing-evidence/README.md) - measures rework, spend, and escapes across routing
-  choices
+- [Score-progress and dispute stall detection](/quest/m0/advise-stop.md) - replaces the fixed round-3 stop with score-progress/dispute stalling and rung step-up
+- [Add Neon and Astra to top review rungs](/quest/m0/review-third-seat.md) - reuses #993's read-only `agy` runner for regular reviews
+- [Raise the decision bar and delete afk merge](/quest/m0/decision-bar-and-afk.md) - removes `afk` decision-taking and tightens review rules
+- [Try and promote quest advise](/quest/m1/try-advise.md) - maintainer trial of manual `quest advise`

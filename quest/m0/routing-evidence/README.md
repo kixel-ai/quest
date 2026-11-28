@@ -298,6 +298,7 @@ replaced 6.1 11-24, and the review prompt changed 11-25.
     stays the rule for the other arms).
   - Severity? ✅ [`## Caused by` lines carry one](/quest/m0/caused-by-severity.md)
     (rejected: dropping it; a mistake-audit tally only).
+- Amended 2026-11-28 (maintainer, `/quest-plan` raising the bar): ✅ Park [second-seat ablation](/quest/m0/second-seat-ablation.md) ("never lower rungs" while raising the bar), delete `advise-replay.md` and `advise-trigger.md`, add [Rung-escalation A/B test](/quest/m0/rung-escalation-ab.md) (stepping up `+1` rung vs. handing back on stall), and calibrate gates with [Decision and agreement telemetry](/quest/m0/telemetry/decisions.md) and manual [Post-hoc frontier PR audits](/quest/m0/audit-pr.md).
 
 Baseline from the 2026-11-11 audit, at API list price:
 

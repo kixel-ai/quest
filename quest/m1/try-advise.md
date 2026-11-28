@@ -7,8 +7,8 @@ promote it.
 
 ## Waiting
 
-- Maintainer (action): on a branch whose review reached `next decide`, or any branch you are stuck on, run
-  `quest advise "<what you tried>"` (README "Ask for advice when stuck") or `/quest-advise`, and judge whether the
+- Maintainer (action): on a branch whose review stalled or that you want a second opinion on, pick `/quest-advise` or run
+  `quest advise "<what you tried>"` (README "Ask for advice when stuck"), and judge whether the
   advice would have changed what you did. No agent can judge that for you, and Neon's answers on this repository's
   own PR are the only evidence so far. Done when you have recorded the verdict in this quest's Plan.
 - Maintainer: where should `quest advise` be promoted once you have tried it?
