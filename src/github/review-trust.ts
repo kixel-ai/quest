@@ -20,8 +20,12 @@ import { history } from "./history";
 /** The commit status context `quest review` sets on each head it records. */
 export const REVIEW_CONTEXT = "quest review";
 
-/** A run's outcome as its status names it, including whether a local reviewer ran, which a standing pick needs. */
-export type Outcome = "passed" | "passed with no local reviewer" | "findings accepted" | "findings open";
+/**
+ * A run's outcome as its status names it, including whether a local reviewer ran, which a standing pick needs, and
+ * whether the maintainer or `quest advise`'s advisor accepted its open findings, which pass a head alike.
+ */
+export type Outcome =
+	"passed" | "passed with no local reviewer" | "findings accepted" | "findings accepted by advisor" | "findings open";
 
 /**
  * The status description `quest review` sets: the head's risk, class, and the base's risk file they were set against,
@@ -41,7 +45,7 @@ export function reviewTarget(repository: Repository, from: string, sha: string):
 }
 
 const ATTESTED =
-	/^Risk (low|medium|high)(?:, class ([a-z0-9-]+))?(?:, risk file ([0-9a-f]{12}|none))?: (passed|passed with no local reviewer|findings accepted|findings open)$/;
+	/^Risk (low|medium|high)(?:, class ([a-z0-9-]+))?(?:, risk file ([0-9a-f]{12}|none))?: (passed|passed with no local reviewer|findings accepted|findings accepted by advisor|findings open)$/;
 
 /** Repository permissions that can push. */
 const WRITE = ["admin", "maintain", "write"];

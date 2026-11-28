@@ -2068,9 +2068,9 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"its one-sentence rationale, a recommendation line with the approach the reviewer would build instead when it recommends one, the finding count, each finding by its number, a notes line with the count and each note, then the last round's findings with " +
 				"their numbers and dispositions; then the `record` line below and a last `next` line naming the author's next step: " +
 				"`next decide` when a reviewer's third or later round still reports findings, to stop until the user picks " +
-				"fixing them as recommended, accepting them, or dropping the PR, except that the author may first run quest advise " +
-				"once and, when its task already lets it edit and push the PR and the advice stays within the quest's Goal and " +
-				"settled decisions, apply it with a `Design change:` PR comment and a quest review --new round, `next respond` to fix or refute the findings, or `next done`, and for --accept `next done` or `next stop`. A reply without a valid score " +
+				"fixing them as recommended, accepting them, or dropping the PR, unless quest advise, which the author runs " +
+				"once first, prints `next apply`, which it follows with a `Design change:` PR comment and a quest review --new " +
+				"round, `next respond` to fix or refute the findings, or `next done`, and for --accept `next done` or `next stop`. A reply without a valid score " +
 				"fails as any malformed reply does. --json prints " +
 				"one object: `rounds`, one per reviewer, `tallies`, every reviewer's findings across the branch's rounds, `risk`, the head's tier with its classification, `skipped`, each reviewer passed over with its reason, `accepted`, the maintainer's reason under --accept or null, `record`, and `next`.\n\n" +
 				"When quest runs from the source of the checkout it judges (bun src/cli/bin.ts, or a build there), the round still runs but posts nothing and sets no status: it prints `record skipped: ...` " +
@@ -2300,8 +2300,13 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"reads it from stdin. The advisor also gets the quest file the branch names, the open PR's body, the review " +
 				"rounds saved for the branch, and the base's agent instructions in place of the checkout's, and is asked " +
 				"to compare two or three approaches, such as patching, redesigning, or dropping the change, and recommend " +
-				"one, saying whether it stays within the quest's Goal and settled decisions (change within) or changes " +
-				"its scope or architecture or drops the PR.\n\n" +
+				"one, with a verdict: revise the PR, however far, accept the review's open findings, or drop the PR. " +
+				"--limit passes an explicit limit the caller's request states, such as fix the packaging only, and the " +
+				"advisor says whether its recommendation goes past it. The output ends with a `next` line: `next apply` " +
+				"for a revision within the limit, which a caller whose task lets it edit and push the PR applies, posting a " +
+				"`Design change:` PR comment and reviewing it with quest review --new; else `next decide`, handing the PR " +
+				"back for the maintainer's pick, for advice to drop the PR, advice past the limit, or advice to accept the " +
+				"findings, which quest review --accept would still record as the maintainer's.\n\n" +
 				`The first advisor that can run answers: ${advisorList}. One that is not installed, logged out, at its ` +
 				"usage limit, or cannot be sandboxed on this host passes the question on, as does one whose reply does " +
 				"not fit the schema. --harness asks only that advisor, at its listed model and effort unless --model or " +
@@ -2324,6 +2329,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		.option("--base <remote/branch>", "Base branch the change is against (default: origin's default branch)")
 		.option("--branch <name>", "Branch to advise on, instead of the checked-out one or its upstream")
 		.option("--force", "Ask again on a branch that was already advised")
+		.option("--limit <text>", "An explicit limit the request you work on states, such as fix the packaging only")
 		.addOption(new Option("--harness <name>", "The only advisor to ask").choices(ADVISORS.map((e) => e.harness)))
 		.option("--model <model>", "Model --harness's advisor runs instead")
 		.option("--effort <level>", "Reasoning effort --harness's advisor runs at instead, never max", effortLevel)
@@ -2337,6 +2343,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 					harness?: AskHarness;
 					model?: string;
 					effort?: string;
+					limit?: string;
 				},
 			) => {
 				const question = words.length === 1 && words[0] === "-" ? readFileSync(0, "utf8") : words.join(" ");

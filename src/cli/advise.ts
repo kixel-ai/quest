@@ -22,20 +22,21 @@ import {
 } from "./review";
 import type { Pins, Session, Spent } from "./usage";
 
-/** The kinds of change an advisor's recommendation makes, so the caller knows whether it may act alone. */
-export const CHANGES = ["within", "scope", "architecture", "drop"] as const;
-export type Change = (typeof CHANGES)[number];
+/**
+ * What an advisor recommends doing with the PR: revise it, however far, accept the review's open findings as they
+ * stand, or drop it.
+ */
+export const VERDICTS = ["revise", "accept", "drop"] as const;
+export type Verdict = (typeof VERDICTS)[number];
 
 /** An advisor's reply. */
 export interface Advice {
 	approaches: { name: string; summary: string; tradeoffs: string }[];
 	/** The name of the approach it recommends. */
 	recommendation: string;
-	/**
-	 * Whether that approach stays within the quest's Goal and settled decisions, or changes its scope, its
-	 * architecture, or drops the PR.
-	 */
-	change: Change;
+	verdict: Verdict;
+	/** Whether the recommendation goes beyond the limit the caller's request set; false when it set none. */
+	beyond: boolean;
 	rationale: string;
 	steps: string[];
 }
@@ -71,6 +72,8 @@ export interface Call {
 	/** The branch's open PR then, or null. */
 	pull: string | null;
 	head: string;
+	/** The limit the caller's request set, or null. */
+	limit: string | null;
 	/** Every session that replied, the answering one last, unusable ones first. */
 	sessions: AdviseSession[];
 	/** The answer, or null when no advisor gave a usable one, which counts toward no cap. */
@@ -102,6 +105,8 @@ export interface AdviseOptions {
 	effort?: string;
 	/** What the caller tried and where it is stuck. */
 	question: string;
+	/** An explicit limit the request the caller works on states, such as "fix the packaging only". */
+	limit?: string;
 }
 
 /** A session an advise run started, for the record sender, with the tokens of one token-max cannot read. */
@@ -164,7 +169,7 @@ export function advisors(options: Pick<AdviseOptions, "harness" | "model" | "eff
 export const ADVICE_SCHEMA = {
 	type: "object",
 	additionalProperties: false,
-	required: ["approaches", "recommendation", "change", "rationale", "steps"],
+	required: ["approaches", "recommendation", "verdict", "beyond", "rationale", "steps"],
 	properties: {
 		approaches: {
 			type: "array",
@@ -178,7 +183,8 @@ export const ADVICE_SCHEMA = {
 			},
 		},
 		recommendation: { type: "string" },
-		change: { type: "string", enum: [...CHANGES] },
+		verdict: { type: "string", enum: [...VERDICTS] },
+		beyond: { type: "boolean" },
 		rationale: { type: "string" },
 		steps: { type: "array", items: { type: "string" } },
 	},
@@ -195,7 +201,8 @@ export function parseAdvice(value: unknown): Advice {
 		fields.approaches.length < 2 ||
 		!fields.approaches.every((a) => text(a?.name) && text(a?.summary) && typeof a?.tradeoffs === "string") ||
 		!text(fields.recommendation) ||
-		!(CHANGES as readonly unknown[]).includes(fields.change) ||
+		!(VERDICTS as readonly unknown[]).includes(fields.verdict) ||
+		typeof fields.beyond !== "boolean" ||
 		!text(fields.rationale) ||
 		!Array.isArray(fields.steps) ||
 		!fields.steps.every(text)
@@ -232,16 +239,20 @@ export function advisePrompt(input: {
 	rounds: string | null;
 	/** The base's REVIEW.md, which reviews of the change follow. */
 	rules: string | null;
+	limit?: string;
 }): string {
 	return [
 		`An agent working on branch ${input.branch} is stuck and asks for a fresh approach. Start from scratch: judge ` +
 			"the goal and the change yourself rather than through the agent's framing. Compare two or three approaches, " +
 			"such as patching the current change, simplifying or redesigning it, and dropping it, with what each costs " +
-			"and risks, then recommend one, naming it exactly as you named it among the approaches. Say whether it stays " +
-			"within the quest's Goal and settled decisions (`within`), or changes the scope, changes the architecture, or " +
-			"drops the PR. List the concrete steps it takes. Do not edit code.",
+			"and risks, then recommend one, naming it exactly as you named it among the approaches, and list the " +
+			"concrete steps it takes. Its verdict is `revise` to change the PR, however far, even past the quest's " +
+			"settled scope or architecture when that is what converges; `accept` to keep the change and accept the " +
+			"review's open findings as they stand; or `drop` to close the PR. Set `beyond` when the recommendation " +
+			"goes past the request's limit below, and false when there is none. Do not edit code.",
 		`The change is \`git diff ${input.mergeBase}..${input.head}\`, branch ${input.branch} against ${input.base.ref} at ${input.base.sha}.`,
 		`## What the agent tried and where it is stuck\n\n${input.question}`,
+		`## The request's limit\n\n${input.limit ?? "The request sets no limit beyond the quest's Goal."}`,
 		input.quest
 			? `## Quest ${input.quest.path}\n\n${input.quest.text}`
 			: "## Quest\n\nNo quest file names this branch.",
@@ -318,6 +329,7 @@ export async function advise(options: AdviseOptions, deps: AdviseDependencies): 
 		pull,
 		rounds: savedRounds(common, branch),
 		rules: shown(root, "REVIEW.md", [base.sha]),
+		...(options.limit !== undefined && { limit: options.limit }),
 	});
 	// The reply's schema is saved apart from the calls, which `savedAdvice` reads every file of.
 	const dir = join(common, "quest", "advise", "schema");
@@ -354,6 +366,7 @@ export async function advise(options: AdviseOptions, deps: AdviseDependencies): 
 				branch,
 				pull: pull?.url ?? null,
 				head,
+				limit: options.limit ?? null,
 				sessions,
 				advice: answer?.value ?? null,
 			};
@@ -489,13 +502,28 @@ export function savedAdvice(root: string, origin: string, since: number): { pins
 /** Whether no advisor could answer because none could run: each was not installed, logged out, limited, or unsupported. */
 export const unavailable = (error: unknown): boolean => error instanceof UnansweredError && error.unavailable;
 
-/** The advice as `quest advise` prints it. */
+/**
+ * What the caller does with `advice`, given whether its request set a limit: apply a revision, or hand the PR back
+ * for the maintainer's pick when the advice would close it, goes past the limit, or accepts the findings, since no
+ * record yet tells an advisor's acceptance from the maintainer's.
+ */
+export function adviceNext(advice: Advice, limited: boolean): string {
+	if (advice.verdict === "drop")
+		return "next decide: the advisor recommends dropping the PR, which only the maintainer closes; hand it back with the approaches";
+	if (limited && advice.beyond)
+		return "next decide: the advice goes past the limit your request set; hand the PR back with the approaches";
+	if (advice.verdict === "accept")
+		return "next decide: the advisor recommends accepting the open findings, which `quest review --accept` would record as the maintainer's; hand the PR back with that recommendation";
+	return "next apply: when your task lets you edit and push the PR, take the recommended approach's steps, post a PR comment starting with `Design change:` that says what changed and why, and review it with `quest review --new`; otherwise report the advice";
+}
+
+/** The advice as `quest advise` prints it, ending with what the caller does next. */
 export function adviceLines({ call, entry, forced }: Advised): string[] {
 	const { advice } = call;
 	return [
 		...(forced ? [`forced past the advice of ${forced.end}`] : []),
 		`advisor ${entry.harness} ${entry.model} ${entry.effort}`,
-		`change ${advice.change}`,
+		`verdict ${advice.verdict}${advice.beyond && call.limit !== null ? ", beyond the request's limit" : ""}`,
 		`recommendation ${advice.recommendation}`,
 		"",
 		...advice.approaches.flatMap((a) => [`## ${a.name}`, "", a.summary, "", `Trade-offs: ${a.tradeoffs}`, ""]),
@@ -506,5 +534,7 @@ export function adviceLines({ call, entry, forced }: Advised): string[] {
 		"## Steps",
 		"",
 		...advice.steps.map((step, index) => `${index + 1}. ${step}`),
+		"",
+		adviceNext(advice, call.limit !== null),
 	];
 }

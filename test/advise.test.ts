@@ -5,10 +5,12 @@ import { dirname, join } from "node:path";
 import { expect, test, vi } from "vitest";
 
 import {
+	type Advice,
 	type Advising,
 	AdviseCapError,
 	advise,
 	adviseFile,
+	adviceNext,
 	advisors,
 	parseAdvice,
 	priced,
@@ -20,13 +22,14 @@ import { ReviewInputError, UnansweredError } from "../src/cli/review";
 import { type Pull, sessionRecords } from "../src/cli/usage";
 import { type Setup, agyFakes, fakes, quest, setup } from "./review-fakes";
 
-const ADVICE = {
+const ADVICE: Advice = {
 	approaches: [
 		{ name: "Patch", summary: "Fix the off-by-one.", tradeoffs: "Leaves the loop." },
 		{ name: "Redesign", summary: "Reduce over the list.", tradeoffs: "A larger diff." },
 	],
 	recommendation: "Redesign",
-	change: "within",
+	verdict: "revise",
+	beyond: false,
 	rationale: "The loop is what keeps breaking.",
 	steps: ["Replace the loop with a reduce."],
 };
@@ -58,8 +61,29 @@ test("advisors are the ranked list, or --harness's entry with --model and --effo
 test("advice must compare at least two approaches and recommend one of them", () => {
 	expect(parseAdvice(ADVICE)).toEqual(ADVICE);
 	expect(() => parseAdvice({ ...ADVICE, approaches: ADVICE.approaches.slice(1) })).toThrow("schema");
-	expect(() => parseAdvice({ ...ADVICE, change: "maybe" })).toThrow("schema");
+	expect(() => parseAdvice({ ...ADVICE, verdict: "maybe" })).toThrow("schema");
+	expect(() => parseAdvice({ ...ADVICE, beyond: "no" })).toThrow("schema");
 	expect(() => parseAdvice({ ...ADVICE, recommendation: "Rewrite" })).toThrow("did not compare");
+});
+
+test("a revision within the request's limit applies; dropping, accepting, or going past the limit hands back", () => {
+	expect(adviceNext(parseAdvice(ADVICE), false)).toMatch(/^next apply: .*`Design change:`.*`quest review --new`/);
+	expect(adviceNext({ ...ADVICE, verdict: "drop" }, false)).toMatch(/^next decide: .*dropping the PR/);
+	expect(adviceNext({ ...ADVICE, verdict: "accept" }, false)).toMatch(/^next decide: .*accepting the open findings/);
+	// An advisor that marks its advice beyond a limit no request set still applies.
+	expect(adviceNext({ ...ADVICE, beyond: true }, false)).toMatch(/^next apply: /);
+	expect(adviceNext({ ...ADVICE, beyond: true }, true)).toMatch(/^next decide: .*past the limit/);
+});
+
+agyFakes("a packaging-only request hands back advice to change the CLI", async () => {
+	const s = setup();
+	vi.stubEnv("FAKE_ASK", JSON.stringify({ ...ADVICE, recommendation: "Patch", beyond: true }));
+	const run = await quest("--root", s.repo, "advise", "--limit", "fix the packaging only", "the build keeps failing");
+	expect(run.code).toBe(0);
+	expect(run.stdout).toContain("verdict revise, beyond the request's limit");
+	expect(run.stdout.trimEnd().split("\n").at(-1)).toMatch(/^next decide: .*past the limit/);
+	const turn = s.calls().find((call) => call.argv[0] !== "models")!;
+	expect(turn.stdin).toContain("## The request's limit\n\nfix the packaging only");
 });
 
 test("untracked tokens price at the model's list rate, and are incomplete without one or without tokens", () => {
@@ -241,7 +265,8 @@ agyFakes("an unusable reply passes the question on, and only answered calls coun
 	vi.stubEnv("FAKE_ASK", JSON.stringify(ADVICE));
 	const run = await quest("--root", s.repo, "advise", "stuck", "again");
 	expect(run.code).toBe(0);
-	expect(run.stdout).toContain("change within");
+	expect(run.stdout).toContain("verdict revise");
+	expect(run.stdout).toContain("next apply: ");
 	expect(run.stdout).toContain("recommendation Redesign");
 	writeFileSync(path, "{");
 	expect((await quest("--root", s.repo, "advise", "again")).code).toBe(2);

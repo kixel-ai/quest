@@ -11,9 +11,9 @@ Exit 3 means no advisor could run: go on without advice and report it.
 
 Invoked on its own, report the advice, a line per approach with your take, and stop: make no edit and write nothing to GitHub.
 
-Inside a task that already lets you edit and push the PR, such as `/quest-start`, `/quest-iterate`, or `/quest-run`, act on its `change` line:
+When the request you work on states an explicit limit, such as "fix the packaging only", pass it with `--limit`.
 
-- `within`: the advice stays within the quest's Goal and settled decisions. Apply it, post a PR comment that starts with `Design change:` saying what the advice changed and why, and review the result with `quest review --new`.
-- `scope`, `architecture`, or `drop`: change nothing, and ask the user to pick among the advisor's approaches, with your recommendation; an agent that cannot prompt puts that decision under the PR's `## Waiting`.
+Inside a task that already lets you edit and push the PR, such as `/quest-start`, `/quest-iterate`, or `/quest-run`, follow its last line, which stands in for the user's pick:
 
-The advice is input, not a decision: when you judge it wrong for this PR, say why in your report and go on.
+- `next apply`: take the recommended approach's steps, even past the quest's settled scope or architecture, post a PR comment that starts with `Design change:` saying what the advice changed and why, update the quest and PR body to match, and review the result with `quest review --new`.
+- `next decide`: change nothing, and ask the user to pick among the advisor's approaches, with its recommendation; an agent that cannot prompt puts that decision under the PR's `## Waiting`.

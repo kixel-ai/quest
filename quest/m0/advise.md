@@ -1,156 +1,51 @@
-# [L] Stuck-agent advisor command and skill
+# [S] Record an advisor's acceptance as the advisor's
 
 ## Goal
 
-Add a read-only `quest advise` CLI command and `/quest-advise` skill so any
-agent that gets stuck (such as failing review convergence at `next decide` or
-repeated findings, or looping before review) can ask a stronger frontier model
-for fresh architectural guidance without requiring T3 Code.
-`quest advise` runs a ranked advisor list (`gemini-4-neon` at `high` via `agy`,
-falling through to `gpt-6.2-astra` at `high` via `codex`, then `claude-fable-5-2`
-at `medium` via `claude`), enforces read-only sandboxing, enforces a hard cap of
-one call per branch unless `--force` is passed, and records every call with
-`role: "advising"` and full token/cost usage in `quest usage` and Kixel Quest.
+When `quest advise`'s advisor recommends accepting a review's open findings (verdict `accept`), the agent at the
+`next decide` stop accepts them itself, and `quest review --accept` records that acceptance as the advisor's, never
+the maintainer's: its posted run's outcome and its `quest review` commit status read `findings accepted by advisor`,
+which the land gate passes as it passes the maintainer's acceptance and `quest usage` counts apart from it.
 
-Non-goals: requiring T3 Code; running `agy` for routine writes or reviews (which
-stay Claude writes and Codex+Claude reviews); prescribing rigid pre-review
-stuckness thresholds in prose.
+Non-goals: the stop's enforcement, cross-host advise records, and the `QUEST_USER_ASKED` attestation, which
+[advise stop](/quest/m0/advise-stop.md) owns.
 
 ## Plan
 
-Decided 2026-11-26 (maintainer, `/quest-plan`):
+Decided 2026-11-28 (maintainer, `/quest-plan` of the agent audit's follow-ups: "I don't really want to be in the
+loop; I just want to fix poor directions early"): ✅ the advisor's verdict replaces the maintainer's pick at
+`next decide` for everything but closing the PR, and an accept the advisor recommended is recorded as the advisor's,
+in the posted run and in the `quest review` commit status the GitHub land gate reads, so `quest usage` and the gate
+never read it as the maintainer's; the gate lands it as it lands the maintainer's (rejected: keeping pivots and drops
+for the maintainer, as decided 2026-11-26; always stop and ask).
 
-- Scope? ✅ Both stuck-agent escalation (`quest advise`) and routine `--advisor`
-  pairing with A/B arms per size ([kixel-ai/quest#934](https://github.com/kixel-ai/quest/pull/934))
-  (rejected: stuck-agent escalation only; review-only triggers; drop).
-- Mechanism? ✅ New `quest advise` CLI command + `/quest-advise` skill,
-  standalone without requiring T3 Code (rejected: coordinator-only via T3
-  `delegate_task`; worker nested `delegate_task`).
-- Triggers? ✅ Generic instructions so agents judge when they are stuck and need
-  advice, naming review convergence failures (`next decide`, repeated findings)
-  and pre-review loops as examples, with every call and its cost tracked by
-  `quest` (rejected: `next decide` only; review-only without pre-review escape
-  hatch).
-- After receiving advice? ✅ Standalone `/quest-advise` only returns its
-  recommendation without editing code or writing to GitHub; when an enclosing
-  task (`/quest-start`, `/quest-iterate`, `/quest-run`) already authorizes edits
-  and pushes, auto-iterate on the advice (record a `Design change:` PR comment
-  and review with `quest review --new`). Amended 2026-11-28 (maintainer,
-  `/quest-plan` of the agent audit's follow-ups: "I don't really want to be in
-  the loop; I just want to fix poor directions early"): ✅ the advisor's
-  verdict replaces the maintainer's pick at `next decide` for everything but
-  closing the PR, scope and architecture pivots included; only a recommendation
-  to drop the PR hands back, since closing one needs the maintainer's
-  confirmation, and advice beyond an explicit limit the enclosing request
-  states, such as "fix the packaging only", hands back too (rejected: closing too; keeping pivots and drops for the
-  maintainer, as decided 2026-11-26; always stop and ask; split behavior
-  between `/quest-afk` and interactive `/quest-run`). Why: of 210 `next decide`
-  stops in the busiest agent host's transcripts from 2026-11-25 to 11-28, 124
-  were handed back under `## Waiting` by `/quest-run`'s dispatched threads,
-  which an afk coordinator answers itself; 37 ran another round anyway and 28
-  ran `--accept` without a pick, many under `/quest-afk`, whose "take your
-  recommendation" covers the stop; the other 21 asked or stopped. About 30 of
-  the maintainer's prompts in those days were checkpoints, counting the
-  handbacks a coordinator relayed. An accept the advisor recommended is
-  recorded as the advisor's, in the posted run and in the `quest review`
-  commit status the GitHub land gate reads (`src/github/review-trust.ts`), so
-  `quest usage` and the gate never read it as the maintainer's. The gate lands
-  an advisor's acceptance as it lands the maintainer's, the hands-off path
-  the maintainer asked for; tests cover both sources.
-  [Advise stop](/quest/m0/advise-stop.md) makes `quest review` enforce it, and
-  [advise replay](/quest/m0/advise-replay.md) measures whether the advice helps.
-- Model order and harnesses? ✅ `gemini-4-neon` (`high`) via `agy` →
-  `gpt-6.2-astra` (`high`) via `codex` → `claude-fable-5-2` (`medium`) via
-  `claude`, restoring `agy` in `quest` solely for `quest advise` (rejected:
-  `opencode` for Neon; `opencode` for all three; `xhigh`/`high` efforts;
-  Codex+Claude only without Neon). Amending [the root quest README](/quest/README.md)
-  narrowly keeps routine writes on Claude and routine reviews on Codex+Claude.
-  Restoring `agy` on the maintainer's hosts is tracked as a follow-up in
-  `kixel-ai/dotfiles`; until `agy` is back on `PATH`, `quest advise` falls
-  through cleanly to `codex` (Astra) and `claude` (Fable).
-- Guardrail? ✅ Read-only sandbox + `role: "advising"` telemetry + hard CLI cap
-  of 1 call per branch (`--force` to override) (rejected: soft warning only).
-
-The maintainer authorized the edits this needs in `assets/` (`assets/skills/advise.md`,
-`assets/skills/review.md`, `assets/skills/iterate.md`, `assets/skills/run.md`,
-`assets/AGENTS.md`) and `README.md`, and on 2026-11-28 `assets/skills/afk.md`,
-which must stop taking its own recommendation at `next decide`.
+The rest of that decision shipped in [kixel-ai/quest#993](https://github.com/kixel-ai/quest/pull/993): `quest advise`,
+its `revise`/`accept`/`drop` verdict and `--limit`, and the readers of `findings accepted by advisor` (`RUN_OUTCOMES` in
+`src/core/reviews.ts` and the status parser in `src/github/review-trust.ts`). Until this quest lands, an `accept`
+verdict prints `next decide` and hands the PR back, since `quest review --accept` would record it as the
+maintainer's.
 
 Recommended, for the implementer to confirm:
 
-- **CLI (`src/cli/advise.ts`, `src/cli/models.ts`, `src/cli/main.ts`):**
-  - Add `ADVISORS` in `src/cli/models.ts`: `[agy("gemini-4-neon", "high"), codex("gpt-6.2-astra", "high"), claude("claude-fable-5-2", "medium")]`.
-  - Restore the read-only `agy` turn runner, deny rules, limit parsing, and
-    sandbox test from commit `83d4e51f93^` (`quest!: remove Antigravity (#902)`),
-    scoped strictly to `quest advise` (not `quest review` or `quest agent`
-    writers, and not the risk classifier).
-  - Run `quest advise [--base <remote>/<base>] [--branch <head-branch>] [--force] [--harness ... --model ... --effort ...] [question]`
-    read-only against the branch, feeding the quest's Goal/Plan, repo
-    `AGENTS.md`/`REVIEW.md`, PR body, saved `.git/quest/review/` rounds, and the
-    caller's summary of what it tried and where it is stuck. Ask the advisor to
-    start from scratch, compare 2–3 approaches (including patching vs
-    simplifying/redesigning vs dropping), and recommend one without editing code.
-  - Fall through `ADVISORS` on missing CLI, logged-out CLI, usage limit, or
-    sandbox incompatibility (such as `agy` refusing to run on macOS's default
-    case-insensitive filesystem), exiting 3 only when every eligible advisor is
-    unavailable.
-  - Persist per-branch invocation history under `.git/quest/advise/` (matching
-    `.git/quest/review/`); refuse a second call on the same branch without
-    `--force`, printing the prior advice timestamp and model.
-- **Telemetry & usage (`src/core/record.ts`, `src/cli/records.ts`, `src/cli/send.ts`, `src/cli/usage.ts`):**
-  - Add `"advising"` to `Role` and `SKILL_ROLES` (`"quest-advise": "advising"`).
-  - Queue each `quest advise` session with its branch, PR, and `role: "advising"`
-    (just as `quest review` queues review sessions via `src/cli/send.ts`), and
-    surface advising invocation counts and spend in `quest usage`.
-  - Because `token-max` only reads Codex and Claude transcripts and the restored
-    `agy` reader returns `input`, `cached`, and `output` token counts without a
-    dollar cost, persist `agy`'s reported token counts in the advisor turn
-    record under `.git/quest/advise/` (or `quest` state), compute dollar spend
-    in `quest usage` and `quest send` from API list-rate pricing for the
-    recorded model (input, cached-input, and output rates), and mark spend
-    incomplete (`complete: false`) when no rate is defined for a model so Neon
-    sessions are never silently dropped or zero-priced.
-- **Checkpoint contract & skills (`src/cli/review.ts`, `README.md`, `assets/skills/advise.md`, `assets/skills/review.md`, `assets/skills/iterate.md`, `assets/AGENTS.md`):**
-  - Update `nextStep()`'s `next decide` output in `src/cli/review.ts`, its CLI
-    help, and `README.md` alongside the skills so headless authors are told the
-    complete exception: they run one `quest advise` escalation, and when the
-    enclosing task already authorizes PR edits, they apply it, post a
-    `Design change:` PR comment, and run `quest review --new`; only advice to
-    drop the PR, or advice beyond an explicit limit the enclosing request
-    states, hands back for the maintainer's pick.
-  - Ship `/quest-advise` (installed by `quest init` like the other skills) with
-    generic guidance: call `quest advise` when stuck (such as failing review
-    convergence, repeated findings, or non-converging implementation loops),
-    not for routine work or infra/environment failures. A standalone
-    `/quest-advise` invocation returns only its recommendation and makes no
-    edits or GitHub writes; automatic iteration applies only when invoked inside
-    a task (`/quest-start`, `/quest-iterate`, `/quest-run`) that already
-    authorizes editing and pushing to the PR.
-  - In `/quest-review` and `/quest-iterate`, note that at `next decide` (or
-    repeated findings across rounds) the agent runs `quest advise` once instead
-    of handing back to the user, applying the advice (`Design change:` PR
-    comment + `quest review --new`) and handing back only when it recommends
-    dropping the PR or goes beyond an explicit limit the request states, such
-    as a CLI change on a packaging-only request. `/quest-afk` no longer takes its own recommendation at the
-    stop; the advisor's stands in for it.
+- `quest review --accept` reads the branch's latest answered call under `.git/quest/advise/` (or wherever
+  [advise stop](/quest/m0/advise-stop.md) moves it); when that call's head is the accepted head, its verdict is
+  `accept`, and the run carries no `QUEST_USER_ASKED=1` attestation, `runOutcome` in `src/cli/review-record.ts` and
+  the status `attestation` record `findings accepted by advisor`.
+- `adviceNext` in `src/cli/advise.ts` then prints `next apply: run quest review --accept "<the advisor's rationale>"`
+  for an `accept` verdict within the request's limit, and `/quest-advise` and `/quest-review` say so.
 
-Tests: unit tests for `ADVISORS` fall-through (missing/logged-out/limited/sandbox-unsupported),
-hard 1-call-per-branch cap and `--force` override, read-only invocation flags
-for `agy`/`codex`/`claude`, persisted `agy` token counts priced at API list
-rates (and marked `complete: false` when a rate is missing) feeding both
-`quest usage` and `quest send`, `"advising"` role attribution and spend rollup,
-`next decide` wording, a packaging-only request handing back advice to
-change the CLI, and `quest init` installing the `/quest-advise` stub.
-Add an `advise` sandbox case alongside `just review-sandbox` verifying no write
-or untrusted code execution.
+Tests: an `accept` verdict on the head records `findings accepted by advisor` in the post and the status, and the land
+gate passes it; an attested `--accept`, or one on another head than the advice's, stays the maintainer's.
 
 ## Waiting
 
-- kixel-ai/kixel.quest: [Accept and display advising session role telemetry](https://github.com/kixel-ai/kixel.quest/blob/main/quest/m0/insight/advising-role.md) is deployed so the Worker accepts `role: "advising"` session records without rejecting batches with HTTP 400. Check that the quest file is gone from `kixel-ai/kixel.quest`'s tree.
+- kixel-ai/kixel.quest: pins a `quest` commit whose `RUN_OUTCOMES` in `src/core/reviews.ts` includes
+  `findings accepted by advisor`, from [kixel-ai/quest#993](https://github.com/kixel-ai/quest/pull/993) on, and
+  deploys it, so its Worker stores such a run instead of refusing the post. Check the `quest` pin in
+  `kixel-ai/kixel.quest`'s lockfile against that commit.
 
 ## Related
 
-- [Routing evidence](/quest/m0/routing-evidence/README.md) - measures rework,
-  spend, and escapes across routing choices
-- [Model check](/quest/m1/model-check.md) - audits shipped model tables each
-  milestone
+- [Advise replay](/quest/m0/advise-replay.md) - measures whether the advice helps
+- [Routing evidence](/quest/m0/routing-evidence/README.md) - measures rework, spend, and escapes across routing
+  choices

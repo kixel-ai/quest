@@ -86,7 +86,17 @@ test("a skill that builds on nothing prints only its own instructions and guide 
 /** Grill only composes into the skills that interview the user, so no stub or listing offers it alone. */
 test("an internal skill composes into others but is neither installed nor listed", () => {
 	expect(skill("grill")).toBeUndefined();
-	expect(SKILLS.map((s) => s.name)).toEqual(["advise", "afk", "import", "iterate", "merge", "plan", "review", "run", "start"]);
+	expect(SKILLS.map((s) => s.name)).toEqual([
+		"advise",
+		"afk",
+		"import",
+		"iterate",
+		"merge",
+		"plan",
+		"review",
+		"run",
+		"start",
+	]);
 	for (const name of ["plan", "iterate", "run"]) expect(skill(name)!.instructions).toContain("# The grill skill\n\n");
 });
 

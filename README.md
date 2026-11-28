@@ -2099,12 +2099,10 @@ and their refutations still decide when the loop ends. Later rounds take
 `--responses`, the author's free-text fixes and refutations, which a round that
 reported findings requires. From a reviewer's third round on, a round that
 still reports findings prints `next decide`: the author stops, and the user
-picks fixing them as recommended, accepting them, or dropping the PR. The
-author may first run `quest advise` once; when its task already lets it edit
-and push the PR and the advice stays within the quest's Goal and settled
-decisions, it applies the advice, posts a `Design change:` PR comment, and
-reviews it with `quest review --new`, while advice that changes the scope or
-architecture or drops the PR still waits for the user's pick. Every
+picks fixing them as recommended, accepting them, or dropping the PR, unless
+the [advisor](#ask-for-advice-when-stuck), which the author runs once first,
+says to apply its advice: the author then revises the PR, posts a
+`Design change:` PR comment, and reviews it with `quest review --new`. Every
 prompt lists the findings the branch settled without a fix, those refuted and
 those the maintainer accepted, with their reasons, so no reviewer reports them
 again; `--new` keeps that list. A later round resumes the session and checks only
@@ -2362,18 +2360,29 @@ broken environment.
 ```console
 $ quest advise "Three rounds keep flagging the cache invalidation; I patched each case and the reviewer finds another."
 advisor agy gemini-4-neon high
-change within
+verdict revise
 recommendation Key the cache by content hash
 ...
+next apply: when your task lets you edit and push the PR, take the recommended approach's steps, ...
 ```
 
 The question says what you tried and where you are stuck; `-` reads it from
 stdin. The advisor also reads the change, the quest file its branch names, the
 open PR's body, the review rounds saved for the branch, and the base's
 `AGENTS.md` and `REVIEW.md`. It compares two or three approaches, such as
-patching, redesigning, or dropping the change, recommends one, and says whether
-that stays within the quest's Goal and settled decisions (`change within`) or
-changes its `scope` or `architecture`, or `drop`s the PR.
+patching, redesigning, or dropping the change, and recommends one with a
+verdict: `revise` the PR, however far, past its quest's settled scope or
+architecture included; `accept` the review's open findings; or `drop` the PR.
+`--limit` passes an explicit limit the request states, such as "fix the
+packaging only", and the advisor says whether its recommendation goes past it.
+
+The last line says what to do. `next apply`, for a revision within the limit,
+has an agent whose task lets it edit and push the PR take the steps, post a
+`Design change:` PR comment, and review it with `quest review --new`.
+`next decide` hands the PR back for the maintainer's pick: for advice to drop
+the PR, which only the maintainer closes, advice past the limit, and advice to
+accept the findings, since `quest review --accept` would record that
+acceptance as the maintainer's.
 
 The first advisor that can run answers, past any that is not installed, logged
 out, at its usage limit, or unable to run sandboxed on this host:

@@ -59,11 +59,6 @@ case-insensitive filesystem, `--accept` requiring all 3 seats on rungs `5`–`6`
 `parseReviews` accepting `seat: "third"`, and `just review-sandbox` covering
 `agy`'s read-only review invocation.
 
-## Required
-
-- [Stuck-agent advisor](/quest/m0/advise.md) - restores the read-only `agy`
-  runner, deny rules, limit parsing, and API-list pricing
-
 ## Related
 
 - [Routing evidence](/quest/m0/routing-evidence/README.md) - tracks per-rung

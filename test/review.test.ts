@@ -262,6 +262,9 @@ test("the 7-rung (size + risk) ladder picks seats and efforts no weaker than the
 		outcomes: [],
 	};
 	expect(parseReviews(thirdPayload)).toEqual(thirdPayload);
+	// The advisor's acceptance reads apart from the maintainer's, ahead of any client posting it.
+	const advised = { ...thirdPayload, runs: [{ ...thirdPayload.runs[0]!, outcome: "findings accepted by advisor" }] };
+	expect(parseReviews(advised)).toEqual(advised);
 });
 
 fakes("a quest branch is reviewed at its quest's size on the base, which its own change cannot lower", async () => {
@@ -3547,7 +3550,7 @@ test("the next step hands the user the findings a reviewer's third round still r
 		/^next decide: .*until the user picks to fix them as the reviewer recommends/,
 	);
 	// The one escalation it allows: advice within the quest's settled scope continues in a new review session.
-	expect(nextStep([round(3, 1)])).toMatch(/`quest advise` once.*\(change within\).*`quest review --new`/);
+	expect(nextStep([round(3, 1)])).toMatch(/run `quest advise` once and follow its `next` line.*`quest review --new`/);
 	expect(nextStep([round(4, 2)])).toMatch(/^next decide: /);
 	expect(nextStep([round(2, 1)])).toMatch(/^next respond: /);
 	expect(nextStep([round(3, 0)])).toBe("next done: no findings remain on this head");

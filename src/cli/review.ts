@@ -3611,7 +3611,7 @@ export function nextStep(rounds: Round[]): string {
 			? "next done: no finding holds this head; its notes are yours to take or leave, and need no answer"
 			: "next done: no findings remain on this head";
 	if (rounds.some((round) => round.findings.length > 0 && round.round >= 3))
-		return "next decide: two rounds of fixes did not settle these findings, so stop and run no further round until the user picks to fix them as the reviewer recommends, accept them, or drop the PR, as /quest-review describes; first you may run `quest advise` once, and when your task already lets you edit and push the PR and its advice stays within the quest's Goal and settled decisions (change within), apply it, post a `Design change:` PR comment, and review it with `quest review --new`";
+		return "next decide: two rounds of fixes did not settle these findings, so stop this approach: run `quest advise` once and follow its `next` line, which applies its advice through `quest review --new` or hands the PR back, running no further round until the user picks to fix them as the reviewer recommends, accept them, or drop the PR, as /quest-review describes";
 	return "next respond: fix each finding as its body recommends, or refute it with evidence the reviewer cannot rebut, commit, rerun the checks, push, then run the next round with --responses, one response per finding by its number";
 }
 
