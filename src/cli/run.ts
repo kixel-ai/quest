@@ -356,6 +356,14 @@ function changes(top: string, ref: string): { base: string; changed: string[] } 
 
 /** Run, or with `query` print, the tasks `options` picks, returning the exit status. */
 export async function run(options: RunOptions, io: RunIO): Promise<number> {
+	if (!options.query) {
+		const host = nativeOs();
+		const foreign = options.os.filter((os) => os !== host);
+		if (foreign.length > 0)
+			throw new Error(
+				`quest run executes only this host's (${host}) tasks, not ${foreign.map((os) => `${os}'s`).join(" or ")}; --query lists any operating system's`,
+			);
+	}
 	const top = git(options.root, ["rev-parse", "--show-toplevel"]);
 	const manifest = readManifest(top);
 	let base: string | null = null;

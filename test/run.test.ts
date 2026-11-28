@@ -9,7 +9,7 @@ import { expect, test } from "vitest";
 
 import { main } from "../src/cli/main";
 import { REFERENCE_LINE } from "../src/core";
-import { type RunOptions, manifestProblems, run } from "../src/cli/run";
+import { type RunOptions, manifestProblems, nativeOs, run } from "../src/cli/run";
 import { initRepository, tempDir } from "./fixture";
 
 // The stubs are shell scripts.
@@ -98,7 +98,7 @@ async function runIn(
 			all: false,
 			only: null,
 			base: undefined,
-			os: ["linux"],
+			os: [nativeOs()],
 			failFast: false,
 			query: false,
 			report: undefined,
@@ -333,6 +333,20 @@ test.runIf(posix)("inside nix develop, mbx's Cargo shim goes back in front of th
 	expect(plain.log).toContain(`nix develop ${dir} --command env A=1 bash -eo pipefail -c echo first=\${PATH%%:*}`);
 });
 
+test.runIf(posix)("only --query accepts tasks for another operating system", async () => {
+	const here = nativeOs();
+	const other = here === "linux" ? "macos" : "linux";
+	const dir = repository({ "quest.toml": task("port", "touch ran", `os = ["${other}"]`) });
+	await expect(runIn(dir, { all: true, os: [other] })).rejects.toThrow(
+		`quest run executes only this host's (${here}) tasks, not ${other}'s; --query lists any operating system's`,
+	);
+	await expect(runIn(dir, { all: true, os: [here, other] })).rejects.toThrow(`not ${other}'s`);
+	expect(existsSync(join(dir, "ran"))).toBe(false);
+	const query = await runIn(dir, { all: true, os: [other], query: true });
+	expect(query.code).toBe(0);
+	expect(JSON.parse(query.stdout).include).toEqual([expect.objectContaining({ task: "port", os: other })]);
+});
+
 test.runIf(posix)("a task's reports are checked and copied, and a stale one never counts", async () => {
 	const dir = repository({
 		"quest.toml": [
@@ -383,7 +397,7 @@ test.runIf(posix)("quest run runs a fixture repository's quest.toml end to end",
 	let stdout = "";
 	let stderr = "";
 	try {
-		const code = await main(["--root", dir, "run", "--tier", "gate", "--os", "linux", "--report", report], {
+		const code = await main(["--root", dir, "run", "--tier", "gate", "--os", nativeOs(), "--report", report], {
 			stdout: (text) => void (stdout += text),
 			stderr: (text) => void (stderr += text),
 		});
