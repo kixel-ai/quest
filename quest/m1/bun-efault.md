@@ -16,10 +16,11 @@ Bun release fixes it and Quest's pin includes that release, `remove()` in
   [comment with the Windows repro and counts](https://github.com/oven-sh/bun/issues/48811#issuecomment-6882793150)
   on [oven-sh/bun#48811](https://github.com/oven-sh/bun/issues/48811), the
   report filed 2026-11-13 that matches this exactly but had no Windows run.
-- The fix to wait for is
-  [oven-sh/bun#48816](https://github.com/oven-sh/bun/pull/48816), open: it makes
-  non-recursive `rm` report the errno `unlink` returned, so the losing caller
-  gets `EPERM` as in Node. `remove()` already tolerates `EPERM`, so only the
+- The expected fix,
+  [oven-sh/bun#48816](https://github.com/oven-sh/bun/pull/48816), which made
+  non-recursive `rm` report the errno `unlink` returned so the losing caller
+  gets `EPERM` as in Node, closed unmerged on 2026-11-27 with no replacement
+  linked from the issue (checked 2026-11-28). `remove()` already tolerates `EPERM`, so only the
   `EFAULT` entry goes.
 - The recursive case is
   [oven-sh/bun#39708](https://github.com/oven-sh/bun/issues/39708) with its fix
@@ -30,7 +31,6 @@ Bun release fixes it and Quest's pin includes that release, `remove()` in
 ## Waiting
 
 - oven-sh/bun: a release carries a fix for
-  [oven-sh/bun#48811](https://github.com/oven-sh/bun/issues/48811) (likely
-  [oven-sh/bun#48816](https://github.com/oven-sh/bun/pull/48816)), and Quest's
-  pin includes it. Check the issue and the fix PR each time ready work is
+  [oven-sh/bun#48811](https://github.com/oven-sh/bun/issues/48811), and Quest's
+  pin includes it. Check the issue and the PRs it links each time ready work is
   triaged.

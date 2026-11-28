@@ -29,9 +29,9 @@ The maintainer authorized the edits this needs in `assets/skills/review.md`,
 Recommended, for the implementer to confirm:
 
 - `src/core/reviews.ts`: `"third"` is already in `SEATS` without sending any
-  `"third"` rounds yet, and this quest's `## Waiting` item confirms
-  `kixel.quest` has pinned and deployed that `quest/core` release before clients
-  begin posting `seat: "third"`.
+  `"third"` rounds yet. Checked 2026-11-28: kixel.quest pins `quest` at
+  `a8b9e776d`, whose `SEATS` includes `"third"`, and has deployed it since, so
+  clients may post `seat: "third"`.
 - `src/cli/models.ts`: add `agy("gemini-4-neon", "medium")` to rung `5` and
   `agy("gemini-4-neon", "high")` to rung `6` in `REVIEW_RUNGS`.
 - `src/cli/review.ts` & `src/cli/agent.ts`:
@@ -59,12 +59,10 @@ case-insensitive filesystem, `--accept` requiring all 3 seats on rungs `5`–`6`
 `parseReviews` accepting `seat: "third"`, and `just review-sandbox` covering
 `agy`'s read-only review invocation.
 
-## Waiting
+## Required
 
-- kixel-ai/kixel.quest: `POST /reviews` accepts `seat: "third"` (via a bumped
-  `quest/core` pin) and displays third-seat rounds in merge cards and factory
-  pages. Check that `kixel-ai/kixel.quest` imports a `quest/core` version whose
-  `SEATS` includes `"third"` and has deployed it.
+- [Stuck-agent advisor](/quest/m0/advise.md) - restores the read-only `agy`
+  runner, deny rules, limit parsing, and API-list pricing
 
 ## Related
 

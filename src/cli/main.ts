@@ -299,10 +299,14 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"through nix develop --command. " +
 				"quest and bash must be on PATH, env when a task run outside nix develop has an environment table, " +
 				"and nix outside that dev shell or while the run uses the cache.\n\n" +
-				"A task that passes must write the junit and metrics files it declares, and metrics must hold a JSON " +
-				"object; --report copies them to <dir>/<task>/junit.xml and <dir>/<task>/metrics.json, where <dir> " +
-				"must not exist yet. A failed task skips the tasks after it, and with --fail-fast also stops every " +
-				"running task. Exits 1 when a task fails.\n\n" +
+				"A task that passes must write the junit and metrics files it declares; --report copies them to " +
+				"<dir>/<task>/junit.xml and <dir>/<task>/metrics.json, where <dir> must not exist yet. Each must pass " +
+				"Kixel Quest's reader: UTF-8 JUnit XML whose root is testsuites or testsuite, with no DTD and a named " +
+				"testcase only inside a testsuite, and metrics of units and a non-empty list of samples in the " +
+				"Bencher Metric Format. A malformed report is named, left out of --report, and fails the run, while " +
+				"its task passes uncached, so the tasks after it run. A failed task skips the tasks after it, and " +
+				"with --fail-fast also stops every running task. Exits 1 when a task fails or a report is " +
+				"malformed.\n\n" +
 				"A task with cargo = true runs once per crate of the Cargo workspace at the repository root, which " +
 				"cargo metadata --locked --all-features lists, with QUEST_CRATE naming the crate, one crate at a " +
 				"time; its reports copy to <dir>/<task>/<crate>/.\n\n" +

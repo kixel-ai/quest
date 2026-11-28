@@ -233,6 +233,72 @@ three hosts' saved review rounds:
     either. The baseline's rounds were reviewed by Sol xhigh, as XL's are
     again.
 
+Agent audit of 2026-11-28, from `quest usage --since 2026-11-01 --json`
+over moq-dev/moq, moq-dev/moq.pro, kixel-ai/quest, kixel-ai/kixel.quest,
+kixel-ai/dotfiles, kixel-ai/kixel.ai, kixel-ai/token-max, and
+moq-dev/hang.live, with the sessions of every maintainer host but the laptop,
+whose token-max refused the SSH audit. 5,038 non-bot PRs merged
+2026-11-01 to 11-28. An escape is a later PR naming it under `## Caused by`,
+opened within 7 days of its merge, counted over PRs merged 11-09 to 11-21:
+detection lag was a median 6 days and a 75th percentile of 25, and the
+convention began 11-04 to 11-08. The writer is the first `Implementer:`
+line's model, with its effort read from the PR's writing sessions when the
+line says `unknown`. Observational: Codex stopped writing 11-23, Sol 6.2
+replaced 6.1 11-24, and the review prompt changed 11-25.
+
+- Escapes by size and tier (PRs; mean review rounds):
+
+  | Size | low | medium | high |
+  |---|---|---|---|
+  | XS | 0/15 (1.3) | 0/116 (1.5) | 0/23 (1.9) |
+  | S | 0/22 (1.5) | 12/203, 6% (2.2) | 7/73, 10% (3.0) |
+  | M | 0/8 (1.6) | 17/143, 12% (3.6) | 16/84, 19% (4.8) |
+  | L | 0/1 | 11/38, 29% (5.5) | 12/41, 29% (6.4) |
+  | XL | none | 4/5 (7.5) | 3/3 (7.5) |
+
+  By size alone: XS 0%, S 4%, M 9%, L 22%, XL 11 of 19. Tier adds no
+  signal once size is known (likelihood ratio 10.4 on 9 degrees of freedom,
+  p about 0.3), against 89 on 4 for size alone.
+- Escapes by review rounds: 1 round 2%, 2 5%, 3 11%, 4 6%, 5 26%, 6 or
+  more 36%. PRs with 5 or more rounds were 18% of reviewed PRs and held 57%
+  of reviewed escapes, almost all before #882's `next decide` stop.
+- Writers within size (escapes; median writing cost per merged PR with
+  attributed sessions): S Sonnet high 6/53 ($1.35), Opus low 5/123 ($1.11),
+  Opus medium 6/120 ($2.69), Opus high 2/76 ($5.72); M Opus medium 25/221
+  ($5.83), Opus high 12/118 ($8.93); L Opus high 26/99 ($16.47).
+- Local reviewer seats, first-round findings per PR and cost per PR. Sol
+  6.2 against 6.1 at one effort: S medium 1.51 against 0.26 ($0.93 against
+  $0.30), M high 2.56 against 0.89 ($1.41 against $0.82), L xhigh 3.77
+  against 2.05 ($2.84 against $1.61), with refuted findings 15-18% against
+  6-10%; the 11-24 and 11-25 prompt changes share the credit. Second seats:
+  Opus high 2.2 at M for $4.03 and 3.7 at L for $5.19, a quarter refuted;
+  Sonnet medium 6.0-6.5 at S and M for under $0.45, half or more refuted;
+  Fable xhigh 10-11 at S and M for $14-18.
+- Mean cost per merged PR since 11-09, writing, review, other roles, and
+  later fixes: XS $7.85, $0.53, $1.62, $0.02; S $6.91, $0.84, $0.48, $0.84;
+  M $11.32, $1.60, $0.76, $1.15; L $25.40, $2.83, $2.18, $4.22; XL (11 PRs)
+  $48.47, $1.81, $0.16, $36.04. Median writing cost XS $0.95, S $2.10, M
+  $6.65, L $15.77, XL $31.64.
+- Coverage of merged non-bot PRs since 11-01: size 68%, tier 43%, review
+  tally 46%, writer effort known 27%, any session cost 43%. About $12.6k of
+  about $67k of host spend traced to a PR; see
+  [deleted checkouts](/quest/m0/telemetry/usage-deleted-checkouts.md).
+- Decided 2026-11-28 (maintainer, `/quest-plan` of the audit's follow-ups):
+  - Risk tier? ✅ Keep it, and let the
+    [second-seat ablation](/quest/m0/second-seat-ablation.md) decide what
+    its extra seat buys (rejected: a size-only ladder now; keeping it with
+    no test).
+  - New arms? ✅ The second-seat ablation, now, and
+    [M writer effort](/quest/m0/m-writer-effort.md) after the advisor
+    readout (rejected: S on Opus low against medium; plan-time splitting at
+    L and XL; escalating at review round 5, which #882's round-3 stop
+    already covers).
+  - Metric for those arms? ✅ 7-day escapes, with first-round findings and
+    cost beside them (rejected: first-round findings at 0.25 per PR, which
+    stays the rule for the other arms).
+  - Severity? ✅ [`## Caused by` lines carry one](/quest/m0/caused-by-severity.md)
+    (rejected: dropping it; a mistake-audit tally only).
+
 Baseline from the 2026-11-11 audit, at API list price:
 
 - Host spend 2026-11-01 to 11-11: about $18.6k. Claude $15.7k, Codex
@@ -280,3 +346,6 @@ Baseline from the 2026-11-11 audit, at API list price:
 
 - [Model check](/quest/m1/model-check.md) - retunes the tables each
   milestone from these tallies
+- [Second-seat ablation](/quest/m0/second-seat-ablation.md) and
+  [M writer effort](/quest/m0/m-writer-effort.md) - the arms the 2026-11-28
+  audit started

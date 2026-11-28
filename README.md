@@ -741,7 +741,9 @@ the least, such as no review record counting from a server too old to say
 whether a maintainer attested it; a request with a field the server
 does not know is refused. A 400 with `{"error"}` refuses a bad argument, such as a
 malformed `--since`, which `quest` reports as a usage error. `quest/core` exports each read's types and their parsers;
-`quest/github`'s `GitHubForge` answers the same reads from GitHub, other than `updated` and `writers`.
+`quest/github`'s `GitHubForge` answers the same reads from GitHub, other than `updated` and `writers`, its `history` reads
+a repository's history for `quest/core`'s `BaseMerges`, and `reviewStatuses` with `countedReview` read the `quest review`
+status that counts for a head, each as `quest status` does.
 `quest review` posts each run to `POST /reviews` with the same token, its body
 `{"runs", "outcomes"}` as `parseReviews` in `quest/core` reads it.
 
@@ -1658,11 +1660,20 @@ mbx's Cargo shim, not the shell's Cargo, builds.
 
 A failed task skips the tasks that run after it, while independent ones finish;
 `--fail-fast` stops them too. A task that passes must write each `junit` and
-`metrics` file it declares, and `metrics` must hold a JSON object; a file left
-from an earlier run is deleted before the task starts, and two tasks may declare
-the same file, compared without case, only when one runs after the other.
-`quest.toml` must be a regular file, not a symlink. `--report <dir>` copies them to `<dir>/<task>/junit.xml`
-and `<dir>/<task>/metrics.json` for upload; `<dir>` must not exist yet.
+`metrics` file it declares; a file left from an earlier run is deleted before
+the task starts, and two tasks may declare the same file, compared without
+case, only when one runs after the other. `quest.toml` must be a regular file,
+not a symlink. `--report <dir>` copies them to `<dir>/<task>/junit.xml` and
+`<dir>/<task>/metrics.json` for upload; `<dir>` must not exist yet.
+
+Each report must pass Kixel Quest's reader, which refuses a malformed one along
+with the whole run it came in: UTF-8 JUnit XML whose root is `testsuites` or
+`testsuite`, with no DTD and a named `testcase` only inside a `testsuite`, and
+a `metrics.json` of `units`, each measure's unit, and a non-empty list of
+`samples` in the [Bencher Metric Format](https://bencher.dev/docs/reference/bencher-metric-format/),
+each with an optional full `commit` ID. A malformed report is named, left out
+of `--report`, and fails the run once its tasks finish, while its task still
+passes, so the tasks after it run; that pass is not cached.
 
 `--query` prints the picked tasks and runs nothing, so a CI runner can plan
 its legs before installing a toolchain. Its JSON is one entry per task and
@@ -1786,9 +1797,9 @@ a release tag's commit, never a branch:
   only mbx.
 - `.github/workflows/platform.yml` runs a tier's macOS and Windows tasks on
   GitHub's runners, one job per operating system, with `quest` built from the
-  workflow's own commit, and uploads each job's `--report`, merged into one
-  `junit.xml` and `metrics.json` at the root as Kixel Quest reads them, as
-  `kixel-metrics-<os>-<arch>`. Without `base` it runs every task (`--all`).
+  workflow's own commit, and uploads each job's `--report` directory as is,
+  even when a task failed, as `kixel-metrics-<os>-<arch>`. Without `base` it
+  runs every task (`--all`).
 - `.github/workflows/npm-publish.yml` runs a publish script in the dev shell
   on a GitHub-hosted runner with `id-token: write`, for npm's trusted
   publishing, which accepts no other runner. npm checks the calling workflow's
