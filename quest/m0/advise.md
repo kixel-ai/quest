@@ -41,7 +41,8 @@ Decided 2026-11-26 (maintainer, `/quest-plan`):
   verdict replaces the maintainer's pick at `next decide` for everything but
   closing the PR, scope and architecture pivots included; only a recommendation
   to drop the PR hands back, since closing one needs the maintainer's
-  confirmation (rejected: closing too; keeping pivots and drops for the
+  confirmation, and advice beyond an explicit limit the enclosing request
+  states, such as "fix the packaging only", hands back too (rejected: closing too; keeping pivots and drops for the
   maintainer, as decided 2026-11-26; always stop and ask; split behavior
   between `/quest-afk` and interactive `/quest-run`). Why: of 210 `next decide`
   stops in the busiest agent host's transcripts from 2026-11-25 to 11-28, 124
@@ -51,9 +52,11 @@ Decided 2026-11-26 (maintainer, `/quest-plan`):
   recommendation" covers the stop; the other 21 asked or stopped. About 30 of
   the maintainer's prompts in those days were checkpoints, counting the
   handbacks a coordinator relayed. An accept the advisor recommended is
-  recorded as the advisor's, such as a reason prefixed `advisor:` or its own
-  field in the posted run, so `quest usage` and the land gate never read it as
-  the maintainer's.
+  recorded as the advisor's, in the posted run and in the `quest review`
+  commit status the GitHub land gate reads (`src/github/review-trust.ts`), so
+  `quest usage` and the gate never read it as the maintainer's. The gate lands
+  an advisor's acceptance as it lands the maintainer's, the hands-off path
+  the maintainer asked for; tests cover both sources.
   [Advise stop](/quest/m0/advise-stop.md) makes `quest review` enforce it, and
   [advise replay](/quest/m0/advise-replay.md) measures whether the advice helps.
 - Model order and harnesses? ✅ `gemini-4-neon` (`high`) via `agy` →

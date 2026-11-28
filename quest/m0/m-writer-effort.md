@@ -20,7 +20,6 @@ Agent's choices, for the implementer to revisit:
 - Start once the [advisor trial readout](/quest/m0/advisor-readout.md) has decided M. If it moves M off Opus high, rewrite this quest for M's new writer or delete it.
 - Reuse the `ARMS` and `COHORT` machinery under a new cohort name, so the advisor trial's rows never mix in.
 - Read each PR's arm and effort from wherever the writer is recorded when it enrolls: its `Implementer:` lines today, or the session records Kixel Quest's `writers` read answers once [Implementer cutover](/quest/m0/telemetry/implementer-cutover.md) lands. If the cutover lands mid-trial, check that every enrolled PR still reaches the readout under its arm before counting it.
-- Count escapes as the [second-seat ablation](/quest/m0/second-seat-ablation.md) defines them, open fixes included.
 - Sample: detecting a fall from 10% to 5% needs about 430 PRs per arm, three to four weeks at the audit's rate of about 265 merged M PRs a week across the eight repositories, fewer when only armed quests count.
 
 Tests: an M quest draws a stable arm under the new cohort, and the arm reaches `quest usage`'s readout through the writer record in use.
@@ -28,3 +27,4 @@ Tests: an M quest draws a stable arm under the new cohort, and the arm reaches `
 ## Required
 
 - [Advisor trial readout](/quest/m0/advisor-readout.md) - frees M's writer arms and decides its writer
+- [Escape window](/quest/m0/escape-window.md) - the 7-day escape count the readout decides on

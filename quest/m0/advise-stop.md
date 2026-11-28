@@ -20,8 +20,9 @@ Agent's choices, for the implementer to revisit:
 - `quest advise` exiting 3, every advisor unavailable, satisfies the stop as an outage, recorded as such, so an outage never blocks the branch for good.
 - The maintainer's `--accept` passes at any point; an accept the advisor recommended is recorded as the advisor's, as [advise](/quest/m0/advise.md) plans.
 
-Tests: a two-seat review that changes hosts before its third run prints `next decide` there; another round past the stop is refused until an advise record dated after the stop exists on another host, then allowed; a stale advise call gets `--force` printed; an advise outage satisfies the stop; three runs with findings after the advice's `--new` hand back; the maintainer's `--accept` passes throughout.
+Tests: through that posted-runs read, a two-seat review that changes hosts and heads before its third run prints `next decide` there; another round past the stop is refused until an advise record dated after the stop exists on another host, then allowed; a stale advise call gets `--force` printed; an advise outage satisfies the stop; three runs with findings after the advice's `--new` hand back; the maintainer's `--accept` passes throughout.
 
 ## Required
 
 - [Advise](/quest/m0/advise.md) - `quest advise` and its per-branch history
+- [Usage reviews](/quest/m0/telemetry/usage-reviews.md) - the client read of a PR's posted review runs across heads, which counts runs made on other hosts

@@ -12,7 +12,7 @@ Decided 2026-11-28 (maintainer, `/quest-plan` of the agent audit's follow-ups, r
 
 - Risk tier? ✅ Keep the model-classified tier and let this ablation decide what its extra seat buys (rejected: a size-only ladder now, keeping path-held high and low auto-land; keeping it with no test). The audit found tier adds no escape signal once size is known: a likelihood-ratio test of size plus tier against size alone gave 10.4 on 9 degrees of freedom (p about 0.3), over the 775 sized and tiered PRs merged 2026-11-09 to 11-21 and at least 7 days old. Within S and M, high-tier PRs escaped about 1.6 times as often as medium ones, which was not significant. At L there was no gap.
 - Start and scope? ✅ Start as soon as it ships, on every rung 3 and 4 head, path-held high included (rejected: skipping path-held high heads; waiting for the 2026-12-04 advisor readout).
-- Metric? ✅ 7-day escapes decide: a later PR naming it under `## Caused by` opened within 7 days of its merge, open or merged, counted only once 7 days have passed. `quest usage` reads only merged fixes today (`fixBreakages()`), so this quest makes it count open ones too, by opening time, the definition [M writer effort](/quest/m0/m-writer-effort.md) and the [advisor trigger A/B](/quest/m1/advise-trigger.md) reuse. First-round findings and cost go beside them (rejected: the routing evidence rule of first-round findings at 0.25 per PR, for this arm only). Detection lag measured by the audit: median 6 days, 75th percentile 25 days, so an unwindowed count undercounts recent PRs.
+- Metric? ✅ 7-day escapes decide: a later PR naming it under `## Caused by` opened within 7 days of its merge, open or merged, counted only once 7 days have passed, as [escape window](/quest/m0/escape-window.md) defines and builds for every experiment. First-round findings and cost go beside them (rejected: the routing evidence rule of first-round findings at 0.25 per PR, for this arm only). Detection lag measured by the audit: median 6 days, 75th percentile 25 days, so an unwindowed count undercounts recent PRs.
 
 Agent's choices, for the implementer to revisit:
 
@@ -28,6 +28,7 @@ Tests: the draw is stable across heads and tier changes; an arm-B head on rung 3
 ## Required
 
 - [Usage reviews](/quest/m0/telemetry/usage-reviews.md) - `quest usage` reads the posted review runs that hold each arm's findings
+- [Escape window](/quest/m0/escape-window.md) - the 7-day escape count the readout decides on
 
 ## Related
 
