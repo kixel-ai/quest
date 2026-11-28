@@ -335,7 +335,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		.option("--base <ref>", "Diff against the merge base of HEAD and this ref")
 		.option(
 			"--os <os>",
-			`Run the tasks for this operating system, one of ${HOST.join(", ")} (repeatable; default: this host's)`,
+			`Pick tasks for ${HOST.join(", ")} (repeatable; default: this host's). Only --query accepts other operating systems`,
 			(value: string, previous: Host[]) => {
 				if (!HOST.includes(value as Host)) throw new InvalidArgumentError(`expected one of ${HOST.join(", ")}`);
 				return [...previous, value as Host];

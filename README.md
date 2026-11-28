@@ -1620,7 +1620,7 @@ os = ["windows"]
 ```sh
 quest run                                 # this host's pr tasks the branch affects
 quest run --tier gate --fail-fast         # the merge gate
-quest run --tier nightly --os macos --all # every nightly task for macOS
+quest run --tier nightly --all                        # every nightly task for this host
 quest run --only test                     # one task, whatever its tier
 quest run --no-cache                      # run every task, taking no cached pass
 quest run --tier gate --query --os linux --os macos   # a runner's matrix
@@ -1664,7 +1664,8 @@ the same file, compared without case, only when one runs after the other.
 `quest.toml` must be a regular file, not a symlink. `--report <dir>` copies them to `<dir>/<task>/junit.xml`
 and `<dir>/<task>/metrics.json` for upload; `<dir>` must not exist yet.
 
-`--query` prints the picked tasks and runs nothing, so a CI runner can plan
+`quest run` executes tasks for the host operating system. `--query` accepts
+any supported operating system and prints the picked tasks without running them, so a CI runner can plan
 its legs before installing a toolchain. Its JSON is one entry per task and
 operating system, under `include` for a GitHub Actions matrix:
 
