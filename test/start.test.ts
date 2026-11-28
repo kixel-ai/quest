@@ -359,7 +359,7 @@ describe("start on GitHub", () => {
 		const warnings: string[] = [];
 		const started = await start(work, new FakeGitHub(), warnings);
 		expect(warnings).toEqual([]);
-		expect(started.worktree).toBe(realpathSync.native(elsewhere));
+		expect(realpathSync.native(started.worktree!)).toBe(realpathSync.native(elsewhere));
 		expect(git(elsewhere, "rev-parse", "HEAD")).toBe(started.sha);
 		expect(existsSync(join(work, ".worktrees"))).toBe(false);
 	});

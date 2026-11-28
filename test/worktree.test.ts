@@ -628,11 +628,13 @@ describe("worktrees", () => {
 				child.on("close", (code) => resolve({ code, stderr }));
 			});
 		const results = await Promise.all([create(repo, "one"), create(second, "two")]);
-		// The loser's stderr says why it failed, which only the disk refusal may be.
+		const failures = results.filter((result) => result.code !== 0);
 		expect(
 			results.filter((result) => result.code === 0),
 			results.map((result) => result.stderr).join("\n"),
 		).toHaveLength(1);
+		// The loser fails on the disk refusal, not on the registry lock or the filesystem.
+		expect(failures[0]!.stderr).toContain("disk capacity exceeded");
 		expect(worktrees.status().records).toHaveLength(1);
 		expect(worktrees.status().allocated).toBeLessThanOrEqual(15_000_000);
 	});

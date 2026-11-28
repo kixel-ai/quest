@@ -47,7 +47,7 @@ const user = (): NodeJS.ProcessEnv => {
 	};
 };
 
-test("an approved code stores a token named after the host, readable only by the user", async () => {
+test("an approved code stores a token named after the host", async () => {
 	const server = new FakeLogin();
 	const { deps, env, said, asked, clock } = host(server);
 	expect(await login(deps)).toEqual({
