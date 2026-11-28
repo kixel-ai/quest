@@ -704,9 +704,10 @@ write, such as one home-manager manages, fails the command naming both entries,
 to declare there instead; one that already holds just them is left alone.
 Git matches `<url>/` to the same remotes as `<url>`, but as a key of quest's
 own, so a helper the person lists under `<url>` is never moved or removed.
-`quest logout` removes those two entries, failing on a config it cannot write
-while they are there, then the token from the host; Kixel Quest takes the token
-until it is revoked on its Tokens page. `QUEST_KIXEL_URL` must be a bare origin,
+`quest logout` revokes the token at Kixel Quest, so it stops working at once,
+then removes those two entries, failing on a config it cannot write while they
+are there, then the token from the host; a refused revoke fails it and keeps the
+token and the entries, so running it again retries. `QUEST_KIXEL_URL` must be a bare origin,
 since git's credential requests name only the protocol and host. A
 `records.json` beside it, where earlier versions read a pasted token, is moved
 into `login.json` on the first read, uploading no transcripts.

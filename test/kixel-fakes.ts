@@ -300,6 +300,10 @@ export class FakeLogin {
 	readonly labels: string[] = [];
 	/** How many times a host asked for its token. */
 	polls = 0;
+	/** The tokens revoked at `/login/revoke`, as Kixel Quest records them. */
+	readonly revoked: string[] = [];
+	/** The status `/login/revoke` answers instead of revoking, to model a refusal. */
+	refuseRevoke: number | null = null;
 	#approved = new Set<string>();
 	#issued = 0;
 
@@ -335,6 +339,12 @@ export class FakeLogin {
 			this.polls++;
 			if (!this.#approved.delete(body.device_code!)) return json({ error: "authorization_pending" }, 400);
 			return json({ access_token: `issued-${++this.#issued}`, token_type: "Bearer" });
+		}
+		if (path === "/login/revoke") {
+			if (this.refuseRevoke !== null) return json({ error: "server_error" }, this.refuseRevoke);
+			if (typeof body.token !== "string" || body.token === "") return json({ error: "invalid_request" }, 400);
+			this.revoked.push(body.token);
+			return json({});
 		}
 		return json({ error: "not found" }, 404);
 	}) as typeof fetch;
