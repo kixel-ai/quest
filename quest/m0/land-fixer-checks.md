@@ -35,5 +35,7 @@ repository's checks "as the merge queue will". Since Codex stopped fixing
   The queue is the gate either way.
 - rind's standalone Lean proofs (`admin/prove lean`) were another 20% of its
   fixer CPU. Since kixel-ai/rind#958, they gate releases rather than merges,
-  so the queue never repeats them. Say whether the fixer runs a check the
-  merge gate does not.
+  so the queue never repeats them. The fixer runs no check the merge gate does
+  not, so it skips them too, unless the failure log shows one failing.
+- Where the base names no quick check, keep today's fallback: each touched
+  language's own type check and linter beside its build and test.
