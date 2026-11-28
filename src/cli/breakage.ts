@@ -20,19 +20,22 @@ export interface Cause {
 	found: Finder | null;
 	/** The ID of the incident the fix closes, as `quest records incident` reported it. */
 	incident: string | null;
-	/** Earlier fixes, closed unmerged, that this one redoes, so an escape keeps the earlier opening. */
-	replaces: number[];
+}
+
+/** One `## Caused by` line as written, before {@link culprits} folds a culprit's lines together. */
+export interface Line extends Cause {
+	/** An earlier fix, closed unmerged, that this line's fix redoes, so an escape keeps the earlier opening. */
+	replaces: number | null;
 }
 
 /**
- * The PRs of `repository` that `body`'s `## Caused by` section names as culprits: each bullet that opens with
+ * Each line of `body`'s `## Caused by` section naming a culprit of `repository`: each bullet that opens with
  * `[owner/repo#N](url) - why`. A link anywhere else on a line, as context or a "fixed by" aside, names no culprit.
  * A line may end with a parenthesis of any of three parts, in order, as
  * `(found by customer; replaces <PR URL>; incident <id>)`: who found it, an article allowed, the closed fix of
- * `repository` it redoes, and the incident the fix closes. Each culprit and incident keeps its first line, and a
- * culprit whose lines name incidents drops its line naming none.
+ * `repository` it redoes, as its URL or a Markdown link to it, and the incident the fix closes.
  */
-export function culprits(body: string, repository: Repository): Cause[] {
+export function causeLines(body: string, repository: Repository): Line[] {
 	const heading = /^## Caused by[ \t]*\r?$/m.exec(body);
 	if (!heading) return [];
 	const rest = body.slice(heading.index + heading[0].length);
@@ -47,32 +50,35 @@ export function culprits(body: string, repository: Repository): Cause[] {
 		`\\((?:found by (?:an? |the )?(${FINDERS.join("|")})(?:; |(?=\\))))?(?:replaces ([^;\\r\\n]+?)(?:; |(?=\\))))?(?:incident ([^\\r\\n]+?))?\\)\\s*$`,
 		"i",
 	);
-	// The PR a `replaces` part names, as its URL or a Markdown link to it; another form names none.
+	// An unreadable replacement names none, keeping the line's other parts.
 	const replacement = new RegExp(`^(?:\\[${name}#\\d+\\]\\()?https://github\\.com/${name}/pull/(\\d+)\\)?$`, "i");
+	return [...section.matchAll(culprit)]
+		.filter((match) => match[1] === match[2])
+		.map((match) => {
+			const [, by, replaced, named] = tail.exec(match[0]) ?? [];
+			const replaces = replacement.exec(replaced?.trim() ?? "")?.[1];
+			return {
+				number: Number(match[1]),
+				found: (by?.toLowerCase() as Finder | undefined) ?? null,
+				incident: named?.trim() || null,
+				replaces: replaces === undefined ? null : Number(replaces),
+			};
+		});
+}
+
+/**
+ * The culprits of `repository` that `body`'s `## Caused by` section names, read from its {@link causeLines}. Each culprit
+ * and incident keeps its first line, and a culprit whose lines name incidents drops its line naming none.
+ */
+export function culprits(body: string, repository: Repository): Cause[] {
 	const found = new Map<string, Cause>();
-	for (const match of section.matchAll(culprit)) {
-		if (match[1] !== match[2]) continue;
-		const [, by, replaced, named] = tail.exec(match[0]) ?? [];
-		const cause: Cause = {
-			number: Number(match[1]),
-			found: (by?.toLowerCase() as Finder | undefined) ?? null,
-			incident: named?.trim() || null,
-			replaces: [Number(replacement.exec(replaced?.trim() ?? "")?.[1])].filter((n) => n > 0),
-		};
-		const id = JSON.stringify([cause.number, cause.incident]);
-		const kept = found.get(id);
-		if (!kept) found.set(id, cause);
-		else kept.replaces = [...new Set([...kept.replaces, ...cause.replaces])];
+	for (const { number, found: by, incident } of causeLines(body, repository)) {
+		const id = JSON.stringify([number, incident]);
+		if (!found.has(id)) found.set(id, { number, found: by, incident });
 	}
-	// A line naming an incident records its culprit's breakage, so the culprit's line naming none would count it twice;
-	// the culprit's first line keeps the fixes it replaces.
+	// A line naming an incident records its culprit's breakage, so the culprit's line naming none would count it twice.
 	const named = new Set([...found.values()].filter((c) => c.incident !== null).map((c) => c.number));
-	const kept = [...found.values()].filter((c) => c.incident !== null || !named.has(c.number));
-	for (const dropped of [...found.values()].filter((c) => !kept.includes(c))) {
-		const first = kept.find((c) => c.number === dropped.number)!;
-		first.replaces = [...new Set([...first.replaces, ...dropped.replaces])];
-	}
-	return kept;
+	return [...found.values()].filter((c) => c.incident !== null || !named.has(c.number));
 }
 
 /**

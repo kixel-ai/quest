@@ -29,7 +29,7 @@ import { type Implementer, canonicalModel, recorded } from "./models-record";
 import { type ClaimDependencies, upstream } from "./claims";
 import { repositoryPath } from "../github/client";
 import { git } from "./git";
-import { type Cause, culpritOf, culprits } from "./breakage";
+import { type Line, causeLines, culpritOf, culprits } from "./breakage";
 import { fixes } from "./land-fixer";
 import { MERGER } from "./land-watch-fix";
 import { githubRepository, requireRemote } from "./github";
@@ -611,35 +611,43 @@ const DAY = 86_400_000;
  */
 function escapeOpenings(pulls: Pull[], repository: Repository): Map<number, number[]> {
 	const closed = pulls.filter((each) => each.state === "closed");
-	const lines = new Map(pulls.map((each) => [each.number, culprits(each.body, repository)]));
-	// The openings along the closed fixes `cause` replaces, each fix visited once.
-	const opened = (fix: Pull, cause: Cause, seen: Set<number>): number[] => {
-		seen.add(fix.number);
+	// Each line as written, so a line takes over only the fixes it names or shares an incident with.
+	const written = new Map(pulls.map((each) => [each.number, causeLines(each.body, repository)]));
+	// The openings along the closed fixes `line` of `fix` replaces. Each fix and line is followed once, so a fix two
+	// lines reach is followed for each of its own lines.
+	const opened = (fix: Pull, line: Line, seen: Set<string>): number[] => {
 		const at = [fix.created];
 		for (const earlier of closed) {
-			if (seen.has(earlier.number)) continue;
-			const own = lines.get(earlier.number)!;
+			if (earlier.number === fix.number) continue;
+			const own = written.get(earlier.number)!;
 			// An incident ID is the repository's, so it ties the fixes even when the earlier one blamed another PR; only
 			// a fix opened earlier can be the one redone.
 			const shared =
-				cause.incident === null || earlier.created >= fix.created
-					? undefined
-					: own.find((each) => each.incident === cause.incident);
+				line.incident === null || earlier.created >= fix.created
+					? []
+					: own.filter((each) => each.incident === line.incident);
 			// A named replacement counts even when the earlier fix's body never named the culprit.
-			const line =
-				shared ??
-				(cause.replaces.includes(earlier.number)
-					? (own.find((each) => each.number === cause.number) ?? { ...cause, incident: null, replaces: [] })
-					: undefined);
-			if (line) at.push(...opened(earlier, line, seen));
+			const named =
+				line.replaces !== earlier.number
+					? []
+					: own.some((each) => each.number === line.number)
+						? own.filter((each) => each.number === line.number)
+						: [{ ...line, incident: null, replaces: null }];
+			for (const next of new Set([...shared, ...named])) {
+				const key = `${earlier.number}\0${own.indexOf(next)}`;
+				if (seen.has(key)) continue;
+				seen.add(key);
+				at.push(...opened(earlier, next, seen));
+			}
 		}
 		return at;
 	};
 	const openings = new Map<number, number[]>();
 	for (const fix of pulls.filter((each) => each.state !== "closed"))
-		for (const cause of lines.get(fix.number)!) {
-			if (cause.number === fix.number) continue;
-			openings.set(cause.number, [...(openings.get(cause.number) ?? []), ...opened(fix, cause, new Set())]);
+		for (const [index, line] of written.get(fix.number)!.entries()) {
+			if (line.number === fix.number) continue;
+			const found = opened(fix, line, new Set([`${fix.number}\0${index}`]));
+			openings.set(line.number, [...(openings.get(line.number) ?? []), ...found]);
 		}
 	return openings;
 }
