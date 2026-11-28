@@ -1,10 +1,10 @@
 name: Check
 
-# Runs after each push to main, outside pull requests. The merge queue already
-# runs `just check`, `just test`, and the flake check on the host's runner; this
-# repeats them on a hosted one and adds the installed lifecycle on Linux and
-# macOS. A newer push cancels an older run, even one in progress, so runs
-# coalesce.
+# Runs after each push to main, outside pull requests. It runs only the installed
+# lifecycle on Linux and macOS: the merge queue already ran `just check`, `just
+# test`, and the flake check on this exact tree, so repeating them here only
+# added hosted-runner noise. A newer push cancels an older run, even one in
+# progress, so runs coalesce.
 on:
   push:
     branches: [main]
@@ -18,31 +18,6 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  check:
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - uses: cachix/install-nix-action@bb0495a1086c46893eee56f32fd192dfe4a15bb9 # v32.0.0
-      # The full history holds the merge base with the base branch.
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-      - name: Install dependencies
-        run: nix develop --command just install
-      # `quest worktree run` owns processes through a systemd user scope, which the tests exercise.
-      - name: Start a systemd user manager
-        run: |
-          sudo loginctl enable-linger "$USER"
-          sudo systemctl start "user@$(id -u).service"
-          echo "XDG_RUNTIME_DIR=/run/user/$(id -u)" >> "$GITHUB_ENV"
-      - name: Check
-        run: nix develop --command just check
-      - name: Test
-        run: nix develop --command just test
-      - name: Check Nix package
-        run: nix flake check
-
   lifecycle:
     name: lifecycle (${{ matrix.runner }})
     strategy:

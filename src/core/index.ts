@@ -209,6 +209,8 @@ export {
 	type PullFiles,
 	type PullRequest,
 	type PullView,
+	type UpdatedPage,
+	type UpdatedPull,
 	type Reaction,
 	type Repository,
 	type Review,

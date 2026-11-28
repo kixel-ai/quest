@@ -698,6 +698,47 @@ describe("wire", () => {
 		);
 	});
 
+	test("the updated PRs read takes a first and a last page, and refuses a PR missing a field", () => {
+		const merged = {
+			number: 7,
+			url: "https://kixel.quest/example/project/pull/7",
+			branch: "quest/m0/one",
+			state: "merged",
+			created: 1_000,
+			updated: 5_000,
+			closed: 4_000,
+			body: "## Caused by\n",
+		};
+		const request = { repository, since: 0, cursor: null };
+		expect(parseForgeRequest("updated", request)).toEqual(request);
+		expect(parseForgeRequest("updated", { ...request, cursor: "p2" }).cursor).toBe("p2");
+		expect(() => parseForgeRequest("updated", { repository, since: 0 })).toThrow("request.cursor");
+		expect(() => parseForgeRequest("updated", { ...request, since: -1 })).toThrow("request.since");
+		expect(parseForgeAnswer("updated", { value: { pulls: [merged], next: "p2" }, asOf: null }).value.next).toBe(
+			"p2",
+		);
+		const last = parseForgeAnswer("updated", {
+			value: { pulls: [merged, { ...merged, number: 8 }], next: null },
+			asOf: null,
+		});
+		expect(last.value).toEqual({ pulls: [merged, { ...merged, number: 8 }], next: null });
+		for (const field of Object.keys(merged))
+			expect(() =>
+				parseForgeAnswer("updated", {
+					value: { pulls: [{ ...merged, [field]: undefined }], next: null },
+					asOf: null,
+				}),
+			).toThrow(`answer.value.pulls[0].${field}`);
+		const open = { ...merged, state: "open", closed: null };
+		expect(parseForgeAnswer("updated", { value: { pulls: [open], next: null }, asOf: null }).value.pulls).toEqual([
+			open,
+		]);
+		expect(() =>
+			parseForgeAnswer("updated", { value: { pulls: [{ ...merged, state: "draft" }], next: null }, asOf: null }),
+		).toThrow("answer.value.pulls[0].state");
+		expect(() => parseForgeAnswer("updated", { value: { pulls: [] }, asOf: null })).toThrow("answer.value.next");
+	});
+
 	test("an answer from a server older than the client reads, each later field failing closed", () => {
 		// Clients rejected this on 2026-11-25, as it has no `localReview`.
 		const older = statusBefore868();
