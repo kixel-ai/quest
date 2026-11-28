@@ -1700,8 +1700,9 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"command that needs Kixel Quest fails without it, naming quest login. It then signs git in to the " +
 				"repositories that Kixel Quest hosts, as gh auth setup-git does for GitHub: in the global git config, " +
 				"credential.<url>/.helper for its URL gets an empty entry, masking any helper listed before it for that " +
-				"URL, then `!quest git-credential`, which answers with the stored token. A git config that already ends " +
-				"with both is left alone; one quest cannot write otherwise fails the command, naming both entries.",
+				"URL, then `!quest git-credential`, which answers with the stored token. A git config whose " +
+				"credential.<url>/.helper already holds just both is left alone; one quest cannot write otherwise fails " +
+				"the command, naming both entries.",
 		)
 		.action(() => {
 			const ask = (question: string) =>
