@@ -81,6 +81,10 @@ class FakePull {
 	files: string[] = [];
 	/** Each commit's diff from the base, by SHA; its SHA by default, so no two commits share one. */
 	diffs: Record<string, string> = {};
+	/** The commits whose diff GitHub refuses to render, as one too large. */
+	unrenderable = new Set<string>();
+	/** The accounts whose repository permission GitHub refuses to show. */
+	forbidden = new Set<string>();
 	/** The `quest review` status on each commit, as GraphQL's `StatusContext` gives it. */
 	statuses: Record<string, ObjectValue> = {};
 	/** A real repository's commits, trees, blobs, and comparisons other than the head's with the base. */
@@ -148,7 +152,9 @@ class FakePull {
 		const read = /^\/repos\/example\/project\/git\/commits\/(\w+)$/.exec(url.pathname);
 		if (read) return json(200, { sha: read[1], tree: { sha: "0".repeat(40) }, parents: [{ sha: FORK }] });
 		if (compared && new Headers(init.headers).get("Accept") === "application/vnd.github.diff")
-			return new Response(this.diffs[compared[1]!] ?? compared[1]);
+			return this.unrenderable.has(compared[1]!)
+				? json(406, { message: "diff too large" })
+				: new Response(this.diffs[compared[1]!] ?? compared[1]);
 		if (compared) {
 			const files = this.files.map((filename) => ({ filename }));
 			// Only `quest merge`'s own check of the head against the base, which asks for one commit.
@@ -163,6 +169,8 @@ class FakePull {
 				files,
 			});
 		}
+		const asked = /^\/repos\/example\/project\/collaborators\/([^/]+)\/permission$/.exec(url.pathname)?.[1];
+		if (asked && this.forbidden.has(asked)) return json(403, { message: "Must have push access" });
 		if (url.pathname === "/repos/example/project/collaborators/maintainer/permission")
 			return json(200, { permission: "write" });
 		if (url.pathname === "/repos/example/project/rules/branches/main") {
@@ -1296,6 +1304,38 @@ describe("merge --land of a high head", () => {
 			description: "Risk high: findings open",
 			createdAt: new Date(Date.UTC(2026, 11, 1)).toISOString(),
 		};
+		expect(await refused(land_(pull))).toContain("is high");
+		expect(pull.writes).toEqual([]);
+	});
+
+	test("refuses a high head whose pass a newer writer's uncomparable failure may supersede", async () => {
+		const pull = new FakePull();
+		review(pull, HEAD, "high");
+		review(pull, OLD, "high");
+		pull.statuses[OLD] = { ...pull.statuses[OLD]!, state: "FAILURE", description: "Risk high: findings open" };
+		pull.unrenderable.add(HEAD);
+		expect(await refused(land_(pull))).toContain("is high");
+		expect(pull.writes).toEqual([]);
+	});
+
+	test("refuses a high head whose newer uncomparable failure came from an account whose permission is unreadable", async () => {
+		const pull = new FakePull();
+		review(pull, HEAD, "high");
+		review(pull, OLD, "high");
+		pull.statuses[OLD] = {
+			...pull.statuses[OLD]!,
+			state: "FAILURE",
+			description: "Risk high: findings open",
+			creator: { __typename: "User", login: "other" },
+		};
+		pull.unrenderable.add(HEAD);
+		// Known not to write, it supersedes nothing and the head's pass covers it.
+		await land_(pull);
+		expect(pull.writes).toEqual([`enablePullRequestAutoMerge ${HEAD} MERGE`]);
+		pull.writes.length = 0;
+		pull.autoMerge = null;
+		// Unreadable, it may be a writer's, so the pass is in doubt.
+		pull.forbidden.add("other");
 		expect(await refused(land_(pull))).toContain("is high");
 		expect(pull.writes).toEqual([]);
 	});

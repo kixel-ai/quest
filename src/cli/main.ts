@@ -69,7 +69,6 @@ import { gate } from "./gate";
 import { manifestProblems, nativeOs, run as runTasks, workingTree } from "./run";
 import { gitHubDependencies, pullRequest, readRemote, remoteRepository, requireRemote } from "./github";
 import { type GitHubDependencies, mergedHolds } from "../github/client";
-import { GitHubForge } from "../github/forge";
 import { setTimeout as sleep } from "node:timers/promises";
 import { LAND_CHECK } from "../github/land";
 import { audit } from "./audits";
@@ -867,10 +866,12 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"covers the head, as current, diff-identical (git diff <base>...<head> prints the same as for the head it reviewed, or the head only merged the base since, each merge the clean merge of its parents, quest link-list conflicts resolved as quest resolve does), " +
 				"stale, or unknown when the forge cannot compare them, or - when none counts, then the head it reviewed, then local-review or no-local-review for whether a local reviewer's round passed it. " +
 				"The review that counts is the newest passing run quest review posted to Kixel Quest from someone who can push, which Kixel Quest answers; " +
-				"read from GitHub, it is only a PR body's ## Review record an earlier quest review wrote, with a warning saying so, counted only when the latest quest review commit status on the head it names is success, set by a user with write access to the repository, " +
-				"targets the diff from the head's merge base with the PR's base, and attests the record's risk tier, class, and risk file (else -, with a warning saying why, and risk and class print - too), and stale, with a warning, once the PR is open and RISK.md at the base's tip is not the file the record names; risk gives the review's risk " +
+				"read from GitHub, it is the newest passing quest review commit status a user who can push set on a commit of the PR whose diff from the base is the head's, or that the head only merged the base since, " +
+				"as the land gate reads it: current when it is on the head, diff-identical on another such commit, stale when only an older diff passed, unknown when GitHub cannot compare them, " +
+				"and - when a later failing status on the head's diff, a non-writer's status, or one bound to another base counts for none (with a warning saying why), " +
+				"and stale, with a warning, once the PR is open and RISK.md at the base's tip is not the file the status names; risk gives the review's risk " +
 				"tier, the same state for its head, the tier its classifier set, and the " +
-				"reason last, - when none counts, or - malformed - and why when a body record's risk lines do not parse; class gives the built-in or RISK.md ## Automatic class the review's classifier named, or -; auto-merge gives its method, who enabled it and when, and the head it was " +
+				"reason last, - when none counts; read from GitHub, the status carries the final tier and class but not the classifier's tier or the reason, which print -; class gives the built-in or RISK.md ## Automatic class the review's classifier named, or -; auto-merge gives its method, who enabled it and when, and the head it was " +
 				"enabled on, which differs from head once a push follows, as GitHub keeps auto-merge across a writer's " +
 				"push (- when it cannot be told: a quest land pin names it, and otherwise the head branch's push " +
 				"activity, which GitHub lists up to minutes late); landing-stopped is the latest exit from the merge queue, auto-merge, or " +
@@ -899,14 +900,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		.action((value: string, options: { json?: boolean }) => {
 			const { pull: pr, hosted } = locatePull(value, root(), process.env);
 			pending = forgeFor(pr, forgeDependencies(), Infinity, hosted)
-				.then((forge) => {
-					// `quest review` posts its runs to Kixel Quest alone, so GitHub holds no review newer than a body record.
-					if (forge instanceof GitHubForge)
-						warn(
-							"read from GitHub, which holds no review quest review posted to Kixel Quest: review-record, risk, and class show only a PR body's ## Review record an earlier quest wrote",
-						);
-					return forge.status(pr);
-				})
+				.then((forge) => forge.status(pr))
 				.then(
 					({ value: status }) => {
 						if (options.json) print(JSON.stringify(status));

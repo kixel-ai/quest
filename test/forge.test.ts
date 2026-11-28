@@ -18,7 +18,6 @@ import {
 	parseForgeAnswer,
 	parseForgeInfo,
 	parseForgeRequest,
-	REVIEW_MARK,
 } from "../src/core";
 import { type ForgeDependencies, forgeFor, KixelQuest, KixelQuestForge } from "../src/cli/forge";
 import { waitForActivity, WaitTimeout } from "../src/cli/wait";
@@ -186,19 +185,36 @@ describe("status", () => {
 				]),
 		],
 		...[
-			["a malformed risk record", "- Risk:dire"],
-			["a risk record", "- Risk: high, `wire`\n- Classified: medium by default\n- Class: `wire`"],
-		].map(([name, lines]): (typeof scenarios)[number] => [
-			name!,
+			[
+				"a passing status on the head",
+				{
+					[status.A]: status.reviewStatus(
+						"SUCCESS",
+						`Risk high, class wire, risk file ${status.RISK_ID}: passed`,
+						status.A,
+					),
+				},
+				{},
+			],
+			[
+				"a passing status on an earlier commit with another diff",
+				{
+					[status.B]: status.reviewStatus(
+						"SUCCESS",
+						`Risk low, risk file ${status.RISK_ID}: passed`,
+						status.B,
+					),
+				},
+				{ diffs: { [status.A]: "new", [status.B]: "old" } },
+			],
+		].map(([name, statuses, options]): (typeof scenarios)[number] => [
+			name as string,
 			() =>
-				status.setup([
-					status.pull({
-						body: `## Review\n\n${REVIEW_MARK}\n\n- Head: ${status.A}\n${lines}`,
-						checks: null,
-						reviews: status.page([]),
-						threads: status.page([]),
-					}),
-				]),
+				status.setup([status.pull({ checks: null, reviews: status.page([]), threads: status.page([]) })], {
+					permissions: { maintainer: "admin" },
+					statuses,
+					...(options as object),
+				} as Parameters<typeof status.setup>[1]),
 		]),
 		[
 			"a maintainer decision and a hold",
