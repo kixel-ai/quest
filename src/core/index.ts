@@ -124,6 +124,7 @@ export {
 	planInit,
 	questReadme,
 } from "./init";
+export { BaseMerges, type History, type TreeEntry } from "./base-merge";
 export { type Chunk, type Clean, type Conflict, LABELS, merge, render, resolveLists } from "./merge";
 
 export {

@@ -864,7 +864,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"Plain output prints one record per line, its type first and any free text (a check name or path) last: " +
 				"url, state, draft, head, mergeable, merge-state, review-decision, review-record, risk, class, auto-merge, merge-queue, " +
 				"landing-stopped, and checks, whose state and counts follow the checks that count, pending while an open PR's base requires a check or workflow nothing reports; review-record gives whether the review that counts " +
-				"covers the head, as current, diff-identical (git diff <base>...<head> prints the same as for the head it reviewed), " +
+				"covers the head, as current, diff-identical (git diff <base>...<head> prints the same as for the head it reviewed, or the head only merged the base since, each merge the clean merge of its parents, quest link-list conflicts resolved as quest resolve does), " +
 				"stale, or unknown when the forge cannot compare them, or - when none counts, then the head it reviewed, then local-review or no-local-review for whether a local reviewer's round passed it. " +
 				"The review that counts is the newest passing run quest review posted to Kixel Quest from someone who can push, which Kixel Quest answers; " +
 				"read from GitHub, it is only a PR body's ## Review record an earlier quest review wrote, with a warning saying so, counted only when the latest quest review commit status on the head it names is success, set by a user with write access to the repository, " +

@@ -66,7 +66,8 @@ export interface Thread {
 /**
  * The head the `## Review` section holding `quest review`'s record names last, the latest reviewed one, which a
  * `quest review` status attests. `current` is the PR's head; `diff-identical` an earlier head whose diff from
- * the base (`git diff <base>...<sha>`) matches the head's; `unknown` one the forge cannot compare, such as a diff too
+ * the base (`git diff <base>...<sha>`) matches the head's, or that the head only merged the base since, each merge
+ * the clean merge of its parents as `BaseMerges` checks it; `unknown` one the forge cannot compare, such as a diff too
  * large to render.
  */
 export interface ReviewRecord {
