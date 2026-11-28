@@ -35,13 +35,18 @@ const ADVICE: Advice = {
 };
 
 /** Ask with the fakes as `s` set them up, recording what was queued. */
-async function asked(s: Setup, options: Partial<Parameters<typeof advise>[0]> = {}) {
+async function asked(
+	s: Setup,
+	options: Partial<Parameters<typeof advise>[0]> = {},
+	{ url = "https://github.com/acme/proj/pull/7", signal }: { url?: string; signal?: AbortSignal } = {},
+) {
 	const queued: Advising[] = [];
 	const advised = await advise(
 		{ root: s.repo, question: "Three rounds keep finding off-by-ones.", ...options },
 		{
 			env: process.env,
-			pull: async () => ({ url: "https://github.com/acme/proj/pull/7", body: "PR-BODY text" }),
+			pull: async () => ({ url, body: "PR-BODY text" }),
+			...(signal !== undefined && { signal }),
 			queue: (session) => queued.push(session),
 			now: () => Date.parse("2026-11-28T10:00:00Z"),
 		},
@@ -236,6 +241,15 @@ agyFakes("a second call on a branch refuses before any advisor runs, unless forc
 	expect(advised.forced?.advice).toEqual(ADVICE);
 	const state = JSON.parse(readFileSync(adviseFile(join(s.repo, ".git"), "feature"), "utf8"));
 	expect(state.calls).toHaveLength(2);
+	// A call still running on the branch holds its lock, which a finished one leaves behind for none.
+	const lock = `${adviseFile(join(s.repo, ".git"), "feature")}.lock`;
+	writeFileSync(lock, "1\n");
+	const calls = s.calls().length;
+	await expect(asked(s, { force: true })).rejects.toThrow(/another quest advise is running on feature/);
+	expect(s.calls()).toHaveLength(calls);
+	rmSync(lock);
+	await asked(s, { force: true });
+	expect(() => readFileSync(lock)).toThrow();
 });
 
 agyFakes("agy offline, or on a host that cannot confine it, passes the question on", async () => {
@@ -279,9 +293,25 @@ agyFakes("a later PR reusing the branch's name is advised afresh, without the ea
 	git(s.repo, "checkout", "-q", "-B", "feature", "main");
 	write(s.repo, "src/lib.ts", "export const x = 3;\n");
 	git(s.repo, "commit", "-qam", "remainder");
-	const { advised } = await asked(s);
+	const next = { url: "https://github.com/acme/proj/pull/8" };
+	const { advised } = await asked(s, {}, next);
 	expect(advised.forced).toBeUndefined();
+	await expect(asked(s, {}, next)).rejects.toThrow(AdviseCapError);
+});
+
+agyFakes("a rebased PR keeps its advice cap, and an interrupted call asks no other advisor", async () => {
+	const s = setup();
+	vi.stubEnv("FAKE_ASK", JSON.stringify(ADVICE));
+	await asked(s);
+	git(s.repo, "checkout", "-q", "-B", "feature", "main");
+	write(s.repo, "src/lib.ts", "export const x = 4;\n");
+	git(s.repo, "commit", "-qam", "rebased");
 	await expect(asked(s)).rejects.toThrow(AdviseCapError);
+	const before = s.calls().length;
+	const interrupted = new AbortController();
+	interrupted.abort(new Error("interrupted"));
+	await expect(asked(s, { force: true }, { signal: interrupted.signal })).rejects.toThrow("interrupted");
+	expect(s.calls()).toHaveLength(before);
 });
 
 fakes("a missing, logged-out, or limited advisor passes the question on, each read-only", async () => {

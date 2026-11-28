@@ -2318,7 +2318,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"rules case-sensitively, so a host whose path to that directory matches names case-insensitively, as " +
 				"macOS's default volume, passes it over. It runs agy on the user's own Antigravity login with no " +
 				"ANTIGRAVITY_* or AGY_* variable.\n\n" +
-				"Each branch gets one answered call while its head descends from the advised one: a second refuses before any advisor runs, naming the first's time " +
+				"Each PR gets one answered call, as does each line of history on a branch with no PR, and one call runs on a branch at a time: a second refuses before any advisor runs, naming the first's time " +
 				"and model, unless --force. Every call is kept under the clone's common Git directory in quest/advise/, " +
 				"with each session it started and, for agy, whose transcripts token-max cannot read, the tokens it " +
 				"reported, priced at the model's API list rate, or marked incomplete where no rate is known. Each " +
@@ -2352,11 +2352,17 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 			) => {
 				const question = words.length === 1 && words[0] === "-" ? readFileSync(0, "utf8") : words.join(" ");
 				const github = claimDependencies();
+				// An interrupt stops the running advisor, whose CLI it also reaches, and asks no other.
+				const interrupted = new AbortController();
+				const signals = ["SIGINT", "SIGTERM", "SIGHUP"] as const;
+				const stop = () => interrupted.abort(new Error("quest advise was interrupted"));
+				for (const name of signals) process.on(name, stop);
 				pending = advise(
 					{ ...options, root: root(), question },
 					{
 						env: process.env,
 						pull: (dir, base, branch) => pullBody(dir, base, branch, github),
+						signal: interrupted.signal,
 						queue: (session) => {
 							// Only the dashboard loses a session that is not queued, so it never fails the call.
 							try {
@@ -2369,28 +2375,32 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 							}
 						},
 					},
-				).then(
-					(advised) => {
-						for (const line of adviceLines(advised)) print(line);
-						return 0;
-					},
-					(error) => {
-						if (error instanceof AdviseCapError) {
-							out.stderr(`error: ${error.message}\n`);
-							return 1;
-						}
-						if (unavailable(error)) {
-							out.stderr(`error: ${(error as Error).message}\n`);
-							return 3;
-						}
-						// Every advisor ran but none answered usably: a failure, not a usage error.
-						if (error instanceof UnansweredError) {
-							warn(error.message);
-							return 1;
-						}
-						return reviewFailure(error);
-					},
-				);
+				)
+					.then(
+						(advised) => {
+							for (const line of adviceLines(advised)) print(line);
+							return 0;
+						},
+						(error) => {
+							if (error instanceof AdviseCapError) {
+								out.stderr(`error: ${error.message}\n`);
+								return 1;
+							}
+							if (unavailable(error)) {
+								out.stderr(`error: ${(error as Error).message}\n`);
+								return 3;
+							}
+							// Every advisor ran but none answered usably: a failure, not a usage error.
+							if (error instanceof UnansweredError) {
+								warn(error.message);
+								return 1;
+							}
+							return reviewFailure(error);
+						},
+					)
+					.finally(() => {
+						for (const name of signals) process.off(name, stop);
+					});
 			},
 		);
 

@@ -1712,7 +1712,11 @@ async function turn(cli: Cli, call: Turn, cwd: string, model: string): Promise<R
 		ran = await run(call.argv, at, { ...cli.env, ...call.env }, call.stdin, reader, cli.signal);
 	} catch (error) {
 		// A sibling's failure cancelled this turn, which may have spent tokens in the session it had opened.
-		if (cli.signal?.aborted) cli.failed = reader.reply(1, "").session;
+		if (cli.signal?.aborted) {
+			const cut = reader.reply(1, "");
+			cli.failed = cut.session;
+			cli.failedUsage = cut.usage;
+		}
 		throw error;
 	} finally {
 		if (call.workspace) rmSync(call.workspace.dir, { recursive: true, force: true });

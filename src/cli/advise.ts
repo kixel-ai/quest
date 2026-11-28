@@ -3,7 +3,7 @@
 // the clone's common Git directory, so `quest usage` and the record sender count it as advising.
 import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 import { branchQuest } from "../core";
 import { git } from "./git";
@@ -129,6 +129,8 @@ export interface AdviseDependencies {
 	/** Queues a session for the record sender; must not throw. */
 	queue(session: Advising): void;
 	now?(): number;
+	/** Aborted when the user interrupts the command, which stops the turn and asks no further advisor. */
+	signal?: AbortSignal;
 }
 
 const digest = (value: string) => createHash("sha256").update(value).digest("hex").slice(0, 16);
@@ -311,11 +313,70 @@ export async function advise(options: AdviseOptions, deps: AdviseDependencies): 
 	const base = await fetchBase(root, options.base);
 	const branch = sessionBranch(root, options.branch, parseBase(root, base.ref).branch);
 	const path = adviseFile(common, branch);
+	// One call at a time per branch, so two sessions cannot both pass the cap and pay for a turn.
+	const lock = `${path}.lock`;
+	mkdirSync(dirname(lock), { recursive: true });
+	try {
+		writeFileSync(lock, `${process.pid}\n`, { flag: "wx" });
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+		throw new AdviseCapError(`another quest advise is running on ${branch}; if none is, delete ${lock}`);
+	}
+	try {
+		return await adviseLocked(options, deps, {
+			root,
+			common,
+			base,
+			branch,
+			path,
+			question,
+			limit,
+			candidates,
+			now,
+		});
+	} finally {
+		rmSync(lock, { force: true });
+	}
+}
+
+/** The rest of `advise`, holding the branch's lock. */
+async function adviseLocked(
+	options: AdviseOptions,
+	deps: AdviseDependencies,
+	{
+		root,
+		common,
+		base,
+		branch,
+		path,
+		question,
+		limit,
+		candidates,
+		now,
+	}: {
+		root: string;
+		common: string;
+		base: Awaited<ReturnType<typeof fetchBase>>;
+		branch: string;
+		path: string;
+		question: string;
+		limit: string | undefined;
+		candidates: Asked[];
+		now: () => number;
+	},
+): Promise<Advised> {
 	const state = loadState(path, branch);
 	const head = git(root, ["rev-parse", "HEAD"]);
-	// Only advice on this head's history counts: a later PR reusing the branch's name, as a quest's remainder does,
-	// starts afresh.
-	const prior = [...state.calls].reverse().find((call) => call.advice !== null && descends(root, call.head, head));
+	const pull = await deps.pull(root, base.ref, branch);
+	// Only advice on this PR, or on this head's history where the PR is unknown, counts: a later PR reusing the
+	// branch's name, as a quest's remainder does, starts afresh, and a rebased one does not.
+	const prior = [...state.calls]
+		.reverse()
+		.find(
+			(call) =>
+				call.advice !== null &&
+				(pull !== null && call.pull !== null ? call.pull === pull.url : descends(root, call.head, head)),
+		);
 	if (prior !== undefined && !options.force)
 		throw new AdviseCapError(
 			`${branch} was already advised at ${prior.end} by ${prior.sessions.at(-1)?.model ?? "an advisor"}; ` +
@@ -325,7 +386,6 @@ export async function advise(options: AdviseOptions, deps: AdviseDependencies): 
 	const changed = git(root, ["diff", "-z", "--name-only", "--no-renames", mergeBase, head])
 		.split("\0")
 		.filter(Boolean);
-	const pull = await deps.pull(root, base.ref, branch);
 	const prompt = advisePrompt({
 		branch,
 		base,
@@ -360,8 +420,9 @@ export async function advise(options: AdviseOptions, deps: AdviseDependencies): 
 			readable: scratch,
 			who: "advisor",
 			task: "advise",
-			// A failed turn, as agy's on a dropped connection, leaves the next advisor to answer.
+			// A failed turn, as agy's on a dropped connection, leaves the next advisor to answer, unless interrupted.
 			failover: true,
+			...(deps.signal !== undefined && { signal: deps.signal }),
 			parse: parseAdvice,
 		});
 	} finally {

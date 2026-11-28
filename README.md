@@ -2404,9 +2404,10 @@ on a case-insensitive volume, such as macOS's default, it is passed over.
 `--harness` asks only one advisor, and `--model` and `--effort` replace its
 listed ones.
 
-Each branch gets one answered call while its head descends from the advised one,
-so a later PR reusing the name starts afresh; a second refuses before any
-advisor runs unless `--force`. An advisor whose turn fails passes the question
+Each PR gets one answered call, as does each line of history on a branch with
+no PR, so a later PR reusing the branch's name starts afresh and a rebased one
+does not; a second refuses before any advisor runs unless `--force`, and any
+call refuses while another runs on the branch. An advisor whose turn fails passes the question
 on, and Codex and Claude read the change from diff files written as a review's
 are. Calls are kept under the clone's common Git directory in
 `quest/advise/`, and each session is queued for Kixel Quest with the role
