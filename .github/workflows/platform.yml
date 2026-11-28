@@ -34,6 +34,7 @@ on:
         default: ""
         type: string
       macos-runner:
+        description: An Apple Silicon runner, since the pinned nixpkgs no longer evaluates on Intel macOS.
         default: macos-15
         type: string
       windows-runner:
@@ -57,7 +58,9 @@ on:
         default: ""
         type: string
       mbx-write:
-        description: Whether these jobs publish compilations to mbx-remote.
+        description: >-
+          Whether these jobs publish compilations to mbx-remote. Needs an `environment` holding the write key, which
+          admits only trusted refs, since every reader trusts what this publishes.
         default: false
         type: boolean
     secrets:
@@ -88,7 +91,13 @@ jobs:
         env:
           OS: ${{ matrix.os }}
           TIER: ${{ inputs.tier }}
+          MBX_WRITE: ${{ inputs.mbx-write }}
+          ENVIRONMENT: ${{ inputs.environment }}
         run: |
+          if [ "$MBX_WRITE" = true ] && [ -z "$ENVIRONMENT" ]; then
+            echo "::error::mbx-write needs an environment that holds the write key and admits only trusted refs" >&2
+            exit 1
+          fi
           case "$OS" in macos | windows) ;; *)
             echo "::error::platform.yml runs macos and windows, not '$OS'; Linux runs on the repository's own hosts" >&2
             exit 1
@@ -139,18 +148,25 @@ jobs:
           echo "$dist" >> "$GITHUB_PATH"
       # A hosted runner never sees a pass again, so recording one only costs the digests.
       - name: Run the tasks
+        id: run
         working-directory: repo
         env:
           OS: ${{ matrix.os }}
           TIER: ${{ inputs.tier }}
           BASE: ${{ inputs.base }}
         run: |
-          args=(--tier "$TIER" --os "$OS" --no-cache --report "$RUNNER_TEMP/kixel-metrics")
+          args=(--tier "$TIER" --os "$OS" --no-cache --report "$RUNNER_TEMP/quest-report")
           if [ -n "$BASE" ]; then args+=(--base "$BASE"); else args+=(--all); fi
           quest run "${args[@]}"
+      # Kixel Quest reads only the junit.xml and metrics.json at an artifact's
+      # root, and --report keeps one of each per task or crate. Passed tasks'
+      # reports upload even when another task failed.
+      - name: Merge the reports
+        if: ${{ !cancelled() && steps.run.outcome != 'skipped' }}
+        run: bun quest/scripts/kixel-metrics.ts "$RUNNER_TEMP/quest-report" "$RUNNER_TEMP/kixel-metrics"
       # A run whose tasks declare no reports has nothing to upload.
       - name: Upload the reports
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.run.outcome != 'skipped' }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: kixel-metrics-${{ matrix.os }}-${{ runner.arch }}

@@ -1746,10 +1746,13 @@ a release tag's commit, never a branch:
 - `.github/actions/setup-nix` installs Nix trusting the flake's `nixConfig`,
   so `nix.kixel.quest` serves the dev shell, and with `mbx-remote` and its keys
   puts [mbx](https://github.com/jdx/mr-boxington)'s Cargo shim on `PATH`
-  against that bucket. On Windows, where Nix does not run, it sets up only mbx.
+  against that bucket, whose key every later step sees as `AWS_ACCESS_KEY_ID`
+  and `AWS_SECRET_ACCESS_KEY`. On Windows, where Nix does not run, it sets up
+  only mbx.
 - `.github/workflows/platform.yml` runs a tier's macOS and Windows tasks on
   GitHub's runners, one job per operating system, with `quest` built from the
-  workflow's own commit, and uploads each job's `--report` as
+  workflow's own commit, and uploads each job's `--report`, merged into one
+  `junit.xml` and `metrics.json` at the root as Kixel Quest reads them, as
   `kixel-metrics-<os>-<arch>`. Without `base` it runs every task (`--all`).
 - `.github/workflows/npm-publish.yml` runs a publish script in the dev shell
   on a GitHub-hosted runner with `id-token: write`, for npm's trusted
@@ -1807,7 +1810,9 @@ It adds to what `perSystem` returns, for each of `systems` (`x86_64-linux`,
   directory up holding `flake.nix` when that `flake.nix` and its `flake.lock`
   are the ones the shell was built from, so `quest run` and `quest fmt` run
   there without entering the shell again, and a shell entered from another
-  checkout names none. `perSystem`'s `quest` replaces the `quest` package.
+  checkout names none. It puts `$MBX_CARGO_SHIM_DIR`, which the setup-nix
+  action sets, first on `PATH`, so mbx's Cargo shim stays ahead of the
+  shell's Cargo. `perSystem`'s `quest` replaces the `quest` package.
 - `formatter`, the same `treefmt`, which `nix fmt` runs.
 - `checks.quest`, which runs `quest check`, `quest.toml` and `nixConfig`
   included, on the flake's source; a `checks` entry of the same name replaces

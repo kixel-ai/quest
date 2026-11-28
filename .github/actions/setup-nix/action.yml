@@ -1,7 +1,8 @@
 name: Set up Nix
 description: >-
   Install Nix trusting the flake's own nixConfig, which names nix.kixel.quest, and optionally put mbx's Cargo shim
-  on PATH with a remote S3 cache. For GitHub-hosted runners; Windows, where Nix does not run, gets only mbx.
+  on PATH with a remote S3 cache, whose key every later step sees as AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY.
+  For GitHub-hosted runners; Windows, where Nix does not run, gets only mbx.
 
 inputs:
   mbx-remote:
@@ -121,7 +122,9 @@ runs:
         fi
 
     # The shim is how mbx reaches Cargo, so a setup that installed none would
-    # build every job uncached and still pass.
+    # build every job uncached and still pass. A dev shell puts its own Cargo
+    # ahead of everything on PATH, so `quest.lib.mkFlake`'s puts
+    # MBX_CARGO_SHIM_DIR back in front.
     - name: Put mbx's Cargo shim on PATH
       if: inputs.mbx-remote != ''
       shell: bash
@@ -133,3 +136,4 @@ runs:
           exit 1
         fi
         echo "${shim%[/\\]*}" >> "$GITHUB_PATH"
+        echo "MBX_CARGO_SHIM_DIR=${shim%[/\\]*}" >> "$GITHUB_ENV"

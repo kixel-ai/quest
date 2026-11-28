@@ -175,6 +175,11 @@
                 cd repo/sub
                 ${shell.shellHook}
                 [ "$QUEST_DEV_SHELL" = "$(dirname "$PWD")" ]
+                # mbx's Cargo shim, which setup-nix names, goes ahead of the shell's own tools.
+                MBX_CARGO_SHIM_DIR=/shim
+                ${shell.shellHook}
+                [ "''${PATH%%:*}" = /shim ]
+                unset MBX_CARGO_SHIM_DIR
                 # Another flake's checkout, and none at all.
                 { cat ${self}/flake.nix; echo "# other"; } > ../../other/flake.nix
                 for dir in ../../other /; do

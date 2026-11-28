@@ -78,6 +78,10 @@ let
               else
                 unset QUEST_DEV_SHELL
               fi
+              # Quest's setup-nix action names mbx's Cargo shim, which must stay ahead of this shell's Cargo.
+              if [ -n "''${MBX_CARGO_SHIM_DIR:-}" ]; then
+                PATH=$MBX_CARGO_SHIM_DIR:$PATH
+              fi
             ''
             + shell.shellHook or "";
           }
