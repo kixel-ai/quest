@@ -334,6 +334,8 @@ function unwrap(argv: string[], env: Set<string>): string[] | null {
 		if (path === undefined) return null;
 		const name = basename(path);
 		if (KEYWORDS.has(path)) rest = args;
+		// `command -v` only looks the name up.
+		else if (name === "command" && /^-p?[vV]/.test(args[0] ?? "")) return null;
 		else if (["command", "exec", "nohup", "time", "builtin", "env", "nice"].includes(name))
 			rest = dropOptions(args);
 		else if (name === "timeout") rest = dropOptions(args).slice(1);
@@ -476,7 +478,8 @@ function shell(
 			// Piped into a command, `yes` answers its prompts; only output thrown away burns a core for nothing.
 			if (
 				simple.redirects.some(
-					({ op, fd, target }) => /^(>|>\||&>)$/.test(op) && (fd ?? 1) === 1 && target === "/dev/null",
+					({ op, fd, target }) =>
+						[">", ">>", ">|", "&>", "&>>"].includes(op) && (fd ?? 1) === 1 && target === "/dev/null",
 				)
 			)
 				found.add("load");
