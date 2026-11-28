@@ -682,6 +682,33 @@ describe("wire", () => {
 		);
 	});
 
+	test("the writers read takes a PR and answers each writer, refusing a missing field or a cost that is no number", () => {
+		const writer = {
+			harness: "claude",
+			model: "claude-opus-5-5",
+			effort: "high",
+			arm: "A",
+			cost: 1.5,
+			complete: true,
+		};
+		const unrecorded = { harness: "claude", model: null, effort: null, arm: null, cost: 0.25, complete: false };
+		expect(parseForgeRequest("writers", { pull })).toEqual({ pull });
+		expect(() => parseForgeRequest("writers", { pull, extra: 1 })).toThrow("request.extra");
+		expect(parseForgeAnswer("writers", { value: [writer, unrecorded], asOf: null })).toEqual({
+			value: [writer, unrecorded],
+			asOf: null,
+		});
+		expect(parseForgeAnswer("writers", { value: [], asOf: null }).value).toEqual([]);
+		for (const field of Object.keys(writer))
+			expect(() =>
+				parseForgeAnswer("writers", { value: [{ ...writer, [field]: undefined }], asOf: null }),
+			).toThrow(`answer.value[0].${field}`);
+		for (const cost of ["1.5", null, Number.NaN, Number.POSITIVE_INFINITY, -1])
+			expect(() => parseForgeAnswer("writers", { value: [{ ...writer, cost }], asOf: null })).toThrow(
+				"answer.value[0].cost: expected a cost",
+			);
+	});
+
 	test("the updated PRs read takes a first and a last page, and refuses a PR missing a field", () => {
 		const merged = {
 			number: 7,
