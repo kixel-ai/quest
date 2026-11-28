@@ -2322,12 +2322,18 @@ async function remoteGit(root: string, args: string[], signal?: AbortSignal): Pr
 	child.stderr.setEncoding("utf8").on("data", (chunk: string) => {
 		stderr += chunk;
 	});
-	const stop = () => {
+	const signalGroup = (name: NodeJS.Signals) => {
 		try {
-			process.kill(-child.pid!, "SIGTERM");
+			process.kill(-child.pid!, name);
 		} catch {
 			// The group already exited.
 		}
+	};
+	// As `run` stops a CLI: SIGTERM, then SIGKILL after a grace period, for a transport that ignores the first.
+	let killing: ReturnType<typeof setTimeout> | undefined;
+	const stop = () => {
+		signalGroup("SIGTERM");
+		killing = setTimeout(() => signalGroup("SIGKILL"), ABORT_GRACE_MS);
 	};
 	signal?.addEventListener("abort", stop, { once: true });
 	if (signal?.aborted) stop();
@@ -2342,6 +2348,7 @@ async function remoteGit(root: string, args: string[], signal?: AbortSignal): Pr
 		return stdout.trim();
 	} finally {
 		signal?.removeEventListener("abort", stop);
+		clearTimeout(killing);
 	}
 }
 

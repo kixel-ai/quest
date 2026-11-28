@@ -8,7 +8,10 @@ import { fetchBase } from "../src/cli/review";
 
 afterEach(() => vi.unstubAllEnvs());
 
-test.skipIf(process.platform === "win32")("an interrupted fetch stops Git's stalled transport too", async () => {
+test.skipIf(process.platform === "win32").each([
+	["stops Git's stalled transport too", ""],
+	["kills a transport that ignores SIGTERM after the grace period", "trap '' TERM\n"],
+])("an interrupted fetch %s", async (_, trap) => {
 	const dir = mkdtempSync(join(tmpdir(), "quest-fetch-"));
 	try {
 		const repo = join(dir, "repo");
@@ -18,7 +21,7 @@ test.skipIf(process.platform === "win32")("an interrupted fetch stops Git's stal
 		const alive = join(dir, "alive");
 		execFileSync("mkfifo", [alive]);
 		const ssh = join(dir, "ssh");
-		writeFileSync(ssh, `#!/bin/sh\nexec 3>"${alive}"\nexec sleep 300\n`);
+		writeFileSync(ssh, `#!/bin/sh\n${trap}exec 3>"${alive}"\nexec sleep 300\n`);
 		chmodSync(ssh, 0o755);
 		vi.stubEnv("GIT_SSH_COMMAND", ssh);
 		const interrupted = new AbortController();
@@ -29,7 +32,11 @@ test.skipIf(process.platform === "win32")("an interrupted fetch stops Git's stal
 		reader.resume();
 		const fetching = fetchBase(repo, "origin/main", interrupted.signal);
 		await started;
+		// The grace period runs on a mocked clock, so a transport that ignores SIGTERM is killed without waiting.
+		vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
 		interrupted.abort(new Error("interrupted"));
+		vi.advanceTimersByTime(10_000);
+		vi.useRealTimers();
 		await expect(fetching).rejects.toThrow("interrupted");
 		await gone;
 	} finally {
