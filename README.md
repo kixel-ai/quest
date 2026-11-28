@@ -1737,6 +1737,36 @@ holds it, and `quest run` refuses a directory another user owns or can write.
 A host's merge queue keeps its passes under its runner's own user, and runs
 `--no-cache` when that user also runs code no one reviewed.
 
+### Shared GitHub Actions
+
+Linux tasks run on the repository's own hosts. For what those cannot run yet,
+Quest ships one action and two reusable workflows, which a repository calls at
+a release tag's commit, never a branch:
+
+- `.github/actions/setup-nix` installs Nix trusting the flake's `nixConfig`,
+  so `nix.kixel.quest` serves the dev shell, and with `mbx-remote` and its keys
+  puts [mbx](https://github.com/jdx/mr-boxington)'s Cargo shim on `PATH`
+  against that bucket. On Windows, where Nix does not run, it sets up only mbx.
+- `.github/workflows/platform.yml` runs a tier's macOS and Windows tasks on
+  GitHub's runners, one job per operating system, with `quest` built from the
+  workflow's own commit, and uploads each job's `--report` as
+  `kixel-metrics-<os>-<arch>`. Without `base` it runs every task (`--all`).
+- `.github/workflows/npm-publish.yml` runs a publish script in the dev shell
+  on a GitHub-hosted runner with `id-token: write`, for npm's trusted
+  publishing, which accepts no other runner. npm checks the calling workflow's
+  file name.
+
+```yaml
+jobs:
+  platform:
+    uses: kixel-ai/quest/.github/workflows/platform.yml@<sha> # vX.Y.Z
+    with:
+      tier: nightly # or release-gate, with base: ${{ github.event.merge_group.base_sha }}
+```
+
+This repository's nightly `windows.yml` calls `platform.yml` for its own
+`quest.toml`.
+
 ## Share flake boilerplate with quest.lib.mkFlake
 
 `quest.lib.mkFlake` builds a repository's per-system flake outputs, so its
