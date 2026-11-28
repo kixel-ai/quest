@@ -6,7 +6,9 @@ import { join } from "node:path";
 import { describe, expect, test } from "vitest";
 
 import { BaseMerges, merge, render } from "../src/core";
-import { commit, git, gitHistory, repository } from "./git-history";
+import { GitHubReader } from "../src/github/client";
+import { history } from "../src/github/history";
+import { commit, git, gitHistory, gitRoutes, repository } from "./git-history";
 
 /** Numbered lines, with `edits` replacing some by number. */
 const lines = (edits: Record<number, string> = {}) =>
@@ -69,6 +71,18 @@ describe("a review carries", () => {
 		const head = commit(dir, { "d/a.txt": null, "d/b.txt": null });
 		git(dir, "switch", "-q", "main");
 		commit(dir, { "d/c.txt": "c\n" });
+		git(dir, "switch", "-q", "pr");
+		expect(mergeMain(dir)).toBe(true);
+		expect(await carries(dir, head)).toBe(true);
+	});
+
+	test("across a clean merge where both sides deleted a file and neither added one", async () => {
+		const dir = repository();
+		commit(dir, { "d/a.txt": "a\n", "d/b.txt": "b\n", "e.txt": "e\n" });
+		git(dir, "switch", "-q", "-c", "pr");
+		const head = commit(dir, { "d/a.txt": null, "d/b.txt": null });
+		git(dir, "switch", "-q", "main");
+		commit(dir, { "d/a.txt": null, "e.txt": "changed\n" });
 		git(dir, "switch", "-q", "pr");
 		expect(mergeMain(dir)).toBe(true);
 		expect(await carries(dir, head)).toBe(true);
@@ -189,6 +203,37 @@ describe("a review does not carry", () => {
 		expect(await carries(dir, head)).toBe(false);
 	});
 
+	test("across a rename into another directory the base deleted the source of, both leaving the same directory", async () => {
+		const dir = repository();
+		commit(dir, { "quest/active/x.md": "# [S] X\n\n## Goal\n\nDo x.\n", "quest/active/y.md": "# [S] Y\n" });
+		git(dir, "switch", "-q", "-c", "pr");
+		git(dir, "mv", "quest/active/x.md", "quest/archive.md");
+		const head = commit(dir, {});
+		git(dir, "switch", "-q", "main");
+		commit(dir, { "quest/active/x.md": null });
+		git(dir, "switch", "-q", "pr");
+		expect(mergeMain(dir)).toBe(false);
+		git(dir, "add", "-A");
+		conclude(dir);
+		expect(git(dir, "ls-tree", "-r", "--name-only", "HEAD")).toBe("quest/active/y.md\nquest/archive.md");
+		expect(await carries(dir, head)).toBe(false);
+	});
+
+	test("across a clean merge of a file a POSIX bracket class in its attributes gives another merge", async () => {
+		const attributes = "fixtures/[[:digit:]]*.txt -merge\n";
+		const dir = repository();
+		commit(dir, { ".gitattributes": attributes, "fixtures/1.txt": lines() });
+		git(dir, "switch", "-q", "-c", "pr");
+		const head = commit(dir, { "fixtures/1.txt": lines({ 5: "ours" }) });
+		git(dir, "switch", "-q", "main");
+		commit(dir, { "fixtures/1.txt": lines({ 7: "theirs" }) });
+		git(dir, "switch", "-q", "pr");
+		expect(mergeMain(dir)).toBe(false);
+		writeFileSync(join(dir, "fixtures/1.txt"), lines({ 5: "ours", 7: "theirs" }));
+		conclude(dir);
+		expect(await carries(dir, head)).toBe(false);
+	});
+
 	test("across a clean merge the base renamed a file in, which a per-path merge cannot follow", async () => {
 		const { dir, reviewed: head } = reviewed();
 		git(dir, "switch", "-q", "main");
@@ -217,6 +262,42 @@ describe("a review does not carry", () => {
 			conclude(dir);
 			expect(await carries(dir, head)).toBe(false);
 		}
+	});
+});
+
+describe("GitHub's merge base", () => {
+	const github = (dir: string) => {
+		const routes = gitRoutes(dir);
+		return new GitHubReader({
+			readToken: "token",
+			quota: "wait",
+			now: () => 0,
+			sleep: async () => {},
+			warn: () => {},
+			fetch: async (url, init) =>
+				routes(new URL(String(url)), init) ?? Response.json({ message: "Not Found" }, { status: 404 }),
+		});
+	};
+	const pr = { owner: "example", repo: "project", number: 1, base: "main" };
+
+	test("is one GitHub names when it is the only one, and none when the parents have several", async () => {
+		const dir = repository();
+		const root = commit(dir, { "a.txt": "a\n" });
+		git(dir, "switch", "-q", "-c", "left");
+		const left = commit(dir, { "l.txt": "l\n" });
+		git(dir, "switch", "-q", "-c", "right", root);
+		const right = commit(dir, { "r.txt": "r\n" });
+		const reader = history(github(dir), pr);
+		expect(await reader.mergeBase(left, right)).toBe(root);
+		// A criss-cross: each side merges the other's first commit.
+		git(dir, "merge", "-q", "--no-edit", left);
+		const crossed = git(dir, "rev-parse", "HEAD");
+		git(dir, "switch", "-q", "left");
+		git(dir, "merge", "-q", "--no-edit", right);
+		const other = git(dir, "rev-parse", "HEAD");
+		expect(git(dir, "merge-base", "--all", crossed, other).split("\n")).toHaveLength(2);
+		expect(await reader.mergeBase(crossed, other)).toBeNull();
+		expect(await reader.mergeBase(other, crossed)).toBeNull();
 	});
 });
 
@@ -255,6 +336,24 @@ describe("a quest file", () => {
 		expect(mergeMain(dir)).toBe(true);
 		expect(git(dir, "show", "HEAD:quest/x.md")).toBe(quest("First.\n\nSecond.", ["a", "x", "c"]).trimEnd());
 		expect(await carries(dir, head)).toBe(true);
+	});
+
+	test("does not carry a merge no one way of merging explains: the driver's on one file, merge-ort's on another", async () => {
+		// Merge-file's Myers merge settles the first and conflicts on the second; merge-ort's does the opposite.
+		const [o1, b1, t1] = ["c\n\nc\n", "}\nc\nc\n", "c\nc\n}\n"];
+		const [o2, b2, t2] = ["x\n}\n}\n\na\nb\n\n\n", "x\n}\n}\nb\n\nb\n\n", "}\n}\n}\nb\n\n\n"];
+		const dir = repository();
+		commit(dir, { ".gitattributes": ATTRIBUTES, "quest/a.md": b1, "quest/b.md": b2 });
+		git(dir, "switch", "-q", "-c", "pr");
+		const head = commit(dir, { "quest/a.md": o1, "quest/b.md": o2 });
+		git(dir, "switch", "-q", "main");
+		commit(dir, { "quest/a.md": t1, "quest/b.md": t2 });
+		git(dir, "switch", "-q", "pr");
+		expect(mergeMain(dir)).toBe(false);
+		writeFileSync(join(dir, "quest/a.md"), render(merge(o1, b1, t1), 7, false));
+		writeFileSync(join(dir, "quest/b.md"), render(merge(o2, b2, t2, "ort"), 7, false));
+		conclude(dir);
+		expect(await carries(dir, head)).toBe(false);
 	});
 
 	test("does not carry across a link-list conflict resolved otherwise, or without the quest driver", async () => {

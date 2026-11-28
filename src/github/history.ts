@@ -39,10 +39,17 @@ export function history(github: GitHubReader, pr: PullRequest & { base: string }
 			return Uint8Array.from(atob(string(blob.content).replace(/\n/g, "")), (char) => char.charCodeAt(0));
 		},
 		async mergeBase(a, b) {
-			// GitHub names one merge base even where several exist, which takes the base merging the PR's branch
-			// itself rather than a squash of it.
-			const base = (await compare(a, b)).merge_base_commit;
-			return base == null ? null : string(object(base).sha);
+			const compared = await compare(a, b);
+			if (compared.merge_base_commit == null) return null;
+			const base = string(object(compared.merge_base_commit).sha);
+			if (base === a) return base;
+			// GitHub names one merge base even where several exist. Its counts are git's (`git rev-list --count b..a`),
+			// so it is the only one when `a` holds as many commits `b` lacks as commits it lacks: every commit both
+			// reach is one it reaches.
+			const lacks = (await compare(base, a)).ahead_by;
+			if (typeof compared.behind_by !== "number" || typeof lacks !== "number")
+				throw new Error(`GitHub sent no commit counts comparing ${a} with ${b}`);
+			return lacks === compared.behind_by ? base : null;
 		},
 		async onBase(sha) {
 			const status = (await compare(encodeURIComponent(pr.base), sha)).status;

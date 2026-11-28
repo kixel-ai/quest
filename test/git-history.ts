@@ -128,8 +128,12 @@ export function gitRoutes(dir: string): (url: URL, init?: RequestInit) => Respon
 					: reaches(dir, to, from)
 						? "ahead"
 						: "diverged";
+		const count = (range: string) => Number(git(dir, "rev-list", "--count", range));
 		return Response.json({
 			status,
+			// As git counts them, which GitHub's are.
+			ahead_by: count(`${from}..${to}`),
+			behind_by: count(`${to}..${from}`),
 			base_commit: { sha: from },
 			merge_base_commit: { sha: git(dir, "merge-base", from, to) },
 			files: [],

@@ -7,10 +7,11 @@
 // A file only one parent changed since their merge base must be that parent's; one both changed must be its clean
 // line merge: merge-ort's, as `git merge` and GitHub's update-branch run it, or, where `.gitattributes` gives the path
 // the `quest` driver, which a local merge runs, `git merge-file`'s with the quest link lists `resolveLists` settles.
+// One way of merging must account for every file: the driver's on each quest path, or merge-ort's on all of them.
 // Anything this cannot establish as git's clean merge does not count, so the review stays stale: a binary file,
 // another merge driver, a symlink or submodule both changed, a rename one side made of a file the other changed (seen
-// here as a delete against an edit), or a path both sides deleted, which git may pair with a file either side added
-// as a rename it cannot merge.
+// here as a delete against an edit), or a path both sides deleted while either side added one, which git may pair as
+// a rename it cannot merge.
 
 import { type Chunk, merge, render, resolveLists } from "./merge";
 import { HistogramFailure } from "./xdiff";
@@ -31,11 +32,7 @@ export interface History {
 	tree(oid: string): Promise<Map<string, TreeEntry>>;
 	/** A blob's bytes. */
 	blob(oid: string): Promise<Uint8Array>;
-	/**
-	 * The merge base of two commits, or null when they have none, or several. A forge that names one without saying
-	 * whether there are several, as GitHub's compare does, can name the wrong one only where the base branch holds
-	 * commits of the PR's own branch besides those it merged.
-	 */
+	/** The merge base of two commits, or null when they have none, or several. */
 	mergeBase(a: string, b: string): Promise<string | null>;
 	/** Whether the PR's base branch reaches `sha`. */
 	onBase(sha: string): Promise<boolean>;
@@ -89,8 +86,7 @@ export class BaseMerges {
 		const [b, o, t] = await Promise.all(
 			[base, ours, theirs].map(async (each) => (await history.commit(each)).tree),
 		);
-		const merged = new TreeMerge(history, [b!, o!, t!]);
-		return (await merged.matches("", b!, o!, t!, tree)) ? ours : null;
+		return (await new TreeMerge(history, [b!, o!, t!]).check(tree)) ? ours : null;
 	}
 }
 
@@ -135,19 +131,37 @@ class Cached implements History {
 /** How git merges a path both sides changed, as its `merge` attribute says: by lines, by the `quest` driver, or otherwise. */
 type Driver = "text" | "quest" | "other";
 
+/**
+ * How a merge took the files both sides changed: as a local merge with the quest driver does, on the paths it drives,
+ * or as merge-ort does on every path, as GitHub's merges do.
+ */
+type Mode = "driver" | "ort";
+
 /** The check of one merge's tree against its parents' trees and their merge base's. */
 class TreeMerge {
 	readonly #history: History;
 	/** The root trees of the merge base, ours, and theirs, whose `.gitattributes` pick a path's driver. */
-	readonly #roots: string[];
+	readonly #roots: [string, string, string];
+	/** The ways of merging that account for every file checked so far. */
+	readonly #modes = new Set<Mode>(["driver", "ort"]);
+	/** Whether both sides deleted some path. */
+	#bothDeleted = false;
 
-	constructor(history: History, roots: string[]) {
+	constructor(history: History, roots: [string, string, string]) {
 		this.#history = history;
 		this.#roots = roots;
 	}
 
+	/** Whether `merged`, a root tree, is the clean merge of the roots. */
+	async check(merged: string): Promise<boolean> {
+		const [base, ours, theirs] = this.#roots;
+		if (!(await this.#matches("", base, ours, theirs, merged))) return false;
+		if (!this.#bothDeleted) return true;
+		return !(await this.#adds(base, ours)) && !(await this.#adds(base, theirs));
+	}
+
 	/** Whether `merged` is the clean merge of the directory `path` as `base`, `ours`, and `theirs` hold it; null for none. */
-	async matches(
+	async #matches(
 		path: string,
 		base: string | null,
 		ours: string | null,
@@ -161,16 +175,18 @@ class TreeMerge {
 		for (const name of names) {
 			const [eb, eo, et, em] = [b, o, t, m].map((tree) => tree!.get(name)) as (TreeEntry | undefined)[];
 			const at = path === "" ? name : `${path}/${name}`;
-			if (eb !== undefined && eo === undefined && et === undefined) return false;
 			// One side's change, or the same change on both, is taken whole.
 			if (same(eo, et) || same(eo, eb)) {
 				if (!same(em, et)) return false;
+				// The same change on both sides may delete a path both sides did, even inside a directory.
+				if (same(eo, et) && eb !== undefined && !same(eo, eb) && (await this.#deletes(eb, eo)))
+					this.#bothDeleted = true;
 			} else if (same(et, eb)) {
 				if (!same(em, eo)) return false;
 			} else if ([eb, eo, et, em].every((entry) => entry === undefined || entry.type === "tree")) {
 				// A directory either side deleted merges as an empty one.
 				const oids = [eb, eo, et, em].map((entry) => entry?.oid ?? null) as (string | null)[];
-				if (!(await this.matches(at, oids[0]!, oids[1]!, oids[2]!, oids[3]!))) return false;
+				if (!(await this.#matches(at, oids[0]!, oids[1]!, oids[2]!, oids[3]!))) return false;
 			} else if (!(await this.#file(at, eb, eo, et, em))) return false;
 		}
 		return true;
@@ -198,15 +214,41 @@ class TreeMerge {
 		const written = await this.#history.blob(m.oid);
 		const matches = (chunks: Chunk[]) =>
 			chunks.every((chunk) => Array.isArray(chunk)) && equal(ENCODER.encode(render(chunks, 7, false)), written);
-		// The quest driver runs merge-file's merge; without it, as on GitHub, git falls back to its own.
-		if (driver === "quest" && matches(resolveLists(path, merge(ot, bt, tt)))) return true;
+		let ort: boolean;
 		try {
-			return matches(merge(ot, bt, tt, "ort"));
+			ort = matches(merge(ot, bt, tt, "ort"));
 		} catch (error) {
 			// Git fails such a merge too, so whatever the merge holds was written by hand.
-			if (error instanceof HistogramFailure) return false;
-			throw error;
+			if (!(error instanceof HistogramFailure)) throw error;
+			ort = false;
 		}
+		// Only a quest path's merge tells the modes apart: the driver runs merge-file's merge with link lists
+		// resolved, and without it, as on GitHub, git falls back to its own.
+		if (driver !== "quest") return ort;
+		if (!ort) this.#modes.delete("ort");
+		if (!matches(resolveLists(path, merge(ot, bt, tt)))) this.#modes.delete("driver");
+		return this.#modes.size > 0;
+	}
+
+	/** Whether `side` lacks a path `base` holds, both entries of one directory. */
+	async #deletes(base: TreeEntry, side: TreeEntry | undefined): Promise<boolean> {
+		if (side === undefined || (base.type === "tree") !== (side.type === "tree")) return true;
+		if (base.type !== "tree" || base.oid === side.oid) return false;
+		const [b, s] = await Promise.all([this.#history.tree(base.oid), this.#history.tree(side.oid)]);
+		for (const [name, entry] of b) if (await this.#deletes(entry, s.get(name))) return true;
+		return false;
+	}
+
+	/** Whether the tree `side` holds a path the tree `base` does not. */
+	async #adds(base: string, side: string): Promise<boolean> {
+		if (base === side) return false;
+		const [b, s] = await Promise.all([this.#history.tree(base), this.#history.tree(side)]);
+		for (const [name, entry] of s) {
+			const old = b.get(name);
+			if (old === undefined || (old.type === "tree") !== (entry.type === "tree")) return true;
+			if (entry.type === "tree" && (await this.#adds(old.oid, entry.oid))) return true;
+		}
+		return false;
 	}
 
 	/**
@@ -285,7 +327,8 @@ function mergeState(source: string, path: string, macros: Set<string>): Driver |
 		// A quoted pattern may hold spaces, so its line splits wrongly and may name any path.
 		if (pattern!.startsWith('"')) return "other";
 		// A pattern this cannot read exactly, matched loosely: any bracket expression or escape as one character.
-		const loose = glob ?? globSource(pattern!.replace(/\[[^\]]*\]|\\./g, "?"));
+		const loosened = glob === null ? loosen(pattern!) : null;
+		const loose = glob ?? (loosened === null ? null : globSource(loosened));
 		if (loose === null) return "other";
 		const name = path.slice(path.lastIndexOf("/") + 1);
 		const anchored = pattern!.includes("/");
@@ -302,6 +345,37 @@ function mergeState(source: string, path: string, macros: Set<string>): Driver |
 						: "other";
 	}
 	return state;
+}
+
+/**
+ * `pattern` with each bracket expression and escaped character as `?`, which matches any one character, as either
+ * matches one; null when a bracket expression never closes.
+ */
+function loosen(pattern: string): string | null {
+	let out = "";
+	for (let i = 0; i < pattern.length; i++) {
+		if (pattern[i] === "\\") {
+			out += "?";
+			i++;
+		} else if (pattern[i] !== "[") out += pattern[i];
+		else {
+			// As wildmatch reads one: a `]` first, after any `!` or `^`, is literal, and `[:class:]` holds its own `]`.
+			let j = i + 1;
+			if (pattern[j] === "!" || pattern[j] === "^") j++;
+			if (pattern[j] === "]") j++;
+			for (; j < pattern.length && pattern[j] !== "]"; j++) {
+				if (pattern.startsWith("[:", j)) {
+					const end = pattern.indexOf(":]", j + 2);
+					if (end === -1) return null;
+					j = end + 1;
+				} else if (pattern[j] === "\\") j++;
+			}
+			if (j >= pattern.length) return null;
+			out += "?";
+			i = j;
+		}
+	}
+	return out;
 }
 
 /** Whether a line's attribute sets, unsets, or clears `merge`, or one of `macros`. */
