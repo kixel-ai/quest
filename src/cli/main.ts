@@ -1739,20 +1739,19 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		});
 	program
 		.command("logout")
-		.summary("Remove this host's Kixel Quest token")
+		.summary("Revoke and remove this host's Kixel Quest token")
 		.description(
-			`Remove the token quest login stored for Kixel Quest (https://kixel.quest, or the one ${KIXEL_QUEST_URL} ` +
-				"names) from this host, after removing the two credential.<url>/.helper entries quest login wrote to the " +
-				"global git config; a git config it cannot write fails the command and keeps the token. Kixel Quest " +
-				"still takes the token until it is revoked on its Tokens page.",
+			`Revoke the token quest login stored for Kixel Quest (https://kixel.quest, or the one ${KIXEL_QUEST_URL} ` +
+				"names) at its /login/revoke, so it stops working at once, then remove the two credential.<url>/.helper " +
+				"entries quest login wrote to the global git config and the token from this host. A refused revoke or a " +
+				"git config it cannot write fails the command and keeps the token, so running it again retries.",
 		)
 		.action(() => {
-			const { url, removed } = logout(process.env);
-			print(
-				removed
-					? `removed this host's token for ${url}; revoke it at ${url}/tokens`
-					: `this host held no token for ${url}`,
-			);
+			settle(logout({ env: process.env, fetch: globalThis.fetch }), ({ url, removed }) => {
+				print(
+					removed ? `revoked and removed this host's token for ${url}` : `this host held no token for ${url}`,
+				);
+			});
 		});
 
 	program

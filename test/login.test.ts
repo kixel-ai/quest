@@ -35,6 +35,9 @@ function host(server: FakeLogin, answer: string | null = "n", env: NodeJS.Proces
 	return { deps, env, said, asked, clock: () => now };
 }
 
+/** Logs `env`'s user out against `server`, which holds its token's revocation. */
+const signOut = (env: NodeJS.ProcessEnv, server = new FakeLogin()) => logout({ env, fetch: server.fetch });
+
 /** A user signing in to the fake, with a global git config of their own and none of the caller's environment. */
 const user = (): NodeJS.ProcessEnv => {
 	const home = tempDir();
@@ -130,23 +133,74 @@ test("signing in again replaces this Kixel Quest's token and keeps another's", a
 	expect(tokenFor("https://kixel.quest", env)).toBe("theirs");
 });
 
-test("logout removes the token, after which a command needing Kixel Quest names quest login", async () => {
+test("logout revokes the token, then removes it, after which a command needing Kixel Quest names quest login", async () => {
 	const env = user();
 	await login(host(new FakeLogin(), "n", env).deps);
 	writeTokens(env, { [KIXEL]: "mine", "https://kixel.quest": "theirs" });
-	expect(logout(env)).toEqual({ url: KIXEL, removed: true });
+	expect(await signOut(env)).toEqual({ url: KIXEL, removed: true });
 	expect(tokenFor(KIXEL, env)).toBeNull();
 	expect(tokenFor("https://kixel.quest", env)).toBe("theirs");
 	const deps = { env, fetch, now: () => 0, sleep: async () => {}, github: () => ({}) as never, warn: () => {} };
 	expect(() => hostedForge(REPOSITORY, deps)).toThrow(
 		`Kixel Quest hosts example/project, but this host is not signed in to ${KIXEL}; run \`quest login\``,
 	);
-	expect(logout(env)).toEqual({ url: KIXEL, removed: false });
-	expect(logout({ ...env, QUEST_KIXEL_URL: "https://kixel.quest" }).removed).toBe(true);
+	expect(await signOut(env)).toEqual({ url: KIXEL, removed: false });
+	expect((await signOut({ ...env, QUEST_KIXEL_URL: "https://kixel.quest" })).removed).toBe(true);
 	expect(JSON.parse(readFileSync(tokensPath(env), "utf8"))).toEqual({});
 });
 
-test("a token file an earlier quest wrote is moved once, uploading no transcripts", () => {
+test("logout revokes the host's token at Kixel Quest, and a host holding none revokes nothing", async () => {
+	const env = user();
+	const server = new FakeLogin();
+	await login(host(server, "n", env).deps);
+	await signOut(env, server);
+	expect(server.revoked).toEqual(["issued-1"]);
+	await signOut(env, server);
+	expect(server.revoked).toEqual(["issued-1"]);
+});
+
+test("a refused revoke fails logout, keeping the token and git's sign-in, and running it again retries", async () => {
+	const env = user();
+	const server = new FakeLogin();
+	await login(host(server, "n", env).deps);
+	const config = readFileSync(env.GIT_CONFIG_GLOBAL!, "utf8");
+	const before = readFileSync(tokensPath(env), "utf8");
+	server.refuseRevoke = 503;
+	await expect(signOut(env, server)).rejects.toThrow(`${KIXEL}/login/revoke answered HTTP 503: server_error`);
+	expect(readFileSync(tokensPath(env), "utf8")).toBe(before);
+	expect(readFileSync(env.GIT_CONFIG_GLOBAL!, "utf8")).toBe(config);
+	expect(server.revoked).toEqual([]);
+	// An unreachable Kixel Quest fails the same way.
+	const unreachable = (async () => {
+		throw new Error("connection refused");
+	}) as unknown as typeof fetch;
+	await expect(logout({ env, fetch: unreachable })).rejects.toThrow(
+		`${KIXEL}/login/revoke failed: connection refused`,
+	);
+	expect(tokenFor(KIXEL, env)).toBe("issued-1");
+	server.refuseRevoke = null;
+	expect(await signOut(env, server)).toEqual({ url: KIXEL, removed: true });
+	expect(server.revoked).toEqual(["issued-1"]);
+	expect(tokenFor(KIXEL, env)).toBeNull();
+});
+
+test("a sign-in saved while logout revokes survives it, and running logout again revokes that one", async () => {
+	const env = user();
+	const server = new FakeLogin();
+	await login(host(server, "n", env).deps);
+	const racing = (async (input: string | URL | Request, init?: RequestInit) => {
+		const answer = await server.fetch(input, init);
+		writeTokens(env, { [KIXEL]: "replacement" });
+		return answer;
+	}) as typeof fetch;
+	await expect(logout({ env, fetch: racing })).rejects.toThrow(`signed in to ${KIXEL} again while logging out`);
+	expect(tokenFor(KIXEL, env)).toBe("replacement");
+	expect(readFileSync(env.GIT_CONFIG_GLOBAL!, "utf8")).toContain(HELPER);
+	expect(await signOut(env, server)).toEqual({ url: KIXEL, removed: true });
+	expect(server.revoked).toEqual(["issued-1", "replacement"]);
+});
+
+test("a token file an earlier quest wrote is moved once, uploading no transcripts", async () => {
 	const env = user();
 	const old = join(dirname(tokensPath(env)), "records.json");
 	mkdirSync(dirname(old), { recursive: true });
@@ -157,7 +211,7 @@ test("a token file an earlier quest wrote is moved once, uploading no transcript
 		"https://kixel.quest": { token: "theirs", transcripts: false },
 	});
 	expect(existsSync(old)).toBe(false);
-	expect(logout(env).removed).toBe(true);
+	expect((await signOut(env)).removed).toBe(true);
 	expect(tokenFor(KIXEL, env)).toBeNull();
 });
 
@@ -211,11 +265,11 @@ describe.skipIf(process.platform === "win32")("git's sign-in", () => {
 		expect(readFileSync(env.GIT_CONFIG_GLOBAL!, "utf8").match(/helper = !quest/g)).toHaveLength(1);
 		writeTokens(env, { [KIXEL]: "rotated" });
 		expect(fill(env, KIXEL).stdout).toContain("password=rotated\n");
-		expect(logout(env).removed).toBe(true);
+		expect((await signOut(env)).removed).toBe(true);
 		expect(readFileSync(env.GIT_CONFIG_GLOBAL!, "utf8")).toBe(before);
 		const signedOut = fill(env, KIXEL);
 		expect(signedOut.stdout).not.toContain("password=");
-		expect(logout(env).removed).toBe(false);
+		expect((await signOut(env)).removed).toBe(false);
 	});
 
 	test("a git config quest cannot write fails login, naming the entries, and one declaring them already passes", async () => {
@@ -227,7 +281,7 @@ describe.skipIf(process.platform === "win32")("git's sign-in", () => {
 			`could not write git's global credential entries for ${KIXEL} (${entries})`,
 		);
 		// Logout finds none of quest's entries, so it writes nothing and removes the token.
-		expect(logout(env).removed).toBe(true);
+		expect((await signOut(env)).removed).toBe(true);
 		// A read-only config declaring the entries, as home-manager links into place.
 		const declared = join(home, "declared");
 		mkdirSync(declared);
@@ -237,7 +291,7 @@ describe.skipIf(process.platform === "win32")("git's sign-in", () => {
 		try {
 			await login(host(new FakeLogin(), "n", env).deps);
 			expect(fill(env, KIXEL).stdout).toContain("password=issued-1\n");
-			expect(() => logout(env)).toThrow(
+			await expect(signOut(env)).rejects.toThrow(
 				`could not remove git's global credential entries for ${KIXEL} (${entries})`,
 			);
 			expect(tokenFor(KIXEL, env)).toBe("issued-1");
@@ -253,7 +307,7 @@ describe.skipIf(process.platform === "win32")("git's sign-in", () => {
 			`[credential "${KIXEL}"]\n\thelper = \n\thelper = "!f() { echo; }\\nf"\n` +
 			`[credential]\n\thelper = store\n[credential "${KIXEL}"]\n\thelper = cache\n`;
 		writeFileSync(env.GIT_CONFIG_GLOBAL!, before);
-		expect(logout(env).removed).toBe(false);
+		expect((await signOut(env)).removed).toBe(false);
 		expect(readFileSync(env.GIT_CONFIG_GLOBAL!, "utf8")).toBe(before);
 		await login(host(new FakeLogin(), "n", env).deps);
 		await login(host(new FakeLogin(), "n", env).deps);
@@ -261,7 +315,7 @@ describe.skipIf(process.platform === "win32")("git's sign-in", () => {
 			`${before}[credential "${KIXEL}/"]\n\thelper = \n\thelper = ${HELPER}\n`,
 		);
 		expect(fill(env, KIXEL).stdout).toContain("password=issued-1\n");
-		expect(logout(env).removed).toBe(true);
+		expect((await signOut(env)).removed).toBe(true);
 		expect(readFileSync(env.GIT_CONFIG_GLOBAL!, "utf8")).toBe(before);
 	});
 });
