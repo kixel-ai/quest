@@ -460,11 +460,17 @@ async function sendTo(
 			const emit = new Set<Session>();
 			const missing: typeof group = [];
 			// Sessions token-max cannot read, built from the tokens their queue entries carry.
-			const untracked = [...bySession(group).values()].flatMap((pending) =>
-				pending.untracked
-					? [untrackedSession({ ...pending, cwd: pending.root, untracked: pending.untracked })]
-					: [],
-			);
+			// Sorted by start, then session, since the queue's files are named at random and list in no set order.
+			const untracked = [...bySession(group).values()]
+				.flatMap((pending) =>
+					pending.untracked
+						? [untrackedSession({ ...pending, cwd: pending.root, untracked: pending.untracked })]
+						: [],
+				)
+				.sort((a, b) => {
+					const [x, y] = [`${a.harness}\0${a.id}`, `${b.harness}\0${b.id}`];
+					return a.start - b.start || (x < y ? -1 : x > y ? 1 : 0);
+				});
 			for (const s of untracked) byId.set(`${s.harness}\0${s.id}`, s);
 			for (const q of group) {
 				const session = byId.get(`${q.pending.harness}\0${q.pending.session}`);

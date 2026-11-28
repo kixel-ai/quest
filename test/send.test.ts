@@ -1479,12 +1479,13 @@ test("an agy advisor's session, which token-max cannot read, is priced from its 
 	const first = sender(env, 200, []);
 	await sendPass(first.deps);
 	const records = parseUpload(first.uploads[0]!.body).records;
+	// The queue lists its files in no set order, so sessions that start together go by their IDs.
 	expect(records.map((r) => [r.harness, r.session, r.pulls, r.role, r.models[0]!.cacheRead])).toEqual([
-		["agy", "on-pr", [7], "advising", 400],
 		["agy", "early", [], "advising", 400],
+		["agy", "on-pr", [7], "advising", 400],
 	]);
-	expect(records[0]!.models[0]!.cost).toBeCloseTo((600 * 3 + 400 * 0.15 + 90 * 15) / 1e6);
-	expect(records[0]!.complete).toBe(true);
+	expect(records[1]!.models[0]!.cost).toBeCloseTo((600 * 3 + 400 * 0.15 + 90 * 15) / 1e6);
+	expect(records[1]!.complete).toBe(true);
 	// With no transcript to prune, it waits for a PR on its branch through later passes.
 	expect(remembered(env)).toEqual(["early"]);
 	const s2 = later(env, root, "s2");
