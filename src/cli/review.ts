@@ -83,8 +83,6 @@ export class UnansweredError extends ReviewInputError {
 	constructor(
 		message: string,
 		readonly spent: Answer<unknown, Asked>["spent"],
-		/** Whether every model failed because it could not run, rather than for a reply it gave. */
-		readonly unavailable = false,
 	) {
 		super(message);
 	}
@@ -108,6 +106,17 @@ export class ReviewerUnavailableError extends Error {
 		message: string,
 	) {
 		super(message);
+	}
+}
+
+/** No model could run to answer a question, an outage, with the turns that failed partway, which the caller may still count. */
+export class UnrunError extends ReviewerUnavailableError {
+	constructor(
+		first: ReviewerUnavailableError,
+		message: string,
+		readonly spent: Answer<unknown, Asked>["spent"],
+	) {
+		super(first.harness, first.reason, message);
 	}
 }
 
@@ -2839,7 +2848,7 @@ export async function ask<T, E extends Asked = Model>(
 
 /**
  * Why no model answered: the usage limit that resets first when every one whose CLI is installed hit its own, so a
- * caller waits for the earliest, else each model's reason.
+ * caller waits for the earliest, else an {@link UnrunError} when none could run at all, else each model's reason.
  */
 function unanswered(
 	failures: (ReviewInputError | ReviewerUnavailableError)[],
@@ -2859,11 +2868,12 @@ function unanswered(
 	// Every model at its limit replied to nothing, so nothing was spent.
 	if (limits.length > 0 && limits.length === blocking.length)
 		return limits.sort((a, b) => (a.until ?? Infinity) - (b.until ?? Infinity))[0]!;
-	return new UnansweredError(
-		`no ${who} could ${task}: ${failures.map((each) => each.message).join("; ")}`,
-		spent,
-		failures.every((each) => each instanceof ReviewerUnavailableError),
-	);
+	const message = `no ${who} could ${task}: ${failures.map((each) => each.message).join("; ")}`;
+	// No model could run at all, as when every installed CLI is logged out: an outage the user signs in to clear, not a
+	// mistake in the arguments.
+	const down = failures.filter((each) => each instanceof ReviewerUnavailableError);
+	if (down.length > 0 && down.length === failures.length) return new UnrunError(down[0]!, message, spent);
+	return new UnansweredError(message, spent);
 }
 
 /** The head's risk as its classifier set it, before any override. */

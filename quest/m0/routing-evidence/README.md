@@ -340,7 +340,7 @@ Baseline from the 2026-11-11 audit, at API list price:
 
 ## Scheduled
 
-- 2026-12-01 - legacy XS and S writer A/B cohort reaches 26 and 115 first-round PRs each (separate from the advisor trial's cohort, `advisor-2026-11`)
+- 2026-12-01 - read out the legacy XS and S writer A/B cohort (separate from the advisor trial's cohort, `advisor-2026-11`) at the count it froze at when the advisor trial began, reporting each arm's count and the difference it can detect rather than rescheduling, since a frozen cohort never reaches the 26 and 115 first-round PRs the rule above waits for
 
 ## Related
 

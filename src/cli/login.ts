@@ -1,7 +1,7 @@
 // `quest login`: this host gets a token to post with once a person signed in at Kixel Quest approves the code it shows,
 // as OAuth's device authorization grant (RFC 8628) does, which Kixel Quest's `/login/device` and `/login/token` serve.
 import { signInGit, signOutGit } from "./git-credential";
-import { kixelUrl, removeLogin, saveLogin } from "./tokens";
+import { kixelUrl, removeLogin, saveLogin, tokenFor } from "./tokens";
 
 /** What signing in needs from its host. */
 export interface LoginDependencies {
@@ -38,7 +38,7 @@ export async function login(deps: LoginDependencies): Promise<SignedIn> {
 	const url = kixelUrl(deps.env);
 	const transcripts = await askTranscripts(deps);
 	const label = deps.hostname;
-	const code = parseCode(await post(deps, url, "/login/device", { label }), url);
+	const code = parseCode(await post(deps, url, "/login/device", { label, transcripts }), url);
 	deps.say(`Open ${code.verification_uri}, sign in with GitHub, and enter the code ${code.user_code}.`);
 	deps.say(`Waiting for its approval; the code expires in ${Math.round(code.expires_in / 60)} minutes.`);
 	const deadline = deps.now() + code.expires_in * 1000;
@@ -54,11 +54,26 @@ export async function login(deps: LoginDependencies): Promise<SignedIn> {
 }
 
 /**
- * Sign git out of the Kixel Quest `env` names and forget this host's token for it, returning its URL and whether there
- * was one. A git config it cannot write keeps the token.
+ * Revoke this host's token at the Kixel Quest `env` names, sign git out of it, and forget the token, returning its URL
+ * and whether there was one. A refused revoke or a git config it cannot write fails the command and keeps the token,
+ * so running it again retries; Kixel Quest answers a token it already revoked the same as one it just did.
  */
-export function logout(env: NodeJS.ProcessEnv): { url: string; removed: boolean } {
+export async function logout(
+	deps: Pick<LoginDependencies, "env" | "fetch">,
+): Promise<{ url: string; removed: boolean }> {
+	const { env } = deps;
 	const url = kixelUrl(env);
+	const token = tokenFor(url, env);
+	if (token !== null) {
+		const answer = await post(deps, url, "/login/revoke", { token });
+		if (answer.status !== 200)
+			throw new Error(
+				`${url}${answer.path} answered HTTP ${answer.status}: ${String(answer.body.error ?? "no error named")}`,
+			);
+	}
+	// A `quest login` that saved its token while the revoke was in flight holds one this did not revoke; keep it.
+	if (tokenFor(url, env) !== token)
+		throw new Error(`this host signed in to ${url} again while logging out; run \`quest logout\` again`);
 	signOutGit(url, env);
 	return { url, removed: removeLogin(url, env) };
 }
@@ -79,13 +94,13 @@ interface Answer {
 	body: Record<string, unknown>;
 }
 
-async function post(deps: LoginDependencies, url: string, path: string, body: unknown): Promise<Answer> {
+async function post(deps: Pick<LoginDependencies, "fetch">, url: string, path: string, body: unknown): Promise<Answer> {
 	let response: Response;
 	let text: string;
 	try {
 		response = await deps.fetch(`${url}${path}`, {
 			method: "POST",
-			// The answer carries a token, which is Kixel Quest's alone, so it follows no redirect elsewhere.
+			// The request or answer carries a token, which is Kixel Quest's alone, so it follows no redirect elsewhere.
 			redirect: "error",
 			headers: { Accept: "application/json", "Content-Type": "application/json", "User-Agent": "quest" },
 			body: JSON.stringify(body),

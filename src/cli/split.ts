@@ -16,7 +16,14 @@ import {
 } from "../core";
 import { eachLine, parseLine } from "./messages";
 import { type Asked, type Model, SPLITTERS, SPLIT_CHECKERS } from "./models";
-import { type Answer, type Question, ReviewInputError, ReviewerUnavailableError, UnansweredError } from "./review";
+import {
+	type Answer,
+	type Question,
+	ReviewInputError,
+	ReviewerUnavailableError,
+	UnansweredError,
+	UnrunError,
+} from "./review";
 
 /** The categories a model may pick; `idle` is measured, never judged. */
 export const LABELS = SPLIT_CATEGORIES.filter((c) => c !== "idle") as Exclude<SplitCategory, "idle">[];
@@ -473,7 +480,7 @@ function addUsage(usage: SplitUsage[], spent: Answer<unknown, Asked>["spent"]): 
 
 /** The turns a question no model answered usably still spent. */
 const spentBy = (error: unknown): Answer<unknown, Asked>["spent"] =>
-	error instanceof UnansweredError ? error.spent : [];
+	error instanceof UnansweredError || error instanceof UnrunError ? error.spent : [];
 
 /**
  * Label every action of `harness` session `session` not labeled yet, one part per prompt, keeping the labels after

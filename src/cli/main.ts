@@ -1743,20 +1743,19 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		});
 	program
 		.command("logout")
-		.summary("Remove this host's Kixel Quest token")
+		.summary("Revoke and remove this host's Kixel Quest token")
 		.description(
-			`Remove the token quest login stored for Kixel Quest (https://kixel.quest, or the one ${KIXEL_QUEST_URL} ` +
-				"names) from this host, after removing the two credential.<url>/.helper entries quest login wrote to the " +
-				"global git config; a git config it cannot write fails the command and keeps the token. Kixel Quest " +
-				"still takes the token until it is revoked on its Tokens page.",
+			`Revoke the token quest login stored for Kixel Quest (https://kixel.quest, or the one ${KIXEL_QUEST_URL} ` +
+				"names) at its /login/revoke, so it stops working at once, then remove the two credential.<url>/.helper " +
+				"entries quest login wrote to the global git config and the token from this host. A refused revoke or a " +
+				"git config it cannot write fails the command and keeps the token, so running it again retries.",
 		)
 		.action(() => {
-			const { url, removed } = logout(process.env);
-			print(
-				removed
-					? `removed this host's token for ${url}; revoke it at ${url}/tokens`
-					: `this host held no token for ${url}`,
-			);
+			settle(logout({ env: process.env, fetch: globalThis.fetch }), ({ url, removed }) => {
+				print(
+					removed ? `revoked and removed this host's token for ${url}` : `this host held no token for ${url}`,
+				);
+			});
 		});
 
 	program
@@ -1790,7 +1789,8 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"transcript not labeled yet with a category of work, and about one part in ten is labeled again by " +
 				`${SPLIT_CHECKERS.map((e) => `${e.harness} ${e.model} ${e.effort}`).join(", then ")}; the record's split sums each ` +
 				"category's time, less its timed waits, and tokens, with a line on what went wrong. Only the categories and " +
-				"notes leave the host. A session no model could label is sent without its split, and the next stop says why. " +
+				"notes leave the host, except for a person who agreed at quest login to upload transcripts: each sent session's " +
+				"transcript is then uploaded gzipped too, and again only once it, the sign-in, or its repository changes. A session no model could label is sent without its split, and the next stop says why. " +
 				"Exactly one sender runs per user, " +
 				"as the service quest records install sets up; start no other.\n\nUses GH_TOKEN, GITHUB_TOKEN, or gh auth token.",
 		)
@@ -1956,7 +1956,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		return `rung ${index} (${cells}): ${rung.reviewers.map((e) => `${e.harness} ${e.model} ${e.effort}`).join(joiner)}`;
 	}).join("; ");
 	const classifiers = CLASSIFIERS.map((e) => `${e.harness} ${e.model} ${e.effort}`).join(", then ");
-	/** quest review's exit code for `error`: 2 for a usage error, 3 when no reviewer could run, else 1. */
+	/** quest review's exit code for `error`: 2 for a usage error, 3 when no reviewer or classifier could run, else 1. */
 	const reviewFailure = (error: unknown): number => {
 		const outage = error instanceof ReviewerUnavailableError || error instanceof ReviewOutageError;
 		if (error instanceof ReviewInputError || outage) {
@@ -2045,7 +2045,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				`${classifiers}, reads the diff and the base's RISK.md, if any, which says what is customer-facing, ` +
 				"in one read-only turn and replies with a tier and its reason. One that is logged out, whose login the " +
 				"API rejects, or at its usage limit passes the turn to the next; when none is left, the run fails on the " +
-				"limit that resets first if every one whose CLI is installed hit its own, else as a usage error naming why each failed. A later round on the same head, base " +
+				"limit that resets first if every one whose CLI is installed hit its own, else as an outage naming why each failed when none could run, and otherwise as a usage error. A later round on the same head, base " +
 				"RISK.md, and built-in defaults reuses the tier unless --new. Reviewers never judge it. " +
 				"A change that adds or changes a line under quest/, a new quest or a move included, is at least medium whatever " +
 				"RISK.md says, since agents start that work unattended: the classifier may answer only medium or high and is offered no class. " +
@@ -2091,7 +2091,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"and prints `next done`. When no status is set, as for a token that cannot push, or the post fails, it prints `next stop` and exits 1. With no " +
 				"such PR, several from other repositories that `HEAD` contains, or a remote off GitHub and Kixel Quest, it prints `record skipped: <why>` and changes nothing.\n\n" +
 				"Exits 0 once the round finishes, whatever it found, 2 for invalid arguments " +
-				"or a checkout that cannot be reviewed, 3 when no eligible reviewer could run, each not installed, logged " +
+				"or a checkout that cannot be reviewed, 3 when no eligible reviewer or no classifier could run, each not installed, logged " +
 				"out, its login rejected, at its usage limit, or unable to run on this host, and 1 for other failures, including a PR GitHub will not show, a post Kixel Quest " +
 				"refuses, or a status GitHub refuses. A malformed `## Models` field the round reads, such as a Size line naming no size or an " +
 				"Implementer line naming no model it can read, is a usage error, unless --size or --exclude-model replaces it. A usage limit of the only " +

@@ -2291,12 +2291,13 @@ fakes(
 		vi.stubEnv("PATH", without);
 		expect(await run("codex-limited")).toMatchObject({ code: 3, stdout: "" });
 		vi.stubEnv("PATH", path);
-		// Otherwise it names why each failed.
+		// Every classifier unable to run, for any mix of reasons, is an outage naming why each failed.
 		const failed = await run("claude-rejected,codex-limited");
-		expect(failed.code).toBe(2);
+		expect(failed.code).toBe(3);
 		expect(failed.stderr).toMatch(
 			/^error: no classifier could set the risk tier: claude is not logged in .*; codex hit its usage limit; resets .*\n$/,
 		);
+		// A classifier that replied unusably makes it a usage error.
 		const unusable = await run("claude-unusable,codex-unusable");
 		expect(unusable.code).toBe(2);
 		expect(unusable.stderr).toBe(

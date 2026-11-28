@@ -11,7 +11,7 @@ import { ADVISORS, type AskHarness, type Asked } from "./models";
 import {
 	type Answer,
 	ReviewInputError,
-	UnansweredError,
+	ReviewerUnavailableError,
 	ask,
 	baseInstructions,
 	fetchBase,
@@ -575,7 +575,7 @@ export function savedAdvice(root: string, origin: string, since: number): { pins
 }
 
 /** Whether no advisor could answer because none could run: each was not installed, logged out, limited, or unsupported. */
-export const unavailable = (error: unknown): boolean => error instanceof UnansweredError && error.unavailable;
+export const unavailable = (error: unknown): boolean => error instanceof ReviewerUnavailableError;
 
 /**
  * What the caller does with `advice`, given whether its request set a limit: apply a revision, or hand the PR back

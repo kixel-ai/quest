@@ -20,6 +20,7 @@ import { fileURLToPath } from "node:url";
 
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
+import { checkFixers, stopFixers, track } from "./fixers";
 import { ACTIONS_APP, type Pull, type World, fakeGitHub } from "./github";
 import { authenticatedRead, gitAuthentication } from "../src/cli/land-git";
 import {
@@ -80,6 +81,7 @@ const SQUASH: Target = { method: "squash" };
 const MERGE: Target = { method: "merge" };
 
 const PATH = process.env.PATH;
+afterEach(checkFixers);
 /** Each directory `quest` ran in, one per line. */
 let ran = "";
 beforeEach(() => {
@@ -1179,7 +1181,7 @@ ${options.raw ? `exec '${agent}' "$@"` : options.pipe ? `quest land fix --agent 
 	);
 	const fix: FixContext = {
 		root: queue.root,
-		fixer: options.missing ? join(tools, "missing") : wrapper,
+		fixer: track(options.missing ? join(tools, "missing") : wrapper),
 		jobs: 1,
 		effort: "medium",
 		tags: [],
@@ -1256,7 +1258,11 @@ describe.skipIf(process.platform === "win32")("asynchronous land fixer", () => {
 		expect(fixture.pull.landing).toBe(false);
 		expect(fixture.forge.comment(1)).toContain("fixer timed out");
 		fixture.finished.cancel();
+		// The watcher's timeout signals only a fixer it identified from /proc, which macOS lacks.
+		stopFixers();
 	}
+	// Telling a daemon restart from a crash reads process identities from /proc, so only Linux notes one.
+	const restarted = process.platform === "linux" ? "; the daemon restarted while it ran" : "";
 	const editJob = (state: string, change: (job: Record<string, unknown>) => void) => {
 		const path = join(
 			state,
@@ -1330,7 +1336,7 @@ ${requeueScript}`);
 		writeFileSync(join(fixture.queue.state, `${fixture.jobs()[0]}.error`), "launcher connection closed\n");
 		expect(await fixture.collect()).toEqual(["handback 1"]);
 		expect(fixture.forge.comment(1)).toContain(
-			"fixer stopped by SIGTERM (exit 143); the daemon restarted while it ran; run /quest-iterate. Recommendation: run /quest-iterate",
+			`fixer stopped by SIGTERM (exit 143)${restarted}; run /quest-iterate. Recommendation: run /quest-iterate`,
 		);
 	});
 	test("a crash with no error from its wrapper sends the PR to /quest-iterate", async () => {
@@ -1375,9 +1381,7 @@ ${requeueScript}`);
 			job.daemon = "another-boot:1";
 		});
 		expect(await fixture.collect()).toEqual(["handback 1"]);
-		expect(fixture.forge.comment(1)).toContain(
-			"fixer stopped without recording an exit status; the daemon restarted while it ran",
-		);
+		expect(fixture.forge.comment(1)).toContain(`fixer stopped without recording an exit status${restarted}`);
 		writeFileSync(fixture.fifo, "continue\n");
 		await fixture.finished;
 	});
@@ -1678,14 +1682,18 @@ ${requeueScript}
 			"checks may also reach the services their own tests use",
 			"never stop them or hand a PR back for it",
 			"entered from the tree they check rather than from `base`",
-			"Before reporting `fixed` or `requeue`, run the repository's own checks on the head you report merged with `base`",
-			"lint, format, and type checks as well as build and test",
+			"Before reporting `fixed` or `requeue`, run the base's quick local check on the head you report merged with `base`",
+			"plus the test or step the failure log shows failing",
+			"Leave the repository's full merge gate to the merge queue",
+			"Run no check the merge gate does not",
+			"pass the pinned base yourself, such as `just check base`",
+			"reports it skipped",
 			"Take the commands from the base's root instructions",
 			"run each touched language's own type check and linter",
 			"A `requeue` of an unchanged head runs the same checks",
 			"Name each command you ran",
-			'"reason":"healthy; flaky test; ran just check and just test on a scratch merge"',
-			'"reason":"healthy; flaky test; ran just check and just test on a scratch merge and the disable branch"',
+			'"reason":"healthy; flaky test; ran just check and the failing test on a scratch merge"',
+			'"reason":"healthy; flaky test; ran just check and the failing test on a scratch merge; ran just check on the disable branch and saw the test skipped"',
 			'"reason":"one-line mechanical reason, naming the commands run"',
 			"quoting the command and the output",
 		])
@@ -2755,7 +2763,7 @@ describe.skipIf(process.platform === "win32")("the watcher's own queue", () => {
 		);
 		const fix: FixContext = {
 			root: queue.root,
-			fixer: wrapper,
+			fixer: track(wrapper),
 			jobs: 1,
 			effort: "medium",
 			tags: [],
@@ -2790,7 +2798,7 @@ describe.skipIf(process.platform === "win32")("the watcher's own queue", () => {
 		);
 		const fix: FixContext = {
 			root: queue.root,
-			fixer: wrapper,
+			fixer: track(wrapper),
 			jobs: 1,
 			effort: "medium",
 			branches: [],

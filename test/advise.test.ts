@@ -15,10 +15,11 @@ import {
 	parseAdvice,
 	priced,
 	savedAdvice,
+	unavailable,
 	untrackedSession,
 } from "../src/cli/advise";
 import { ADVISORS } from "../src/cli/models";
-import { ReviewInputError, UnansweredError } from "../src/cli/review";
+import { ReviewInputError, UnansweredError, UnrunError } from "../src/cli/review";
 import { type Pull, sessionRecords } from "../src/cli/usage";
 import { type Setup, agyFakes, fakes, git, quest, setup, write } from "./review-fakes";
 
@@ -342,8 +343,8 @@ agyFakes("when no advisor can run, the question fails as unavailable and saves n
 	const s = setup();
 	vi.stubEnv("FAKE_LOGGED_OUT", "1");
 	const error = await asked(s).catch((caught: unknown) => caught);
-	expect(error).toBeInstanceOf(UnansweredError);
-	expect((error as UnansweredError).unavailable).toBe(true);
+	expect(error).toBeInstanceOf(UnrunError);
+	expect(unavailable(error)).toBe(true);
 	expect(() => readFileSync(adviseFile(join(s.repo, ".git"), "feature"))).toThrow();
 	const run = await quest("--root", s.repo, "advise", "stuck");
 	expect(run.code).toBe(3);
@@ -353,7 +354,8 @@ agyFakes("an unusable reply passes the question on, and only answered calls coun
 	const s = setup();
 	vi.stubEnv("FAKE_ASK", JSON.stringify({ nope: true }));
 	const error = await asked(s).catch((caught: unknown) => caught);
-	expect((error as UnansweredError).unavailable).toBe(false);
+	expect(error).toBeInstanceOf(UnansweredError);
+	expect(unavailable(error)).toBe(false);
 	// Every advisor replied and spent tokens, so the call is kept, but it holds no advice.
 	const path = adviseFile(join(s.repo, ".git"), "feature");
 	const state = JSON.parse(readFileSync(path, "utf8"));

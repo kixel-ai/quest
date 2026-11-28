@@ -687,8 +687,16 @@ signed git in to https://kixel.quest's repositories: credential.https://kixel.qu
 
 Kixel Quest issues the host a token named after its hostname, which `quest`
 keeps in `$XDG_CONFIG_HOME/quest/login.json` (`~/.config`), readable only by
-the user, with the answer about transcripts, where only a `y` or `yes` agrees;
-the record sender uploads no transcripts yet.
+the user, with the answer about transcripts, where only a `y` or `yes` agrees.
+After agreeing, the record sender uploads each session's transcript,
+sub-agents' included, gzipped as the harness wrote it, to
+`PUT /transcripts/<harness>/<session>` once its record is stored, and again
+only once its files, the sign-in, or the record's repository change; one over 100 MiB gzipped, or that Kixel Quest
+refuses for good, is skipped and said, and a server error retries it with the
+records.
+Signing in again and answering no stops uploads, and so does Kixel Quest
+answering 403, as after turning transcripts off on its Tokens page, until the
+next `quest login`.
 Signing in again replaces the host's token.
 `quest login` also signs git in to the repositories Kixel Quest hosts, as
 `gh auth setup-git` does for GitHub: it writes two `credential.<url>/.helper`
@@ -704,9 +712,10 @@ write, such as one home-manager manages, fails the command naming both entries,
 to declare there instead; one that already holds just them is left alone.
 Git matches `<url>/` to the same remotes as `<url>`, but as a key of quest's
 own, so a helper the person lists under `<url>` is never moved or removed.
-`quest logout` removes those two entries, failing on a config it cannot write
-while they are there, then the token from the host; Kixel Quest takes the token
-until it is revoked on its Tokens page. `QUEST_KIXEL_URL` must be a bare origin,
+`quest logout` revokes the token at Kixel Quest, so it stops working at once,
+then removes those two entries, failing on a config it cannot write while they
+are there, then the token from the host; a refused revoke fails it and keeps the
+token and the entries, so running it again retries. `QUEST_KIXEL_URL` must be a bare origin,
 since git's credential requests name only the protocol and host. A
 `records.json` beside it, where earlier versions read a pasted token, is moved
 into `login.json` on the first read, uploading no transcripts.
@@ -1601,7 +1610,7 @@ paths = ["rs/", "Cargo.*"]        # run when a change touches one; any change wh
 tier = "gate"
 run = 'cargo nextest run --profile ci -p "$QUEST_CRATE"'
 after = ["build"]                 # starts once build passes, and pulls it in
-paths = ["rs/"]
+paths = ["rs/", "Cargo.*"]
 exclude = ["rs/**/*.md"]          # never selects the task
 inputs = ["test/vectors/"]        # read outside paths, so selects it too
 caches = ["mbx"]                  # shared build caches a runner provisions
@@ -1768,13 +1777,15 @@ dependencies count. Each crate's digest reads:
 - files outside the member crates that the task's `paths` select
 - the commit of a submodule holding any of those crates
 - the task's `inputs`
+- the digests of the tasks it runs `after`
 
 A crate whose closure declares a path crate that `cargo metadata` lists
 nowhere, such as an optional one only a task's `--features` enables on a
 crate outside the workspace, runs uncached.
 
 Editing crate B or bumping its dependency leaves crate A's pass in place
-unless A depends on B.
+unless A depends on B, or the task runs `after` one whose inputs B is among,
+such as a workspace-wide build.
 
 Passes live in `$XDG_CACHE_HOME/quest/tasks`, or `~/.cache/quest/tasks`, at
 most 256 MiB, least recently used first out. A cached pass is trusted as if
@@ -2214,7 +2225,7 @@ nothing and prints `record skipped: <why>`. A post Kixel Quest refuses, or a
 status GitHub refuses, fails the command after the round's report, with exit
 status 1, a status printing `; status refused: <why>`. It exits 0 once the
 round finishes, whatever it found, 2 for invalid arguments or a checkout that
-cannot be reviewed, 3 when no eligible reviewer could run, each not installed,
+cannot be reviewed, 3 when no eligible reviewer or no classifier could run, each not installed,
 logged out, its login rejected, at its usage limit, or unable to run on this host, and 1 for other
 failures. The only eligible reviewer's usage limit prints one line,
 `error: <harness> hit its usage limit; resets <time>`, where `<time>` is the
@@ -2305,7 +2316,7 @@ review of a high head until a review classifies the head again. It runs as Claud
 `claude-haiku-5-5` at low effort, then Codex `gpt-6.2-sol` at low when Claude Code is
 missing, logged out, has its login rejected, or hits its usage limit. When none can
 run, the review fails on the limit that resets first if every one whose CLI is
-installed hit its own, and otherwise as a usage error naming why each failed. Its diff ignores the head's
+installed hit its own, as an outage naming why each failed when none could run, and otherwise as a usage error naming why each failed. Its diff ignores the head's
 `.gitattributes` and treats every file as text, so a head cannot hide hunks by
 marking them binary. A diff past 200,000 characters, or one holding a NUL byte or bytes that are not
 UTF-8, gives it only the stat and a file of the whole diff in a scratch directory, which Claude Code is
@@ -2643,7 +2654,8 @@ latest upload, since one sender sends a session's uploads in order. The type is
 - `split` is where the rest of its time went, as the next section describes;
   null until every step is labeled, and for a session on another host.
 
-The record holds no prompt, reply, or transcript text: skills and questions
+The record holds no prompt, reply, or transcript text, which only a
+[transcript upload](#read-through-kixel-quest) the person agreed to sends: skills and questions
 are read from the transcript on this host, and only their names and times
 leave it. The split's notes are lines a model wrote, told to name no one and
 quote no message.
@@ -2762,7 +2774,8 @@ unusable replies included.
 
 The labels are kept under `$XDG_STATE_HOME/quest/records/splits`, so each stop
 labels only the new steps, and `quest usage` reads them without asking a model.
-The transcript text reaches only the labeling model, never the store. Labeling
+The transcript text reaches only the labeling model, never the store, unless
+the person agreed at `quest login` to upload transcripts. Labeling
 never holds a record back: a session no model could label, such as with every
 model logged out, is sent without its split, the next stop says why, and the
 session's next stop labels the steps still unlabeled.
@@ -3154,6 +3167,8 @@ as the reason:
 - a scratch file written under `/tmp`, outside the checkout, by a redirection,
   `tee`, `mkdir`, `mktemp`, `git clone` or `worktree add`, or a file edit;
 - killing processes by name with `pkill` or `killall`, which can hit sibling agents;
+- loading the CPU with `stress`, `stress-ng`, or `yes` writing to `/dev/null`,
+  which starves sibling agents;
 - `cargo test` or `mbx test`, other than `--doc` or `--no-run`, in a Cargo
   workspace whose `.config/nextest.toml` kills hung tests with
   `terminate-after`, since plain `cargo test` skips it, unless the command
