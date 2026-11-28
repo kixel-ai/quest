@@ -5,7 +5,7 @@ import { dirname, join } from "node:path";
 import type { Readable, Writable } from "node:stream";
 import { fileURLToPath } from "node:url";
 
-import { onTestFinished } from "vitest";
+import { afterEach } from "vitest";
 
 import type { History, TreeEntry } from "../src/core";
 import { tempDir } from "./fixture";
@@ -56,11 +56,12 @@ class Objects {
 	readonly #waiting: {
 		oid: string;
 		type: string;
-		resolve: (body: Buffer) => void;
+		resolve: (object: { oid: string; body: Buffer }) => void;
 		reject: (error: Error) => void;
 	}[] = [];
 	readonly #exited: Promise<void>;
 	#buffer = Buffer.alloc(0);
+	#failed: Error | undefined;
 
 	constructor(dir: string) {
 		this.#child = spawn("git", ["-C", dir, "cat-file", "--batch"], { stdio: ["pipe", "pipe", "inherit"] });
@@ -70,17 +71,20 @@ class Objects {
 		});
 		this.#exited = new Promise((resolve) => {
 			const fail = (error: Error) => {
-				for (const read of this.#waiting.splice(0)) read.reject(error);
+				this.#failed ??= error;
+				for (const read of this.#waiting.splice(0)) read.reject(this.#failed);
 				resolve();
 			};
 			this.#child.on("error", fail);
+			this.#child.stdin.on("error", fail);
 			this.#child.on("close", (code) => fail(new Error(`git cat-file --batch exited with ${code}`)));
 		});
 	}
 
-	/** The body of object `oid`, which must be a `type`. */
-	read(oid: string, type: string): Promise<Buffer> {
+	/** Object `oid`'s full id and body; it must be a `type`. */
+	read(oid: string, type: string): Promise<{ oid: string; body: Buffer }> {
 		return new Promise((resolve, reject) => {
+			if (this.#failed !== undefined) return reject(this.#failed);
 			this.#waiting.push({ oid, type, resolve, reject });
 			this.#child.stdin.write(`${oid}\n`);
 		});
@@ -98,7 +102,7 @@ class Objects {
 			if (eol < 0) return;
 			// `<oid> <type> <size>`, the body, and a newline; or `<name> missing` or `<name> ambiguous`.
 			const header = this.#buffer.toString("latin1", 0, eol);
-			const [, type, size] = header.split(" ");
+			const [id, type, size] = header.split(" ") as [string, string?, string?];
 			const end = eol + 1 + Number(size);
 			if (size !== undefined && this.#buffer.length < end + 1) return;
 			const read = this.#waiting.shift()!;
@@ -107,7 +111,7 @@ class Objects {
 				read.reject(new Error(`${read.oid} is not a ${read.type}: ${header}`));
 				continue;
 			}
-			read.resolve(this.#buffer.subarray(eol + 1, end));
+			read.resolve({ oid: id, body: this.#buffer.subarray(eol + 1, end) });
 			this.#buffer = this.#buffer.subarray(end + 1);
 		}
 	}
@@ -115,35 +119,40 @@ class Objects {
 
 const readers = new Map<string, Objects>();
 
+// Registered after the fixture's and the budget's hooks, so it runs before them (Vitest runs after-hooks as a
+// stack): each reader exits before its repository is removed and is reaped before the budget samples the CPU.
+afterEach(async () => {
+	const open = [...readers.values()];
+	readers.clear();
+	await Promise.all(open.map((reader) => reader.close()));
+});
+
 /** `dir`'s object reader, started once per test and closed when the test ends. */
 function objects(dir: string): Objects {
 	let reader = readers.get(dir);
 	if (reader === undefined) {
-		const started = new Objects(dir);
-		readers.set(dir, started);
-		onTestFinished(() => {
-			readers.delete(dir);
-			return started.close();
-		});
-		reader = started;
+		reader = new Objects(dir);
+		readers.set(dir, reader);
 	}
 	return reader;
 }
 
-/** `dir`'s history, with `base` as the PR's base branch; call it within a test, whose end closes its reads. */
+/** `dir`'s history, with `base` as the PR's base branch; its reads end with the test. */
 export function gitHistory(dir: string, base = "main"): History {
 	const reader = objects(dir);
 	return {
 		async commit(sha) {
-			const body = (await reader.read(sha, "commit")).toString("utf8");
+			const body = (await reader.read(sha, "commit")).body.toString("utf8");
 			const headers = body.slice(0, body.indexOf("\n\n")).split("\n");
 			const field = (name: string) =>
 				headers.filter((line) => line.startsWith(`${name} `)).map((line) => line.slice(name.length + 1));
 			return { tree: field("tree")[0]!, parents: field("parent") };
 		},
 		async tree(oid) {
-			// Each entry is `<mode> <name>\0` and a 20-byte id; git stores a directory's mode without its leading zero.
-			const body = await reader.read(oid, "tree");
+			// Each entry is `<mode> <name>\0` and a binary id as wide as the tree's own (SHA-1 or SHA-256); git
+			// stores a directory's mode without its leading zero.
+			const { oid: id, body } = await reader.read(oid, "tree");
+			const width = id.length / 2;
 			const entries = new Map<string, TreeEntry>();
 			for (let at = 0; at < body.length;) {
 				const space = body.indexOf(32, at);
@@ -153,14 +162,14 @@ export function gitHistory(dir: string, base = "main"): History {
 				entries.set(body.toString("utf8", space + 1, nul), {
 					mode,
 					type,
-					oid: body.toString("hex", nul + 1, nul + 21),
+					oid: body.toString("hex", nul + 1, nul + 1 + width),
 				});
-				at = nul + 21;
+				at = nul + 1 + width;
 			}
 			return entries;
 		},
 		async blob(oid) {
-			return new Uint8Array(await reader.read(oid, "blob"));
+			return new Uint8Array((await reader.read(oid, "blob")).body);
 		},
 		async mergeBase(a, b) {
 			const bases = git(dir, "merge-base", "--all", a, b).split("\n").filter(Boolean);
