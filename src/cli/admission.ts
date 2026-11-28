@@ -15,7 +15,9 @@ import {
 	hostLimits,
 	memoryRoom,
 	processStart,
+	owner,
 	room,
+	sliceUser,
 	type Waiting,
 	usableMemory,
 } from "./gate";
@@ -100,8 +102,8 @@ const agentsDirectory = (gate: string) => join(dirname(dirname(gate)), `agents-v
 /**
  * How agents are admitted on a platform: only Linux bounds them by memory alone. macOS's gate reads
  * no memory and Windows reports no load, so both keep `room`'s count of pending agents and queued
- * commands against the CPUs. On Linux the gate runs commands in the user's `background.slice`, so
- * agents read its memory cap with the user's `uid`, as the gate does.
+ * commands against the CPUs. Where the gate runs commands in the user's `background.slice` (see
+ * `sliceUser`), agents read its memory cap with that `uid`, as the gate does.
  */
 export function admissionMode(platform: NodeJS.Platform, uid: number | undefined): { load: boolean; uid?: number } {
 	return platform === "linux" ? { load: false, uid } : { load: true };
@@ -110,7 +112,7 @@ export function admissionMode(platform: NodeJS.Platform, uid: number | undefined
 /** The admission `quest agent` runs with: the host's own limits and ledgers. */
 export function processAdmission(notice: (text: string) => void): AdmissionDependencies {
 	const gate = claimDirectory();
-	const { load, uid } = admissionMode(process.platform, process.getuid?.());
+	const { load, uid } = admissionMode(process.platform, sliceUser(owner().unit));
 	return {
 		limits: hostLimits(undefined, usableMemory(uid)),
 		gate: fileHost(gate, Date.now, uid),

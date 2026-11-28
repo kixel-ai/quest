@@ -2692,8 +2692,8 @@ would admit a gated command at once, as `quest gate` counts it, with one more
 command's budget taken for every agent admitted in the last 5 minutes: an agent
 adds no gated work until its first build, and three quarters of those that build
 at all reach it by then. An agent `start` or `resume` runs stops counting when it
-exits. On Linux, the user's `background.slice` counts too, as it does for the
-gate, so a slice at its cap holds agents back however much memory the host has
+exits. On Linux, where the gate runs commands in the user's `background.slice`, that
+slice counts too, as it does for the gate, so a slice at its cap holds agents back however much memory the host has
 free. CPU load and commands queued for the gate do not hold agents back: an
 agent mostly waits on its model, and its builds wait in the gate. On macOS,
 where the gate reads no memory, and on Windows, where memory alone does not
