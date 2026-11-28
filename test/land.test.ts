@@ -1381,9 +1381,7 @@ ${requeueScript}`);
 			job.daemon = "another-boot:1";
 		});
 		expect(await fixture.collect()).toEqual(["handback 1"]);
-		expect(fixture.forge.comment(1)).toContain(
-			`fixer stopped without recording an exit status${restarted}`,
-		);
+		expect(fixture.forge.comment(1)).toContain(`fixer stopped without recording an exit status${restarted}`);
 		writeFileSync(fixture.fifo, "continue\n");
 		await fixture.finished;
 	});
