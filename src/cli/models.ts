@@ -15,6 +15,16 @@ export interface Model {
 	advisor?: string;
 }
 
+/** The CLIs a one-turn question runs: every agent harness, and Google's Antigravity CLI, `agy`, which only advises. */
+export type AskHarness = HarnessName | "agy";
+
+/** One CLI running one model at one effort for a one-turn question, as an advisor. */
+export interface Asked {
+	harness: AskHarness;
+	model: string;
+	effort: string;
+}
+
 /** The size of a PR with neither a quest nor `--size`. */
 export const DEFAULT_SIZE: Size = "M";
 
@@ -110,6 +120,17 @@ export const ARM_NAMES: readonly Arm[] = ["A", "B"];
 export const CLASSIFIERS: readonly Model[] = [
 	{ harness: "claude", model: "claude-haiku-5-5", effort: "low" },
 	sol("low"),
+];
+
+/**
+ * The stronger models `quest advise` asks for a fresh approach when an agent is stuck, ranked: the first that can run
+ * answers, past any not installed, logged out, at its usage limit, or unable to run sandboxed on this host. Neon runs
+ * only here, through `agy`; writes stay Claude's and reviews Codex's and Claude's.
+ */
+export const ADVISORS: readonly Asked[] = [
+	{ harness: "agy", model: "gemini-4-neon", effort: "high" },
+	{ harness: "codex", model: "gpt-6.2-astra", effort: "high" },
+	{ harness: "claude", model: "claude-fable-5-2", effort: "medium" },
 ];
 
 /**

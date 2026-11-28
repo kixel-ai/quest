@@ -1,7 +1,7 @@
 // A pull request body's `## Models` record, which names the PR's size and each session that implemented it.
 
 import { SIZES } from "../core";
-import { ARMS, ARM_NAMES, type Arm, CLASSIFIERS, REVIEW_RUNGS, SPLITTERS, WRITERS } from "./models";
+import { ADVISORS, ARMS, ARM_NAMES, type Arm, CLASSIFIERS, REVIEW_RUNGS, SPLITTERS, WRITERS } from "./models";
 
 const SECTION = /^## Models[ \t]*\r?$/m;
 
@@ -62,8 +62,6 @@ const key = (name: string) =>
 		.replace(/^claude-/, "");
 // Models the tables no longer list, which older records still name.
 const RETIRED = ["gpt-6.1-sol"];
-// Models no table lists, which run only when named, as `--model claude-fable-5-2` does, and which records still name.
-const NAMED = ["claude-fable-5-2", "gpt-6.2-astra"];
 const KNOWN = new Map(
 	[
 		...[
@@ -72,11 +70,11 @@ const KNOWN = new Map(
 			...Object.values(ARMS).flatMap(Object.values),
 			CLASSIFIERS,
 			SPLITTERS,
+			ADVISORS,
 		]
 			.flat()
 			.map(({ model }) => model),
 		...RETIRED,
-		...NAMED,
 	].map((model) => [key(model), model]),
 );
 

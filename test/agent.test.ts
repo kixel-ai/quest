@@ -268,6 +268,9 @@ test("the agent environment holds no session credentials or harness state", () =
 		CODEX_SANDBOX: "seatbelt",
 		CODEX_HOME: "/home/me/.codex",
 		CLAUDE_CONFIG_DIR: "/home/me/.claude-work",
+		ANTIGRAVITY_LS_ADDRESS: "127.0.0.1:1",
+		ANTIGRAVITY_CSRF_TOKEN: "t",
+		AGY_LLM_GATEWAY_URL: "https://gateway",
 	});
 	expect(env).toEqual({
 		PATH: "/bin",

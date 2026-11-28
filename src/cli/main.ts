@@ -92,6 +92,8 @@ import {
 	WRITERS,
 	questWriters,
 	writerAt,
+	ADVISORS,
+	type AskHarness,
 } from "./models";
 import { canonicalModel } from "./models-record";
 import {
@@ -104,7 +106,8 @@ import {
 	nextStep,
 	roundLines,
 } from "./review";
-import { type Recorded, pullModels, recordRounds, requirePosting } from "./review-record";
+import { type Recorded, pullBody, pullModels, recordRounds, requirePosting } from "./review-record";
+import { AdviseCapError, advise, adviceLines, unavailable } from "./advise";
 import {
 	BASH_MAX_TIMEOUT_MS,
 	CLAUDE_HOOKS,
@@ -1466,7 +1469,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"The agent CLI runs from its absolute path on PATH, never from the worktree; on native Windows " +
 				"a batch shim such as npm's claude.cmd runs through System32's cmd.exe, and stop ends the agent's process tree at once.\n\n" +
 				"The agent runs in <worktree> with the user's environment minus every CLAUDE* (except CLAUDE_CONFIG_DIR), " +
-				"ANTHROPIC*, CODEX_* (except CODEX_HOME), OP_*, OPENAI_API_KEY, QUEST_GATE_ADMITTED, QUEST_GATE_PRIORITY, " +
+				"ANTHROPIC*, CODEX_* (except CODEX_HOME), ANTIGRAVITY_*, AGY_*, OP_*, OPENAI_API_KEY, QUEST_GATE_ADMITTED, QUEST_GATE_PRIORITY, " +
 				"and MBX_SCHEDULER_PRIORITY when QUEST_GATE_PRIORITY=1, so it uses the CLI's stored login rather than the coordinating session's. " +
 				"--advisor turns on Claude Code's advisor tool with that model, setting CLAUDE_CODE_ENABLE_EXPERIMENTAL_ADVISOR_TOOL=1, " +
 				"without which Claude Code drops the tool silently on an account its rollout has not reached; it is refused for Codex.\n\n" +
@@ -2274,6 +2277,95 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 					},
 					(error) => {
 						queueStarted(null);
+						return reviewFailure(error);
+					},
+				);
+			},
+		);
+
+	const advisorList = ADVISORS.map((entry) => `${entry.harness} ${entry.model} ${entry.effort}`).join(", then ");
+	program
+		.command("advise")
+		.summary("Ask a stronger model, read-only, for a fresh approach when stuck on a branch")
+		.description(
+			"Ask a stronger model for a fresh approach to the checkout's committed branch, for an agent that is stuck, " +
+				"such as a review that keeps raising findings or an implementation loop that does not converge; not for " +
+				"routine work or a broken environment. The question says what the agent tried and where it is stuck; - " +
+				"reads it from stdin. The advisor also gets the quest file the branch names, the open PR's body, the review " +
+				"rounds saved for the branch, and the base's agent instructions in place of the checkout's, and is asked " +
+				"to compare two or three approaches, such as patching, redesigning, or dropping the change, and recommend " +
+				"one, saying whether it stays within the quest's Goal and settled decisions (change within) or changes " +
+				"its scope or architecture or drops the PR.\n\n" +
+				`The first advisor that can run answers: ${advisorList}. One that is not installed, logged out, at its ` +
+				"usage limit, or cannot be sandboxed on this host passes the question on, as does one whose reply does " +
+				"not fit the schema. --harness asks only that advisor, at its listed model and effort unless --model or " +
+				"--effort replaces them. Each runs read-only as `quest review` runs its reviewers: Claude Code and Codex " +
+				"in the checkout with no write tool and no settings or project config, and agy with no shell, reading " +
+				"an export of the head and the change's diff from a private directory outside any repository, past deny " +
+				"rules on commands, writes, web requests, MCP calls, and reads outside that directory. agy compares its " +
+				"rules case-sensitively, so a host whose path to that directory matches names case-insensitively, as " +
+				"macOS's default volume, passes it over. It runs agy on the user's own Antigravity login with no " +
+				"ANTIGRAVITY_* or AGY_* variable.\n\n" +
+				"Each branch gets one answered call: a second refuses before any advisor runs, naming the first's time " +
+				"and model, unless --force. Every call is kept under the clone's common Git directory in quest/advise/, " +
+				"with each session it started and, for agy, whose transcripts token-max cannot read, the tokens it " +
+				"reported, priced at the model's API list rate, or marked incomplete where no rate is known. Each " +
+				"session is queued for Kixel Quest with role advising, and `quest usage` counts it so.\n\n" +
+				"Exits 0 with the advice, 1 when the branch was already advised or on another failure, 2 on a usage " +
+				"error, and 3 when no advisor could run.",
+		)
+		.argument("<question...>", "What you tried and where you are stuck; - reads it from stdin")
+		.option("--base <remote/branch>", "Base branch the change is against (default: origin's default branch)")
+		.option("--branch <name>", "Branch to advise on, instead of the checked-out one or its upstream")
+		.option("--force", "Ask again on a branch that was already advised")
+		.addOption(new Option("--harness <name>", "The only advisor to ask").choices(ADVISORS.map((e) => e.harness)))
+		.option("--model <model>", "Model --harness's advisor runs instead")
+		.option("--effort <level>", "Reasoning effort --harness's advisor runs at instead, never max", effortLevel)
+		.action(
+			(
+				words: string[],
+				options: {
+					base?: string;
+					branch?: string;
+					force?: boolean;
+					harness?: AskHarness;
+					model?: string;
+					effort?: string;
+				},
+			) => {
+				const question = words.length === 1 && words[0] === "-" ? readFileSync(0, "utf8") : words.join(" ");
+				const github = claimDependencies();
+				pending = advise(
+					{ ...options, root: root(), question },
+					{
+						env: process.env,
+						pull: (dir, base, branch) => pullBody(dir, base, branch, github),
+						queue: (session) => {
+							// Only the dashboard loses a session that is not queued, so it never fails the call.
+							try {
+								for (const notice of queue(session, process.env).notices)
+									warn(notice.replace(/^quest: /, ""));
+							} catch (error) {
+								warn(
+									`cannot queue this session's record: ${error instanceof Error ? error.message : String(error)}`,
+								);
+							}
+						},
+					},
+				).then(
+					(advised) => {
+						for (const line of adviceLines(advised)) print(line);
+						return 0;
+					},
+					(error) => {
+						if (error instanceof AdviseCapError) {
+							out.stderr(`error: ${error.message}\n`);
+							return 1;
+						}
+						if (unavailable(error)) {
+							out.stderr(`error: ${(error as Error).message}\n`);
+							return 3;
+						}
 						return reviewFailure(error);
 					},
 				);

@@ -24,6 +24,7 @@ import {
 	type TimeSplit,
 	WAIT_KINDS,
 } from "../core";
+import { savedAdvice } from "./advise";
 import type { Arm } from "./models";
 import { type Implementer, canonicalModel, recorded } from "./models-record";
 import { type ClaimDependencies, upstream } from "./claims";
@@ -715,16 +716,16 @@ export function heading(pulls: Pull[]): (reached: Reached) => boolean {
 }
 
 /**
- * The PR `quest review` recorded a session it started on, by URL so a same-numbered PR in another repository never
- * claims it, or null when it recorded on none; its branch; and its role.
+ * The PR `quest review` or `quest advise` recorded a session it started on, by URL so a same-numbered PR in another
+ * repository never claims it, or null when it recorded on none; its branch; and its role.
  */
 export interface Reviewed {
 	pull: string | null;
 	branch: string;
-	role: "classifying" | "reviewing";
+	role: "classifying" | "reviewing" | "advising";
 }
 
-/** The sessions `quest review` started, by `harness\0id`, with the repository of the checkout that queued each. */
+/** The sessions `quest review` and `quest advise` started, by `harness\0id`, with the repository of the checkout that queued each. */
 export type Pins = Map<string, Reviewed & { origin: string }>;
 
 const pinOf = (session: Session, pins: Pins | undefined) =>
@@ -1343,10 +1344,14 @@ export async function usage(root: string, options: UsageOptions, deps: UsageDepe
 	let incomplete: Session[] = [];
 	let folded: Session[] = dropped;
 	if (exported !== null) {
+		// This clone's advise calls set their sessions' role, and bring the agy ones token-max cannot read.
+		const advised = savedAdvice(top, key(repository), since);
+		const sessions = [...kept, ...advised.sessions];
 		// Every PR in the window competes for a session, so narrowing never hands one PR another's sessions.
 		const records = sessionRecords({
 			repository: key(repository),
-			sessions: kept,
+			sessions,
+			pins: advised.pins,
 			evidence: exported,
 			pulls: all,
 			waits: deps.waits(since),
@@ -1356,7 +1361,7 @@ export async function usage(root: string, options: UsageOptions, deps: UsageDepe
 		});
 		const attributed: Session[] = [];
 		const left: Session[] = [];
-		for (const session of kept) {
+		for (const session of sessions) {
 			const record = records.get(session);
 			const on = record?.pulls.flatMap((number) => byNumber.get(number) ?? []) ?? [];
 			for (const row of on) {

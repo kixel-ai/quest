@@ -9,6 +9,7 @@ import { dirname, join, resolve } from "node:path";
 import { createHash, randomUUID } from "node:crypto";
 
 import { type BreakageRecord, type Finder, type RecordUpload, type Repository, parseUpload } from "../core";
+import { type Untracked, untrackedSession } from "./advise";
 import { culpritOf } from "./breakage";
 import { CLOCK_SKEW, type GitHubDependencies, GitHub } from "../github/client";
 import { baseRepository } from "./claims";
@@ -58,6 +59,8 @@ export interface Pending {
 	 * there, which the sender takes over what it infers from the session's checkout and the PR's `## Review` record.
 	 */
 	reviewed?: Reviewed;
+	/** The tokens of a session token-max cannot read, as an agy advisor's, which the sender prices itself. */
+	untracked?: Untracked;
 	/**
 	 * On a resend, the instant, epoch ms, its earlier upload read PRs from, so the resend reads at least as far back and
 	 * names every PR that upload did.
@@ -109,7 +112,7 @@ function transcriptStart(path: string): number | null {
  * `quest review` started, which knows its own first instant, epoch ms, and the PR, branch, and role it reviewed in.
  */
 export type Stopped = { harness: string; session: string; cwd: string } & (
-	{ transcript: string } | ({ start: number } & Reviewed)
+	{ transcript: string } | ({ start: number; untracked?: Untracked } & Reviewed)
 );
 
 /** What `queue` did, for the hook to say. */
@@ -148,8 +151,10 @@ export function queue(stopped: Stopped, env: NodeJS.ProcessEnv = process.env): Q
 	if (existsSync(refusal(env, url, token))) return { notices, queued: false };
 	let start: number;
 	let reviewed: Reviewed | undefined;
+	let untracked: Untracked | undefined;
 	if ("start" in stopped) {
 		start = stopped.start;
+		untracked = stopped.untracked;
 		reviewed = { pull: stopped.pull, branch: stopped.branch, role: stopped.role };
 	} else {
 		const first = transcriptStart(stopped.transcript);
@@ -166,6 +171,7 @@ export function queue(stopped: Stopped, env: NodeJS.ProcessEnv = process.env): Q
 		origin: repository,
 		prefix: run(["rev-parse", "--show-prefix"]).stdout.trim(),
 		...(reviewed && { reviewed }),
+		...(untracked && { untracked }),
 	});
 	const sender = senderRuns(env);
 	if (!sender.runs)
@@ -452,6 +458,13 @@ async function sendTo(
 			const pulls: Pull[] = await updatedPulls(client, repository, from);
 			const emit = new Set<Session>();
 			const missing: typeof group = [];
+			// Sessions token-max cannot read, built from the tokens their queue entries carry.
+			const untracked = group.flatMap((q) =>
+				q.pending.untracked
+					? [untrackedSession({ ...q.pending, cwd: q.pending.root, untracked: q.pending.untracked })]
+					: [],
+			);
+			for (const s of untracked) byId.set(`${s.harness}\0${s.id}`, s);
 			for (const q of group) {
 				const session = byId.get(`${q.pending.harness}\0${q.pending.session}`);
 				if (session) emit.add(session);
@@ -522,8 +535,9 @@ async function sendTo(
 			// Each session's new steps are labeled before its record is built, so its record carries its split.
 			const labeled = new Map<Session, { steps: Steps; labeled: Labeled }>();
 			for (const s of emit) {
-				// A transcript with lines token-max could not read either is sent unsplit, as it is sent without waits.
-				if (s.id === null || s.host !== null || s.skippedLines > 0) continue;
+				// A transcript with lines token-max could not read either is sent unsplit, as it is sent without waits, and
+				// a session with no transcript has nothing to split.
+				if (s.id === null || s.host !== null || s.skippedLines > 0 || s.files.length === 0) continue;
 				// Labeling never holds a record back: a session whose transcript reads in a shape quest does not know, or
 				// that no model could label, is sent unsplit and said, and its next stop tries the parts still unlabeled.
 				try {
@@ -544,7 +558,7 @@ async function sendTo(
 			}
 			const records = sessionRecords({
 				repository: key(repository),
-				sessions: kept,
+				sessions: [...kept, ...untracked],
 				evidence: exported,
 				pulls,
 				waits,
