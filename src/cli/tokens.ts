@@ -54,7 +54,12 @@ export function kixelPath(value: string, base: string): string | null {
 
 /** The token this host signed in to `url` with, or null. */
 export function tokenFor(url: string, env: NodeJS.ProcessEnv = process.env): string | null {
-	return readLogins(env)[url]?.token ?? null;
+	return loginFor(url, env)?.token ?? null;
+}
+
+/** This host's sign-in to `url`, or null. */
+export function loginFor(url: string, env: NodeJS.ProcessEnv = process.env): Login | null {
+	return readLogins(env)[url] ?? null;
 }
 
 /** The token this host signed in to `url` with, failing with what to run when it has none. */

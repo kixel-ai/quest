@@ -36,6 +36,7 @@ import {
 	updatedPulls,
 } from "./usage";
 import { kixelUrl, notSignedIn, requireToken, tokenFor } from "./tokens";
+import { sendTranscripts } from "./transcripts";
 import { type LoggedWait } from "./waits";
 import type { CallLine } from "./calls";
 
@@ -570,6 +571,19 @@ async function sendTo(
 			}
 			if (!response.ok)
 				throw new Error(`${endpoint} answered ${response.status}: ${(await response.text()).slice(0, 500)}`);
+			// After the records, since Kixel Quest stores a transcript only for a session whose record it holds.
+			notes.push(
+				...(await sendTranscripts({
+					env: deps.env,
+					fetch: deps.fetch,
+					url,
+					token,
+					repository: key(repository),
+					state: dir,
+					sessions: records.keys(),
+					acknowledged: response,
+				})),
+			);
 			clearBackoff(deps.env, id);
 			remember(deps.env, id, { group, emit, byId, from, waiting: unheaded([...emit], exported, pulls, pins) });
 			for (const path of due.forget) rmSync(path, { force: true });

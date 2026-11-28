@@ -38,7 +38,7 @@ export async function login(deps: LoginDependencies): Promise<SignedIn> {
 	const url = kixelUrl(deps.env);
 	const transcripts = await askTranscripts(deps);
 	const label = deps.hostname;
-	const code = parseCode(await post(deps, url, "/login/device", { label }), url);
+	const code = parseCode(await post(deps, url, "/login/device", { label, transcripts }), url);
 	deps.say(`Open ${code.verification_uri}, sign in with GitHub, and enter the code ${code.user_code}.`);
 	deps.say(`Waiting for its approval; the code expires in ${Math.round(code.expires_in / 60)} minutes.`);
 	const deadline = deps.now() + code.expires_in * 1000;
