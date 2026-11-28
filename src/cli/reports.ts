@@ -26,7 +26,6 @@ function junitProblem(text: string): string | null {
 	const parser = new SaxesParser();
 	const stack: string[] = [];
 	let problem: string | null = null;
-	let inCase = false;
 	const fail = (why: string) => {
 		problem ??= why;
 	};
@@ -38,15 +37,12 @@ function junitProblem(text: string): string | null {
 			if (tag.name !== "testsuites" && tag.name !== "testsuite")
 				fail(`its root is ${tag.name}, not testsuites or testsuite`);
 		} else if (tag.name === "testcase") {
-			if (inCase || !stack.includes("testsuite")) fail("a testcase is outside a testsuite");
+			if (stack.indexOf("testcase") < stack.length - 1 || !stack.includes("testsuite"))
+				fail("a testcase is outside a testsuite");
 			if ((tag.attributes.name ?? "") === "") fail("a testcase has no name");
-			inCase = true;
 		}
 	});
-	parser.on("closetag", (tag) => {
-		stack.pop();
-		if (tag.name === "testcase") inCase = false;
-	});
+	parser.on("closetag", () => stack.pop());
 	try {
 		parser.write(text).close();
 	} catch (error) {

@@ -2,16 +2,7 @@
 // `quest gate` and, for a Nix task, in the repository's dev shell, with every task whose `after` tasks passed
 // running at once, and a task whose inputs this host already saw pass taking that pass instead of running.
 import { type ChildProcess, spawn, spawnSync } from "node:child_process";
-import {
-	copyFileSync,
-	existsSync,
-	lstatSync,
-	mkdirSync,
-	readFileSync,
-	realpathSync,
-	rmSync,
-	writeFileSync,
-} from "node:fs";
+import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 
 import {
@@ -680,17 +671,12 @@ export async function run(options: RunOptions, io: RunIO): Promise<number> {
 					let malformed: string[] = [];
 					let reports: TaskResult["reports"] = [];
 					try {
-						({ problems, refused: malformed } = collect(
-							top,
-							outputs,
-							status === null,
-							reportDir(report, unit),
-						));
-						if (status === null && problems.length === 0 && malformed.length === 0)
-							reports = outputs.map(({ path, name }) => ({
-								name,
-								base64: readFileSync(join(top, path)).toString("base64"),
-							}));
+						const collected = collect(top, outputs, status === null, reportDir(report, unit));
+						({ problems, refused: malformed } = collected);
+						reports = collected.valid.map(({ name, bytes }) => ({
+							name,
+							base64: bytes.toString("base64"),
+						}));
 					} catch (error) {
 						problems = [`cannot collect its reports: ${(error as Error).message}`];
 					}
@@ -812,6 +798,8 @@ interface Collected {
 	problems: string[];
 	/** Each report Kixel Quest would refuse, and why, which is left out of `--report`'s directory and fails the run. */
 	refused: string[];
+	/** The bytes of each valid report as checked, which `--report` and the cache both take, so neither gets others. */
+	valid: { name: "junit.xml" | "metrics.json"; bytes: Buffer }[];
 }
 
 /** Check the reports a task wrote and copy the valid ones under `destination`. */
@@ -821,21 +809,23 @@ function collect(
 	passed: boolean,
 	destination: string | null,
 ): Collected {
-	const collected: Collected = { problems: [], refused: [] };
+	const collected: Collected = { problems: [], refused: [], valid: [] };
 	for (const { path, name } of outputs) {
 		const file = join(top, path);
 		if (!existsSync(file)) {
 			if (passed) collected.problems.push(`it did not write ${path}`);
 			continue;
 		}
-		const problem = reportProblem(name, readFileSync(file));
+		const bytes = readFileSync(file);
+		const problem = reportProblem(name, bytes);
 		if (problem !== null) {
 			collected.refused.push(`${path} is malformed: ${problem}`);
 			continue;
 		}
+		collected.valid.push({ name, bytes });
 		if (destination !== null) {
 			mkdirSync(destination, { recursive: true });
-			copyFileSync(file, join(destination, name));
+			writeFileSync(join(destination, name), bytes);
 		}
 	}
 	return collected;

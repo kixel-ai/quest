@@ -403,6 +403,11 @@ test("a report Kixel Quest's reader would refuse is named", () => {
 		["its root is report, not testsuites or testsuite", "junit.xml", "<report/>"],
 		["a testcase has no name", "junit.xml", "<testsuite><testcase/></testsuite>"],
 		["a testcase is outside a testsuite", "junit.xml", '<testsuites><testcase name="x"/></testsuites>'],
+		[
+			"a testcase is outside a testsuite",
+			"junit.xml",
+			'<testsuite><testcase name="a"><failure/><testcase name="b"/></testcase></testsuite>',
+		],
 		["it declares a DTD", "junit.xml", '<!DOCTYPE x [<!ENTITY a "b">]><testsuites/>'],
 		["it is not JSON", "metrics.json", '{"units": {'],
 		["it is not an object", "metrics.json", "[1]"],
