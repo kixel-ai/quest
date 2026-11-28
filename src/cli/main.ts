@@ -1533,8 +1533,8 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		.description(
 			"Wait until this host can carry one more agent, for a coordinator to run before it starts or resumes " +
 				"an agent of its own, such as a sub-agent; start and resume do the same themselves. The host has room " +
-				"while its memory, including the user's background.slice cap on Linux, would admit a gated command at " +
-				"once, counting as one recent admission each every " +
+				"while its memory, including on Linux the cap of the user's background.slice where gated commands run " +
+				"in it, would admit a gated command at once, counting as one recent admission each every " +
 				`agent admitted in the last ${PENDING_MS / 60_000} minutes, since an agent adds no gated work until ` +
 				"its first build; an agent start or resume runs counts only until it exits. CPU load and commands " +
 				"queued for quest gate do not count, except on macOS, where the gate reads no memory, and Windows: there the " +

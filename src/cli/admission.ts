@@ -109,10 +109,13 @@ export function admissionMode(platform: NodeJS.Platform, uid: number | undefined
 	return platform === "linux" ? { load: false, uid } : { load: true };
 }
 
-/** The admission `quest agent` runs with: the host's own limits and ledgers. */
-export function processAdmission(notice: (text: string) => void): AdmissionDependencies {
+/**
+ * The admission `quest agent` runs with: the host's own limits and ledgers. `env` is the agent's
+ * environment, which decides whether its builds run in the gate's scope or inside an admitted command.
+ */
+export function processAdmission(env: NodeJS.ProcessEnv, notice: (text: string) => void): AdmissionDependencies {
 	const gate = claimDirectory();
-	const { load, uid } = admissionMode(process.platform, sliceUser(owner().unit));
+	const { load, uid } = admissionMode(process.platform, sliceUser(owner(env).unit));
 	return {
 		limits: hostLimits(undefined, usableMemory(uid)),
 		gate: fileHost(gate, Date.now, uid),

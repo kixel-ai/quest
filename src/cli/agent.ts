@@ -422,7 +422,7 @@ export const processDependencies = (out: Pick<AgentDependencies, "stdout" | "std
 	...out,
 	admit: (signal, held) =>
 		admission.admit(
-			processAdmission((text) => out.stderr(`quest: ${text}\n`)),
+			processAdmission(strippedEnvironment(process.env), (text) => out.stderr(`quest: ${text}\n`)),
 			signal,
 			held,
 		),
