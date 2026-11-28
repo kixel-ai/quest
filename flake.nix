@@ -168,6 +168,7 @@
                     systems = [ system ];
                     perSystem = _: {
                       quest = pkgs.hello;
+                      shell.shellHook = "HOOKED=1";
                       shell.CHANGED = "1";
                     };
                   }).devShells.${system}.default;
