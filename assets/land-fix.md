@@ -53,7 +53,7 @@ other host.
 
 Write `quest-land-result.json` in the repository root: a JSON array with exactly
 one entry per supplied PR, no extra fields. Use one of:
-{"number":123,"action":"requeue","cause":"flaky","reason":"healthy; flaky test; ran just check and just test on a scratch merge"}
+{"number":123,"action":"requeue","cause":"flaky","reason":"healthy; flaky test; ran just check and the failing test on a scratch merge"}
 {"number":123,"action":"fixed","head":"full 40-character SHA","reason":"one-line mechanical reason, naming the commands run"}
 {"number":123,"action":"handback","diagnosis":"one line","recommendation":"one line"}
 
@@ -83,8 +83,7 @@ Keep the result file uncommitted.
 Before reporting `fixed` or `requeue`, run the base's quick local check on the head
 you report merged with `base`, plus the test or step the failure log shows failing,
 run alone rather than through the gate that wraps it. The quick check covers every
-language the PR and your fix touch: lint, format, and type checks as well as build
-and test where it includes them, such as `just check` and `just test`. A conflict in
+language the PR and your fix touch, such as `just check`. A conflict in
 a generated file needs only that file's own regeneration or check. Leave the
 repository's full merge gate, such as `just ci`, to the merge queue, which runs it
 on the merge group before anything lands: a fix the quick check misses fails once
@@ -185,7 +184,7 @@ A disabled test that is another quest's acceptance test
 leaves that quest as it is: the test still counts as its work. Run the
 [repository checks](#repository-checks) on the branch, and add its full SHA to the
 PR's entry:
-{"number":123,"action":"requeue","cause":"flaky","reason":"healthy; flaky test; ran just check and just test on a scratch merge and the disable branch","failure":"moq-relay interop::render_timeout","quest":"quest/m0/flaky/render-timeout.md","disable":"full 40-character SHA"}
+{"number":123,"action":"requeue","cause":"flaky","reason":"healthy; flaky test; ran just check and the failing test on a scratch merge and the disable branch","failure":"moq-relay interop::render_timeout","quest":"quest/m0/flaky/render-timeout.md","disable":"full 40-character SHA"}
 quest land opens the commit as a pull request of its own and enqueues it. Never
 disable a test that is not listed. When the repository keeps no `quest/m0/`, or
 the skip needs a protected path or more than a mechanical edit, requeue
