@@ -35,8 +35,10 @@ export interface TranscriptUploads {
 	repository: string;
 	/** The sender's state directory. */
 	state: string;
-	/** The sessions whose records Kixel Quest just stored. */
+	/** The sessions whose records the upload sent. */
 	sessions: Iterable<Session>;
+	/** Kixel Quest's 200 to the records upload, whose `refused` names each record it left out. */
+	acknowledged: Response;
 }
 
 const digest = (text: string) => createHash("sha256").update(text).digest("hex").slice(0, 32);
@@ -45,7 +47,7 @@ const digest = (text: string) => createHash("sha256").update(text).digest("hex")
  * Upload each of `sessions`' transcripts not yet sent as they stand, when the person signed in with `token` agreed,
  * returning notes for the stop hook. A 403, which Kixel Quest answers only to a person who has not agreed, as after
  * turning it off on its Tokens page, stops this token's uploads; signing in again issues a new one. A failure that
- * may pass, 5xx, 401, or 429, throws, so the group's records and transcripts are retried; any other refusal is said
+ * may pass, 5xx, 401, 404, or 429, throws, so the group's records and transcripts are retried; any other refusal is said
  * and not retried until the transcript changes.
  */
 export async function sendTranscripts(uploads: TranscriptUploads): Promise<string[]> {
@@ -55,24 +57,27 @@ export async function sendTranscripts(uploads: TranscriptUploads): Promise<strin
 	if (login?.token !== token || !login.transcripts) return [];
 	const refused = join(state, "transcripts-refused", digest(`${url}\0${token}`));
 	if (existsSync(refused)) return [];
+	const refusedRecords = refusedOf(await uploads.acknowledged.json(), url);
 	const notes: string[] = [];
+	// One sender runs per user, so a compression file left here is a crashed pass's.
+	rmSync(join(state, "transcripts", "gzip"), { recursive: true, force: true });
 	for (const s of uploads.sessions) {
 		// Another host's transcript is not on this one; one with no ID has no path to upload to.
 		if (s.host !== null || s.id === null || s.files.length === 0) continue;
-		// Under the token and repository too: a new agreement or a moved record needs the copy sent again.
-		const sent = join(
-			state,
-			"transcripts",
-			digest(JSON.stringify([url, token, uploads.repository, s.harness, s.id])),
-		);
+		// Kixel Quest keeps no transcript of a session whose record it left out.
+		if (refusedRecords.some((line) => line.startsWith(`session ${s.harness} ${s.id}:`))) continue;
+		const sent = join(state, "transcripts", digest(JSON.stringify([url, s.harness, s.id])));
 		let stamp: string;
 		try {
-			stamp = JSON.stringify(
-				s.files.map((file) => {
+			// The token and repository too: a new agreement or a moved record needs the copy sent again.
+			stamp = JSON.stringify({
+				token: digest(token),
+				repository: uploads.repository,
+				files: s.files.map((file) => {
 					const { size, mtimeMs } = statSync(file);
 					return [file, size, mtimeMs];
 				}),
-			);
+			});
 		} catch (error) {
 			// Deleted since token-max read it: there is nothing left to upload.
 			if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
@@ -107,11 +112,20 @@ export async function sendTranscripts(uploads: TranscriptUploads): Promise<strin
 			);
 			return notes;
 		}
-		if (response.status >= 500 || response.status === 401 || response.status === 429) throw new Error(await said());
+		// A 404 says the record it just took is not derived yet, which a later replay fixes.
+		if (response.status >= 500 || [401, 404, 429].includes(response.status)) throw new Error(await said());
 		if (!response.ok) notes.push(`${s.harness} session ${s.id}'s transcript was not uploaded: ${await said()}`);
 		record(sent, stamp);
 	}
 	return notes;
+}
+
+/** The `refused` lines of a records upload's acknowledgement, failing on one that is not `{"refused": [string]}`. */
+function refusedOf(acknowledged: unknown, url: string): string[] {
+	const refused = (acknowledged as { refused?: unknown } | null)?.refused;
+	if (!Array.isArray(refused) || !refused.every((line) => typeof line === "string"))
+		throw new Error(`${url}/records answered 200 without a list of the records it refused`);
+	return refused;
 }
 
 class Over extends Error {}

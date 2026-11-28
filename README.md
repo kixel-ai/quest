@@ -691,7 +691,7 @@ the user, with the answer about transcripts, where only a `y` or `yes` agrees.
 After agreeing, the record sender uploads each session's transcript,
 sub-agents' included, gzipped as the harness wrote it, to
 `PUT /transcripts/<harness>/<session>` once its record is stored, and again
-only once its files change; one over 100 MiB gzipped, or that Kixel Quest
+only once its files, the sign-in, or the record's repository change; one over 100 MiB gzipped, or that Kixel Quest
 refuses for good, is skipped and said, and a server error retries it with the
 records.
 Signing in again and answering no stops uploads, and so does Kixel Quest

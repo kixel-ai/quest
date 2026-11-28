@@ -581,6 +581,7 @@ async function sendTo(
 					repository: key(repository),
 					state: dir,
 					sessions: records.keys(),
+					acknowledged: response,
 				})),
 			);
 			clearBackoff(deps.env, id);

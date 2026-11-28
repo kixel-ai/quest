@@ -116,6 +116,7 @@ function sender(
 	pulls: object[] = [],
 	served: string[] = ["acme/proj"],
 	transcriptStatus = 200,
+	refusedRecords: string[] = [],
 ) {
 	const uploads: { token: string; body: unknown }[] = [];
 	const transcripts: { path: string; token: string; text: string }[] = [];
@@ -209,7 +210,11 @@ function sender(
 				body: JSON.parse(String(init?.body)),
 			});
 			during();
-			return new Response("", { status: typeof status === "number" ? status : status() });
+			const answered = typeof status === "number" ? status : status();
+			const body = parseUpload(JSON.parse(String(init?.body)));
+			return answered === 200
+				? json({ records: body.records.length, breakages: body.breakages.length, refused: refusedRecords })
+				: new Response("", { status: answered });
 		}) as typeof fetch,
 	};
 	return { deps, uploads, transcripts, asked, windows, slept, clock };
@@ -372,7 +377,8 @@ test("a transcript Kixel Quest refuses for good is said and not sent again until
 	expect(transcripts).toHaveLength(1);
 });
 
-test("a transcript upload that fails keeps the session queued, records and all", async () => {
+// A 404 says the record Kixel Quest just took is not derived yet.
+test.each([500, 404])("a transcript upload answered %i keeps the session queued, records and all", async (status) => {
 	const env = home();
 	saveLogin(URL_, { token: "secret", transcripts: true }, env);
 	const root = checkout();
@@ -383,11 +389,33 @@ test("a transcript upload that fails keeps the session queued, records and all",
 		() => {},
 		[],
 		["acme/proj"],
-		500,
+		status,
 	);
 	queue(stopped(root), env);
-	await expect(sendPass(deps)).rejects.toThrow("/transcripts/claude/s1 answered 500");
+	await expect(sendPass(deps)).rejects.toThrow(`/transcripts/claude/s1 answered ${status}`);
 	expect(pending(env)).toHaveLength(1);
+});
+
+test("a session whose record Kixel Quest left out has no transcript uploaded", async () => {
+	const env = home();
+	saveLogin(URL_, { token: "secret", transcripts: true }, env);
+	const root = checkout();
+	const { deps, transcripts } = sender(
+		env,
+		200,
+		[
+			session("s1", "quest/m0/a", { files: [transcriptFile("parent\n")] }),
+			session("sub", "quest/m0/a", { parent: "s1", files: [transcriptFile("sub\n")] }),
+		],
+		() => {},
+		[],
+		["acme/proj"],
+		200,
+		["session claude s1: only people who can push to acme/proj post its sessions, for now"],
+	);
+	queue(stopped(root), env);
+	await sendPass(deps);
+	expect(transcripts.map((t) => t.path)).toEqual(["/transcripts/claude/sub"]);
 });
 
 test("a session `quest review` queued is sent on the PR it recorded on, as the role it played", async () => {
