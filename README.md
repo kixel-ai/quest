@@ -1624,7 +1624,9 @@ is already inside it (with no Nix evaluation, unless it uses [the cache](#cached
 shell without it, such as another repository's, gets `nix develop` all the
 same. That shell may predate an edit to the flake, which the marker, checked as
 the shell is entered, cannot tell, so while [the cache](#cached-passes) is in
-use `quest run` also needs `QUEST_DEV_SHELL_ID`, which `mkFlake`'s shell sets. Each task gets `QUEST_TIER`, `QUEST_BASE` (the merge base, unless
+use `quest run` also needs `QUEST_DEV_SHELL_ID`, which `mkFlake`'s shell sets. A
+nested `nix shell` keeps both variables, so a task runs with its tools while
+the outer shell's identity still matches. Each task gets `QUEST_TIER`, `QUEST_BASE` (the merge base, unless
 `--all`), and its `environment`, exported inside the dev shell, and every line
 it prints is prefixed with its name.
 
