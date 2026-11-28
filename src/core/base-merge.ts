@@ -4,13 +4,16 @@
 // such merges, each checked by redoing it: git's own line merge, ported in `xdiff.ts`, so a merge queue that cannot
 // run git judges a head as `quest` does.
 //
-// A file only one parent changed since their merge base must be that parent's; one both changed must be their
-// line merge, without conflicts other than the quest link lists `resolveLists` settles where `.gitattributes` gives
-// the path the `quest` driver. Anything this cannot establish as git's clean merge, such as a binary file, another
-// merge driver, a symlink or submodule both changed, or a rename one side made of a file the other changed (seen
-// here as a delete against an edit), does not count, so the review stays stale.
+// A file only one parent changed since their merge base must be that parent's; one both changed must be its clean
+// line merge: merge-ort's, as `git merge` and GitHub's update-branch run it, or, where `.gitattributes` gives the path
+// the `quest` driver, which a local merge runs, `git merge-file`'s with the quest link lists `resolveLists` settles.
+// Anything this cannot establish as git's clean merge does not count, so the review stays stale: a binary file,
+// another merge driver, a symlink or submodule both changed, a rename one side made of a file the other changed (seen
+// here as a delete against an edit), or a path both sides deleted, which git may pair with a file either side added
+// as a rename it cannot merge.
 
-import { merge, render, resolveLists } from "./merge";
+import { type Chunk, merge, render, resolveLists } from "./merge";
+import { HistogramFailure } from "./xdiff";
 
 /** A tree's entry, as git stores it. */
 export interface TreeEntry {
@@ -28,7 +31,11 @@ export interface History {
 	tree(oid: string): Promise<Map<string, TreeEntry>>;
 	/** A blob's bytes. */
 	blob(oid: string): Promise<Uint8Array>;
-	/** The merge base of two commits, or null when they have none, or several. */
+	/**
+	 * The merge base of two commits, or null when they have none, or several. A forge that names one without saying
+	 * whether there are several, as GitHub's compare does, can name the wrong one only where the base branch holds
+	 * commits of the PR's own branch besides those it merged.
+	 */
 	mergeBase(a: string, b: string): Promise<string | null>;
 	/** Whether the PR's base branch reaches `sha`. */
 	onBase(sha: string): Promise<boolean>;
@@ -48,13 +55,22 @@ export class BaseMerges {
 		this.#chain = [head.toLowerCase()];
 	}
 
-	/** Whether a review of `sha` covers the head: it is the head, or the head only merged the base since. */
+	/**
+	 * Whether a review of `sha` covers the head: it is the head, or the head only merged the base since. A read that
+	 * fails ends the chain where it stands, and throws.
+	 */
 	async reaches(sha: string): Promise<boolean> {
 		const wanted = sha.toLowerCase();
 		for (;;) {
 			if (this.#chain.includes(wanted)) return true;
 			if (this.#ended) return false;
-			const next = await this.#step(this.#chain.at(-1)!);
+			let next: string | null;
+			try {
+				next = await this.#step(this.#chain.at(-1)!);
+			} catch (error) {
+				this.#ended = true;
+				throw error;
+			}
 			if (next === null) this.#ended = true;
 			else this.#chain.push(next);
 		}
@@ -78,9 +94,10 @@ export class BaseMerges {
 	}
 }
 
-/** A history that reads each tree and blob once, since a walk reads the same ones from several commits. */
+/** A history that reads each commit, tree, and blob once, since a walk reads the same ones from several commits. */
 class Cached implements History {
 	readonly #history: History;
+	readonly #commits = new Map<string, Promise<{ tree: string; parents: string[] }>>();
 	readonly #trees = new Map<string, Promise<Map<string, TreeEntry>>>();
 	readonly #blobs = new Map<string, Promise<Uint8Array>>();
 
@@ -89,7 +106,9 @@ class Cached implements History {
 	}
 
 	commit(sha: string) {
-		return this.#history.commit(sha);
+		let found = this.#commits.get(sha);
+		if (found === undefined) this.#commits.set(sha, (found = this.#history.commit(sha)));
+		return found;
 	}
 
 	tree(oid: string) {
@@ -142,14 +161,16 @@ class TreeMerge {
 		for (const name of names) {
 			const [eb, eo, et, em] = [b, o, t, m].map((tree) => tree!.get(name)) as (TreeEntry | undefined)[];
 			const at = path === "" ? name : `${path}/${name}`;
+			if (eb !== undefined && eo === undefined && et === undefined) return false;
 			// One side's change, or the same change on both, is taken whole.
 			if (same(eo, et) || same(eo, eb)) {
 				if (!same(em, et)) return false;
 			} else if (same(et, eb)) {
 				if (!same(em, eo)) return false;
-			} else if (eo?.type === "tree" && et?.type === "tree" && em?.type === "tree") {
-				const inner = eb?.type === "tree" ? eb.oid : null;
-				if (!(await this.matches(at, inner, eo.oid, et.oid, em.oid))) return false;
+			} else if ([eb, eo, et, em].every((entry) => entry === undefined || entry.type === "tree")) {
+				// A directory either side deleted merges as an empty one.
+				const oids = [eb, eo, et, em].map((entry) => entry?.oid ?? null) as (string | null)[];
+				if (!(await this.matches(at, oids[0]!, oids[1]!, oids[2]!, oids[3]!))) return false;
 			} else if (!(await this.#file(at, eb, eo, et, em))) return false;
 		}
 		return true;
@@ -174,24 +195,29 @@ class TreeMerge {
 			[b, o, t].map(async (entry) => text(await this.#history.blob(entry.oid))),
 		);
 		if (bt === null || ot === null || tt === null) return false;
-		const lines = merge(ot, bt, tt);
-		const chunks = driver === "quest" ? resolveLists(path, lines) : lines;
-		if (!chunks.every((chunk) => Array.isArray(chunk))) return false;
-		return equal(ENCODER.encode(render(chunks, 7, false)), await this.#history.blob(m.oid));
+		const written = await this.#history.blob(m.oid);
+		const matches = (chunks: Chunk[]) =>
+			chunks.every((chunk) => Array.isArray(chunk)) && equal(ENCODER.encode(render(chunks, 7, false)), written);
+		// The quest driver runs merge-file's merge; without it, as on GitHub, git falls back to its own.
+		if (driver === "quest" && matches(resolveLists(path, merge(ot, bt, tt)))) return true;
+		try {
+			return matches(merge(ot, bt, tt, "ort"));
+		} catch (error) {
+			// Git fails such a merge too, so whatever the merge holds was written by hand.
+			if (error instanceof HistogramFailure) return false;
+			throw error;
+		}
 	}
 
 	/**
-	 * How git merges `path`: by lines when every one of the three trees leaves it to the default or names `text`, by
-	 * the `quest` driver when every one names it, and otherwise not in a way this can check. Git reads one tree's
-	 * attributes, which differs between commands, so all three must agree.
+	 * How git may merge `path`: `other` when any of the three trees' attributes give it a merge this cannot check,
+	 * `quest` when any gives it the quest driver, and otherwise `text`. Commands differ in which tree's attributes git
+	 * reads, so each one's must allow the merge.
 	 */
 	async #driver(path: string): Promise<Driver> {
 		const drivers = await Promise.all(this.#roots.map((root) => this.#attribute(root, path)));
-		if (drivers.every((driver) => driver === "text")) return "text";
-		if (drivers.every((driver) => driver === "quest")) return "quest";
-		// A clean line merge is the same under either driver, which only resolves conflicts.
-		if (drivers.every((driver) => driver !== "other")) return "text";
-		return "other";
+		if (drivers.includes("other")) return "other";
+		return drivers.includes("quest") ? "quest" : "text";
 	}
 
 	/** `path`'s merge driver as the `.gitattributes` files in `root` set it, from the root's down to its own directory's. */
@@ -256,10 +282,15 @@ function mergeState(source: string, path: string, macros: Set<string>): Driver |
 		const touching = attributes.filter((each) => touches(each, macros));
 		if (touching.length === 0) continue;
 		const glob = globSource(pattern!);
-		if (glob === null || touching.length > 1) return "other";
+		// A quoted pattern may hold spaces, so its line splits wrongly and may name any path.
+		if (pattern!.startsWith('"')) return "other";
+		// A pattern this cannot read exactly, matched loosely: any bracket expression or escape as one character.
+		const loose = glob ?? globSource(pattern!.replace(/\[[^\]]*\]|\\./g, "?"));
+		if (loose === null) return "other";
 		const name = path.slice(path.lastIndexOf("/") + 1);
 		const anchored = pattern!.includes("/");
-		if (!new RegExp(`^${glob}$`, "s").test(anchored ? path : name)) continue;
+		if (!new RegExp(`^${loose}$`, "s").test(anchored ? path : name)) continue;
+		if (glob === null || touching.length > 1) return "other";
 		const [attribute] = touching as [string];
 		state =
 			attribute === "!merge"

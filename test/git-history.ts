@@ -26,6 +26,9 @@ export function repository(): string {
 	git(dir, "config", "user.name", "Quest test");
 	git(dir, "config", "user.email", "test@example.invalid");
 	git(dir, "config", "merge.quest.driver", `bun --config='${bunfig}' '${bin}' resolve %A %O %B`);
+	// Git's defaults, which a person's own config may change for `git merge`, and GitHub's merges keep.
+	git(dir, "config", "diff.algorithm", "histogram");
+	git(dir, "config", "merge.conflictStyle", "merge");
 	return dir;
 }
 

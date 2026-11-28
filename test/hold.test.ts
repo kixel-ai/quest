@@ -1271,6 +1271,18 @@ describe("merge --land of a high head", () => {
 		);
 	});
 
+	test("says why when reading the head's merges of the base failed", async () => {
+		const pull = new FakePull();
+		review(pull, OLD, "high");
+		pull.git = (url) =>
+			url.pathname.includes("/git/commits/")
+				? Response.json({ message: "Not Found" }, { status: 404 })
+				: undefined;
+		expect(await refused(land_(pull))).toContain(
+			`since the quest review status on ${OLD} rates it high, and no quest review status covers it (reading its merges of the base failed: GitHub HTTP 404 for /repos/example/project/git/commits/${HEAD}`,
+		);
+	});
+
 	test("lets the most recently set status of the head's diff decide, whatever commit carries it", async () => {
 		const pull = new FakePull();
 		const MID = "e".repeat(40);

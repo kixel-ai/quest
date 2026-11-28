@@ -125,12 +125,23 @@ export async function unreviewedHigh(
 	const statuses = await reviewStatuses(github, pr);
 	let diff: Promise<string | null> | undefined;
 	const merges = new BaseMerges(history(github, pr), head);
+	// Why reading the head's merges of the base failed, which leaves a review they would carry uncounted.
+	let unread: string | undefined;
+	const reached = async (oid: string) => {
+		try {
+			return await merges.reaches(oid);
+		} catch (error) {
+			if (error instanceof GitHubDeadline || !(error instanceof Error)) throw error;
+			unread ??= error.message;
+			return false;
+		}
+	};
 	for (const each of statuses) {
 		if (each.oid !== head) {
 			diff ??= baseDiff(github, pr, head);
 			const own = await diff;
 			const same = own !== null && (await baseDiff(github, pr, each.oid)) === own;
-			if (!same && !(await merges.reaches(each.oid))) continue;
+			if (!same && !(await reached(each.oid))) continue;
 		}
 		// Only a writer's status, bound to the diff it reviewed, says anything about the head.
 		const bound = await boundStatus(github, pr, each.oid, each.status);
@@ -139,7 +150,9 @@ export async function unreviewedHigh(
 		break;
 	}
 	const high = statusHigh(statuses) ?? (await pathHigh(github, pr, head, risk?.text ?? null));
-	return high === null ? null : `${sha} is high, since ${high}, and no quest review status covers it`;
+	if (high === null) return null;
+	const why = unread === undefined ? "" : ` (reading its merges of the base failed: ${unread})`;
+	return `${sha} is high, since ${high}, and no quest review status covers it${why}`;
 }
 
 /**

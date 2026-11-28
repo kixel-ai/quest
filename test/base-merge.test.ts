@@ -5,7 +5,7 @@ import { join } from "node:path";
 
 import { describe, expect, test } from "vitest";
 
-import { BaseMerges } from "../src/core";
+import { BaseMerges, merge, render } from "../src/core";
 import { commit, git, gitHistory, repository } from "./git-history";
 
 /** Numbered lines, with `edits` replacing some by number. */
@@ -53,6 +53,27 @@ describe("a review carries", () => {
 		expect(await carries(dir, head)).toBe(true);
 	});
 
+	test("across a clean merge where attributes the check cannot parse name only other files", async () => {
+		const { dir, reviewed: head } = reviewed();
+		git(dir, "switch", "-q", "main");
+		commit(dir, { ".gitattributes": "images/*.[pP][nN][gG] binary\n" });
+		git(dir, "switch", "-q", "pr");
+		expect(mergeMain(dir)).toBe(true);
+		expect(await carries(dir, head)).toBe(true);
+	});
+
+	test("across a clean merge of a file the base added under a directory the PR deleted", async () => {
+		const dir = repository();
+		commit(dir, { "d/a.txt": "a\n", "d/b.txt": "b\n", "e.txt": "e\n" });
+		git(dir, "switch", "-q", "-c", "pr");
+		const head = commit(dir, { "d/a.txt": null, "d/b.txt": null });
+		git(dir, "switch", "-q", "main");
+		commit(dir, { "d/c.txt": "c\n" });
+		git(dir, "switch", "-q", "pr");
+		expect(mergeMain(dir)).toBe(true);
+		expect(await carries(dir, head)).toBe(true);
+	});
+
 	test("across a clean merge that keeps the base's mode change on a file the PR edited", async () => {
 		const { dir, reviewed: head } = reviewed();
 		git(dir, "switch", "-q", "main");
@@ -61,6 +82,39 @@ describe("a review carries", () => {
 		git(dir, "switch", "-q", "pr");
 		expect(mergeMain(dir)).toBe(true);
 		expect(await carries(dir, head)).toBe(true);
+	});
+});
+
+describe("a merge both sides changed a file in", () => {
+	/** A PR that writes `ours` over `base` in `a.txt`, reviewed, and a base that writes `theirs`, merged in. */
+	function merged(ours: string, base: string, theirs: string) {
+		const dir = repository();
+		commit(dir, { "a.txt": base });
+		git(dir, "switch", "-q", "-c", "pr");
+		const head = commit(dir, { "a.txt": ours });
+		git(dir, "switch", "-q", "main");
+		commit(dir, { "a.txt": theirs });
+		git(dir, "switch", "-q", "pr");
+		return { dir, head, clean: mergeMain(dir) };
+	}
+
+	test("carries where git's histogram merge is clean, though merge-file's Myers merge conflicts", async () => {
+		const [ours, base, theirs] = ["x\n}\n}\n\na\nb\n\n\n", "x\n}\n}\nb\n\nb\n\n", "}\n}\n}\nb\n\n\n"];
+		expect(merge(ours, base, theirs).every((chunk) => Array.isArray(chunk))).toBe(false);
+		const { dir, head, clean } = merged(ours, base, theirs);
+		expect(clean).toBe(true);
+		expect(await carries(dir, head)).toBe(true);
+	});
+
+	test("does not carry a conflict git's histogram merge left, resolved as Myers would have merged it", async () => {
+		const [ours, base, theirs] = ["c\n\nc\n", "}\nc\nc\n", "c\nc\n}\n"];
+		const myers = merge(ours, base, theirs);
+		expect(myers.every((chunk) => Array.isArray(chunk))).toBe(true);
+		const { dir, head, clean } = merged(ours, base, theirs);
+		expect(clean).toBe(false);
+		writeFileSync(join(dir, "a.txt"), render(myers, 7, false));
+		conclude(dir);
+		expect(await carries(dir, head)).toBe(false);
 	});
 });
 
@@ -116,6 +170,22 @@ describe("a review does not carry", () => {
 		expect(mergeMain(dir)).toBe(false);
 		git(dir, "checkout", "--theirs", "a.bin");
 		conclude(dir);
+		expect(await carries(dir, head)).toBe(false);
+	});
+
+	test("across a rename the base deleted the source of, resolved by keeping the PR's file", async () => {
+		const dir = repository();
+		commit(dir, { "quest/x.md": "# [S] X\n\n## Goal\n\nDo x.\n", "b.txt": "b\n" });
+		git(dir, "switch", "-q", "-c", "pr");
+		git(dir, "mv", "quest/x.md", "quest/y.md");
+		const head = commit(dir, {});
+		git(dir, "switch", "-q", "main");
+		commit(dir, { "quest/x.md": null });
+		git(dir, "switch", "-q", "pr");
+		expect(mergeMain(dir)).toBe(false);
+		git(dir, "add", "-A");
+		conclude(dir);
+		expect(git(dir, "ls-tree", "-r", "--name-only", "HEAD")).toBe("b.txt\nquest/y.md");
 		expect(await carries(dir, head)).toBe(false);
 	});
 
