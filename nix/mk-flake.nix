@@ -78,16 +78,17 @@ let
           + shell.shellHook or "";
         }
       );
-      # The shell's identity is `inner`'s derivation, which changes with any of its inputs. The shell exports
-      # it as `QUEST_DEV_SHELL_ID` and carries it as `passthru.questShell`, which leaves its derivation alone,
-      # so `quest run` finds out whether an entered shell is the one `nix develop` enters now.
+      # The shell's identity is `inner`'s derivation path, which changes with any of its inputs, as a plain string
+      # so the shell depends on nothing more than `inner` itself. The shell exports it as `QUEST_DEV_SHELL_ID` and
+      # carries it as `passthru.questShell`, which leaves its derivation alone, so `quest run` finds out whether an
+      # entered shell is the one `nix develop` enters now.
+      identity = builtins.unsafeDiscardStringContext inner.drvPath;
       default = inner.overrideAttrs (old: {
         passthru = old.passthru or { } // {
-          questShell = inner.drvPath;
+          questShell = identity;
         };
-        shellHook = old.shellHook + ''
-          export QUEST_DEV_SHELL_ID=${inner.drvPath}
-        '';
+        # Its own line, since the repository's hook may end without a newline.
+        shellHook = old.shellHook + "\nexport QUEST_DEV_SHELL_ID=${identity}\n";
       });
     in
     removeAttrs own [

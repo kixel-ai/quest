@@ -1618,7 +1618,7 @@ Each task runs through [`quest gate`](#gate-cpu-heavy-commands), so independent
 tasks start together and wait only for the host's room. A task that sets
 `nix = false` runs on the host's own tools; every other task needs the
 repository's `flake.nix`, a regular file, and runs in its dev shell: directly when `quest run`
-is already inside it, with no Nix evaluation, and through `nix develop
+is already inside it (with no Nix evaluation, unless it uses [the cache](#cached-passes)), and through `nix develop
 --command` otherwise. The dev shell says it is the repository's by setting
 `QUEST_DEV_SHELL` to the repository's root, as [`quest.lib.mkFlake`'s](#share-flake-boilerplate-with-questlibmkflake) does; a
 shell without it, such as another repository's, gets `nix develop` all the
