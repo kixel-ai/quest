@@ -1158,7 +1158,10 @@ function entries(dir: string): string[] {
 	try {
 		return readdirSync(dir);
 	} catch (error) {
-		throw new ReviewInputError(
+		// This host cannot confine agy, so the question passes to the next advisor, as on a case-insensitive volume.
+		throw new ReviewerUnavailableError(
+			"agy",
+			"not supported",
 			`the reviewer's reads cannot be kept to its workspace, since ${dir} cannot be listed ` +
 				`(${(error as Error).message}); set XDG_RUNTIME_DIR, or TMPDIR without it, to a directory whose every parent you can list`,
 		);
@@ -1453,7 +1456,9 @@ function workspace(files: Record<string, string>, env: NodeJS.ProcessEnv): strin
 	try {
 		for (let up = dir; up !== dirname(up); up = dirname(up))
 			if (existsSync(join(up, ".git")))
-				throw new ReviewInputError(
+				throw new ReviewerUnavailableError(
+					"agy",
+					"not supported",
 					`the reviewer's workspace ${dir} lies in the repository at ${up}, whose agent configuration the ` +
 						"reviewer would load; set XDG_RUNTIME_DIR, or TMPDIR without it, to a directory outside any repository",
 				);
@@ -1637,8 +1642,14 @@ async function prepare(
 			reviewer.supported?.(dir);
 			const { code, stderr } = await run(reviewer.status, dir, env, "", reader, signal);
 			const output = `${printed}${stderr}`.trim();
+			// A remote check that failed for another reason than the login, as on a network error, is no logout, but
+			// still leaves this CLI unable to answer, so the question passes on.
 			if (code !== 0 && reviewer.remoteStatus && !reviewer.unauthorized.test(output))
-				throw new Error(`\`${reviewer.status.join(" ")}\` failed: ${output || `exit ${code}`}`);
+				throw new ReviewerUnavailableError(
+					harness,
+					"unavailable",
+					`\`${reviewer.status.join(" ")}\` failed: ${output || `exit ${code}`}`,
+				);
 			return code === 0;
 		} finally {
 			if (dir !== cwd) rmSync(dir, { recursive: true, force: true });

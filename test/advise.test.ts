@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
 import { expect, test, vi } from "vitest";
@@ -236,6 +236,23 @@ agyFakes("a second call on a branch refuses before any advisor runs, unless forc
 	expect(advised.forced?.advice).toEqual(ADVICE);
 	const state = JSON.parse(readFileSync(adviseFile(join(s.repo, ".git"), "feature"), "utf8"));
 	expect(state.calls).toHaveLength(2);
+});
+
+agyFakes("agy offline, or on a host that cannot confine it, passes the question on", async () => {
+	const s = setup();
+	vi.stubEnv("FAKE_ASK", JSON.stringify(ADVICE));
+	vi.stubEnv("FAKE_OFFLINE", "1");
+	const offline = await asked(s);
+	expect(offline.advised.entry.harness).toBe("codex");
+	vi.stubEnv("FAKE_OFFLINE", undefined);
+	// A workspace inside a repository would load that repository's agent configuration.
+	const inside = join(s.repo, ".tmp", "run");
+	mkdirSync(inside, { recursive: true, mode: 0o700 });
+	vi.stubEnv("XDG_RUNTIME_DIR", inside);
+	const confined = await asked(s, { force: true });
+	expect(confined.advised.entry.harness).toBe("codex");
+	// agy never ran a turn in either case.
+	expect(s.calls().filter((call) => call.argv.includes("quest-advisor"))).toHaveLength(0);
 });
 
 fakes("a missing, logged-out, or limited advisor passes the question on, each read-only", async () => {

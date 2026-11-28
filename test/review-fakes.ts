@@ -293,6 +293,10 @@ const model = argv.includes("--model") ? argv[argv.indexOf("--model") + 1] : und
 const only = process.env.FAKE_FAILS?.split(",");
 const fake = (name) => (!only || only.includes("agy") || only.includes(model) ? process.env[name] : undefined);
 if (argv[0] === "models") {
+	if (fake("FAKE_OFFLINE")) {
+		console.log("Error: dial tcp: connection refused");
+		process.exit(1);
+	}
 	if (fake("FAKE_LOGGED_OUT")) {
 		console.log("Error: Please sign in to view available models. Launch the CLI without arguments to sign in.");
 		process.exit(1);
@@ -425,6 +429,7 @@ export function setup(host: "CLAUDECODE" | "CODEX_THREAD_ID" | null = "CLAUDECOD
 		"FAKE_RISK",
 		"FAKE_CLASSIFY",
 		"FAKE_ASK",
+		"FAKE_OFFLINE",
 		"ANTIGRAVITY_CONVERSATION_ID",
 	]) {
 		vi.stubEnv(name, undefined);

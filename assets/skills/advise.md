@@ -15,5 +15,5 @@ When the request you work on states an explicit limit, such as "fix the packagin
 
 Inside a task that already lets you edit and push the PR, such as `/quest-start`, `/quest-iterate`, or `/quest-run`, follow its last line, which stands in for the user's pick:
 
-- `next apply`: take the recommended approach's steps, even past the quest's settled scope or architecture, post a PR comment that starts with `Design change:` saying what the advice changed and why, update the quest and PR body to match, and review the result with `quest review --new`.
+- `next apply`: take the recommended approach's steps, even past the quest's settled scope or architecture, checking each against the code and declining one you refute in a line, post a PR comment that starts with `Design change:` saying what the advice changed and why, update the quest and PR body to match, and review the result with `quest review --new`.
 - `next decide`: change nothing, and ask the user to pick among the advisor's approaches, with its recommendation; an agent that cannot prompt puts that decision under the PR's `## Waiting`.
