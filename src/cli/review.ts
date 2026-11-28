@@ -1319,10 +1319,7 @@ export function agyTurn(context: Context, prompt: string, flags: string[]): Turn
 			"core.quotePath=false",
 			`--attr-source=${empty}`,
 			"diff",
-			"--no-ext-diff",
-			"--no-textconv",
-			"--no-color",
-			"--ignore-submodules=none",
+			...DIFF_FLAGS,
 			...range.split(" "),
 		]);
 	// Created last, since a turn that is never run leaves its directory behind.
@@ -1420,7 +1417,18 @@ const agy: Reviewer = {
 			reply(code, stderr) {
 				const limit = (failure: string) =>
 					AGY_LIMIT.test(failure) ? { until: agyReset(failure, new Date()) } : undefined;
-				if (result === undefined) return { error: "agy printed no result", limited: limit(stderr) };
+				const sum = (key: string) => [...steps.values()].reduce((total, usage) => total + count(usage[key]), 0);
+				const cached = sum("cache_read_tokens");
+				// Its input tokens leave out the cached ones; its output tokens include thinking.
+				const usage = { input: sum("input_tokens") + cached, cached, output: sum("output_tokens") };
+				// A turn cut off before its result, as by a dropped connection, still spent its steps' tokens.
+				if (result === undefined)
+					return {
+						error: "agy printed no result",
+						session,
+						...(steps.size > 0 && { usage }),
+						limited: limit(stderr),
+					};
 				const denied = (Array.isArray(result.denied_actions) ? result.denied_actions : []).map(
 					(action) => text(record(action)?.action) ?? "an action",
 				);
@@ -1430,14 +1438,11 @@ const agy: Reviewer = {
 						: denied.length > 0
 							? `agy denied ${names(denied)}, which ended the turn`
 							: undefined;
-				const sum = (key: string) => [...steps.values()].reduce((total, usage) => total + count(usage[key]), 0);
-				const cached = sum("cache_read_tokens");
 				return {
 					session: text(result.conversation_id) || session,
 					text: text(result.response),
 					structured: result.structured_output,
-					// Its input tokens leave out the cached ones; its output tokens include thinking.
-					usage: { input: sum("input_tokens") + cached, cached, output: sum("output_tokens") },
+					usage,
 					error,
 					limited: error === undefined && code === 0 ? undefined : limit(`${error ?? ""}\n${stderr}`),
 				};
@@ -1580,6 +1585,8 @@ interface Cli {
 	signal?: AbortSignal;
 	/** The session a failed or cancelled turn had already opened, which spent tokens before it ended. */
 	failed?: string;
+	/** What that failed turn reported spending before it ended, where its CLI reports it. */
+	failedUsage?: Reply["usage"];
 }
 
 const names = (list: string[]) => list.join(" and ");
@@ -1716,7 +1723,10 @@ async function turn(cli: Cli, call: Turn, cwd: string, model: string): Promise<R
 		const error = failure(cli, call, model, reply, stderr, code);
 		// A rejected login spent nothing; a limit or any other failure may have, partway through the turn.
 		const rejected = error instanceof ReviewerUnavailableError && !(error instanceof ReviewLimitError);
-		if (reply.session !== undefined && !rejected) cli.failed = reply.session;
+		if (reply.session !== undefined && !rejected) {
+			cli.failed = reply.session;
+			cli.failedUsage = reply.usage;
+		}
 		throw error;
 	}
 	return reply;
@@ -1919,6 +1929,11 @@ function present(root: string, sha: string): boolean {
 	} catch {
 		return false;
 	}
+}
+
+/** Whether `later` descends from `earlier`, or is it; false when either commit is missing. */
+export function descends(root: string, earlier: string, later: string): boolean {
+	return present(root, earlier) && covers(root, earlier, later);
 }
 
 /** Whether a change from `earlier`'s merge base spans one from `later`'s: `later` descends from it, as when the base moved on. */
@@ -2353,12 +2368,16 @@ export function sessionFile(common: string, branch: string, own = false): string
 
 /**
  * The review rounds saved for `branch` under the clone's common Git directory `common`, as prompt text: each
- * reviewer's rounds with their findings, then the findings refuted or accepted; null when none are saved.
+ * reviewer's rounds with their findings, then the findings refuted or accepted; null when none are saved on `head`'s
+ * history.
  */
-export function savedRounds(common: string, branch: string): string | null {
+export function savedRounds(root: string, common: string, branch: string, head: string): string | null {
 	const value = load(sessionFile(common, branch));
 	if (value === undefined) return null;
 	const state = parseState(value);
+	// A later PR that reuses the branch's name, as a quest's remainder does, keeps none of an earlier PR's rounds.
+	if (!state.sessions.some((session) => session.rounds.some((round) => descends(root, round.head, head))))
+		return null;
 	const finding = (f: Finding) => `- ${f.severity} ${located(f)}: ${f.title}\n  ${f.body.replace(/\n/g, "\n  ")}`;
 	const parts = state.sessions.map((session) => {
 		const rounds = session.rounds.map(
@@ -2701,7 +2720,7 @@ export interface Question<T = unknown, E extends Asked = Model> {
 	prompt: string;
 	/** The tools Claude may call; a reviewer's by default. */
 	tools?: string;
-	/** A directory outside `cwd` that a Claude model may read, which the prompt names files in. */
+	/** A directory outside `cwd` that a Claude model may read, which the prompt names files in, and `ranges`' diffs go to. */
 	readable?: string;
 	/** The head a CLI with no shell reads an export of, and each `git diff` range the prompt names, as it names it. */
 	head?: string;
@@ -2711,6 +2730,8 @@ export interface Question<T = unknown, E extends Asked = Model> {
 	task: string;
 	/** Filled with each turn's spend as it ends, so a caller still counts it when the question throws. */
 	spent?: Answer<unknown, E>["spent"];
+	/** Whether a turn that fails, as on a dropped connection, passes the question to the next model, as an unusable reply does. */
+	failover?: boolean;
 	/** The reply's value, throwing when it is unusable, which passes the question to the next model. */
 	parse(value: unknown): T;
 }
@@ -2736,6 +2757,21 @@ export async function ask<T, E extends Asked = Model>(
 	question: Question<T, E>,
 ): Promise<Answer<T, E>> {
 	const schemaFile = saveSchema(question.dir, question.schema);
+	// Each range's diff as a review writes it, for a model that reads the checkout rather than an export, since a plain
+	// `git diff` follows the head's .gitattributes and .gitmodules, which can blank a file or hide a submodule update.
+	const readable = question.readable;
+	const ranges = readable === undefined ? [] : (question.ranges ?? []);
+	const empty = ranges.length > 0 ? emptyTree(question.cwd) : "";
+	const diffs = ranges.map((range, index) => {
+		const file = join(readable!, `diff-${index + 1}.diff`);
+		modelDiff(question.cwd, empty, ["--patch", `--output=${file}`, ...range.split(" ")]);
+		return ` \`${file}\` holds \`git diff ${range}\`.`;
+	});
+	const diffNote =
+		diffs.length === 0
+			? ""
+			: `Read the change from these files, written with \`git --attr-source=<empty tree> diff ${DIFF_FLAGS.join(" ")}\`, ` +
+				`never a plain \`git diff\`, \`git show\`, or \`git log -p\`:${diffs.join("")}\n\n`;
 	const failures: (ReviewInputError | ReviewerUnavailableError)[] = [];
 	const spent = question.spent ?? [];
 	for (const entry of entries) {
@@ -2760,15 +2796,25 @@ export async function ask<T, E extends Asked = Model>(
 			};
 			reply = await turn(
 				cli,
-				cli.reviewer.ask(context, randomUUID(), question.prompt),
+				// An export's CLI names its own copies of the diffs.
+				cli.reviewer.ask(
+					context,
+					randomUUID(),
+					cli.reviewer.isolated ? question.prompt : `${diffNote}${question.prompt}`,
+				),
 				question.cwd,
 				entry.model,
 			);
 		} catch (error) {
 			// A turn that failed after opening its session still spent tokens there.
-			if (cli?.failed !== undefined) spent.push({ entry, usage: null, session: cli.failed });
-			if (!(error instanceof ReviewerUnavailableError)) throw error;
-			failures.push(error);
+			if (cli?.failed !== undefined) {
+				const usage = reported(cli.failedUsage) ? cli.failedUsage : null;
+				spent.push({ entry, usage, session: cli.failed });
+			}
+			if (error instanceof ReviewerUnavailableError) failures.push(error);
+			else if (question.failover && !question.signal?.aborted)
+				failures.push(new ReviewInputError(`${entry.harness} ${entry.model}: ${(error as Error).message}`));
+			else throw error;
 			continue;
 		}
 		const usage = reported(reply.usage) ? reply.usage : null;

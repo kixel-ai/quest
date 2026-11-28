@@ -244,6 +244,9 @@ agyFakes("agy offline, or on a host that cannot confine it, passes the question 
 	vi.stubEnv("FAKE_OFFLINE", "1");
 	const offline = await asked(s);
 	expect(offline.advised.entry.harness).toBe("codex");
+	// Codex reads the change from a diff written as a review's is, not a plain `git diff`.
+	const codex = s.calls().find((call) => call.argv.includes("exec"));
+	expect(codex!.stdin).toMatch(/diff-1\.diff` holds `git diff [0-9a-f]+\.\.[0-9a-f]+`/);
 	vi.stubEnv("FAKE_OFFLINE", undefined);
 	// A workspace inside a repository would load that repository's agent configuration.
 	const inside = join(s.repo, ".tmp", "run");
@@ -253,6 +256,32 @@ agyFakes("agy offline, or on a host that cannot confine it, passes the question 
 	expect(confined.advised.entry.harness).toBe("codex");
 	// agy never ran a turn in either case.
 	expect(s.calls().filter((call) => call.argv.includes("quest-advisor"))).toHaveLength(0);
+});
+
+agyFakes("an agy turn cut off mid-stream passes the question on and keeps what it spent", async () => {
+	const s = setup();
+	vi.stubEnv("FAKE_ASK", JSON.stringify(ADVICE));
+	vi.stubEnv("FAKE_CUT", "1");
+	const { advised, queued } = await asked(s);
+	expect(advised.entry.harness).toBe("codex");
+	expect(queued[0]).toMatchObject({
+		harness: "agy",
+		session: "conversation-ask",
+		untracked: expect.objectContaining({ input: 300, cached: 0, output: 20 }),
+	});
+});
+
+agyFakes("a later PR reusing the branch's name is advised afresh, without the earlier PR's advice", async () => {
+	const s = setup();
+	vi.stubEnv("FAKE_ASK", JSON.stringify(ADVICE));
+	await asked(s);
+	// The first PR merged; its remainder starts the same branch over from the base.
+	git(s.repo, "checkout", "-q", "-B", "feature", "main");
+	write(s.repo, "src/lib.ts", "export const x = 3;\n");
+	git(s.repo, "commit", "-qam", "remainder");
+	const { advised } = await asked(s);
+	expect(advised.forced).toBeUndefined();
+	await expect(asked(s)).rejects.toThrow(AdviseCapError);
 });
 
 fakes("a missing, logged-out, or limited advisor passes the question on, each read-only", async () => {

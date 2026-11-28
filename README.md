@@ -627,7 +627,7 @@ comes last, and a missing value prints as `-`:
 | `checks` | `failure` if any check fails, else `pending` if any is pending or a requirement is unreported, else `success`, and `passed=`, `failing=`, `pending=` counts, all from the checks that count; `-` when the head has no checks and the base requires none. |
 | `check` | `failing` or `pending`, `required` or `optional`, the result, details URL, and name. A required check or required workflow nothing reports yet prints as `pending required expected -` with its name, followed by `(from app <id>)` when the requirement names an app, or the workflow's repository and path, as `owner/name:path`. |
 | `review` | `current` or `stale` against the head, state, reviewer, time, and URL of each reviewer's latest review. |
-| `checkpoint` | Each bot reviewer that approves or requests changes and that the base requires, as a `finding` signal's reviewer is, its round, and its review's URL, when that review is of the head and its latest verdict there, ignoring plain comments, is neither an approval nor a dismissal, at the end of its third, sixth, ... round, where [`/quest-review` stops for the user's decision](#review-locally). A round is one commit it reviewed; a dismissed review counts as one that approves or requests changes. Only printed when due. |
+| `checkpoint` | Each bot reviewer that approves or requests changes and that the base requires, as a `finding` signal's reviewer is, its round, and its review's URL, when that review is of the head and its latest verdict there, ignoring plain comments, is neither an approval nor a dismissal, at the end of its third, sixth, ... round, where [`/quest-review` stops](#review-locally), asks [`quest advise`](#ask-for-advice-when-stuck) once, and hands the PR back for the user's decision unless the advice applies. A round is one commit it reviewed; a dismissed review counts as one that approves or requests changes. Only printed when due. |
 | `reacted:<content>` | Actor, time, and the PR or review reacted to, as `quest wait` names reactions. |
 | `thread` | Node ID, `current` or `outdated`, last commenter, latest comment URL, and `path:line` of each unresolved thread. |
 | `signal` | `finding` or `decision`, its URL, who posted it, and its text, for each [signal](#signals-that-hold-a-head) holding the head. |
@@ -2404,8 +2404,11 @@ on a case-insensitive volume, such as macOS's default, it is passed over.
 `--harness` asks only one advisor, and `--model` and `--effort` replace its
 listed ones.
 
-Each branch gets one answered call; a second refuses before any advisor runs
-unless `--force`. Calls are kept under the clone's common Git directory in
+Each branch gets one answered call while its head descends from the advised one,
+so a later PR reusing the name starts afresh; a second refuses before any
+advisor runs unless `--force`. An advisor whose turn fails passes the question
+on, and Codex and Claude read the change from diff files written as a review's
+are. Calls are kept under the clone's common Git directory in
 `quest/advise/`, and each session is queued for Kixel Quest with the role
 `advising`, which `quest usage` reports too. `token-max` reads no `agy`
 transcript, so an `agy` session's spend is the tokens it reported, priced at
@@ -3088,6 +3091,7 @@ arrives with the guide sections and other skills it builds on, in one call:
 | `quest-start` | Claim a ready quest, complete it, and open a PR. |
 | `quest-iterate` | Iterate on an open PR to settle its open decisions, fix CI and review findings, and push. |
 | `quest-review` | Review a PR's branch locally with a model no weaker than its latest writer, then mark it ready for review. |
+| `quest-advise` | [Ask a stronger model from another vendor for a fresh approach](#ask-for-advice-when-stuck) when a branch is stuck; at a review's `next decide` stop, its advice stands in for your pick unless it hands the PR back. |
 | `quest-merge` | Queue a PR to land, running `quest-iterate` first when it needs work. |
 | `quest-run` | Orchestrate a project from one session: start ready quests, take PRs to merge, and settle what quests and drafts wait on you, in a loop until only your decisions remain, then plan the follow-ups no quest owns yet. Pass a filter such as `prs` to start no quests. |
 | `quest-afk` | Keep a session such as `quest-run` going while you are away: it acts on its recommendations, defers merges, and walks you through the rest when you return. `afk merge` also merges low-risk PRs it recommends, implements the follow-ups it recommends doing now in the PRs that add them, and once idle merges a medium-risk PR that unblocks a quest it would start; and `afk soon` asks pending questions in one batch before you leave. |

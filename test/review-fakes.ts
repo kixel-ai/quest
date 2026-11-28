@@ -321,6 +321,11 @@ event({ event: "init", conversation_id: conversation });
 if (fake("FAKE_REJECTED")) fail("authentication failed or timed out");
 if (fake("FAKE_LIMITED")) fail("Error 429, Message: Quota exhausted., Status: RESOURCE_EXHAUSTED, Details: [map[metadata:map[quotaResetTimeStamp:2030-03-17T17:46:40Z] reason:QUOTA_EXHAUSTED]]");
 if (!at("--json-schema")) fail("quest runs agy only for questions");
+// A turn cut off after one model step, as by a dropped connection.
+if (fake("FAKE_CUT")) {
+	event({ event: "step_update", step_update: { conversation_id: conversation, step_index: 1, state: "DONE", usage: { input_tokens: 300, output_tokens: 20, cache_read_tokens: 0 } } });
+	process.exit(1);
+}
 const reply = ${RISK_REPLY};
 result({ response: reply + "\\n", structured_output: JSON.parse(reply) }, { input_tokens: 600, output_tokens: 90, cache_read_tokens: 400 });
 `,
@@ -430,6 +435,7 @@ export function setup(host: "CLAUDECODE" | "CODEX_THREAD_ID" | null = "CLAUDECOD
 		"FAKE_CLASSIFY",
 		"FAKE_ASK",
 		"FAKE_OFFLINE",
+		"FAKE_CUT",
 		"ANTIGRAVITY_CONVERSATION_ID",
 	]) {
 		vi.stubEnv(name, undefined);

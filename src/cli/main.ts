@@ -892,7 +892,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"reviewer's latest review, marked current or stale against the head; a checkpoint line per bot " +
 				"reviewer that approves or requests changes, its round, and its review, when that review is of the " +
 				"head, while its latest verdict on the head is neither an approval nor a dismissal, and ends its third, sixth, ... round (one commit it reviewed), as " +
-				"where /quest-review stops for the user's decision; a reacted:<content> line per " +
+				"where /quest-review stops, asks quest advise once, and hands the PR back unless the advice applies; a reacted:<content> line per " +
 				"reaction on the PR or a review; a thread line per unresolved review thread, led by its node ID; a " +
 				"signal line per finding or decision that holds the head from landing (see the README); and last, " +
 				"for an open PR, a duplicate line per quest it adds that another open PR also adds, at the same path or under the same title " +
@@ -2318,7 +2318,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"rules case-sensitively, so a host whose path to that directory matches names case-insensitively, as " +
 				"macOS's default volume, passes it over. It runs agy on the user's own Antigravity login with no " +
 				"ANTIGRAVITY_* or AGY_* variable.\n\n" +
-				"Each branch gets one answered call: a second refuses before any advisor runs, naming the first's time " +
+				"Each branch gets one answered call while its head descends from the advised one: a second refuses before any advisor runs, naming the first's time " +
 				"and model, unless --force. Every call is kept under the clone's common Git directory in quest/advise/, " +
 				"with each session it started and, for agy, whose transcripts token-max cannot read, the tokens it " +
 				"reported, priced at the model's API list rate, or marked incomplete where no rate is known. Each " +
@@ -2328,7 +2328,10 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		)
 		.argument("<question...>", "What you tried and where you are stuck; - reads it from stdin")
 		.option("--base <remote/branch>", "Base branch the change is against (default: origin's default branch)")
-		.option("--branch <name>", "Branch to advise on, instead of the checked-out one or its upstream")
+		.option(
+			"--branch <name>",
+			"Branch whose quest, PR, and saved rounds the checkout's HEAD stands for, instead of the checked-out one or its upstream",
+		)
 		.option("--force", "Ask again on a branch that was already advised")
 		.option("--limit <text>", "An explicit limit the request you work on states, such as fix the packaging only")
 		.addOption(new Option("--harness <name>", "The only advisor to ask").choices(ADVISORS.map((e) => e.harness)))

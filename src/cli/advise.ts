@@ -2,7 +2,7 @@
 // `ADVISORS` that can run answers; each branch gets one answered call unless `--force`, and every call is kept under
 // the clone's common Git directory, so `quest usage` and the record sender count it as advising.
 import { createHash } from "node:crypto";
-import { mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { branchQuest } from "../core";
@@ -17,6 +17,7 @@ import {
 	fetchBase,
 	parseBase,
 	requireAttrSource,
+	descends,
 	savedRounds,
 	sessionBranch,
 } from "./review";
@@ -311,13 +312,15 @@ export async function advise(options: AdviseOptions, deps: AdviseDependencies): 
 	const branch = sessionBranch(root, options.branch, parseBase(root, base.ref).branch);
 	const path = adviseFile(common, branch);
 	const state = loadState(path, branch);
-	const prior = [...state.calls].reverse().find((call) => call.advice !== null);
+	const head = git(root, ["rev-parse", "HEAD"]);
+	// Only advice on this head's history counts: a later PR reusing the branch's name, as a quest's remainder does,
+	// starts afresh.
+	const prior = [...state.calls].reverse().find((call) => call.advice !== null && descends(root, call.head, head));
 	if (prior !== undefined && !options.force)
 		throw new AdviseCapError(
 			`${branch} was already advised at ${prior.end} by ${prior.sessions.at(-1)?.model ?? "an advisor"}; ` +
 				"each branch gets one call, so act on that advice, or pass --force to ask again",
 		);
-	const head = git(root, ["rev-parse", "HEAD"]);
 	const mergeBase = git(root, ["merge-base", base.sha, head]);
 	const changed = git(root, ["diff", "-z", "--name-only", "--no-renames", mergeBase, head])
 		.split("\0")
@@ -331,13 +334,15 @@ export async function advise(options: AdviseOptions, deps: AdviseDependencies): 
 		question,
 		quest: questText(root, branch, [base.sha, head]),
 		pull,
-		rounds: savedRounds(common, branch),
+		rounds: savedRounds(root, common, branch, head),
 		rules: shown(root, "REVIEW.md", [base.sha]),
 		...(limit !== undefined && { limit }),
 	});
 	// The reply's schema is saved apart from the calls, which `savedAdvice` reads every file of.
 	const dir = join(common, "quest", "advise", "schema");
 	mkdirSync(dir, { recursive: true });
+	// The diff files a Codex or Claude advisor reads, kept out of the checkout.
+	const scratch = mkdtempSync(join(dir, "diffs-"));
 	const start = now();
 	const spent: Answer<unknown, Asked>["spent"] = [];
 	let answer: Answer<Advice, Asked> | undefined;
@@ -352,11 +357,15 @@ export async function advise(options: AdviseOptions, deps: AdviseDependencies): 
 			prompt,
 			head,
 			ranges: [`${mergeBase}..${head}`],
+			readable: scratch,
 			who: "advisor",
 			task: "advise",
+			// A failed turn, as agy's on a dropped connection, leaves the next advisor to answer.
+			failover: true,
 			parse: parseAdvice,
 		});
 	} finally {
+		rmSync(scratch, { recursive: true, force: true });
 		// A clock stepped back mid-call would otherwise end the record before it starts, which the store refuses.
 		const end = Math.max(start, now());
 		const sessions: AdviseSession[] = spent.flatMap(({ entry, usage, session }) =>
