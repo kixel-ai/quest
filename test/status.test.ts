@@ -942,6 +942,15 @@ describe("the review record", () => {
 		expect(await read({ statuses: { [A]: passed(A), [B]: bot }, diffs: { [A]: 403 } })).toMatchObject({
 			record: `review-record current ${A} local-review`,
 		});
+		// An account whose permission cannot be read may be a writer, so the pass is in doubt, with a warning.
+		const unread = reviewStatus("FAILURE", "Risk low: findings open", B, "carol");
+		const doubted = await read({
+			statuses: { [A]: passed(A), [B]: unread },
+			permissions: { ...permissions, carol: 403 },
+			diffs: { [A]: 403 },
+		});
+		expect(doubted.record).toBe(`review-record unknown ${A} local-review`);
+		expect(doubted.warnings.join("\n")).toContain("cannot read the permission of carol");
 		// Comparable, it is the same diff, and the failure outweighs the pass.
 		expect(
 			await read({ statuses: { [A]: passed(A), [B]: failed }, diffs: { [A]: "same", [B]: "same" } }),

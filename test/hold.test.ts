@@ -82,6 +82,8 @@ class FakePull {
 	diffs: Record<string, string> = {};
 	/** The commits whose diff GitHub refuses to render, as one too large. */
 	unrenderable = new Set<string>();
+	/** The accounts whose repository permission GitHub refuses to show. */
+	forbidden = new Set<string>();
 	/** The `quest review` status on each commit, as GraphQL's `StatusContext` gives it. */
 	statuses: Record<string, ObjectValue> = {};
 	private clock = Date.parse("2026-10-21T12:00:00Z");
@@ -159,6 +161,8 @@ class FakePull {
 				files,
 			});
 		}
+		const asked = /^\/repos\/example\/project\/collaborators\/([^/]+)\/permission$/.exec(url.pathname)?.[1];
+		if (asked && this.forbidden.has(asked)) return json(403, { message: "Must have push access" });
 		if (url.pathname === "/repos/example/project/collaborators/maintainer/permission")
 			return json(200, { permission: "write" });
 		if (url.pathname === "/repos/example/project/rules/branches/main") {
@@ -1262,6 +1266,28 @@ describe("merge --land of a high head", () => {
 		review(pull, OLD, "high");
 		pull.statuses[OLD] = { ...pull.statuses[OLD]!, state: "FAILURE", description: "Risk high: findings open" };
 		pull.unrenderable.add(HEAD);
+		expect(await refused(land_(pull))).toContain("is high");
+		expect(pull.writes).toEqual([]);
+	});
+
+	test("refuses a high head whose newer uncomparable failure came from an account whose permission is unreadable", async () => {
+		const pull = new FakePull();
+		review(pull, HEAD, "high");
+		review(pull, OLD, "high");
+		pull.statuses[OLD] = {
+			...pull.statuses[OLD]!,
+			state: "FAILURE",
+			description: "Risk high: findings open",
+			creator: { __typename: "User", login: "other" },
+		};
+		pull.unrenderable.add(HEAD);
+		// Known not to write, it supersedes nothing and the head's pass covers it.
+		await land_(pull);
+		expect(pull.writes).toEqual([`enablePullRequestAutoMerge ${HEAD} MERGE`]);
+		pull.writes.length = 0;
+		pull.autoMerge = null;
+		// Unreadable, it may be a writer's, so the pass is in doubt.
+		pull.forbidden.add("other");
 		expect(await refused(land_(pull))).toContain("is high");
 		expect(pull.writes).toEqual([]);
 	});

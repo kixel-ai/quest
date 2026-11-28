@@ -159,14 +159,25 @@ export async function countedReview(
 			skipped.push(bound);
 			continue;
 		}
-		// A newer writer's status whose diff cannot be compared may supersede this one, so it is not known to cover the
-		// head; anyone else's never could.
+		// A newer status whose diff cannot be compared may supersede this one, so it is not known to cover the head, unless
+		// its creator is known not to be a writer. A permission that cannot be read leaves it doubted.
 		let doubted = false;
-		for (const other of rest)
-			if (!other.known && (await writerFault(github, pr, other.each.oid, other.each.status)) === null) {
+		for (const other of rest) {
+			if (other.known) continue;
+			let fault: Awaited<ReturnType<typeof writerFault>> | undefined;
+			try {
+				fault = await writerFault(github, pr, other.each.oid, other.each.status);
+			} catch (error) {
+				// A status read, not the gate, goes on past a lookup GitHub fails, with the status in doubt.
+				if (!report || error instanceof GitHubDeadline || !(error instanceof Error)) throw error;
+				skipped.push(`cannot read who set the ${REVIEW_CONTEXT} status on ${other.each.oid}: ${error.message}`);
+			}
+			if (fault === undefined || fault === null || fault.unreadable) {
+				if (fault?.unreadable) skipped.push(fault.why);
 				doubted = true;
 				break;
 			}
+		}
 		const state = doubted ? "unknown" : each.oid === head ? "current" : "diff-identical";
 		return { counted: { oid: each.oid, state, passed: each.status.state === "SUCCESS", attested: bound }, skipped };
 	}
@@ -293,28 +304,37 @@ export interface Attested {
 	outcome: Outcome;
 }
 
-/** Why the user who set a `quest review` status on `sha` cannot count, or null when they have write access. */
+/**
+ * Why the user who set a `quest review` status on `sha` cannot count, or null when they have write access. `unreadable`
+ * marks a permission GitHub refused to show, which says nothing of whether they can write.
+ */
 async function writerFault(
 	github: GitHubReader,
 	pr: PullRequest,
 	sha: string,
 	status: ObjectValue,
-): Promise<string | null> {
+): Promise<{ why: string; unreadable: boolean } | null> {
 	const { creator } = status;
-	if (creator == null) return `the account that set the ${REVIEW_CONTEXT} status on ${sha} is gone`;
+	const fault = (why: string, unreadable = false) => ({ why, unreadable });
+	if (creator == null) return fault(`the account that set the ${REVIEW_CONTEXT} status on ${sha} is gone`);
 	const { __typename: kind, login } = object(creator);
 	const name = String(login);
 	if (kind !== "User")
-		return `${name}, who set the ${REVIEW_CONTEXT} status on ${sha}, is a ${String(kind)}, not a user`;
+		return fault(`${name}, who set the ${REVIEW_CONTEXT} status on ${sha}, is a ${String(kind)}, not a user`);
 	const permission = await github.request(
 		`/repos/${pr.owner}/${pr.repo}/collaborators/${encodeURIComponent(name)}/permission`,
 		{ allow: [403, 404] },
 	);
 	if (permission.status === 403)
-		return `cannot read the permission of ${name}, who set the ${REVIEW_CONTEXT} status on ${sha}: ${String(object(await permission.json()).message)}`;
+		return fault(
+			`cannot read the permission of ${name}, who set the ${REVIEW_CONTEXT} status on ${sha}: ${String(object(await permission.json()).message)}`,
+			true,
+		);
 	const found = permission.status === 404 ? "no" : string(object(await permission.json()).permission);
 	if (!WRITE.includes(found))
-		return `${name}, who set the ${REVIEW_CONTEXT} status on ${sha}, has ${found} access to ${pr.owner}/${pr.repo}, not write`;
+		return fault(
+			`${name}, who set the ${REVIEW_CONTEXT} status on ${sha}, has ${found} access to ${pr.owner}/${pr.repo}, not write`,
+		);
 	return null;
 }
 
@@ -331,7 +351,7 @@ async function boundStatus(
 ): Promise<Attested | string> {
 	const { description, targetUrl } = status;
 	const fault = await writerFault(github, pr, sha, status);
-	if (fault !== null) return fault;
+	if (fault !== null) return fault.why;
 	// A retargeted PR, or a base reset under it, has another diff than the one reviewed, from another merge base. A
 	// merged PR has none to compare: its merge base moved with the landing, so only its writer binds a status.
 	if (bind) {
