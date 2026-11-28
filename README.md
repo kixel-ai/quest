@@ -1624,7 +1624,10 @@ is already inside it, with no Nix evaluation, and through `nix develop
 shell without it, such as another repository's, gets `nix develop` all the
 same. Each task gets `QUEST_TIER`, `QUEST_BASE` (the merge base, unless
 `--all`), and its `environment`, exported inside the dev shell, and every line
-it prints is prefixed with its name.
+it prints is prefixed with its name. When `MBX_CARGO_SHIM_DIR` is set, as
+[Quest's setup-nix action](#shared-github-actions) sets it, `nix develop`
+runs the task with that directory back in front of the shell's tools, so
+mbx's Cargo shim, not the shell's Cargo, builds.
 
 A failed task skips the tasks that run after it, while independent ones finish;
 `--fail-fast` stops them too. A task that passes must write each `junit` and
@@ -1810,9 +1813,7 @@ It adds to what `perSystem` returns, for each of `systems` (`x86_64-linux`,
   directory up holding `flake.nix` when that `flake.nix` and its `flake.lock`
   are the ones the shell was built from, so `quest run` and `quest fmt` run
   there without entering the shell again, and a shell entered from another
-  checkout names none. It puts `$MBX_CARGO_SHIM_DIR`, which the setup-nix
-  action sets, first on `PATH`, so mbx's Cargo shim stays ahead of the
-  shell's Cargo. `perSystem`'s `quest` replaces the `quest` package.
+  checkout names none. `perSystem`'s `quest` replaces the `quest` package.
 - `formatter`, the same `treefmt`, which `nix fmt` runs.
 - `checks.quest`, which runs `quest check`, `quest.toml` and `nixConfig`
   included, on the flake's source; a `checks` entry of the same name replaces

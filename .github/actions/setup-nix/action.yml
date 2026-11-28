@@ -123,8 +123,8 @@ runs:
 
     # The shim is how mbx reaches Cargo, so a setup that installed none would
     # build every job uncached and still pass. A dev shell puts its own Cargo
-    # ahead of everything on PATH, so `quest.lib.mkFlake`'s puts
-    # MBX_CARGO_SHIM_DIR back in front.
+    # ahead of everything on PATH, so `quest run` puts
+    # MBX_CARGO_SHIM_DIR back in front inside `nix develop`.
     - name: Put mbx's Cargo shim on PATH
       if: inputs.mbx-remote != ''
       shell: bash

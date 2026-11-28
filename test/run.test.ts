@@ -314,6 +314,19 @@ test.runIf(posix)(
 	},
 );
 
+test.runIf(posix)("inside nix develop, mbx's Cargo shim goes back in front of the dev shell's tools", async () => {
+	const dir = repository({
+		"flake.nix": "{}",
+		"quest.toml": '[tasks.nixed]\ntier = "pr"\nrun = "echo first=${PATH%%:*}"\nenvironment = { A = "1" }\n',
+	});
+	const out = await runIn(dir, { all: true }, { MBX_CARGO_SHIM_DIR: "/shim" });
+	expect(out.code, out.stderr).toBe(0);
+	expect(out.stdout).toBe("nixed | first=/shim\n");
+	// Without it, the command is the shell's own.
+	const plain = await runIn(dir, { all: true });
+	expect(plain.log).toContain(`nix develop ${dir} --command env A=1 bash -eo pipefail -c echo first=\${PATH%%:*}`);
+});
+
 test.runIf(posix)("a task's reports are checked and copied, and a stale one never counts", async () => {
 	const dir = repository({
 		"quest.toml": [

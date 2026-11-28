@@ -159,8 +159,9 @@ jobs:
           if [ -n "$BASE" ]; then args+=(--base "$BASE"); else args+=(--all); fi
           quest run "${args[@]}"
       # Kixel Quest reads only the junit.xml and metrics.json at an artifact's
-      # root, and --report keeps one of each per task or crate. Passed tasks'
-      # reports upload even when another task failed.
+      # root, and --report keeps one of each per task or crate. The merge
+      # leads each test's class with its task, and fails naming any report it
+      # leaves out; the rest upload even then, or when a task failed.
       - name: Merge the reports
         if: ${{ !cancelled() && steps.run.outcome != 'skipped' }}
         run: bun quest/scripts/kixel-metrics.ts "$RUNNER_TEMP/quest-report" "$RUNNER_TEMP/kixel-metrics"
