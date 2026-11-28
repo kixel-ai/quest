@@ -2037,7 +2037,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				`${classifiers}, reads the diff and the base's RISK.md, if any, which says what is customer-facing, ` +
 				"in one read-only turn and replies with a tier and its reason. One that is logged out, whose login the " +
 				"API rejects, or at its usage limit passes the turn to the next; when none is left, the run fails on the " +
-				"limit that resets first if every one whose CLI is installed hit its own, else as a usage error naming why each failed. A later round on the same head, base " +
+				"limit that resets first if every one whose CLI is installed hit its own, else as an outage naming why each failed when none could run, and otherwise as a usage error. A later round on the same head, base " +
 				"RISK.md, and built-in defaults reuses the tier unless --new. Reviewers never judge it. " +
 				"A change that adds or changes a line under quest/, a new quest or a move included, is at least medium whatever " +
 				"RISK.md says, since agents start that work unattended: the classifier may answer only medium or high and is offered no class. " +

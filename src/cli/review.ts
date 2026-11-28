@@ -2305,7 +2305,13 @@ function unanswered(
 	// Every model at its limit replied to nothing, so nothing was spent.
 	if (limits.length > 0 && limits.length === blocking.length)
 		return limits.sort((a, b) => (a.until ?? Infinity) - (b.until ?? Infinity))[0]!;
-	return new UnansweredError(`no ${who} could ${task}: ${failures.map((each) => each.message).join("; ")}`, spent);
+	const message = `no ${who} could ${task}: ${failures.map((each) => each.message).join("; ")}`;
+	// No model could run at all, as when every installed CLI is logged out: an outage the user signs in to clear, not a
+	// mistake in the arguments.
+	const down = failures.filter((each) => each instanceof ReviewerUnavailableError);
+	if (down.length > 0 && down.length === failures.length)
+		return new ReviewerUnavailableError(down[0]!.harness, down[0]!.reason, message);
+	return new UnansweredError(message, spent);
 }
 
 /** The head's risk as its classifier set it, before any override. */

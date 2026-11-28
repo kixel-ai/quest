@@ -226,7 +226,10 @@ class TreeMerge {
 		// resolved, and without it, as on GitHub, git falls back to its own.
 		if (driver !== "quest") return ort;
 		if (!ort) this.#modes.delete("ort");
-		if (!matches(resolveLists(path, merge(ot, bt, tt)))) this.#modes.delete("driver");
+		// The driver puts its own side's inserts first: the PR's in a merge on the PR branch, the base's in the land
+		// watcher's, which merges the PR into the base yet records the PR head as the first parent.
+		const driven = (first: string, second: string) => matches(resolveLists(path, merge(first, bt, second)));
+		if (!driven(ot, tt) && !driven(tt, ot)) this.#modes.delete("driver");
 		return this.#modes.size > 0;
 	}
 

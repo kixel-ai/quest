@@ -31,6 +31,7 @@ The implementer's choices, for the readout to revisit:
   Report XL's counts rather than wait for a detectable difference. Report
   Routing evidence's cost metric beside the findings: the mean spend per merged PR,
   including later `## Caused by` fixes, with a bootstrap interval.
+- Report each arm's spend both with and without coordinating sessions. Under a Claude Code `/quest-run`, arm A writers run as native sub-agents and so carry a share of the coordinator's cost, while arm B writers run headless through `quest agent` and carry none, so `quest usage`'s `arms` rows (`armRows` in `src/cli/usage.ts`, which counts every role) overstate arm A's spend; recompute from each PR's sessions in `--json`, leaving out role `coordinating`.
 - Price the advisor's spend. token-max reports an advisor iteration's tokens
   under the advisor's model, but Claude Code 2.1.330 records no service tier
   on it, so token-max leaves its cost at $0 with `complete` false, which

@@ -338,6 +338,23 @@ describe("a quest file", () => {
 		expect(await carries(dir, head)).toBe(true);
 	});
 
+	test("carries across the land watcher's merge, which lists the base's links before the PR's", async () => {
+		const { dir, head } = diverged(
+			quest("First.\n\nSecond.", ["a", "b", "c", "p"]),
+			quest("First.\n\nSecond.", ["a", "b", "c", "m"]),
+		);
+		// As `quest land` merges: the PR into the base, recorded with the PR head as the first parent.
+		const main = git(dir, "rev-parse", "main");
+		git(dir, "switch", "-q", "--detach", main);
+		git(dir, "merge", "-q", "--no-ff", "--no-commit", head);
+		const tree = git(dir, "write-tree");
+		expect(git(dir, "show", ":quest/x.md")).toBe(quest("First.\n\nSecond.", ["a", "b", "c", "m", "p"]).trimEnd());
+		const merged = execFileSync("git", ["-C", dir, "commit-tree", tree, "-p", head, "-p", main, "-m", "merge"], {
+			encoding: "utf8",
+		}).trim();
+		expect(await carries(dir, head, merged)).toBe(true);
+	});
+
 	test("does not carry a merge no one way of merging explains: the driver's on one file, merge-ort's on another", async () => {
 		// Merge-file's Myers merge settles the first and conflicts on the second; merge-ort's does the opposite.
 		const [o1, b1, t1] = ["c\n\nc\n", "}\nc\nc\n", "c\nc\n}\n"];
