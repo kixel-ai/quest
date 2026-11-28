@@ -8,7 +8,7 @@
 // head and the author's responses, checking only what changed and the open findings,
 // so the reviewer keeps its context and its prompt cache, and a finding the author
 // refuted with evidence does not recur.
-import { execFile, spawn, spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import {
 	existsSync,
@@ -23,7 +23,6 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { dirname, join, posix } from "node:path";
-import { promisify } from "node:util";
 
 import {
 	ALWAYS_HIGH,
@@ -2306,22 +2305,43 @@ export function parseBase(root: string, base: string): { remote: string; branch:
 	return { remote, branch: base.slice(remote.length + 1) };
 }
 
-const execGit = promisify(execFile);
-
 /** `git` without blocking the event loop, for the calls that reach a remote. */
 async function remoteGit(root: string, args: string[], signal?: AbortSignal): Promise<string> {
+	// A cancellable call runs in its own process group and stops the whole group, since Git leaves its transport,
+	// such as ssh, running when only Git is killed. Without a signal it stays in ours, so an interrupt reaches it.
+	const child = spawn("git", ["-C", root, ...args], {
+		env: { ...discoveryEnv(), GIT_TERMINAL_PROMPT: "0" },
+		stdio: ["ignore", "pipe", "pipe"],
+		detached: signal !== undefined,
+	});
+	let stdout = "";
+	let stderr = "";
+	child.stdout.setEncoding("utf8").on("data", (chunk: string) => {
+		stdout += chunk;
+	});
+	child.stderr.setEncoding("utf8").on("data", (chunk: string) => {
+		stderr += chunk;
+	});
+	const stop = () => {
+		try {
+			process.kill(-child.pid!, "SIGTERM");
+		} catch {
+			// The group already exited.
+		}
+	};
+	signal?.addEventListener("abort", stop, { once: true });
+	if (signal?.aborted) stop();
 	try {
-		const { stdout } = await execGit("git", ["-C", root, ...args], {
-			encoding: "utf8",
-			env: { ...discoveryEnv(), GIT_TERMINAL_PROMPT: "0" },
-			...(signal !== undefined && { signal }),
+		const code = await new Promise<number | null>((done, reject) => {
+			child.once("error", reject);
+			child.once("close", done);
 		});
-		return stdout.trim();
-	} catch (error) {
 		// An interrupt stops a stalled remote, which reads as the interrupt, not as Git failing.
 		if (signal?.aborted) throw signal.reason;
-		const stderr = String((error as { stderr?: unknown }).stderr ?? "").trim();
-		throw new Error(`git ${args[0]} failed${stderr ? `: ${stderr}` : ""}`);
+		if (code !== 0) throw new Error(`git ${args[0]} failed${stderr.trim() ? `: ${stderr.trim()}` : ""}`);
+		return stdout.trim();
+	} finally {
+		signal?.removeEventListener("abort", stop);
 	}
 }
 

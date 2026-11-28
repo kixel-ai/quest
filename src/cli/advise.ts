@@ -341,6 +341,8 @@ export async function advise(options: AdviseOptions, deps: AdviseDependencies): 
 /** `promise`, or its rejection with `signal`'s reason once that aborts first. */
 function untilAborted<T>(promise: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
 	if (signal === undefined) return promise;
+	// The lookup may still reject after the interrupt, which no one awaits then.
+	promise.catch(() => {});
 	if (signal.aborted) return Promise.reject(signal.reason);
 	let stop!: () => void;
 	const aborted = new Promise<never>((_, reject) => {
@@ -376,6 +378,8 @@ async function adviseLocked(
 		now: () => number;
 	},
 ): Promise<Advised> {
+	// An interrupt that arrived while the lock was being taken.
+	deps.signal?.throwIfAborted();
 	const state = loadState(path, branch);
 	const head = git(root, ["rev-parse", "HEAD"]);
 	// An interrupt ends a lookup backing off from a rate limit at once, which releases the branch's lock.
