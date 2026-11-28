@@ -682,14 +682,32 @@ Upload this host's agent transcripts with its session records? A transcript hold
 Open https://kixel.quest/login, sign in with GitHub, and enter the code BCDF-GHJK.
 Waiting for its approval; the code expires in 10 minutes.
 signed in to https://kixel.quest as workstation; transcript uploads declined
+signed git in to https://kixel.quest's repositories: credential.https://kixel.quest/.helper = "", credential.https://kixel.quest/.helper = !quest git-credential
 ```
 
 Kixel Quest issues the host a token named after its hostname, which `quest`
 keeps in `$XDG_CONFIG_HOME/quest/login.json` (`~/.config`), readable only by
 the user, with the answer about transcripts, where only a `y` or `yes` agrees;
 the record sender uploads no transcripts yet.
-Signing in again replaces the host's token. `quest logout` removes it from the
-host; Kixel Quest takes it until it is revoked on its Tokens page. A
+Signing in again replaces the host's token.
+`quest login` also signs git in to the repositories Kixel Quest hosts, as
+`gh auth setup-git` does for GitHub: it writes two `credential.<url>/.helper`
+entries to the global git config for that Kixel Quest's URL alone, an empty one
+that masks any helper listed before it for that URL, such as `osxkeychain`,
+without deleting it, then `!quest git-credential`. That hidden command answers
+git with user `quest` and the token in `login.json`, read on every call, so
+signing in again rotates it; without a token it names `quest login` and git
+fails. Git finds `quest` on `PATH`, so an upgrade keeps working. A helper
+listed after quest's, such as a global `credential.helper` defined later in the
+file, still runs and may store the token. A global git config quest cannot
+write, such as one home-manager manages, fails the command naming both entries,
+to declare there instead; one that already holds just them is left alone.
+Git matches `<url>/` to the same remotes as `<url>`, but as a key of quest's
+own, so a helper the person lists under `<url>` is never moved or removed.
+`quest logout` removes those two entries, failing on a config it cannot write
+while they are there, then the token from the host; Kixel Quest takes the token
+until it is revoked on its Tokens page. `QUEST_KIXEL_URL` must be a bare origin,
+since git's credential requests name only the protocol and host. A
 `records.json` beside it, where earlier versions read a pasted token, is moved
 into `login.json` on the first read, uploading no transcripts.
 
@@ -734,7 +752,9 @@ remote is then a Kixel Quest URL, `https://kixel.quest/<owner>/<repo>.git`,
 and its PRs are `https://kixel.quest/<owner>/<repo>/pull/<number>`; that alone
 tells `quest` the repository lives there, so every read and write goes to
 Kixel Quest, with the token `quest login` stored for it, and never to GitHub;
-without one, they fail naming `quest login`.
+without one, they fail naming `quest login`. Git's own `clone`, `fetch`, and
+`push` there use the same token through the credential helper `quest login`
+configures.
 `QUEST_FORGE=github` cannot reach such a repository, and a failure there names
 no override. `quest start` claims with a draft PR there, `quest iterate`,
 `ready`, and `release` take and give back holds that Kixel Quest records rather
