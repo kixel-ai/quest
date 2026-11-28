@@ -253,6 +253,33 @@ export interface Writer {
 	complete: boolean;
 }
 
+/**
+ * A PR the forge updated since an instant, open, merged, or closed, as the record sender reads it. A hosted
+ * repository has no forks, so its head repository is always the repository read.
+ */
+export interface UpdatedPull {
+	number: number;
+	/** The PR's page, which a session's recorded PR is matched by. */
+	url: string;
+	/** The head branch, as {@link OpenPull} names it. */
+	branch: string;
+	state: "open" | "closed" | "merged";
+	/** Epoch milliseconds; the sender dates a breakage from its fix's creation. */
+	created: number;
+	/** Epoch milliseconds of the last push, comment, or edit. */
+	updated: number;
+	/** Epoch milliseconds a merged or closed PR ended, or null while it is open. */
+	closed: number | null;
+	body: string;
+}
+
+/** One page of {@link UpdatedPull}s, newest update first. */
+export interface UpdatedPage {
+	pulls: UpdatedPull[];
+	/** The cursor for the following page, or null on the last. */
+	next: string | null;
+}
+
 /** A held quest branch, and the open PR from it if there is one. */
 export interface Claim {
 	branch: string;
@@ -410,6 +437,12 @@ export interface ForgeWrites {
 export interface ForgeCalls {
 	status: { request: { pull: PullRequest }; value: Status };
 	pulls: { request: { repository: Repository }; value: OpenPull[] };
+	/**
+	 * The PRs updated at or after `since` (epoch milliseconds), merged and closed ones included, as `updatedPulls`
+	 * reads GitHub's. `cursor` is null for the first page, then each page's `next`; a cursor never skips a PR when
+	 * others move to the front. Kixel Quest sets the page size and serves it only for a repository it hosts.
+	 */
+	updated: { request: { repository: Repository; since: number; cursor: string | null }; value: UpdatedPage };
 	files: { request: { repository: Repository }; value: PullFiles[] };
 	held: { request: { sources: ClaimSources; branches: string[] }; value: Holdings };
 	/** `from` is a `--since` point or a cursor; null starts at the head's push time. */
@@ -436,6 +469,7 @@ export type ForgeCall = keyof ForgeCalls;
 export const FORGE_READS = [
 	"status",
 	"pulls",
+	"updated",
 	"files",
 	"held",
 	"watch",
@@ -704,6 +738,22 @@ const writer = shape<Writer>({
 	complete: boolean,
 });
 
+const updatedPage = shape<UpdatedPage>({
+	pulls: list(
+		shape<UpdatedPull>({
+			number: count,
+			url: string,
+			branch: name,
+			state: oneOf(["open", "closed", "merged"]),
+			created: count,
+			updated: count,
+			closed: nullable(count),
+			body: string,
+		}),
+	),
+	next: nullable(name),
+});
+
 const pullFiles = shape<PullFiles>({ number: count, url: string, files: list(name) });
 
 const comment = shape<Comment>({ author: string, body: string, createdAt: time, url: string });
@@ -766,6 +816,7 @@ const none: Parse<null> = (value, at) => (value === null ? null : fail(at, "null
 const REQUESTS: { [C in ForgeCall]: Parse<ForgeCalls[C]["request"]> } = {
 	status: shape({ pull: pullRequest }),
 	pulls: shape({ repository }),
+	updated: shape({ repository, since: count, cursor: nullable(name) }),
 	files: shape({ repository }),
 	held: shape({
 		sources: shape<ClaimSources>({ upstream: source, fork: maybe(source) }),
@@ -798,6 +849,7 @@ const REQUESTS: { [C in ForgeCall]: Parse<ForgeCalls[C]["request"]> } = {
 const VALUES: { [C in ForgeCall]: Parse<ForgeCalls[C]["value"]> } = {
 	status,
 	pulls: list(openPull),
+	updated: updatedPage,
 	files: list(pullFiles),
 	held: holdings,
 	watch: watchPoll,

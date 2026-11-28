@@ -210,6 +210,8 @@ export {
 	type PullRequest,
 	type PullView,
 	type Writer,
+	type UpdatedPage,
+	type UpdatedPull,
 	type Reaction,
 	type Repository,
 	type Review,

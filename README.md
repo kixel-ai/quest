@@ -714,8 +714,7 @@ person's own token, so they are made in their name.
 Its read API lives under `/forge`, with the token as a bearer token:
 `GET /forge` answers `{"login", "repositories"}`, the person the token names
 and the lowercase `owner/repo` of each repository served to them, and
-`POST /forge/<read>` takes one of `status`, `pulls`, `files`, `held`, `watch`, `view`, or `writers` (a PR's
-writers, which only Kixel Quest answers) and
+`POST /forge/<read>` takes one of `status`, `pulls`, `updated` (a hosted repository's recently updated PRs, which only Kixel Quest answers), `files`, `held`, `watch`, `view`, or `writers` (a PR's writers, which only Kixel Quest answers) and
 answers `{"value", "asOf"}`, the read's value and the time of the newest
 webhook behind it. Kixel Quest and a repository's pinned `quest` may each be
 newer than the other, so a client ignores answer fields it does not know and
@@ -724,7 +723,7 @@ the least, such as no review record counting from a server too old to say
 whether a maintainer attested it; a request with a field the server
 does not know is refused. A 400 with `{"error"}` refuses a bad argument, such as a
 malformed `--since`, which `quest` reports as a usage error. `quest/core` exports each read's types and their parsers;
-`quest/github`'s `GitHubForge` answers the same reads from GitHub, other than `writers`.
+`quest/github`'s `GitHubForge` answers the same reads from GitHub, other than `updated` and `writers`.
 `quest review` posts each run to `POST /reviews` with the same token, its body
 `{"runs", "outcomes"}` as `parseReviews` in `quest/core` reads it.
 
