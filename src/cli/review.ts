@@ -2309,14 +2309,17 @@ export function parseBase(root: string, base: string): { remote: string; branch:
 const execGit = promisify(execFile);
 
 /** `git` without blocking the event loop, for the calls that reach a remote. */
-async function remoteGit(root: string, args: string[]): Promise<string> {
+async function remoteGit(root: string, args: string[], signal?: AbortSignal): Promise<string> {
 	try {
 		const { stdout } = await execGit("git", ["-C", root, ...args], {
 			encoding: "utf8",
 			env: { ...discoveryEnv(), GIT_TERMINAL_PROMPT: "0" },
+			...(signal !== undefined && { signal }),
 		});
 		return stdout.trim();
 	} catch (error) {
+		// An interrupt stops a stalled remote, which reads as the interrupt, not as Git failing.
+		if (signal?.aborted) throw signal.reason;
 		const stderr = String((error as { stderr?: unknown }).stderr ?? "").trim();
 		throw new Error(`git ${args[0]} failed${stderr ? `: ${stderr}` : ""}`);
 	}
@@ -2329,10 +2332,14 @@ async function remoteGit(root: string, args: string[]): Promise<string> {
  * move it before a later read, so the same fetch also writes a ref private to this process and the commit is read
  * from that one.
  */
-export async function fetchBase(root: string, base?: string): Promise<{ ref: string; sha: string }> {
+export async function fetchBase(
+	root: string,
+	base?: string,
+	signal?: AbortSignal,
+): Promise<{ ref: string; sha: string }> {
 	let ref = base;
 	if (ref === undefined) {
-		const line = (await remoteGit(root, ["ls-remote", "--symref", "origin", "HEAD"])).split("\n")[0] ?? "";
+		const line = (await remoteGit(root, ["ls-remote", "--symref", "origin", "HEAD"], signal)).split("\n")[0] ?? "";
 		const match = /^ref: refs\/heads\/(\S+)\tHEAD$/.exec(line);
 		if (!match) throw new Error("could not read origin's default branch; pass --base");
 		ref = `origin/${match[1]}`;
@@ -2341,14 +2348,18 @@ export async function fetchBase(root: string, base?: string): Promise<{ ref: str
 	const pinned = `refs/quest/base/${process.pid}`;
 	// A fetch that fails on the tracking ref can still have written the private one, so cleanup covers the fetch.
 	try {
-		await remoteGit(root, [
-			"fetch",
-			"--quiet",
-			"--no-tags",
-			remote,
-			`+refs/heads/${branch}:refs/remotes/${remote}/${branch}`,
-			`+refs/heads/${branch}:${pinned}`,
-		]);
+		await remoteGit(
+			root,
+			[
+				"fetch",
+				"--quiet",
+				"--no-tags",
+				remote,
+				`+refs/heads/${branch}:refs/remotes/${remote}/${branch}`,
+				`+refs/heads/${branch}:${pinned}`,
+			],
+			signal,
+		);
 		return { ref, sha: git(root, ["rev-parse", "--verify", `${pinned}^{commit}`]) };
 	} finally {
 		git(root, ["update-ref", "-d", pinned]);

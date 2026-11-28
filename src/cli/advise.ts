@@ -311,7 +311,9 @@ export async function advise(options: AdviseOptions, deps: AdviseDependencies): 
 	requireAttrSource();
 	const root = git(options.root, ["rev-parse", "--show-toplevel"]);
 	const common = git(root, ["rev-parse", "--path-format=absolute", "--git-common-dir"]);
-	const base = await fetchBase(root, options.base);
+	// An interrupt stops a stalled fetch too, before the lock or any lookup.
+	const base = await fetchBase(root, options.base, deps.signal);
+	deps.signal?.throwIfAborted();
 	const branch = sessionBranch(root, options.branch, parseBase(root, base.ref).branch);
 	const path = adviseFile(common, branch);
 	// One call at a time per branch, so two sessions cannot both pass the cap and pay for a turn. An OS lock, which the
