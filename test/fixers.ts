@@ -46,20 +46,23 @@ function groups(tracked: string[]): { leader: number; running: boolean }[] {
 		(entry) => entry.pid !== entry.group && leaders.some((leader) => leader.pid === entry.group),
 	);
 	// Once the wrapper returns, the leader only records its status with `mv` and exits, so neither is a leak.
-	const writers = new Set<number>();
+	const running = new Set<number>();
 	if (members.length) {
 		// ps exits 1 when a listed process has gone since, which is no leak either.
-		const listed = spawnSync("ps", ["-ww", "-o", "pid=,args=", "-p", members.map((entry) => entry.pid).join(",")], {
-			encoding: "utf8",
-		});
+		const listed = spawnSync(
+			"ps",
+			["-ww", "-o", "pid=,stat=,args=", "-p", members.map((entry) => entry.pid).join(",")],
+			{ encoding: "utf8" },
+		);
 		for (const line of listed.stdout.split("\n")) {
-			const match = /^\s*(\d+)\s+(.*)$/.exec(line);
-			if (match && /^mv (.+\.exit)\.new \1$/.test(match[2])) writers.add(Number(match[1]));
+			const match = /^\s*(\d+)\s+(\S+)\s+(.*)$/.exec(line);
+			if (match && !match[2].startsWith("Z") && !/^mv (.+\.exit)\.new \1$/.test(match[3]))
+				running.add(Number(match[1]));
 		}
 	}
 	return leaders.map((leader) => ({
 		leader: leader.pid,
-		running: members.some((entry) => entry.group === leader.pid && !writers.has(entry.pid)),
+		running: members.some((entry) => entry.group === leader.pid && running.has(entry.pid)),
 	}));
 }
 
