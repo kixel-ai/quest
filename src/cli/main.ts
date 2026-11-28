@@ -92,6 +92,8 @@ import {
 	WRITERS,
 	questWriters,
 	writerAt,
+	ADVISORS,
+	type AskHarness,
 } from "./models";
 import { canonicalModel } from "./models-record";
 import {
@@ -99,12 +101,14 @@ import {
 	ReviewOutageError,
 	type Started,
 	ReviewerUnavailableError,
+	UnansweredError,
 	ask,
 	review,
 	nextStep,
 	roundLines,
 } from "./review";
-import { type Recorded, pullModels, recordRounds, requirePosting } from "./review-record";
+import { type Recorded, pullBody, pullModels, recordRounds, requirePosting } from "./review-record";
+import { AdviseCapError, advise, adviceLines, unavailable } from "./advise";
 import {
 	BASH_MAX_TIMEOUT_MS,
 	CLAUDE_HOOKS,
@@ -176,12 +180,28 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 			warn(line);
 		},
 	});
-	const claimDependencies = (): ClaimDependencies => ({
-		github: () => gitHubDependencies(warn),
-		forge: (repository) => forgeFor(repository, forgeDependencies()),
+	/** `deps` with its waits and requests ended by `signal`, so an interrupt stops a lookup backing off at once. */
+	const cancellable = <D extends { fetch: typeof fetch; sleep(milliseconds: number): Promise<unknown> }>(
+		deps: D,
+		signal: AbortSignal | undefined,
+	): D =>
+		signal === undefined
+			? deps
+			: {
+					...deps,
+					fetch: ((input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) =>
+						deps.fetch(input, {
+							...init,
+							signal: init?.signal ? AbortSignal.any([init.signal, signal]) : signal,
+						})) as typeof fetch,
+					sleep: (milliseconds: number) => sleep(milliseconds, undefined, { signal }),
+				};
+	const claimDependencies = (signal?: AbortSignal): ClaimDependencies => ({
+		github: () => cancellable(gitHubDependencies(warn), signal),
+		forge: (repository) => forgeFor(repository, cancellable(forgeDependencies(), signal)),
 		kixel: {
 			hosted: (url) => hostedRepository(kixelUrl(process.env), url),
-			forge: (repository) => hostedForge(repository, forgeDependencies()),
+			forge: (repository) => hostedForge(repository, cancellable(forgeDependencies(), signal)),
 		},
 		warn,
 	});
@@ -888,7 +908,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"reviewer's latest review, marked current or stale against the head; a checkpoint line per bot " +
 				"reviewer that approves or requests changes, its round, and its review, when that review is of the " +
 				"head, while its latest verdict on the head is neither an approval nor a dismissal, and ends its third, sixth, ... round (one commit it reviewed), as " +
-				"where /quest-review stops for the user's decision; a reacted:<content> line per " +
+				"where /quest-review stops, asks quest advise once, and hands the PR back unless the advice applies; a reacted:<content> line per " +
 				"reaction on the PR or a review; a thread line per unresolved review thread, led by its node ID; a " +
 				"signal line per finding or decision that holds the head from landing (see the README); and last, " +
 				"for an open PR, a duplicate line per quest it adds that another open PR also adds, at the same path or under the same title " +
@@ -1470,7 +1490,7 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"The agent CLI runs from its absolute path on PATH, never from the worktree; on native Windows " +
 				"a batch shim such as npm's claude.cmd runs through System32's cmd.exe, and stop ends the agent's process tree at once.\n\n" +
 				"The agent runs in <worktree> with the user's environment minus every CLAUDE* (except CLAUDE_CONFIG_DIR), " +
-				"ANTHROPIC*, CODEX_* (except CODEX_HOME), OP_*, OPENAI_API_KEY, QUEST_GATE_ADMITTED, QUEST_GATE_PRIORITY, " +
+				"ANTHROPIC*, CODEX_* (except CODEX_HOME), ANTIGRAVITY_*, AGY_*, OP_*, OPENAI_API_KEY, QUEST_GATE_ADMITTED, QUEST_GATE_PRIORITY, " +
 				"and MBX_SCHEDULER_PRIORITY when QUEST_GATE_PRIORITY=1, so it uses the CLI's stored login rather than the coordinating session's. " +
 				"--advisor turns on Claude Code's advisor tool with that model, setting CLAUDE_CODE_ENABLE_EXPERIMENTAL_ADVISOR_TOOL=1, " +
 				"without which Claude Code drops the tool silently on an account its rollout has not reached; it is refused for Codex.\n\n" +
@@ -2065,7 +2085,9 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"its one-sentence rationale, a recommendation line with the approach the reviewer would build instead when it recommends one, the finding count, each finding by its number, a notes line with the count and each note, then the last round's findings with " +
 				"their numbers and dispositions; then the `record` line below and a last `next` line naming the author's next step: " +
 				"`next decide` when a reviewer's third or later round still reports findings, to stop until the user picks " +
-				"fixing them as recommended, accepting them, or dropping the PR, `next respond` to fix or refute the findings, or `next done`, and for --accept `next done` or `next stop`. A reply without a valid score " +
+				"fixing them as recommended, accepting them, or dropping the PR, unless quest advise, which the author runs " +
+				"once first, prints `next apply`, which it follows with a `Design change:` PR comment and a quest review --new " +
+				"round, `next respond` to fix or refute the findings, or `next done`, and for --accept `next done` or `next stop`. A reply without a valid score " +
 				"fails as any malformed reply does. --json prints " +
 				"one object: `rounds`, one per reviewer, `tallies`, every reviewer's findings across the branch's rounds, `risk`, the head's tier with its classification, `skipped`, each reviewer passed over with its reason, `accepted`, the maintainer's reason under --accept or null, `record`, and `next`.\n\n" +
 				"When quest runs from the source of the checkout it judges (bun src/cli/bin.ts, or a build there), the round still runs but posts nothing and sets no status: it prints `record skipped: ...` " +
@@ -2281,6 +2303,120 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 						return reviewFailure(error);
 					},
 				);
+			},
+		);
+
+	const advisorList = ADVISORS.map((entry) => `${entry.harness} ${entry.model} ${entry.effort}`).join(", then ");
+	program
+		.command("advise")
+		.summary("Ask a stronger model, read-only, for a fresh approach when stuck on a branch")
+		.description(
+			"Ask a stronger model for a fresh approach to the checkout's committed branch, for an agent that is stuck, " +
+				"such as a review that keeps raising findings or an implementation loop that does not converge; not for " +
+				"routine work or a broken environment. The question says what the agent tried and where it is stuck; - " +
+				"reads it from stdin. The advisor also gets the quest file the branch names, the open PR's body, the review " +
+				"rounds saved for the branch, and the base's agent instructions in place of the checkout's, and is asked " +
+				"to compare two or three approaches, such as patching, redesigning, or dropping the change, and recommend " +
+				"one, with a verdict: revise the PR, however far, accept the review's open findings, or drop the PR. " +
+				"--limit passes an explicit limit the caller's request states, such as fix the packaging only, and the " +
+				"advisor says whether its recommendation goes past it. The output ends with a `next` line: `next apply` " +
+				"for a revision within the limit, which a caller whose task lets it edit and push the PR applies, posting a " +
+				"`Design change:` PR comment and reviewing it with quest review --new; else `next decide`, handing the PR " +
+				"back for the maintainer's pick, for advice to drop the PR, advice past the limit, or advice to accept the " +
+				"findings, which quest review --accept would still record as the maintainer's.\n\n" +
+				`The first advisor that can run answers: ${advisorList}. One that is not installed, logged out, at its ` +
+				"usage limit, or cannot be sandboxed on this host passes the question on, as does one whose reply does " +
+				"not fit the schema. --harness asks only that advisor, at its listed model and effort unless --model or " +
+				"--effort replaces them. Each runs read-only as `quest review` runs its reviewers: Claude Code and Codex " +
+				"in the checkout with no write tool and no settings or project config, and agy with no shell, reading " +
+				"an export of the head and the change's diff from a private directory outside any repository, past deny " +
+				"rules on commands, writes, web requests, MCP calls, and reads outside that directory. agy compares its " +
+				"rules case-sensitively, so a host whose path to that directory matches names case-insensitively, as " +
+				"macOS's default volume, passes it over. It runs agy on the user's own Antigravity login with no " +
+				"ANTIGRAVITY_* or AGY_* variable.\n\n" +
+				"Each PR gets one answered call, as does each line of history on a branch with no PR, and one call runs on a branch at a time: a second refuses before any advisor runs, naming the first's time " +
+				"and model, unless --force. Every call is kept under the clone's common Git directory in quest/advise/, " +
+				"with each session it started and, for agy, whose transcripts token-max cannot read, the tokens it " +
+				"reported, priced at the model's API list rate, or marked incomplete where no rate is known. Each " +
+				"session is queued for Kixel Quest with role advising, and `quest usage` counts it so.\n\n" +
+				"Exits 0 with the advice, 1 when the branch was already advised or on another failure, 2 on a usage " +
+				"error, and 3 when no advisor could run.",
+		)
+		.argument("<question...>", "What you tried and where you are stuck; - reads it from stdin")
+		.option("--base <remote/branch>", "Base branch the change is against (default: origin's default branch)")
+		.option(
+			"--branch <name>",
+			"Branch whose quest, PR, and saved rounds the checkout's HEAD stands for, instead of the checked-out one or its upstream",
+		)
+		.option("--force", "Ask again on a branch that was already advised")
+		.option("--limit <text>", "An explicit limit the request you work on states, such as fix the packaging only")
+		.addOption(new Option("--harness <name>", "The only advisor to ask").choices(ADVISORS.map((e) => e.harness)))
+		.option("--model <model>", "Model --harness's advisor runs instead")
+		.option("--effort <level>", "Reasoning effort --harness's advisor runs at instead, never max", effortLevel)
+		.action(
+			(
+				words: string[],
+				options: {
+					base?: string;
+					branch?: string;
+					force?: boolean;
+					harness?: AskHarness;
+					model?: string;
+					effort?: string;
+					limit?: string;
+				},
+			) => {
+				const question = words.length === 1 && words[0] === "-" ? readFileSync(0, "utf8") : words.join(" ");
+				// An interrupt stops the PR lookup and the running advisor, whose CLI it also reaches, and asks no other.
+				const interrupted = new AbortController();
+				const signals = ["SIGINT", "SIGTERM", "SIGHUP"] as const;
+				const stop = () => interrupted.abort(new Error("quest advise was interrupted"));
+				for (const name of signals) process.on(name, stop);
+				const github = claimDependencies(interrupted.signal);
+				pending = advise(
+					{ ...options, root: root(), question },
+					{
+						env: process.env,
+						pull: (dir, base, branch) => pullBody(dir, base, branch, github),
+						signal: interrupted.signal,
+						queue: (session) => {
+							// Only the dashboard loses a session that is not queued, so it never fails the call.
+							try {
+								for (const notice of queue(session, process.env).notices)
+									warn(notice.replace(/^quest: /, ""));
+							} catch (error) {
+								warn(
+									`cannot queue this session's record: ${error instanceof Error ? error.message : String(error)}`,
+								);
+							}
+						},
+					},
+				)
+					.then(
+						(advised) => {
+							for (const line of adviceLines(advised)) print(line);
+							return 0;
+						},
+						(error) => {
+							if (error instanceof AdviseCapError) {
+								out.stderr(`error: ${error.message}\n`);
+								return 1;
+							}
+							if (unavailable(error)) {
+								out.stderr(`error: ${(error as Error).message}\n`);
+								return 3;
+							}
+							// Every advisor ran but none answered usably: a failure, not a usage error.
+							if (error instanceof UnansweredError) {
+								warn(error.message);
+								return 1;
+							}
+							return reviewFailure(error);
+						},
+					)
+					.finally(() => {
+						for (const name of signals) process.off(name, stop);
+					});
 			},
 		);
 

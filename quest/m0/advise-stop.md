@@ -4,7 +4,7 @@
 
 `quest review` prints `next decide` once the branch's third review run with findings is reached, counting every run on the branch across sessions and hosts, and refuses another round past that stop until `quest advise` has run on the branch since the stop. Three runs after the advice's `quest review --new`, a branch still reporting findings stops again, and that second stop hands the PR back to the maintainer. The maintainer's own `--accept` always passes, and an agent's `--accept` passes the stop only once the advisor has run.
 
-Non-goal: the advisor itself, which [advise](/quest/m0/advise.md) builds.
+Non-goal: the advisor itself, `quest advise`, and recording its acceptance, which [advise](/quest/m0/advise.md) plans.
 
 ## Plan
 
@@ -24,5 +24,5 @@ Tests: through that posted-runs read, a two-seat review that changes hosts and h
 
 ## Required
 
-- [Advise](/quest/m0/advise.md) - `quest advise` and its per-branch history
+- [Advise](/quest/m0/advise.md) - records an advisor's acceptance as the advisor's, which an unattested `--accept` after advice to accept needs
 - [Usage reviews](/quest/m0/telemetry/usage-reviews.md) - the client read of a PR's posted review runs across heads, which counts runs made on other hosts

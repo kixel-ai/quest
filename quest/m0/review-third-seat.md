@@ -4,7 +4,7 @@
 
 Add `gemini-4-neon` via `agy` as a third gating reviewer (`seat: "third"`) on
 rungs `5` (`L high`, `XL med`: `Neon medium`) and `6` (`XL high`: `Neon high`)
-of the `(size + risk)` reviewer ladder, reusing [Stuck-agent advisor](/quest/m0/advise.md)'s
+of the `(size + risk)` reviewer ladder, reusing `quest advise`'s
 read-only `agy` runner and failing loud as an outage when `agy` cannot run.
 
 Non-goals: using `agy` or Neon for writers, risk classification, or rungs
@@ -37,8 +37,10 @@ Recommended, for the implementer to confirm:
 - `src/cli/review.ts` & `src/cli/agent.ts`:
   - Reuse the read-only `agy` turn runner, deny rules, limit parsing,
     case-insensitive volume refusal, and persisted API-list pricing restored by
-    [Stuck-agent advisor](/quest/m0/advise.md) (instead of duplicating harness
-    plumbing).
+    for `quest advise` (instead of duplicating harness plumbing); its `agy`
+    reviewer refuses `review` and `resume` turns today, so this adds them,
+    with `quest review`'s queueing of `agy` sessions' tokens as `quest advise`
+    queues them.
   - Generalize `SeatId` / `Session` / `Tally` / `Round` from `second?: true` to
     `seat: "pick" | "second" | "third"` (or keep `pick` default + explicit seat
     tag) so findings number cleanly across all 3 seats, all 3 seats run in
@@ -56,11 +58,6 @@ and settlement across 3 seats, outage failure when `agy` is unavailable or on a
 case-insensitive filesystem, `--accept` requiring all 3 seats on rungs `5`–`6`,
 `parseReviews` accepting `seat: "third"`, and `just review-sandbox` covering
 `agy`'s read-only review invocation.
-
-## Required
-
-- [Stuck-agent advisor](/quest/m0/advise.md) - restores the read-only `agy`
-  runner, deny rules, limit parsing, and API-list pricing
 
 ## Related
 

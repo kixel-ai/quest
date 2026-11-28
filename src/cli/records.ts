@@ -17,6 +17,7 @@ const SKILL_ROLES: Record<string, Role> = {
 	"quest-start": "implementing",
 	"quest-iterate": "iterating",
 	"quest-review": "reviewing",
+	"quest-advise": "advising",
 	"quest-merge": "merging",
 	"quest-complete": "merging",
 	"quest-run": "coordinating",

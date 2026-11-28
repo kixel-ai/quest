@@ -1045,6 +1045,8 @@ describe("the review record", () => {
 		for (const [outcome, review] of [
 			["passed", "local-review"],
 			["findings accepted", "local-review"],
+			// An advisor's acceptance passes a head as the maintainer's does.
+			["findings accepted by advisor", "local-review"],
 			["passed with no local reviewer", "no-local-review"],
 		] as const)
 			expect(

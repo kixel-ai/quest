@@ -39,8 +39,9 @@ A finding the reviewer keeps against such a refutation is a decision for the use
 Write each round's `--responses` file in the checkout's `.tmp/`.
 
 At a `next decide` line, which prints once a reviewer's third round still reports findings, stop: fix nothing more, change no approach, and run no further round. `quest status <pr>` prints a `checkpoint` line when the third round of an online reviewer the base requires does the same.
-Report what remains, a line per finding with the fix its reviewer recommends, and recommend one of: fix them as recommended, accept them, or drop the PR. The user decides; an agent that cannot prompt hands the PR back with that choice as a `## Waiting` decision.
-Take up a reviewer's recommended approach only on the user's pick. Record it in a PR comment that starts with `Design change:`, and review it with `quest review --new`, which starts new sessions and keeps what the branch already settled.
+Then run `/quest-advise` once and follow it: advice it applies continues the review with `quest review --new`, and only what it hands back goes to the user. You may run it earlier too, when rounds keep raising findings on the same code.
+For what it hands back, report what remains, a line per finding with the fix its reviewer recommends, and the choices with the advisor's recommendation: its approaches, fixing them as recommended, accepting them, or dropping the PR. The user decides; an agent that cannot prompt hands the PR back with that choice as a `## Waiting` decision.
+Take up a reviewer's recommended approach only on the advisor's `next apply` or the user's pick. Record it in a PR comment that starts with `Design change:`, and review it with `quest review --new`, which starts new sessions and keeps what the branch already settled.
 
 On a one-seat rung, `quest review` passes a round from a reviewer that is out of quota, logged out, or not installed to the rung's next eligible one, and records the skip; on a two-seat rung, both seats are required, so either one being unavailable fails as an outage.
 Once it exits 3, a required reviewer or every eligible reviewer is out, an outage rather than a skip: stop reviewing, keep the PR a draft, hand it back, and report the outage.

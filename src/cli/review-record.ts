@@ -328,6 +328,17 @@ export async function pullModels(
 	return recorded(await pull.body());
 }
 
+/** The URL and body of `branch`'s open PR into `baseRef`, or null when it has none. */
+export async function pullBody(
+	root: string,
+	baseRef: string,
+	branch: string,
+	deps: ClaimDependencies,
+): Promise<{ url: string; body: string } | null> {
+	const pull = await openPull(root, baseRef, branch, deps);
+	return "skipped" in pull ? null : { url: pull.url, body: await pull.body() };
+}
+
 /**
  * Fail unless this host can post a run on `branch`'s open PR into `baseRef` before any reviewer spends a round: it must
  * be signed in to Kixel Quest, and Kixel Quest must serve the PR's repository, since it stores no post for one it does

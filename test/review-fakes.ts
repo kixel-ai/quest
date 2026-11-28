@@ -1,6 +1,16 @@
 // The fake Codex and Claude Code CLIs and the fixture clone the review tests run them in.
 import { execFileSync } from "node:child_process";
-import { chmodSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import {
+	chmodSync,
+	existsSync,
+	mkdirSync,
+	readFileSync,
+	readdirSync,
+	realpathSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test, vi } from "vitest";
 
@@ -14,6 +24,12 @@ export const KIXEL = "https://kixel.example";
 
 /** The fake CLIs are shebang scripts found on a POSIX PATH, which Windows cannot run. */
 export const fakes = test.skipIf(process.platform === "win32");
+
+/** Whether the temporary directory matches names case-insensitively, as macOS's default volume does. */
+export const caseInsensitive = existsSync(realpathSync(tmpdir()).toUpperCase());
+
+/** A fake-CLI test that runs agy, which quest refuses where names match case-insensitively. */
+export const agyFakes = test.skipIf(process.platform === "win32" || caseInsensitive);
 
 export const FINDING = {
 	file: "src/lib.ts",
@@ -47,8 +63,11 @@ try {
 } catch {}
 `;
 
-/** The classifier's reply: FAKE_RISK, or low (a one-seat rung on DEFAULT_SIZE M). */
-const RISK_REPLY = `JSON.stringify(process.env.FAKE_RISK ? JSON.parse(process.env.FAKE_RISK) : { tier: "low", reason: "It changes what the library returns." })`;
+/**
+ * A one-turn question's reply: FAKE_ASK, as an advisor's, else the classifier's, FAKE_RISK, or low (a one-seat rung
+ * on DEFAULT_SIZE M).
+ */
+const RISK_REPLY = `(process.env.FAKE_ASK ?? JSON.stringify(process.env.FAKE_RISK ? JSON.parse(process.env.FAKE_RISK) : { tier: "low", reason: "It changes what the library returns." }))`;
 
 /**
  * Records one call as its own file in FAKE_LOG, a directory, renamed into place
@@ -257,6 +276,59 @@ if (argv[1] === "review") {
 	event({ type: "turn.completed", usage: { input_tokens: 100, cached_input_tokens: 80, output_tokens: 7 } });
 }
 `,
+	// Antigravity's print mode, which quest runs only for one-turn questions: the prompt is one stream-json line on
+	// stdin, and the turn's directory is logged as it stood, since quest removes it after the turn.
+	agy: `
+const fs = require("node:fs");
+const path = require("node:path");${LOG}
+const argv = process.argv.slice(2);
+const raw = fs.readFileSync(0, "utf8");
+const stdin = raw ? JSON.parse(raw).message.content : "";
+const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => /^(CLAUDE|CODEX|ANTHROPIC|ANTIGRAVITY|AGY|FAKE_HOST|PATH$)/.test(k)));
+const walk = (dir) => fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) =>
+	entry.isDirectory() ? walk(path.join(dir, entry.name)).map((name) => entry.name + "/" + name) : [entry.name]);
+const workspace = argv[0] === "models" ? null : Object.fromEntries(walk("..").map((name) => [name, fs.readFileSync(path.join("..", name), "utf8")]));
+logged({ argv, stdin, env, cwd: process.cwd(), workspace });
+const model = argv.includes("--model") ? argv[argv.indexOf("--model") + 1] : undefined;
+const only = process.env.FAKE_FAILS?.split(",");
+const fake = (name) => (!only || only.includes("agy") || only.includes(model) ? process.env[name] : undefined);
+if (argv[0] === "models") {
+	if (fake("FAKE_OFFLINE")) {
+		console.log("Error: dial tcp: connection refused");
+		process.exit(1);
+	}
+	if (fake("FAKE_LOGGED_OUT")) {
+		console.log("Error: Please sign in to view available models. Launch the CLI without arguments to sign in.");
+		process.exit(1);
+	}
+	console.log("gemini-4-neon-high\tGemini 4 Neon (High)");
+	process.exit(0);
+}
+const at = (flag) => (argv.includes(flag) ? argv[argv.indexOf(flag) + 1] : undefined);
+const conversation = "conversation-ask";
+const event = (value) => console.log(JSON.stringify(value));
+const result = (fields, ...steps) => {
+	for (const [index, step] of steps.entries())
+		event({ event: "step_update", step_update: { conversation_id: conversation, step_index: index + 1, state: "DONE", usage: step } });
+	event({ event: "result", result: { conversation_id: conversation, status: "SUCCESS", response: "", ...fields } });
+};
+const fail = (error) => {
+	result({ status: "ERROR", error });
+	console.error("error: " + error);
+	process.exit(1);
+};
+event({ event: "init", conversation_id: conversation });
+if (fake("FAKE_REJECTED")) fail("authentication failed or timed out");
+if (fake("FAKE_LIMITED")) fail("Error 429, Message: Quota exhausted., Status: RESOURCE_EXHAUSTED, Details: [map[metadata:map[quotaResetTimeStamp:2030-03-17T17:46:40Z] reason:QUOTA_EXHAUSTED]]");
+if (!at("--json-schema")) fail("quest runs agy only for questions");
+// A turn cut off after one model step, as by a dropped connection.
+if (fake("FAKE_CUT")) {
+	event({ event: "step_update", step_update: { conversation_id: conversation, step_index: 1, state: "DONE", usage: { input_tokens: 300, output_tokens: 20, cache_read_tokens: 0 } } });
+	process.exit(1);
+}
+const reply = ${RISK_REPLY};
+result({ response: reply + "\\n", structured_output: JSON.parse(reply) }, { input_tokens: 600, output_tokens: 90, cache_read_tokens: 400 });
+`,
 };
 
 export const git = (dir: string, ...args: string[]) =>
@@ -283,6 +355,8 @@ export interface Call {
 	cwd: string;
 	/** The files of the directory a Claude Code turn was let read beside the checkout, as they stood. */
 	readable?: Record<string, string> | undefined;
+	/** The files of an Antigravity turn's directory, beside and in its working directory, as it ran. */
+	workspace?: Record<string, string> | null;
 }
 
 /** Credentials and routes the running session may hold, cleared so each test sets its own. */
@@ -359,6 +433,10 @@ export function setup(host: "CLAUDECODE" | "CODEX_THREAD_ID" | null = "CLAUDECOD
 		"FAKE_DISPOSITION",
 		"FAKE_RISK",
 		"FAKE_CLASSIFY",
+		"FAKE_ASK",
+		"FAKE_OFFLINE",
+		"FAKE_CUT",
+		"ANTIGRAVITY_CONVERSATION_ID",
 	]) {
 		vi.stubEnv(name, undefined);
 	}

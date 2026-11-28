@@ -14,9 +14,16 @@ export type Severity = (typeof SEVERITIES)[number];
 
 /**
  * How a run left its head, as its `quest review` status attests it: every gating reviewer passed it, none ran since it
- * is low risk, the maintainer accepted the open findings, or findings are still open, which reviews nothing.
+ * is low risk, the maintainer or the advisor accepted the open findings, or findings are still open, which reviews
+ * nothing.
  */
-export const RUN_OUTCOMES = ["passed", "passed with no local reviewer", "findings accepted", "findings open"] as const;
+export const RUN_OUTCOMES = [
+	"passed",
+	"passed with no local reviewer",
+	"findings accepted",
+	"findings accepted by advisor",
+	"findings open",
+] as const;
 export type RunOutcome = (typeof RUN_OUTCOMES)[number];
 
 /** How a posted finding settled: the head fixed it, the author refuted it, or it was left to later work. */

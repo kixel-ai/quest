@@ -13,6 +13,7 @@ export const ROLES = [
 	"iterating",
 	"reviewing",
 	"classifying",
+	"advising",
 	"merging",
 	"coordinating",
 ] as const;
@@ -141,7 +142,7 @@ export interface TimeSplit {
 
 /** One agent session, as `quest` sends it. */
 export interface SessionRecord {
-	/** `claude` or `codex`. */
+	/** `claude`, `codex`, or `agy`, which only `quest advise` runs. */
 	harness: string;
 	/**
 	 * The harness's own session ID; a Claude sub-agent's is its agent ID. Null when its transcript names none, which

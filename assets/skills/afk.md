@@ -24,6 +24,7 @@ Take every decision a later PR review can still undo:
 - On a quest or PR this session works on itself, take your recommendation on each decision, list those choices in the PR body for review, and run `/quest-review` when nothing else remains.
 - Tell each agent you dispatch that the user is away, so it does the same.
 - As a coordinator, dispatch `/quest-iterate` on a PR with open decisions, with your recommended answers in its brief.
+- At a review's `next decide` stop, take no recommendation of your own: `/quest-advise` answers it, and what it hands back waits for the user as a blocker.
 
 Unless the mode or argument allows it, defer as blockers what no review can undo and what only the user can do:
 

@@ -179,7 +179,7 @@ three hosts' saved review rounds:
     writes nothing, so L's Fable arm ended; each size reviews on Sol, with
     Opus beside it on a high head and in its place on a medium one when
     Sol cannot run;
-    no list names Fable, Astra, or Neon. On 2026-11-24, Fable xhigh as a
+    no writer or reviewer list names Fable, Astra, or Neon. On 2026-11-24, Fable xhigh as a
     second reviewer took $976 of $1,430 of review spend, at $82 a PR
     against Sol xhigh's $8, for 23 high findings against 44.
   - Amended 2026-11-26 (maintainer, `/quest-plan`): the routine advisor A/B
@@ -192,8 +192,8 @@ three hosts' saved review rounds:
     arm B (`sonnet(high)`) nor legacy `XS`/`S` arm-A controls mix with the new
     trial (whose readout schedule stays separate from the legacy `2026-12-01`
     cohort below).
-    [Stuck-agent advisor](/quest/m0/advise.md) tracks read-only frontier
-    advisor escalations separately under `role: "advising"`.
+    `quest advise` tracks read-only frontier advisor escalations separately
+    under `role: "advising"`.
   - The advisor trial's readout is its own quest,
     [Advisor trial readout](/quest/m0/advisor-readout.md).
   - Cost metric? ✅ Mean spend per merged PR, every session's, plus the

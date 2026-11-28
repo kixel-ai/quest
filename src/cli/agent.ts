@@ -255,13 +255,17 @@ export class AgentInputError extends Error {}
  * A launch from inside a `quest gate` command does not admit the agent's own
  * expensive commands or give them a land check's priority, so the gate's marks
  * are dropped too, with the mbx priority a priority gate sets. Each CLI keeps the
- * user's configuration directory.
+ * user's configuration directory. An Antigravity session hands its commands its
+ * language server's address and token, which would put a launched `agy` in that
+ * session, and `AGY_` variables route `agy` to a gateway or another account.
  */
 const STRIPPED = [
 	/^CLAUDE(?!_CONFIG_DIR$)/,
 	/^ANTHROPIC/,
 	/^CODEX_(?!HOME$)/,
 	/^OPENAI_API_KEY$/,
+	/^ANTIGRAVITY_/,
+	/^AGY_/,
 	/^OP_/,
 	/^QUEST_GATE_(ADMITTED|PRIORITY)$/,
 ];

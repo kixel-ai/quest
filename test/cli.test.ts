@@ -159,7 +159,7 @@ test("guide prints the named sections in the guide's order", () => {
 test("skill rejects an unknown name", () => {
 	const out = run("skill", "nope");
 	expect(out.code).toBe(1);
-	expect(out.stderr).toMatch(/^quest: no skill named nope \(have: afk, import, /);
+	expect(out.stderr).toMatch(/^quest: no skill named nope \(have: advise, afk, import, /);
 });
 
 test("audit lists the pack, and prints a definition with how every run plans the next", () => {

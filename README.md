@@ -627,7 +627,7 @@ comes last, and a missing value prints as `-`:
 | `checks` | `failure` if any check fails, else `pending` if any is pending or a requirement is unreported, else `success`, and `passed=`, `failing=`, `pending=` counts, all from the checks that count; `-` when the head has no checks and the base requires none. |
 | `check` | `failing` or `pending`, `required` or `optional`, the result, details URL, and name. A required check or required workflow nothing reports yet prints as `pending required expected -` with its name, followed by `(from app <id>)` when the requirement names an app, or the workflow's repository and path, as `owner/name:path`. |
 | `review` | `current` or `stale` against the head, state, reviewer, time, and URL of each reviewer's latest review. |
-| `checkpoint` | Each bot reviewer that approves or requests changes and that the base requires, as a `finding` signal's reviewer is, its round, and its review's URL, when that review is of the head and its latest verdict there, ignoring plain comments, is neither an approval nor a dismissal, at the end of its third, sixth, ... round, where [`/quest-review` stops for the user's decision](#review-locally). A round is one commit it reviewed; a dismissed review counts as one that approves or requests changes. Only printed when due. |
+| `checkpoint` | Each bot reviewer that approves or requests changes and that the base requires, as a `finding` signal's reviewer is, its round, and its review's URL, when that review is of the head and its latest verdict there, ignoring plain comments, is neither an approval nor a dismissal, at the end of its third, sixth, ... round, where [`/quest-review` stops](#review-locally), asks [`quest advise`](#ask-for-advice-when-stuck) once, and hands the PR back for the user's decision unless the advice applies. A round is one commit it reviewed; a dismissed review counts as one that approves or requests changes. Only printed when due. |
 | `reacted:<content>` | Actor, time, and the PR or review reacted to, as `quest wait` names reactions. |
 | `thread` | Node ID, `current` or `outdated`, last commenter, latest comment URL, and `path:line` of each unresolved thread. |
 | `signal` | `finding` or `decision`, its URL, who posted it, and its text, for each [signal](#signals-that-hold-a-head) holding the head. |
@@ -2110,7 +2110,10 @@ and their refutations still decide when the loop ends. Later rounds take
 `--responses`, the author's free-text fixes and refutations, which a round that
 reported findings requires. From a reviewer's third round on, a round that
 still reports findings prints `next decide`: the author stops, and the user
-picks fixing them as recommended, accepting them, or dropping the PR. Every
+picks fixing them as recommended, accepting them, or dropping the PR, unless
+the [advisor](#ask-for-advice-when-stuck), which the author runs once first,
+says to apply its advice: the author then revises the PR, posts a
+`Design change:` PR comment, and reviews it with `quest review --new`. Every
 prompt lists the findings the branch settled without a fix, those refuted and
 those the maintainer accepted, with their reasons, so no reviewer reports them
 again; `--new` keeps that list. A later round resumes the session and checks only
@@ -2358,6 +2361,75 @@ reviewer's round, or when no finding is open, and it takes no option that
 would run or reset a round. Its status goes first, so a token that cannot
 push records nothing, printing `next stop` and exiting 1.
 
+## Ask for advice when stuck
+
+`quest advise` asks a stronger model, read-only, for a fresh approach when an
+agent is stuck on a branch, such as a review that keeps raising findings or an
+implementation loop that does not converge. It is not for routine work or a
+broken environment.
+
+```console
+$ quest advise "Three rounds keep flagging the cache invalidation; I patched each case and the reviewer finds another."
+advisor agy gemini-4-neon high
+verdict revise
+recommendation Key the cache by content hash
+...
+next apply: when your task lets you edit and push the PR, take the recommended approach's steps, ...
+```
+
+The question says what you tried and where you are stuck; `-` reads it from
+stdin. The advisor also reads the change, the quest file its branch names, the
+open PR's body, the review rounds saved for the branch, and the base's
+`AGENTS.md` and `REVIEW.md`. It compares two or three approaches, such as
+patching, redesigning, or dropping the change, and recommends one with a
+verdict: `revise` the PR, however far, past its quest's settled scope or
+architecture included; `accept` the review's open findings; or `drop` the PR.
+`--limit` passes an explicit limit the request states, such as "fix the
+packaging only", and the advisor says whether its recommendation goes past it.
+
+The last line says what to do. `next apply`, for a revision within the limit,
+has an agent whose task lets it edit and push the PR take the steps, post a
+`Design change:` PR comment, and review it with `quest review --new`.
+`next decide` hands the PR back for the maintainer's pick: for advice to drop
+the PR, which only the maintainer closes, advice past the limit, and advice to
+accept the findings, since `quest review --accept` would record that
+acceptance as the maintainer's.
+
+The first advisor that can run answers, past any that is not installed, logged
+out, at its usage limit, or unable to run sandboxed on this host:
+
+| Rank | Advisor |
+|---|---|
+| 1 | Antigravity (`agy`) `gemini-4-neon` high |
+| 2 | Codex `gpt-6.2-astra` high |
+| 3 | Claude Code `claude-fable-5-2` medium |
+
+`agy` runs only here: writes stay on Claude Code, and reviews on Codex and
+Claude Code. Claude Code and Codex run as `quest review` runs its reviewers.
+`agy` runs on your own Antigravity login with no `ANTIGRAVITY_*` or `AGY_*`
+variable, as an agent whose only tools are reading a file and replying, from a
+private directory outside any repository holding an export of the head and the
+change's diff, with deny rules on commands, writes, web requests, MCP calls,
+and reads outside that directory. It compares those rules case-sensitively, so
+on a case-insensitive volume, such as macOS's default, it is passed over.
+`--harness` asks only one advisor, and `--model` and `--effort` replace its
+listed ones.
+
+Each PR gets one answered call, as does each line of history on a branch with
+no PR, so a later PR reusing the branch's name starts afresh and a rebased one
+does not; a second refuses before any advisor runs unless `--force`, and any
+call refuses while another runs on the branch, which holds an OS lock (`flock`
+from util-linux on Linux, the base system's `lockf` on macOS, either of which
+must be on `PATH`) that the kernel drops however the call ends. Ctrl-C
+stops the call at once, even mid PR lookup, and asks no further advisor. An advisor whose turn fails passes the question
+on, and Codex and Claude read the change from diff files written as a review's
+are. Calls are kept under the clone's common Git directory in
+`quest/advise/`, and each session is queued for Kixel Quest with the role
+`advising`, which `quest usage` reports too. `token-max` reads no `agy`
+transcript, so an `agy` session's spend is the tokens it reported, priced at
+the model's API list rate, or marked incomplete where quest knows none. It
+exits 3 when no advisor could run.
+
 ## Audit cost and accuracy
 
 `quest usage` reports `origin`'s PRs updated since `--since` (a local
@@ -2522,11 +2594,11 @@ latest upload, since one sender sends a session's uploads in order. The type is
 - `role` is classifying when `quest review` ran it as the
   [risk classifier](#risk-tiers) or an earlier PR's `## Review` record names it
   so, reviewing when it ran it as a reviewer, such a record names it so, or
-  Codex marks it a review, else the one the first quest skill it ran gives: planning
+  Codex marks it a review, advising when `quest advise` ran it, else the one the first quest skill it ran gives: planning
   (`/quest-plan`, `/quest-recurring`, `/quest-import`,
   `/quest-grill`, `/quest-delete`, `/quest-export`), implementing
   (`/quest-start`), iterating (`/quest-iterate`), reviewing (`/quest-review`),
-  merging (`/quest-merge`, `/quest-complete`), or coordinating (`/quest-run`,
+  advising (`/quest-advise`), merging (`/quest-merge`, `/quest-complete`), or coordinating (`/quest-run`,
   `/quest-spawn`). Without one, a sub-agent takes its parent's role unless that
   is coordinating; a session on its sub-agents' PRs only is coordinating; one
   on a `quest-plan/`, `quest-recurring/`, or `quest-import/`
@@ -2618,6 +2690,11 @@ sender takes over what it infers, so a session from the runner's review checkout
 fork's included, as is a sub-agent it starts anywhere in that checkout, and a classifier whose reply was unusable is still
 counted as one. A round that recorded on no PR is sent on a PR its branch heads in the checkout's own repository, never
 on a stranger fork's of the same name.
+
+`quest advise` queues each session it starts the same way, with the role advising, answered or not. `token-max` reads no
+`agy` transcript, so an `agy` session's queue entry carries the tokens its turn reported, and the sender prices them at the
+model's API list rate, marking the cost incomplete where quest knows none; it keeps such a session, which has no
+transcript to prune, until a PR opens on its branch.
 
 Kixel Quest refuses a whole upload naming a repository it does not index or
 the sender cannot read, so the sender asks `GET /forge` which repositories it
@@ -3037,6 +3114,7 @@ arrives with the guide sections and other skills it builds on, in one call:
 | `quest-start` | Claim a ready quest, complete it, and open a PR. |
 | `quest-iterate` | Iterate on an open PR to settle its open decisions, fix CI and review findings, and push. |
 | `quest-review` | Review a PR's branch locally with a model no weaker than its latest writer, then mark it ready for review. |
+| `quest-advise` | [Ask a stronger model from another vendor for a fresh approach](#ask-for-advice-when-stuck) when a branch is stuck; at a review's `next decide` stop, its advice stands in for your pick unless it hands the PR back. |
 | `quest-merge` | Queue a PR to land, running `quest-iterate` first when it needs work. |
 | `quest-run` | Orchestrate a project from one session: start ready quests, take PRs to merge, and settle what quests and drafts wait on you, in a loop until only your decisions remain, then plan the follow-ups no quest owns yet. Pass a filter such as `prs` to start no quests. |
 | `quest-afk` | Keep a session such as `quest-run` going while you are away: it acts on its recommendations, defers merges, and walks you through the rest when you return. `afk merge` also merges low-risk PRs it recommends, implements the follow-ups it recommends doing now in the PRs that add them, and once idle merges a medium-risk PR that unblocks a quest it would start; and `afk soon` asks pending questions in one batch before you leave. |

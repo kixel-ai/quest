@@ -15,7 +15,7 @@ import {
 	type TimeSplit,
 } from "../core";
 import { eachLine, parseLine } from "./messages";
-import { type Model, SPLITTERS, SPLIT_CHECKERS } from "./models";
+import { type Asked, type Model, SPLITTERS, SPLIT_CHECKERS } from "./models";
 import {
 	type Answer,
 	type Question,
@@ -464,7 +464,7 @@ export interface SplitDependencies {
 }
 
 /** Add each turn that replied, unusable ones included, to `usage` by model. */
-function addUsage(usage: SplitUsage[], spent: Answer<unknown>["spent"]): void {
+function addUsage(usage: SplitUsage[], spent: Answer<unknown, Asked>["spent"]): void {
 	for (const turn of spent) {
 		const { harness, model, effort } = turn.entry;
 		let row = usage.find((u) => u.harness === harness && u.model === model && u.effort === effort);
@@ -479,7 +479,7 @@ function addUsage(usage: SplitUsage[], spent: Answer<unknown>["spent"]): void {
 }
 
 /** The turns a question no model answered usably still spent. */
-const spentBy = (error: unknown): Answer<unknown>["spent"] =>
+const spentBy = (error: unknown): Answer<unknown, Asked>["spent"] =>
 	error instanceof UnansweredError || error instanceof UnrunError ? error.spent : [];
 
 /**

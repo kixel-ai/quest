@@ -21,7 +21,3 @@ Agent's choices, for the implementer to revisit:
 - Judge with Opus high, which reads the advice, the later rounds, the merged diff, and any later fix naming the PR: would it have saved rounds (it names the direction that eventually converged), prevented an escape (it names the cause of a later fix), changed nothing, or misled (it points away from what merged, with no later fix showing the merged approach wrong). Check 20 judgments by hand and report the agreement.
 - Neon's list rate is $3 per million input tokens, $15 per million output, and $0.15 per million cached; token-max reads no `agy` transcripts, so price from the token counts advise records.
 - Record the readout in this quest's PR and carry its numbers into the [trigger A/B](/quest/m1/advise-trigger.md)'s Plan.
-
-## Required
-
-- [Advise](/quest/m0/advise.md) - `quest advise`, which the replay runs
