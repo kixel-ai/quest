@@ -1395,7 +1395,10 @@ Other platforms use the host-wide 1-minute load average.
 On Linux, available memory includes reclaimable host and cgroup file cache and is bounded
 by the remaining budget of each enclosing memory cgroup and of the user manager's
 `background.slice`, which gated commands run in, so a slice at its `memory.high` or
-`memory.max` queues the next command, and a slice's cap below RAM sizes the budget. Load and memory count
+`memory.max` queues the next command, and a slice's cap below RAM sizes the budget.
+The slice has no cgroup until a command first runs in it, as after login; the
+gate then reads its cap from `systemctl --user show`, so the first build is
+bounded too, and fails on an answer it cannot read. Load and memory count
 work from every session and user. Windows reports no load average and macOS
 counts reclaimable cache as used memory, so those signals are skipped there.
 

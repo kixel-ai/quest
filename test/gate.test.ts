@@ -8,6 +8,7 @@ import {
 	readdirSync,
 	readFileSync,
 	renameSync,
+	rmSync,
 	statSync,
 	symlinkSync,
 	utimesSync,
@@ -70,6 +71,15 @@ vi.mock("node:fs", async (importOriginal) => {
 });
 
 const GiB = 2 ** 30;
+
+/** `systemctl --user show background.slice -p MemoryMax,MemoryHigh`'s output for these values. */
+const shown = (max: string | number = "infinity", high: string | number = "infinity") =>
+	`MemoryMax=${max}\nMemoryHigh=${high}\n`;
+
+/** A systemd probe for a test whose slice exists, so its files, not systemd, must answer. */
+const noSlice = () => {
+	throw new Error("asked systemd for a slice with a cgroup");
+};
 
 /** How this process's gate records itself in an admission. */
 const me = { pid: process.pid, start: processStart(process.pid) };
@@ -847,17 +857,17 @@ test.each(["v1", "v2"])("Linux memory counts reclaimable cache and bounds %s con
 	const cache = unified ? "inactive_file" : "total_inactive_file";
 	writeFileSync(join(child, limit), unified ? "max" : String(128 * GiB));
 	writeFileSync(join(child, usage), String(GiB));
-	expect(linuxMemory(proc, cgroups)).toEqual({ total: 64 * GiB, available: 24 * GiB });
+	expect(linuxMemory({ proc, cgroups })).toEqual({ total: 64 * GiB, available: 24 * GiB });
 	// The child is unlimited, but shares an almost-full 8 GiB parent budget.
 	writeFileSync(join(container, limit), String(8 * GiB));
 	writeFileSync(join(container, usage), String(8 * GiB - GiB / 4));
-	expect(linuxMemory(proc, cgroups)).toEqual({ total: 8 * GiB, available: GiB / 4 });
+	expect(linuxMemory({ proc, cgroups })).toEqual({ total: 8 * GiB, available: GiB / 4 });
 	// Inactive file cache inside the budget is reclaimable, so it counts as available.
 	writeFileSync(join(container, "memory.stat"), `active_file 1\n${cache} ${6 * GiB}\nanon 2\n`);
-	expect(linuxMemory(proc, cgroups)).toEqual({ total: 8 * GiB, available: 6 * GiB + GiB / 4 });
+	expect(linuxMemory({ proc, cgroups })).toEqual({ total: 8 * GiB, available: 6 * GiB + GiB / 4 });
 	writeFileSync(join(container, "memory.stat"), `${cache} 0\n`);
 	writeFileSync(join(container, usage), String(9 * GiB));
-	expect(linuxMemory(proc, cgroups).available).toBe(0);
+	expect(linuxMemory({ proc, cgroups }).available).toBe(0);
 });
 
 test("Linux memory counts the background slice's headroom wherever the caller runs", () => {
@@ -874,23 +884,66 @@ test("Linux memory counts the background slice's headroom wherever the caller ru
 	writeFileSync(join(slice, "memory.high"), "max");
 	writeFileSync(join(slice, "memory.current"), String(30 * GiB));
 	// An uncapped slice leaves the host's answer.
-	expect(linuxMemory(proc, cgroups, 1000)).toEqual({ total: 64 * GiB, available: 24 * GiB });
+	expect(linuxMemory({ proc, cgroups, uid: 1000, show: noSlice })).toEqual({ total: 64 * GiB, available: 24 * GiB });
 	// One at its cap queues the next command while the host has room, and bounds its budget.
 	writeFileSync(join(slice, "memory.high"), String(32 * GiB));
-	expect(linuxMemory(proc, cgroups, 1000)).toEqual({ total: 32 * GiB, available: 2 * GiB });
+	expect(linuxMemory({ proc, cgroups, uid: 1000, show: noSlice })).toEqual({ total: 32 * GiB, available: 2 * GiB });
 	// A command that runs outside the slice, as on the process-group fallback, is not held by it.
-	expect(linuxMemory(proc, cgroups)).toEqual({ total: 64 * GiB, available: 24 * GiB });
+	expect(linuxMemory({ proc, cgroups })).toEqual({ total: 64 * GiB, available: 24 * GiB });
 	// Its inactive file cache is reclaimable, so it counts as free.
 	writeFileSync(join(slice, "memory.stat"), `inactive_file ${10 * GiB}\n`);
-	expect(linuxMemory(proc, cgroups, 1000).available).toBe(12 * GiB);
+	expect(linuxMemory({ proc, cgroups, uid: 1000, show: noSlice }).available).toBe(12 * GiB);
 	writeFileSync(join(slice, "memory.stat"), "inactive_file 0\n");
 	writeFileSync(join(slice, "memory.max"), String(30 * GiB));
-	expect(linuxMemory(proc, cgroups, 1000).available).toBe(0);
+	expect(linuxMemory({ proc, cgroups, uid: 1000, show: noSlice }).available).toBe(0);
 	// Another user's slice, or none yet, is not this caller's.
-	expect(linuxMemory(proc, cgroups, 1001)).toEqual({ total: 64 * GiB, available: 24 * GiB });
+	expect(linuxMemory({ proc, cgroups, uid: 1001, show: () => shown() })).toEqual({
+		total: 64 * GiB,
+		available: 24 * GiB,
+	});
 	// The slice's own memory.high bounds a gate that runs inside the user manager too.
 	writeFileSync(join(proc, "self/cgroup"), "0::/user.slice/user-1000.slice/user@1000.service/background.slice\n");
-	expect(linuxMemory(proc, cgroups, 1000).available).toBe(0);
+	expect(linuxMemory({ proc, cgroups, uid: 1000, show: noSlice }).available).toBe(0);
+});
+
+test("Linux memory asks systemd for the background slice's cap while its cgroup is missing", () => {
+	const proc = tempDir();
+	const cgroups = tempDir();
+	mkdirSync(join(proc, "self"));
+	writeFileSync(join(proc, "meminfo"), `MemTotal: ${(64 * GiB) / 1024} kB\nMemAvailable: ${(24 * GiB) / 1024} kB\n`);
+	writeFileSync(join(proc, "self/cgroup"), "0::/user.slice/user-1000.slice/session-3.scope\n");
+	writeFileSync(join(cgroups, "cgroup.controllers"), "memory\n");
+	const manager = join(cgroups, "user.slice/user-1000.slice/user@1000.service");
+	mkdirSync(manager, { recursive: true });
+	const memory = (show: string) => linuxMemory({ proc, cgroups, uid: 1000, show: () => show });
+	// The cap bounds the budget and, with nothing running in the slice, all of its headroom.
+	expect(memory(shown("infinity", 30 * GiB))).toEqual({ total: 30 * GiB, available: 24 * GiB });
+	expect(memory(shown(8 * GiB, 30 * GiB))).toEqual({ total: 8 * GiB, available: 8 * GiB });
+	// An unset slice leaves the host's answer.
+	expect(memory(shown())).toEqual({ total: 64 * GiB, available: 24 * GiB });
+	// A slice that systemd is removing, its directory left without limit files, is as missing.
+	mkdirSync(join(manager, "background.slice"));
+	expect(memory(shown(8 * GiB))).toEqual({ total: 8 * GiB, available: 8 * GiB });
+	rmSync(join(manager, "background.slice"), { recursive: true });
+	// The slice's ancestors still bound it, though its own cgroup is missing.
+	writeFileSync(join(manager, "memory.max"), String(16 * GiB));
+	writeFileSync(join(manager, "memory.current"), String(4 * GiB));
+	expect(memory(shown())).toEqual({ total: 16 * GiB, available: 12 * GiB });
+	expect(memory(shown("infinity", 10 * GiB))).toEqual({ total: 10 * GiB, available: 10 * GiB });
+	// A caller outside any user manager, or a command no scope runs, asks nothing.
+	expect(linuxMemory({ proc, cgroups, show: noSlice }).total).toBe(64 * GiB);
+	// Anything but a byte count or infinity, or a missing property, fails the gate.
+	for (const bad of [
+		"MemoryMax=infinity\n",
+		shown("infinity", "50%"),
+		shown("", 1),
+		shown("-1", 1),
+		"",
+		"MemoryHigh=3\n",
+	])
+		expect(() => memory(bad)).toThrow(/gate cannot read background\.slice's Memory(Max|High)/);
+	// The default probe asks only the caller's own user manager.
+	expect(() => linuxMemory({ proc, cgroups, uid: (process.getuid?.() ?? 0) + 1 })).toThrow(/own user/);
 });
 
 test("Linux memory reads the container cgroup mounted as the root", () => {
@@ -903,13 +956,13 @@ test("Linux memory reads the container cgroup mounted as the root", () => {
 	const limited = { total: 8 * GiB, available: 6 * GiB };
 	// With a cgroup namespace, the container's own cgroup is `/`.
 	writeFileSync(join(proc, "self/cgroup"), "0::/\n");
-	expect(linuxMemory(proc, cgroups)).toEqual(limited);
+	expect(linuxMemory({ proc, cgroups })).toEqual(limited);
 	// Without one, the host path is absent below the bind-mounted container cgroup.
 	writeFileSync(join(proc, "self/cgroup"), "0::/system.slice/docker-abc.scope\n");
-	expect(linuxMemory(proc, cgroups)).toEqual(limited);
+	expect(linuxMemory({ proc, cgroups })).toEqual(limited);
 	// A cgroup outside the namespace is not mounted, so nothing visible bounds it.
 	writeFileSync(join(proc, "self/cgroup"), "0::/../sibling\n");
-	expect(linuxMemory(proc, cgroups)).toEqual({ total: 64 * GiB, available: 24 * GiB });
+	expect(linuxMemory({ proc, cgroups })).toEqual({ total: 64 * GiB, available: 24 * GiB });
 });
 
 test("every caller on this host shares one ledger, whatever its environment or sessions", () => {
