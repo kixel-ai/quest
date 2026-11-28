@@ -1341,7 +1341,7 @@ fakes("a review is a usage error with a Git older than 2.41, which has no --attr
 	chmodSync(join(s.bin, "git"), 0o755);
 	const result = await quest("--root", s.repo, "review");
 	expect(result.code, result.stderr).toBe(2);
-	expect(result.stderr).toContain("quest review needs Git 2.41 or later");
+	expect(result.stderr).toContain("quest needs Git 2.41 or later");
 	expect(result.stderr).toContain("git version 2.40.1 is installed");
 	expect(s.calls()).toEqual([]);
 });
@@ -3546,6 +3546,8 @@ test("the next step hands the user the findings a reviewer's third round still r
 	expect(nextStep([round(3, 1)])).toMatch(
 		/^next decide: .*until the user picks to fix them as the reviewer recommends/,
 	);
+	// The one escalation it allows: advice within the quest's settled scope continues in a new review session.
+	expect(nextStep([round(3, 1)])).toMatch(/`quest advise` once.*\(change within\).*`quest review --new`/);
 	expect(nextStep([round(4, 2)])).toMatch(/^next decide: /);
 	expect(nextStep([round(2, 1)])).toMatch(/^next respond: /);
 	expect(nextStep([round(3, 0)])).toBe("next done: no findings remain on this head");

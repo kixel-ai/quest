@@ -1141,19 +1141,15 @@ function caseSensitive(dir: string, names: string[]): void {
 
 /**
  * Refuse a Git older than 2.41, whose missing `--attr-source` would let a head's `.gitattributes` hide its hunks from
- * the classifier and agy, and its files from agy's export.
-
-/**
- * Refuse a Git older than 2.41, whose missing `--attr-source` would let a head's `.gitattributes` hide its hunks from
- * the classifier and reviewers.
+ * the classifier, reviewers, and agy, and its files from agy's export.
  */
-function requireAttrSource(): void {
+export function requireAttrSource(): void {
 	const printed = spawnSync("git", ["version"], { encoding: "utf8" }).stdout?.trim() ?? "";
 	const [major, minor] = (/(\d+)\.(\d+)/.exec(printed) ?? []).slice(1).map(Number);
 	// A Git that prints no version fails on the first command that needs it.
 	if (major === undefined || minor === undefined || major > 2 || (major === 2 && minor >= 41)) return;
 	throw new ReviewInputError(
-		`quest review needs Git 2.41 or later, whose --attr-source keeps the head's .gitattributes from hiding its hunks from the classifier and reviewers; ${printed} is installed`,
+		`quest needs Git 2.41 or later, whose --attr-source keeps the head's .gitattributes from hiding its hunks from the classifier, reviewers, and advisors; ${printed} is installed`,
 	);
 }
 
@@ -1674,7 +1670,7 @@ async function prepare(
 
 /** The environment `quest review` runs `harness`'s CLI in, for a caller that runs it with the same login. */
 export async function reviewerEnvironment(
-	harness: HarnessName,
+	harness: AskHarness,
 	cwd: string,
 	env: NodeJS.ProcessEnv,
 ): Promise<NodeJS.ProcessEnv> {
@@ -3615,7 +3611,7 @@ export function nextStep(rounds: Round[]): string {
 			? "next done: no finding holds this head; its notes are yours to take or leave, and need no answer"
 			: "next done: no findings remain on this head";
 	if (rounds.some((round) => round.findings.length > 0 && round.round >= 3))
-		return "next decide: two rounds of fixes did not settle these findings, so stop: change no approach and run no further round until the user picks to fix them as the reviewer recommends, accept them, or drop the PR, as /quest-review describes";
+		return "next decide: two rounds of fixes did not settle these findings, so stop and run no further round until the user picks to fix them as the reviewer recommends, accept them, or drop the PR, as /quest-review describes; first you may run `quest advise` once, and when your task already lets you edit and push the PR and its advice stays within the quest's Goal and settled decisions (change within), apply it, post a `Design change:` PR comment, and review it with `quest review --new`";
 	return "next respond: fix each finding as its body recommends, or refute it with evidence the reviewer cannot rebut, commit, rerun the checks, push, then run the next round with --responses, one response per finding by its number";
 }
 

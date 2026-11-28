@@ -459,9 +459,9 @@ async function sendTo(
 			const emit = new Set<Session>();
 			const missing: typeof group = [];
 			// Sessions token-max cannot read, built from the tokens their queue entries carry.
-			const untracked = group.flatMap((q) =>
-				q.pending.untracked
-					? [untrackedSession({ ...q.pending, cwd: q.pending.root, untracked: q.pending.untracked })]
+			const untracked = [...bySession(group).values()].flatMap((pending) =>
+				pending.untracked
+					? [untrackedSession({ ...pending, cwd: pending.root, untracked: pending.untracked })]
 					: [],
 			);
 			for (const s of untracked) byId.set(`${s.harness}\0${s.id}`, s);
@@ -886,8 +886,10 @@ async function resendsDue(
 		const path = join(dir, name);
 		if (!name.endsWith(".json") || fresh.has(path)) continue;
 		const kept = readRemembered(path);
-		// An unreadable file loses only the resend of a record already sent once, so it never blocks the group.
-		if (kept === null || !kept.files.some((file) => existsSync(file))) due.forget.push(path);
+		// An unreadable file loses only the resend of a record already sent once, so it never blocks the group. A
+		// session with no transcript, as an agy advisor's, carries its own tokens, so it waits for its PR.
+		const gone = kept !== null && kept.pending.untracked === undefined && !kept.files.some((f) => existsSync(f));
+		if (kept === null || gone) due.forget.push(path);
 		else {
 			// A branch remembered before its repository moved names the old one, which GitHub's PRs no longer do.
 			const waiting = await Promise.all(

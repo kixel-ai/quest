@@ -2064,7 +2064,9 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"its one-sentence rationale, a recommendation line with the approach the reviewer would build instead when it recommends one, the finding count, each finding by its number, a notes line with the count and each note, then the last round's findings with " +
 				"their numbers and dispositions; then the `record` line below and a last `next` line naming the author's next step: " +
 				"`next decide` when a reviewer's third or later round still reports findings, to stop until the user picks " +
-				"fixing them as recommended, accepting them, or dropping the PR, `next respond` to fix or refute the findings, or `next done`, and for --accept `next done` or `next stop`. A reply without a valid score " +
+				"fixing them as recommended, accepting them, or dropping the PR, except that the author may first run quest advise " +
+				"once and, when its task already lets it edit and push the PR and the advice stays within the quest's Goal and " +
+				"settled decisions, apply it with a `Design change:` PR comment and a quest review --new round, `next respond` to fix or refute the findings, or `next done`, and for --accept `next done` or `next stop`. A reply without a valid score " +
 				"fails as any malformed reply does. --json prints " +
 				"one object: `rounds`, one per reviewer, `tallies`, every reviewer's findings across the branch's rounds, `risk`, the head's tier with its classification, `skipped`, each reviewer passed over with its reason, `accepted`, the maintainer's reason under --accept or null, `record`, and `next`.\n\n" +
 				"When quest runs from the source of the checkout it judges (bun src/cli/bin.ts, or a build there), the round still runs but posts nothing and sets no status: it prints `record skipped: ...` " +

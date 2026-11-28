@@ -52,8 +52,8 @@ Narrowed 2026-11-25 (maintainer, closing
 simple. Claude writes, codex+claude reviews" (rejected: Codex, then Gemini, as
 fallback writers; Gemini as an opt-in reviewer). Quest runs no Antigravity.
 Amended 2026-11-26 (maintainer, `/quest-plan`): ✅ Routine writes stay on Claude
-and routine reviews stay on Codex+Claude, while [Stuck-agent advisor](/quest/m0/advise.md)
-adds read-only `quest advise` (`gemini-4-neon` via `agy` → `gpt-6.2-astra` via
+and routine reviews stay on Codex+Claude, while read-only `quest advise`
+runs (`gemini-4-neon` via `agy` → `gpt-6.2-astra` via
 `codex` → `claude-fable-5-2` via `claude`) for stuck agents, and
 the routine advisor A/B ([kixel-ai/quest#934](https://github.com/kixel-ai/quest/pull/934)) runs Claude `--advisor` writer
 A/B arms across `XS`–`XL` (rejected: `opencode` for Neon; T3-only advisor;
@@ -63,7 +63,7 @@ risk-tier seating with one 7-rung `(size + risk)` reviewer ladder
 (`XS=1`…`XL=5`, `low=-1`, `medium=0`, `high=+1` → rungs `0`–`6`) so every
 `low` PR gets Sol (dropping `passed with no local reviewer`), `sol("low")` is
 retired, and rungs `5`–`6` (`L high`, `XL med`, `XL high`) add `gemini-4-neon`
-via `agy` as a 3rd reviewer reusing [Stuck-agent advisor](/quest/m0/advise.md)'s
+via `agy` as a 3rd reviewer reusing `quest advise`'s
 read-only `agy` runner (rejected: a 15-cell 2D matrix; clamping `low`/`high`
 seats; keeping `low` unreviewed; 2 reviewers max without Neon). Planned in [Neon third reviewer](/quest/m0/review-third-seat.md) (the 7-rung Codex/Claude ladder landed first).
 

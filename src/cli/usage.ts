@@ -1345,7 +1345,7 @@ export async function usage(root: string, options: UsageOptions, deps: UsageDepe
 	let folded: Session[] = dropped;
 	if (exported !== null) {
 		// This clone's advise calls set their sessions' role, and bring the agy ones token-max cannot read.
-		const advised = savedAdvice(top, key(repository), since);
+		const advised = savedAdvice(top, key(up.github.head), since);
 		const sessions = [...kept, ...advised.sessions];
 		// Every PR in the window competes for a session, so narrowing never hands one PR another's sessions.
 		const records = sessionRecords({

@@ -11,6 +11,7 @@
 import { PREFIX, type SkillDir } from "../core";
 import guide from "../../assets/AGENTS.md";
 import context from "../../assets/CONTEXT.md";
+import advise from "../../assets/skills/advise.md";
 import afk from "../../assets/skills/afk.md";
 import grill from "../../assets/skills/grill.md";
 import importSkill from "../../assets/skills/import.md";
@@ -164,6 +165,7 @@ export function compose(skills: readonly Skill[]): string {
 
 /** Every skill a repository installs, sorted by name. */
 export const SKILLS: readonly Skill[] = Object.entries({
+	advise,
 	afk,
 	import: importSkill,
 	iterate,

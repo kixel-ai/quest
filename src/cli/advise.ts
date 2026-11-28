@@ -16,6 +16,7 @@ import {
 	baseInstructions,
 	fetchBase,
 	parseBase,
+	requireAttrSource,
 	savedRounds,
 	sessionBranch,
 } from "./review";
@@ -229,6 +230,8 @@ export function advisePrompt(input: {
 	quest: { path: string; text: string } | null;
 	pull: { url: string; body: string } | null;
 	rounds: string | null;
+	/** The base's REVIEW.md, which reviews of the change follow. */
+	rules: string | null;
 }): string {
 	return [
 		`An agent working on branch ${input.branch} is stuck and asks for a fresh approach. Start from scratch: judge ` +
@@ -244,21 +247,28 @@ export function advisePrompt(input: {
 			: "## Quest\n\nNo quest file names this branch.",
 		input.pull ? `## PR ${input.pull.url}\n\n${input.pull.body}` : "## PR\n\nThe branch has no open PR.",
 		`## Review rounds\n\n${input.rounds ?? "No review rounds are saved for this branch."}`,
+		...(input.rules === null ? [] : [`## The base's REVIEW.md, which its reviews follow\n\n${input.rules}`]),
 	].join("\n\n");
+}
+
+/** The file at `path` in the first of `refs` that holds it, or null. */
+function shown(root: string, path: string, refs: string[]): string | null {
+	for (const ref of refs) {
+		try {
+			return git(root, ["show", `${ref}:${path}`]);
+		} catch {
+			// Not at this ref, as a quest file the branch that finishes it deletes.
+		}
+	}
+	return null;
 }
 
 /** The quest file a branch names, from its head, else the base, or null. */
 function questText(root: string, branch: string, refs: string[]): { path: string; text: string } | null {
 	if (!branch.startsWith("quest/")) return null;
 	const path = branchQuest(branch);
-	for (const ref of refs) {
-		try {
-			return { path, text: git(root, ["show", `${ref}:${path}`]) };
-		} catch {
-			// Not at this ref; a finished quest's branch deletes its file.
-		}
-	}
-	return null;
+	const text = shown(root, path, refs);
+	return text === null ? null : { path, text };
 }
 
 /** What `advise` returns: the call it saved, and the answering advisor. */
@@ -279,6 +289,7 @@ export async function advise(options: AdviseOptions, deps: AdviseDependencies): 
 	const question = options.question.trim();
 	if (question === "") throw new ReviewInputError("say what you tried and where you are stuck");
 	const candidates = advisors(options);
+	requireAttrSource();
 	const root = git(options.root, ["rev-parse", "--show-toplevel"]);
 	const common = git(root, ["rev-parse", "--path-format=absolute", "--git-common-dir"]);
 	const base = await fetchBase(root, options.base);
@@ -293,7 +304,9 @@ export async function advise(options: AdviseOptions, deps: AdviseDependencies): 
 		);
 	const head = git(root, ["rev-parse", "HEAD"]);
 	const mergeBase = git(root, ["merge-base", base.sha, head]);
-	const changed = git(root, ["diff", "--name-only", "--no-renames", mergeBase, head]).split("\n").filter(Boolean);
+	const changed = git(root, ["diff", "-z", "--name-only", "--no-renames", mergeBase, head])
+		.split("\0")
+		.filter(Boolean);
 	const pull = await deps.pull(root, base.ref, branch);
 	const prompt = advisePrompt({
 		branch,
@@ -304,8 +317,10 @@ export async function advise(options: AdviseOptions, deps: AdviseDependencies): 
 		quest: questText(root, branch, [head, base.sha]),
 		pull,
 		rounds: savedRounds(common, branch),
+		rules: shown(root, "REVIEW.md", [base.sha]),
 	});
-	const dir = join(common, "quest", "advise");
+	// The reply's schema is saved apart from the calls, which `savedAdvice` reads every file of.
+	const dir = join(common, "quest", "advise", "schema");
 	mkdirSync(dir, { recursive: true });
 	const start = now();
 	const spent: Answer<unknown, Asked>["spent"] = [];
@@ -342,8 +357,11 @@ export async function advise(options: AdviseOptions, deps: AdviseDependencies): 
 				sessions,
 				advice: answer?.value ?? null,
 			};
-			state.calls.push(call);
-			saveState(path, state);
+			// Read again, since another run on the branch may have saved a call during this one's turn.
+			const saved = loadState(path, branch);
+			saved.calls.push(call);
+			saveState(path, saved);
+			state.calls = saved.calls;
 			for (const session of sessions)
 				deps.queue({
 					harness: session.harness,
@@ -381,7 +399,8 @@ const untracked = (session: AdviseSession, end: number): Untracked => ({
  */
 export function priced(tokens: Untracked): Spent {
 	const rate = RATES[tokens.model];
-	const input = tokens.input - tokens.cached;
+	// A CLI that counts cached tokens apart from its input would make this negative, which no record holds.
+	const input = Math.max(0, tokens.input - tokens.cached);
 	const cost = rate ? (input * rate.input + tokens.cached * rate.cached + tokens.output * rate.output) / 1e6 : 0;
 	return {
 		model: tokens.model,

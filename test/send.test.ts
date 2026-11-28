@@ -1300,3 +1300,45 @@ test("each Kixel Quest that does not serve a repository says so once, whichever 
 	expect(notice).toContain(`${URL_} does not serve acme/proj`);
 	expect(notice).toContain(`${OTHER} does not serve acme/proj`);
 });
+
+test("an agy advisor's session, which token-max cannot read, is priced from its queued tokens and kept for its PR", async () => {
+	const env = home();
+	const root = checkout();
+	const start = Date.parse("2026-11-06T10:00:00Z");
+	const untracked = {
+		model: "gemini-4-neon",
+		effort: "high",
+		input: 1000,
+		cached: 400,
+		output: 90,
+		end: start + 60_000,
+	};
+	const advising = (session: string, pull: string | null, branch: string) =>
+		queue({ harness: "agy", session, cwd: root, start, pull, branch, role: "advising", untracked }, env);
+	advising("on-pr", "https://github.com/acme/proj/pull/7", "quest/m0/a");
+	// Queued twice, as a resend does, it is still one record.
+	advising("early", null, "fix/x");
+	advising("early", null, "fix/x");
+	const first = sender(env, 200, []);
+	await sendPass(first.deps);
+	const records = parseUpload(first.uploads[0]!.body).records;
+	expect(records.map((r) => [r.harness, r.session, r.pulls, r.role, r.models[0]!.cacheRead])).toEqual([
+		["agy", "on-pr", [7], "advising", 400],
+		["agy", "early", [], "advising", 400],
+	]);
+	expect(records[0]!.models[0]!.cost).toBeCloseTo((600 * 3 + 400 * 0.15 + 90 * 15) / 1e6);
+	expect(records[0]!.complete).toBe(true);
+	// With no transcript to prune, it waits for a PR on its branch through later passes.
+	expect(remembered(env)).toEqual(["early"]);
+	const s2 = later(env, root, "s2");
+	await sendPass(sender(env, 200, [s2]).deps);
+	expect(remembered(env)).toEqual(["early", "s2"]);
+	const pr = opened(9, "fix/x", "2026-11-06T13:30:00Z");
+	const s3 = later(env, root, "s3");
+	await sendPass(sender(env, 200, [s2, s3], () => {}, [pr]).deps);
+	const resend = sender(env, 200, [s2, s3], () => {}, [pr]);
+	await sendPass(resend.deps);
+	expect(parseUpload(resend.uploads[0]!.body).records.map((r) => [r.session, r.pulls, r.role])).toEqual([
+		["early", [9], "advising"],
+	]);
+});

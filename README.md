@@ -2088,7 +2088,12 @@ and their refutations still decide when the loop ends. Later rounds take
 `--responses`, the author's free-text fixes and refutations, which a round that
 reported findings requires. From a reviewer's third round on, a round that
 still reports findings prints `next decide`: the author stops, and the user
-picks fixing them as recommended, accepting them, or dropping the PR. Every
+picks fixing them as recommended, accepting them, or dropping the PR. The
+author may first run `quest advise` once; when its task already lets it edit
+and push the PR and the advice stays within the quest's Goal and settled
+decisions, it applies the advice, posts a `Design change:` PR comment, and
+reviews it with `quest review --new`, while advice that changes the scope or
+architecture or drops the PR still waits for the user's pick. Every
 prompt lists the findings the branch settled without a fix, those refuted and
 those the maintainer accepted, with their reasons, so no reviewer reports them
 again; `--new` keeps that list. A later round resumes the session and checks only
@@ -2336,6 +2341,57 @@ reviewer's round, or when no finding is open, and it takes no option that
 would run or reset a round. Its status goes first, so a token that cannot
 push records nothing, printing `next stop` and exiting 1.
 
+## Ask for advice when stuck
+
+`quest advise` asks a stronger model, read-only, for a fresh approach when an
+agent is stuck on a branch, such as a review that keeps raising findings or an
+implementation loop that does not converge. It is not for routine work or a
+broken environment.
+
+```console
+$ quest advise "Three rounds keep flagging the cache invalidation; I patched each case and the reviewer finds another."
+advisor agy gemini-4-neon high
+change within
+recommendation Key the cache by content hash
+...
+```
+
+The question says what you tried and where you are stuck; `-` reads it from
+stdin. The advisor also reads the change, the quest file its branch names, the
+open PR's body, the review rounds saved for the branch, and the base's
+`AGENTS.md` and `REVIEW.md`. It compares two or three approaches, such as
+patching, redesigning, or dropping the change, recommends one, and says whether
+that stays within the quest's Goal and settled decisions (`change within`) or
+changes its `scope` or `architecture`, or `drop`s the PR.
+
+The first advisor that can run answers, past any that is not installed, logged
+out, at its usage limit, or unable to run sandboxed on this host:
+
+| Rank | Advisor |
+|---|---|
+| 1 | Antigravity (`agy`) `gemini-4-neon` high |
+| 2 | Codex `gpt-6.2-astra` high |
+| 3 | Claude Code `claude-fable-5-2` medium |
+
+`agy` runs only here: writes stay on Claude Code, and reviews on Codex and
+Claude Code. Claude Code and Codex run as `quest review` runs its reviewers.
+`agy` runs on your own Antigravity login with no `ANTIGRAVITY_*` or `AGY_*`
+variable, as an agent whose only tools are reading a file and replying, from a
+private directory outside any repository holding an export of the head and the
+change's diff, with deny rules on commands, writes, web requests, MCP calls,
+and reads outside that directory. It compares those rules case-sensitively, so
+on a case-insensitive volume, such as macOS's default, it is passed over.
+`--harness` asks only one advisor, and `--model` and `--effort` replace its
+listed ones.
+
+Each branch gets one answered call; a second refuses before any advisor runs
+unless `--force`. Calls are kept under the clone's common Git directory in
+`quest/advise/`, and each session is queued for Kixel Quest with the role
+`advising`, which `quest usage` reports too. `token-max` reads no `agy`
+transcript, so an `agy` session's spend is the tokens it reported, priced at
+the model's API list rate, or marked incomplete where quest knows none. It
+exits 3 when no advisor could run.
+
 ## Audit cost and accuracy
 
 `quest usage` reports `origin`'s PRs updated since `--since` (a local
@@ -2494,11 +2550,11 @@ latest upload, since one sender sends a session's uploads in order. The type is
 - `role` is classifying when `quest review` ran it as the
   [risk classifier](#risk-tiers) or an earlier PR's `## Review` record names it
   so, reviewing when it ran it as a reviewer, such a record names it so, or
-  Codex marks it a review, else the one the first quest skill it ran gives: planning
+  Codex marks it a review, advising when `quest advise` ran it, else the one the first quest skill it ran gives: planning
   (`/quest-plan`, `/quest-recurring`, `/quest-import`,
   `/quest-grill`, `/quest-delete`, `/quest-export`), implementing
   (`/quest-start`), iterating (`/quest-iterate`), reviewing (`/quest-review`),
-  merging (`/quest-merge`, `/quest-complete`), or coordinating (`/quest-run`,
+  advising (`/quest-advise`), merging (`/quest-merge`, `/quest-complete`), or coordinating (`/quest-run`,
   `/quest-spawn`). Without one, a sub-agent takes its parent's role unless that
   is coordinating; a session on its sub-agents' PRs only is coordinating; one
   on a `quest-plan/`, `quest-recurring/`, or `quest-import/`
@@ -2589,6 +2645,11 @@ sender takes over what it infers, so a session from the runner's review checkout
 fork's included, as is a sub-agent it starts anywhere in that checkout, and a classifier whose reply was unusable is still
 counted as one. A round that recorded on no PR is sent on a PR its branch heads in the checkout's own repository, never
 on a stranger fork's of the same name.
+
+`quest advise` queues each session it starts the same way, with the role advising, answered or not. `token-max` reads no
+`agy` transcript, so an `agy` session's queue entry carries the tokens its turn reported, and the sender prices them at the
+model's API list rate, marking the cost incomplete where quest knows none; it keeps such a session, which has no
+transcript to prune, until a PR opens on its branch.
 
 Kixel Quest refuses a whole upload naming a repository it does not index or
 the sender cannot read, so the sender asks `GET /forge` which repositories it
