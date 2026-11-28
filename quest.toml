@@ -23,7 +23,7 @@ run = """
 nix --version
 mkdir -p .tmp
 printf '<testsuites><testsuite name="smoke" tests="1"><testcase name="macos"/></testsuite></testsuites>\\n' > .tmp/smoke-macos.xml
-printf '{"smoke": 1}\\n' > .tmp/smoke-macos.json
+printf '{"units": {"latency": "ns"}, "samples": [{"metrics": {"smoke/macos": {"latency": {"value": 1}}}}]}\\n' > .tmp/smoke-macos.json
 """
 junit = ".tmp/smoke-macos.xml"
 metrics = ".tmp/smoke-macos.json"
@@ -35,7 +35,7 @@ os = ["windows"]
 run = """
 mkdir -p .tmp
 printf '<testsuites><testsuite name="smoke" tests="1"><testcase name="windows"/></testsuite></testsuites>\\n' > .tmp/smoke-windows.xml
-printf '{"smoke": 1}\\n' > .tmp/smoke-windows.json
+printf '{"units": {"latency": "ns"}, "samples": [{"metrics": {"smoke/windows": {"latency": {"value": 1}}}}]}\\n' > .tmp/smoke-windows.json
 """
 junit = ".tmp/smoke-windows.xml"
 metrics = ".tmp/smoke-windows.json"
