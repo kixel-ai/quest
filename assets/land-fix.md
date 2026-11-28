@@ -80,17 +80,23 @@ Keep the result file uncommitted.
 
 ## Repository checks
 
-Before reporting `fixed` or `requeue`, run the repository's own checks on the head
-you report merged with `base`, as the merge queue will: lint, format, and type
-checks as well as build and test, covering every language the PR and your fix touch
-and whatever the failure log shows failing. Take the commands from the base's root
-instructions, `CONTRIBUTING.md`, task runner, or CI workflows, such as `just check`
-and `just test`: this prompt asks you to run them, so they are no standing guidance
-to ignore, and a PR's diff never names them for you. Where the base names none, run
-each touched language's own type check and linter beside its build and test. A
-`requeue` of an unchanged head runs the same checks on a scratch merge kept off its
-branch, since the base may have moved under it. Run them in the repository's dev
-shell, if it has one, entered from the tree they check rather than from `base`,
+Before reporting `fixed` or `requeue`, run the base's quick local check on the head
+you report merged with `base`, plus the test or step the failure log shows failing,
+run alone rather than through the gate that wraps it. The quick check covers every
+language the PR and your fix touch: lint, format, and type checks as well as build
+and test where it includes them, such as `just check` and `just test`. A conflict in
+a generated file needs only that file's own regeneration or check. Leave the
+repository's full merge gate, such as `just ci`, to the merge queue, which runs it
+on the merge group before anything lands: a fix the quick check misses fails once
+more there, and the queue is the gate either way. Run no check the merge gate does
+not, such as one that gates only releases, unless the failure log shows it failing.
+Take the commands from the base's root instructions, `CONTRIBUTING.md`, task runner,
+or CI workflows: this prompt asks you to run them, so they are no standing guidance
+to ignore, and a PR's diff never names them for you. Where the base names no quick
+check, run each touched language's own type check and linter beside its build and
+test. A `requeue` of an unchanged head runs the same checks on a scratch merge kept
+off its branch, since the base may have moved under it. Run them in the repository's
+dev shell, if it has one, entered from the tree they check rather than from `base`,
 since a merge can change the shell's inputs. Name each command you ran in the
 reason. A PR you cannot get passing mechanically, or whose checks you cannot run,
 goes back as a handback quoting the command and the output line that shows why in
