@@ -158,18 +158,13 @@ jobs:
           args=(--tier "$TIER" --os "$OS" --no-cache --report "$RUNNER_TEMP/quest-report")
           if [ -n "$BASE" ]; then args+=(--base "$BASE"); else args+=(--all); fi
           quest run "${args[@]}"
-      # Kixel Quest reads only the junit.xml and metrics.json at an artifact's
-      # root, and --report keeps one of each per task or crate. The merge
-      # leads each test's class with its task, and fails naming any report it
-      # leaves out; the rest upload even then, or when a task failed.
-      - name: Merge the reports
-        if: ${{ !cancelled() && steps.run.outcome != 'skipped' }}
-        run: bun quest/scripts/kixel-metrics.ts "$RUNNER_TEMP/quest-report" "$RUNNER_TEMP/kixel-metrics"
-      # A run whose tasks declare no reports has nothing to upload.
+      # Kixel Quest reads each task's and crate's reports below the root. quest run
+      # leaves out and fails on any report it would refuse; the rest upload even
+      # then, or when a task failed. A run whose tasks declare none uploads nothing.
       - name: Upload the reports
         if: ${{ !cancelled() && steps.run.outcome != 'skipped' }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: kixel-metrics-${{ matrix.os }}-${{ runner.arch }}
-          path: ${{ runner.temp }}/kixel-metrics
+          path: ${{ runner.temp }}/quest-report
           if-no-files-found: ignore
