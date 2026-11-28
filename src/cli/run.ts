@@ -26,6 +26,7 @@ import {
 import { git } from "./git";
 import { GROUP, cancelled, follow, interrupts, requested } from "./interrupt";
 import { programCommand, requireProgram } from "./program";
+import { reportProblem } from "./reports";
 import {
 	type CargoCrate,
 	type CargoWorkspace,
@@ -475,7 +476,7 @@ export async function run(options: RunOptions, io: RunIO): Promise<number> {
 				return { uncached: `it runs after ${uncachedBefore.name}, whose inputs no digest names` };
 			const key = digest({
 				// Raised whenever the digest's material changes meaning, so no earlier pass matches.
-				version: 2,
+				version: 3,
 				system: `${process.arch}-${process.platform}`,
 				shell: task.nix ? shell!.derivation : null,
 				run: task.run,
@@ -546,6 +547,8 @@ export async function run(options: RunOptions, io: RunIO): Promise<number> {
 	const running = new Map<Unit, ChildProcess>();
 	/** How each unit that passed or ran got its outcome, for the summary: a cached pass, or its run's seconds. */
 	const results = new Map<Unit, "hit" | string>();
+	/** Each malformed report, by unit, which fails the run once its tasks finish. */
+	const refused: string[] = [];
 	const writes: Promise<void>[] = [];
 	let writeFailure: unknown;
 	let stopping = false;
@@ -674,10 +677,16 @@ export async function run(options: RunOptions, io: RunIO): Promise<number> {
 					results.set(unit, `${seconds.toFixed(1)}s`);
 					const status = failure ?? (code === 0 ? null : `exit ${code ?? signal}`);
 					let problems: string[];
+					let malformed: string[] = [];
 					let reports: TaskResult["reports"] = [];
 					try {
-						problems = collect(top, outputs, status === null, reportDir(report, unit));
-						if (status === null && problems.length === 0)
+						({ problems, refused: malformed } = collect(
+							top,
+							outputs,
+							status === null,
+							reportDir(report, unit),
+						));
+						if (status === null && problems.length === 0 && malformed.length === 0)
 							reports = outputs.map(({ path, name }) => ({
 								name,
 								base64: readFileSync(join(top, path)).toString("base64"),
@@ -685,11 +694,17 @@ export async function run(options: RunOptions, io: RunIO): Promise<number> {
 					} catch (error) {
 						problems = [`cannot collect its reports: ${(error as Error).message}`];
 					}
+					// A malformed report fails the run, not the task, so the tasks after it still run.
+					for (const each of malformed) {
+						refused.push(`${unit.name}: ${each}`);
+						io.stderr(`quest: ${unit.name} left out ${each}\n`);
+					}
 					if (status === null && problems.length === 0) {
 						finish(unit, "passed", ` in ${seconds.toFixed(1)}s`);
 						// A pass counts for the inputs the digest named only while nothing changed them as the task ran,
-						// such as an edit saved meanwhile.
-						const record = cache !== null && task.cache && unit.digest !== null;
+						// such as an edit saved meanwhile. One with a malformed report is never recorded, since a hit
+						// replays its reports unchecked.
+						const record = cache !== null && task.cache && unit.digest !== null && malformed.length === 0;
 						// Caught here, since a throw from this handler would end the run while other tasks still run.
 						let changed: string | null = null;
 						if (record)
@@ -756,8 +771,12 @@ export async function run(options: RunOptions, io: RunIO): Promise<number> {
 				: [],
 		).join(", ")}\n`,
 	);
+	if (refused.length > 0)
+		io.stderr(
+			`quest: ${refused.length} malformed ${refused.length === 1 ? "report" : "reports"} left out:\n${refused.map((each) => `  ${each}\n`).join("")}`,
+		);
 	if (cancel.signal.aborted) return cancelled(cancel.signal);
-	return counts.has("failed") || counts.has("cancelled") ? 1 : 0;
+	return counts.has("failed") || counts.has("cancelled") || refused.length > 0 ? 1 : 0;
 }
 
 const OUTCOMES = ["passed", "failed", "cancelled", "skipped"] as const;
@@ -780,46 +799,46 @@ function reportDir(report: string | null, unit: Unit): string | null {
 }
 
 /** The reports `task` declares, each with the name `--report` gives its copy. */
-function declared(task: ManifestTask): { path: string; name: string }[] {
+function declared(task: ManifestTask): { path: string; name: "junit.xml" | "metrics.json" }[] {
 	return [
-		...(task.junit === null ? [] : [{ path: task.junit, name: "junit.xml" }]),
-		...(task.metrics === null ? [] : [{ path: task.metrics, name: "metrics.json" }]),
+		...(task.junit === null ? [] : [{ path: task.junit, name: "junit.xml" as const }]),
+		...(task.metrics === null ? [] : [{ path: task.metrics, name: "metrics.json" as const }]),
 	];
 }
 
-/**
- * Check the reports a task wrote and copy them under `report`, returning what is wrong: a passing task must write
- * every report it declares, and a metrics file must hold a JSON object.
- */
+/** What `collect` found wrong with a task's reports. */
+interface Collected {
+	/** What fails the task: a passing task must write every report it declares. */
+	problems: string[];
+	/** Each report Kixel Quest would refuse, and why, which is left out of `--report`'s directory and fails the run. */
+	refused: string[];
+}
+
+/** Check the reports a task wrote and copy the valid ones under `destination`. */
 function collect(
 	top: string,
-	outputs: { path: string; name: string }[],
+	outputs: { path: string; name: "junit.xml" | "metrics.json" }[],
 	passed: boolean,
 	destination: string | null,
-): string[] {
-	const problems: string[] = [];
+): Collected {
+	const collected: Collected = { problems: [], refused: [] };
 	for (const { path, name } of outputs) {
 		const file = join(top, path);
 		if (!existsSync(file)) {
-			if (passed) problems.push(`it did not write ${path}`);
+			if (passed) collected.problems.push(`it did not write ${path}`);
 			continue;
 		}
-		if (name === "metrics.json") {
-			let metrics: unknown;
-			try {
-				metrics = JSON.parse(readFileSync(file, "utf8"));
-			} catch {
-				metrics = undefined;
-			}
-			if (typeof metrics !== "object" || metrics === null || Array.isArray(metrics))
-				problems.push(`${path} is not a JSON object`);
+		const problem = reportProblem(name, readFileSync(file));
+		if (problem !== null) {
+			collected.refused.push(`${path} is malformed: ${problem}`);
+			continue;
 		}
 		if (destination !== null) {
 			mkdirSync(destination, { recursive: true });
 			copyFileSync(file, join(destination, name));
 		}
 	}
-	return problems;
+	return collected;
 }
 
 /** Write each line `stream` carries with `prefix`, returning the function that writes a last unterminated line. */

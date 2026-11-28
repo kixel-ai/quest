@@ -9,6 +9,7 @@ import { expect, test } from "vitest";
 
 import { main } from "../src/cli/main";
 import { REFERENCE_LINE } from "../src/core";
+import { reportProblem } from "../src/cli/reports";
 import { type RunOptions, manifestProblems, run } from "../src/cli/run";
 import { initRepository, tempDir } from "./fixture";
 
@@ -333,16 +334,27 @@ test.runIf(posix)("inside nix develop, mbx's Cargo shim goes back in front of th
 	expect(plain.log).toContain(`nix develop ${dir} --command env A=1 bash -eo pipefail -c echo first=\${PATH%%:*}`);
 });
 
+const METRICS = JSON.stringify({
+	units: { latency: "ns" },
+	samples: [{ metrics: { bench: { latency: { value: 1 } } } }],
+});
+
 test.runIf(posix)("a task's reports are checked and copied, and a stale one never counts", async () => {
 	const dir = repository({
 		"quest.toml": [
 			task(
 				"good",
-				"echo '<testsuites/>' > out/good.xml; echo '{\"ms\": 1}' > out/good.json",
+				`echo '<testsuites/>' > out/good.xml; echo '${METRICS}' > out/good.json`,
 				'junit = "out/good.xml"\nmetrics = "out/good.json"',
 			),
 			task("lazy", "true", 'junit = "out/lazy.xml"'),
-			task("bad", "echo '[1]' > out/bad.json", 'metrics = "out/bad.json"'),
+			task(
+				"bad",
+				"echo '[1]' > out/bad.json; echo '<testsuites/>' > out/bad.xml",
+				'metrics = "out/bad.json"\njunit = "out/bad.xml"',
+			),
+			// A malformed report fails the run, not the task, so a task after it still runs.
+			task("after", "echo after", 'after = ["bad"]'),
 		].join(""),
 		// An earlier run's report, which lazy must not pass off as its own.
 		"out/lazy.xml": "<stale/>",
@@ -353,10 +365,64 @@ test.runIf(posix)("a task's reports are checked and copied, and a stale one neve
 	const out = await runIn(dir, { all: true, report });
 	expect(out.code).toBe(1);
 	expect(out.stderr).toContain("quest: lazy failed in 0.0s: it did not write out/lazy.xml\n");
-	expect(out.stderr).toContain("quest: bad failed in 0.0s: out/bad.json is not a JSON object\n");
+	expect(out.stderr).toContain("quest: bad left out out/bad.json is malformed: it is not an object\n");
+	expect(out.stderr).toContain("quest: bad passed in 0.0s\n");
+	expect(out.stdout).toContain("after | after\n");
+	expect(out.stderr).toContain(
+		"quest: 1 malformed report left out:\n  bad: out/bad.json is malformed: it is not an object\n",
+	);
 	expect(readFileSync(join(report, "good", "junit.xml"), "utf8")).toBe("<testsuites/>\n");
-	expect(readFileSync(join(report, "good", "metrics.json"), "utf8")).toBe('{"ms": 1}\n');
+	expect(readFileSync(join(report, "good", "metrics.json"), "utf8")).toBe(`${METRICS}\n`);
+	expect(readFileSync(join(report, "bad", "junit.xml"), "utf8")).toBe("<testsuites/>\n");
+	expect(existsSync(join(report, "bad", "metrics.json"))).toBe(false);
 	expect(existsSync(join(report, "lazy"))).toBe(false);
+});
+
+test("a report Kixel Quest's reader would refuse is named", () => {
+	const problem = (name: "junit.xml" | "metrics.json", text: string | Uint8Array) =>
+		reportProblem(name, typeof text === "string" ? Buffer.from(text) : text);
+	const sample = (metrics: unknown, extra = {}) =>
+		JSON.stringify({ units: { latency: "ns" }, samples: [{ metrics, ...extra }] });
+	const latency = (metric: unknown) => sample({ bench: { latency: metric } });
+	const nextest = [
+		`\ufeff<?xml version="1.0"?>`,
+		`<!-- nextest -->`,
+		`<testsuites><testsuite name="a"><testcase name="x"><failure/></testcase></testsuite></testsuites>`,
+		``,
+	].join("\n");
+	for (const [name, text] of [
+		["junit.xml", nextest],
+		["junit.xml", "<testsuites/>"],
+		["metrics.json", METRICS],
+		["metrics.json", latency({ value: 2, lower_value: 1, upper_value: 3 })],
+		["metrics.json", sample({ bench: { latency: { value: 1 } } }, { commit: "a".repeat(40) })],
+	] as const)
+		expect(problem(name, text), text).toBeNull();
+	const refused: [string, "junit.xml" | "metrics.json", string | Uint8Array][] = [
+		["it is not UTF-8", "junit.xml", Buffer.from([0xff, 0xfe, ...Buffer.from("<testsuites/>", "utf16le")])],
+		["its root is report, not testsuites or testsuite", "junit.xml", "<report/>"],
+		["a testcase has no name", "junit.xml", "<testsuite><testcase/></testsuite>"],
+		["a testcase is outside a testsuite", "junit.xml", '<testsuites><testcase name="x"/></testsuites>'],
+		["it declares a DTD", "junit.xml", '<!DOCTYPE x [<!ENTITY a "b">]><testsuites/>'],
+		["it is not JSON", "metrics.json", '{"units": {'],
+		["it is not an object", "metrics.json", "[1]"],
+		['the file has an unknown field "ms"', "metrics.json", '{"ms": 1}'],
+		["units is not an object", "metrics.json", '{"samples": []}'],
+		["samples is not a non-empty list", "metrics.json", '{"units": {}, "samples": []}'],
+		["measure latency's unit is not a string", "metrics.json", '{"units": {"latency": 1}, "samples": [{}]}'],
+		["sample 0's commit is not a full commit ID", "metrics.json", sample({}, { commit: "abc" })],
+		["sample 0's bench size has no unit", "metrics.json", sample({ bench: { size: { value: 1 } } })],
+		["sample 0's bench latency's value is not a finite number", "metrics.json", latency({ value: null })],
+		[
+			"sample 0's bench latency's value is outside its bounds",
+			"metrics.json",
+			latency({ value: 1, lower_value: 2 }),
+		],
+		[`sample 0's bench latency has an unknown field "unit"`, "metrics.json", latency({ value: 1, unit: "ns" })],
+	];
+	for (const [why, name, text] of refused) expect(problem(name, text), why).toBe(why);
+	// A truncated file is not well formed.
+	expect(problem("junit.xml", "<testsuites><testsuite>")).toMatch(/unclosed tag/);
 });
 
 // The real CLI and the real gate, admitted at once so a loaded host does not hold the test.
@@ -734,19 +800,28 @@ test.runIf(posix)("a pass whose inputs cannot be read again is not recorded, and
 	expect((await runIn(dir, { all: true, cache: true }, env)).stdout).toBe("odd | ran\n");
 });
 
-test.runIf(posix)("a hit replays its reports byte for byte, whatever their encoding", async () => {
-	const dir = repository({
-		"flake.nix": "{}",
-		// A UTF-16 JUnit report, with its byte order mark.
-		"quest.toml": `[tasks.test]\ntier = "pr"\nrun = '''mkdir -p out; printf '\\377\\376<\\000a\\000/\\000>\\000' > out/junit.xml'''\njunit = "out/junit.xml"\n`,
-		".gitignore": "out/\n",
-	});
-	const env = { XDG_CACHE_HOME: tempDir() };
-	const utf16 = Buffer.from([0xff, 0xfe, ...Buffer.from("<a/>", "utf16le")]);
-	expect((await runIn(dir, { all: true, cache: true }, env)).code).toBe(0);
-	expect(readFileSync(join(dir, "out", "junit.xml"))).toEqual(utf16);
-	const report = join(tempDir(), "report");
-	expect((await runIn(dir, { all: true, cache: true, report }, env)).stderr).toContain("quest: cached (hit) test\n");
-	expect(readFileSync(join(dir, "out", "junit.xml"))).toEqual(utf16);
-	expect(readFileSync(join(report, "test", "junit.xml"))).toEqual(utf16);
-});
+test.runIf(posix)(
+	"a hit replays its reports byte for byte, and a pass with a malformed one is never recorded",
+	async () => {
+		const dir = repository({
+			"flake.nix": "{}",
+			// A JUnit report with a byte order mark and a CRLF, and a malformed one in another task.
+			"quest.toml": [
+				`[tasks.test]\ntier = "pr"\nrun = '''mkdir -p out; printf '\\357\\273\\277<testsuites>\\r\\n</testsuites>' > out/junit.xml'''\njunit = "out/junit.xml"\n`,
+				`[tasks.bad]\ntier = "pr"\nrun = '''mkdir -p out; echo bad; echo '<report/>' > out/bad.xml'''\njunit = "out/bad.xml"\n`,
+			].join(""),
+			".gitignore": "out/\n",
+		});
+		const env = { XDG_CACHE_HOME: tempDir() };
+		const bytes = Buffer.from("\ufeff<testsuites>\r\n</testsuites>");
+		expect((await runIn(dir, { all: true, cache: true }, env)).code).toBe(1);
+		expect(readFileSync(join(dir, "out", "junit.xml"))).toEqual(bytes);
+		const report = join(tempDir(), "report");
+		const second = await runIn(dir, { all: true, cache: true, report }, env);
+		expect(second.stderr).toContain("quest: cached (hit) test\n");
+		expect(second.stdout).toBe("bad  | bad\n");
+		expect(readFileSync(join(dir, "out", "junit.xml"))).toEqual(bytes);
+		expect(readFileSync(join(report, "test", "junit.xml"))).toEqual(bytes);
+		expect(existsSync(join(report, "bad"))).toBe(false);
+	},
+);
