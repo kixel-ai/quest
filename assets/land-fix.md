@@ -85,8 +85,9 @@ you report merged with `base`, plus the test or step the failure log shows faili
 run alone rather than through the merge gate's command, such as `just ci`, that wraps
 it. Run the quick check for every language the PR and your fix touch, and that
 language's own type check and linter where it skips them. Where it diffs against a
-base, pass `base` yourself, such as `just check base`, since the default ref may be
-absent from this checkout. When the only conflict is in a generated file, its own
+base, pass the pinned base yourself, such as `just check base`, since the default ref
+may be absent from this checkout; where the recipe picks its checks by the target
+branch's name, point `origin/<target>` at the same commit and pass that. When the only conflict is in a generated file, its own
 regeneration or check replaces the quick check. Leave the repository's full merge
 gate to the merge queue, which runs it on the merge group before anything lands: a
 fix the quick check misses fails once more there, and the queue is the gate either
@@ -188,7 +189,7 @@ leaves that quest as it is: the test still counts as its work. Run the
 [repository checks](#repository-checks) on the branch, with the failing test's rerun only on the
 scratch merge without the skip: on the branch, confirm the runner discovers the test
 and reports it skipped. Add the branch's full SHA to the PR's entry:
-{"number":123,"action":"requeue","cause":"flaky","reason":"healthy; flaky test; ran just check and the failing test on a scratch merge and the disable branch","failure":"moq-relay interop::render_timeout","quest":"quest/m0/flaky/render-timeout.md","disable":"full 40-character SHA"}
+{"number":123,"action":"requeue","cause":"flaky","reason":"healthy; flaky test; ran just check and the failing test on a scratch merge; ran just check on the disable branch and saw the test skipped","failure":"moq-relay interop::render_timeout","quest":"quest/m0/flaky/render-timeout.md","disable":"full 40-character SHA"}
 quest land opens the commit as a pull request of its own and enqueues it. Never
 disable a test that is not listed. When the repository keeps no `quest/m0/`, or
 the skip needs a protected path or more than a mechanical edit, requeue
