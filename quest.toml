@@ -4,7 +4,7 @@
 # The native Windows suite, which .github/workflows/windows.yml runs nightly
 # through platform.yml, whose Bun, the one that built quest there, runs it.
 [tasks.windows]
-tier = "release-gate"
+tier = "nightly"
 nix = false
 os = ["windows"]
 run = """
@@ -14,35 +14,3 @@ bun run test
 bun run build
 bun scripts/lifecycle-check.mjs dist/quest.js dev
 """
-
-# TEMPORARY smoke tasks for validating platform.yml; reverted before review.
-[tasks.smoke-good]
-tier = "nightly"
-nix = false
-os = ["windows"]
-run = '''
-mkdir -p .tmp
-printf '<testsuites><testsuite name="smoke"><testcase name="good"/></testsuite></testsuites>\n' > .tmp/smoke-good.xml
-printf '{"units":{"latency":"ns"},"samples":[{"metrics":{"smoke":{"latency":{"value":1}}}}]}\n' > .tmp/smoke-good.json
-'''
-junit = ".tmp/smoke-good.xml"
-metrics = ".tmp/smoke-good.json"
-
-[tasks.smoke-bad]
-tier = "nightly"
-nix = false
-os = ["windows"]
-run = '''
-mkdir -p .tmp
-printf '<testsuites><testsuite name="smoke"><testcase name="bad"/></testsuite></testsuites>\n' > .tmp/smoke-bad.xml
-printf '{"smoke": 1}\n' > .tmp/smoke-bad.json
-'''
-junit = ".tmp/smoke-bad.xml"
-metrics = ".tmp/smoke-bad.json"
-
-[tasks.smoke-after]
-tier = "nightly"
-nix = false
-os = ["windows"]
-after = ["smoke-bad"]
-run = "echo after ran"
