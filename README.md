@@ -2538,8 +2538,14 @@ window names under `## Caused by` follows on its own line, by culprit, even one
 older than the window, which is read from GitHub: the culprit's tier, size,
 writers, and local reviewers, who found it and the incident it closes when
 the bullet ends with
-`(found by check|reviewer|queue|canary|person|customer; incident <id>)` as the
-rules ask, either part alone allowed, and how long after the culprit merged the fix opened. Over the merged
+`(found by check|reviewer|queue|canary|person|customer; replaces <PR URL>; incident <id>)` as the
+rules ask, any part alone allowed, and how long after the culprit merged the fix opened. Each
+PR merged since `--since` and at least 7 or 28 days ago, so widen `--since` past
+the default week to judge any, gets an `escaped:` line saying whether a fix
+naming it opened within that many days of its merge, so an experiment's escape
+count does not change with how fast or in which PR the fix lands: an open fix
+counts, and a fix closed unmerged counts at its own opening once a later fix
+sharing its incident or naming it as `replaces` takes over. Over the merged
 PRs come each online
 reviewer's coverage, final heads reviewed, findings per PR reviewed, and
 answers. A hand-back counts only while its draft is open, so a merged PR

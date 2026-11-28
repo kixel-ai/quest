@@ -27,4 +27,3 @@ Tests: an M quest draws a stable arm under the new cohort, and the arm reaches `
 ## Required
 
 - [Advisor trial readout](/quest/m0/advisor-readout.md) - frees M's writer arms and decides its writer
-- [Escape window](/quest/m0/escape-window.md) - the 7-day escape count the readout decides on
