@@ -48,6 +48,7 @@ Language and PR topic packs (`pr`, `rust`, `ts`, `uniffi`) load lazily via hooks
 
 - Work in your own worktree, reusing a suitable one you already own; read-only discovery needs no new checkout. Finish with a clean checkout (intended changes committed and pushed, incidental changes restored, unrelated changes preserved). Before ending a task, pausing, or handing off, commit a checkpoint and report what remains and which checks passed or did not run.
 - Gate by CPU, not run time: run builds, tests, and model checkers through `quest gate <command>` in the foreground, reading the exit code directly, never through a pipe. Leave `quest review`, servers, and formatters ungated. Never work around the queue by polling the load or capping agents (`quest agent admit`'s job); cancel a gated command only once its result is unneeded.
+- Never load the host's CPU to reproduce a flake, as with `stress-ng` or `yes > /dev/null`, even from a script: slow only the code under test, such as with `taskset` or injected delays.
 - Never end a turn with your background work running, and never poll with `sleep` or status loops: block on the harness's wait or `quest wait` (re-running on timeout with the `--since` it printed). A gate's queue or a long command still running is not a stall; back out only if progress genuinely stalls.
 - A sub-agent ends its turn only with a final result or a question, reporting only what its caller acts on (PR URL, state, head, open decisions with recommendations).
 
@@ -78,6 +79,7 @@ Language and PR topic packs (`pr`, `rust`, `ts`, `uniffi`) load lazily via hooks
 - Never rebase or force-push, even a branch only you hold; merge the base instead, when the branch conflicts with it or a landing step refuses the head.
 - Put scratch files, such as PR bodies, logs, patches, helper scripts, and temporary clones, in the checkout's `.tmp/`, never `/tmp`, so they disappear with the worktree.
 - Stop a process you started by its PID or process group, never by name with `pkill` or `killall`: other agents share the host.
+- Never load the host's CPU to reproduce a flake, as with `stress-ng`, `stress`, or `yes > /dev/null`: other agents share it. Slow only the code under test instead, such as by pinning it to one core with `taskset` or injecting delays.
 - Where a repository's `.config/nextest.toml` kills hung tests (`terminate-after`), run Rust tests through its test recipe or `cargo nextest run`, not plain `cargo test`, which skips that config, so a hung test never ends and holds the host's test slots. `cargo test --doc` runs the doctests nextest cannot.
 - In a question dialog, end each option you recommend with `(Recommended)`, and recommend one in every question with two or more options.
 - On a repository Kixel Quest hosts, `gh` cannot reach its PRs: use `quest pr view`, `list`, `create`, `edit`, `comment`, and `resolve`, and `quest status`, `ready`, and `merge`.
