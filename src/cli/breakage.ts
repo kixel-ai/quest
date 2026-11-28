@@ -20,13 +20,16 @@ export interface Cause {
 	found: Finder | null;
 	/** The ID of the incident the fix closes, as `quest records incident` reported it. */
 	incident: string | null;
+	/** An earlier fix, closed unmerged, that this one redoes, so an escape keeps the earlier opening. */
+	replaces: number | null;
 }
 
 /**
  * The PRs of `repository` that `body`'s `## Caused by` section names as culprits: each bullet that opens with
  * `[owner/repo#N](url) - why`. A link anywhere else on a line, as context or a "fixed by" aside, names no culprit.
- * A line may end with a parenthesis of either part or both, as `(found by customer; incident <id>)`: who found it,
- * an article allowed, and the incident the fix closes. Each culprit and incident keeps its first line, and a
+ * A line may end with a parenthesis of any of three parts, in order, as
+ * `(found by customer; replaces <PR URL>; incident <id>)`: who found it, an article allowed, the closed fix of
+ * `repository` it redoes, and the incident the fix closes. Each culprit and incident keeps its first line, and a
  * culprit whose lines name incidents drops its line naming none.
  */
 export function culprits(body: string, repository: Repository): Cause[] {
@@ -41,17 +44,18 @@ export function culprits(body: string, repository: Repository): Cause[] {
 		"gim",
 	);
 	const tail = new RegExp(
-		`\\((?:found by (?:an? |the )?(${FINDERS.join("|")})(?:; |(?=\\))))?(?:incident ([^\\r\\n]+?))?\\)\\s*$`,
+		`\\((?:found by (?:an? |the )?(${FINDERS.join("|")})(?:; |(?=\\))))?(?:replaces https://github\\.com/${name}/pull/(\\d+)(?:; |(?=\\))))?(?:incident ([^\\r\\n]+?))?\\)\\s*$`,
 		"i",
 	);
 	const found = new Map<string, Cause>();
 	for (const match of section.matchAll(culprit)) {
 		if (match[1] !== match[2]) continue;
-		const [, by, named] = tail.exec(match[0]) ?? [];
+		const [, by, replaced, named] = tail.exec(match[0]) ?? [];
 		const cause: Cause = {
 			number: Number(match[1]),
 			found: (by?.toLowerCase() as Finder | undefined) ?? null,
 			incident: named?.trim() || null,
+			replaces: replaced === undefined ? null : Number(replaced),
 		};
 		const id = JSON.stringify([cause.number, cause.incident]);
 		if (!found.has(id)) found.set(id, cause);

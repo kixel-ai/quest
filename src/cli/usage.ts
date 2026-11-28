@@ -29,7 +29,7 @@ import { type Implementer, canonicalModel, recorded } from "./models-record";
 import { type ClaimDependencies, upstream } from "./claims";
 import { repositoryPath } from "../github/client";
 import { git } from "./git";
-import { culpritOf, culprits } from "./breakage";
+import { type Cause, culpritOf, culprits } from "./breakage";
 import { fixes } from "./land-fixer";
 import { MERGER } from "./land-watch-fix";
 import { githubRepository, requireRemote } from "./github";
@@ -121,6 +121,11 @@ export interface PullRow {
 	landFixes: string[];
 	/** Later PRs that list it under `## Caused by`. */
 	fixedBy: number[];
+	/**
+	 * For each window, whether a fix naming it under `## Caused by` opened within that many days of its merge, open
+	 * fixes included; null until it has been merged that long.
+	 */
+	escaped: Record<EscapeWindow, boolean | null>;
 	/** Each online reviewer's passes and findings, as GitHub shows them. */
 	online: OnlineReview[];
 	sessions: SessionRow[];
@@ -594,18 +599,75 @@ function settledOnMerge(reviews: ReviewSummary[], merged: boolean): ReviewSummar
 	);
 }
 
-/** Each PR's record, without its sessions yet. */
-function pullRows(pulls: Pull[], repository: Repository): PullRow[] {
+/** The fixed windows, in days after a culprit's merge, within which a fix's opening counts as its escape. */
+export const ESCAPE_WINDOWS = [7, 28] as const;
+export type EscapeWindow = (typeof ESCAPE_WINDOWS)[number];
+const DAY = 86_400_000;
+
+/**
+ * When each culprit's escape was found: the opening of each open or merged fix naming it under `## Caused by`, or of
+ * the earliest fix closed unmerged that it replaces, by sharing the line's incident or naming it as `replaces`. A
+ * closed fix nothing replaced, often a regression that wasn't, counts for nothing.
+ */
+function escapeOpenings(pulls: Pull[], repository: Repository): Map<number, number[]> {
+	const closed = pulls.filter((each) => each.state === "closed");
+	const lines = new Map(pulls.map((each) => [each.number, culprits(each.body, repository)]));
+	// The earliest opening along the closed fixes `fix`'s line for `culprit` replaces, each fix visited once.
+	const opened = (fix: Pull, cause: Cause, seen: Set<number>): number => {
+		seen.add(fix.number);
+		let earliest = fix.created;
+		for (const earlier of closed) {
+			if (seen.has(earlier.number)) continue;
+			const own = lines.get(earlier.number)!.filter((each) => each.number === cause.number);
+			const shared = cause.incident === null ? undefined : own.find((each) => each.incident === cause.incident);
+			// A named replacement counts even when the earlier fix's body never named the culprit.
+			const line =
+				shared ??
+				(cause.replaces === earlier.number
+					? (own[0] ?? { number: cause.number, found: null, incident: null, replaces: null })
+					: undefined);
+			if (line) earliest = Math.min(earliest, opened(earlier, line, seen));
+		}
+		return earliest;
+	};
+	const openings = new Map<number, number[]>();
+	for (const fix of pulls.filter((each) => each.state !== "closed"))
+		for (const cause of lines.get(fix.number)!) {
+			if (cause.number === fix.number) continue;
+			openings.set(cause.number, [...(openings.get(cause.number) ?? []), opened(fix, cause, new Set())]);
+		}
+	return openings;
+}
+
+/** Each PR's record, without its sessions yet, its escapes judged at `now`, epoch ms. */
+function pullRows(pulls: Pull[], repository: Repository, now: number): PullRow[] {
 	const fixedBy = new Map<number, number[]>();
 	// A fix counts once it lands: an open or abandoned one, such as a closed duplicate, fixed nothing.
 	for (const each of pulls.filter((pull) => pull.state === "merged"))
 		for (const cause of causes(each.body, repository))
 			if (cause !== each.number) fixedBy.set(cause, [...(fixedBy.get(cause) ?? []), each.number]);
-	return pulls.map((each) => pullRow(each, fixedBy));
+	const escaped = escapes(pulls, repository, now);
+	return pulls.map((each) => pullRow(each, fixedBy, escaped.get(each.number)!));
 }
 
-/** `each`'s record, given the merged PRs that name each culprit as `fixedBy`. */
-function pullRow(each: Pull, fixedBy: Map<number, number[]>): PullRow {
+/** Each PR's escapes among `pulls`, judged at `now`, epoch ms: none until it has been merged a window's length. */
+export function escapes(pulls: Pull[], repository: Repository, now: number): Map<number, PullRow["escaped"]> {
+	const openings = escapeOpenings(pulls, repository);
+	return new Map(
+		pulls.map((each) => {
+			const merged = each.state === "merged" ? each.closed : null;
+			const found = openings.get(each.number) ?? [];
+			const windows = ESCAPE_WINDOWS.map((days) => [
+				days,
+				merged === null || now - merged < days * DAY ? null : found.some((at) => at - merged <= days * DAY),
+			]);
+			return [each.number, Object.fromEntries(windows) as PullRow["escaped"]];
+		}),
+	);
+}
+
+/** `each`'s record, given the merged PRs that name each culprit as `fixedBy`, and its escapes. */
+function pullRow(each: Pull, fixedBy: Map<number, number[]>, escaped: PullRow["escaped"]): PullRow {
 	const own = recorded(each.body);
 	// The `## Review` record is its writer's text, at times edited by hand, so one this version cannot read is
 	// reported on its PR instead of stopping every other PR's. Its reviewers and its tier are read apart, so a
@@ -640,6 +702,7 @@ function pullRow(each: Pull, fixedBy: Map<number, number[]>): PullRow {
 		unreadReview,
 		landFixes: fixes(each.body),
 		fixedBy: (fixedBy.get(each.number) ?? []).sort((a, b) => a - b),
+		escaped,
 		online: [],
 		sessions: [],
 	};
@@ -1333,7 +1396,7 @@ export async function usage(root: string, options: UsageOptions, deps: UsageDepe
 			(branch === undefined || each.branch === branch),
 	);
 	const narrowed = options.pr !== undefined || branch !== undefined;
-	const allRows = pullRows(all, repository);
+	const allRows = pullRows(all, repository, deps.github().now());
 	const rows = allRows.filter((row) => pulls.some((each) => each.number === row.number));
 	const byNumber = new Map(rows.map((row) => [row.number, row]));
 	const read = deps.sessions(new Date(since), options.ssh ?? []);
@@ -1613,6 +1676,11 @@ export function usageLines(report: Usage): string[] {
 			lines.push(`  online review: ${o.reviewer}, ${o.finalHead ? "" : "not "}at the final head; ${answers(o)}`);
 		if (row.landFixes.length) lines.push(`  land fixes: ${row.landFixes.join("; ")}`);
 		if (row.fixedBy.length) lines.push(`  fixed later by: ${row.fixedBy.map((n) => `#${n}`).join(", ")}`);
+		const judged = ESCAPE_WINDOWS.filter((days) => row.escaped[days] !== null);
+		if (judged.length)
+			lines.push(
+				`  escaped: ${judged.map((days) => `${row.escaped[days] ? "yes" : "no"} within ${days} days`).join(", ")}`,
+			);
 		const sessions = row.sessions.flatMap((s) =>
 			s.models.map((m) => [
 				"   ",
