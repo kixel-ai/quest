@@ -34,11 +34,31 @@ Decided 2026-11-26 (maintainer, `/quest-plan`):
 - After receiving advice? ✅ Standalone `/quest-advise` only returns its
   recommendation without editing code or writing to GitHub; when an enclosing
   task (`/quest-start`, `/quest-iterate`, `/quest-run`) already authorizes edits
-  and pushes, auto-iterate when the advice fits the quest's Goal and settled
-  decisions (record a `Design change:` PR comment and review with
-  `quest review --new`), and stop and ask the maintainer when the advisor
-  recommends changing scope/architecture or dropping the PR (rejected: always
-  stop and ask; split behavior between `/quest-afk` and interactive `/quest-run`).
+  and pushes, auto-iterate on the advice (record a `Design change:` PR comment
+  and review with `quest review --new`). Amended 2026-11-28 (maintainer,
+  `/quest-plan` of the agent audit's follow-ups: "I don't really want to be in
+  the loop; I just want to fix poor directions early"): ✅ the advisor's
+  verdict replaces the maintainer's pick at `next decide` for everything but
+  closing the PR, scope and architecture pivots included; only a recommendation
+  to drop the PR hands back, since closing one needs the maintainer's
+  confirmation, and advice beyond an explicit limit the enclosing request
+  states, such as "fix the packaging only", hands back too (rejected: closing too; keeping pivots and drops for the
+  maintainer, as decided 2026-11-26; always stop and ask; split behavior
+  between `/quest-afk` and interactive `/quest-run`). Why: of 210 `next decide`
+  stops in the busiest agent host's transcripts from 2026-11-25 to 11-28, 124
+  were handed back under `## Waiting` by `/quest-run`'s dispatched threads,
+  which an afk coordinator answers itself; 37 ran another round anyway and 28
+  ran `--accept` without a pick, many under `/quest-afk`, whose "take your
+  recommendation" covers the stop; the other 21 asked or stopped. About 30 of
+  the maintainer's prompts in those days were checkpoints, counting the
+  handbacks a coordinator relayed. An accept the advisor recommended is
+  recorded as the advisor's, in the posted run and in the `quest review`
+  commit status the GitHub land gate reads (`src/github/review-trust.ts`), so
+  `quest usage` and the gate never read it as the maintainer's. The gate lands
+  an advisor's acceptance as it lands the maintainer's, the hands-off path
+  the maintainer asked for; tests cover both sources.
+  [Advise stop](/quest/m0/advise-stop.md) makes `quest review` enforce it, and
+  [advise replay](/quest/m0/advise-replay.md) measures whether the advice helps.
 - Model order and harnesses? ✅ `gemini-4-neon` (`high`) via `agy` →
   `gpt-6.2-astra` (`high`) via `codex` → `claude-fable-5-2` (`medium`) via
   `claude`, restoring `agy` in `quest` solely for `quest advise` (rejected:
@@ -53,7 +73,8 @@ Decided 2026-11-26 (maintainer, `/quest-plan`):
 
 The maintainer authorized the edits this needs in `assets/` (`assets/skills/advise.md`,
 `assets/skills/review.md`, `assets/skills/iterate.md`, `assets/skills/run.md`,
-`assets/AGENTS.md`) and `README.md`.
+`assets/AGENTS.md`) and `README.md`, and on 2026-11-28 `assets/skills/afk.md`,
+which must stop taking its own recommendation at `next decide`.
 
 Recommended, for the implementer to confirm:
 
@@ -92,11 +113,11 @@ Recommended, for the implementer to confirm:
 - **Checkpoint contract & skills (`src/cli/review.ts`, `README.md`, `assets/skills/advise.md`, `assets/skills/review.md`, `assets/skills/iterate.md`, `assets/AGENTS.md`):**
   - Update `nextStep()`'s `next decide` output in `src/cli/review.ts`, its CLI
     help, and `README.md` alongside the skills so headless authors are told the
-    complete exception: they may run one `quest advise` escalation, and when the
-    enclosing task already authorizes PR edits and the advice fits the quest's
-    Goal and settled decisions, they may apply it, post a `Design change:` PR
-    comment, and run `quest review --new`; scope changes, architecture pivots,
-    and dropping the PR still stop for the maintainer's pick.
+    complete exception: they run one `quest advise` escalation, and when the
+    enclosing task already authorizes PR edits, they apply it, post a
+    `Design change:` PR comment, and run `quest review --new`; only advice to
+    drop the PR, or advice beyond an explicit limit the enclosing request
+    states, hands back for the maintainer's pick.
   - Ship `/quest-advise` (installed by `quest init` like the other skills) with
     generic guidance: call `quest advise` when stuck (such as failing review
     convergence, repeated findings, or non-converging implementation loops),
@@ -106,18 +127,20 @@ Recommended, for the implementer to confirm:
     a task (`/quest-start`, `/quest-iterate`, `/quest-run`) that already
     authorizes editing and pushing to the PR.
   - In `/quest-review` and `/quest-iterate`, note that at `next decide` (or
-    repeated findings across rounds) the agent may run `quest advise` once before
-    handing back to the user, auto-applying advice that stays within the quest's
-    Goal and settled decisions (`Design change:` PR comment + `quest review --new`)
-    and handing back with the advisor's options when it recommends a scope or
-    architecture pivot or dropping the PR.
+    repeated findings across rounds) the agent runs `quest advise` once instead
+    of handing back to the user, applying the advice (`Design change:` PR
+    comment + `quest review --new`) and handing back only when it recommends
+    dropping the PR or goes beyond an explicit limit the request states, such
+    as a CLI change on a packaging-only request. `/quest-afk` no longer takes its own recommendation at the
+    stop; the advisor's stands in for it.
 
 Tests: unit tests for `ADVISORS` fall-through (missing/logged-out/limited/sandbox-unsupported),
 hard 1-call-per-branch cap and `--force` override, read-only invocation flags
 for `agy`/`codex`/`claude`, persisted `agy` token counts priced at API list
 rates (and marked `complete: false` when a rate is missing) feeding both
 `quest usage` and `quest send`, `"advising"` role attribution and spend rollup,
-`next decide` wording, and `quest init` installing the `/quest-advise` stub.
+`next decide` wording, a packaging-only request handing back advice to
+change the CLI, and `quest init` installing the `/quest-advise` stub.
 Add an `advise` sandbox case alongside `just review-sandbox` verifying no write
 or untrusted code execution.
 
