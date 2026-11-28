@@ -2977,6 +2977,51 @@ describe.skipIf(process.platform === "win32")("the watcher's own queue", () => {
 		},
 	);
 
+	// The client itself resends the merge after a rate-limit wait or a 5xx, at the same pinned head.
+	test.each([
+		[
+			"a rate-limit wait",
+			() => Response.json({ message: "rate limit" }, { status: 429, headers: { "retry-after": "60" } }),
+		],
+		["a 5xx pause", () => Response.json({ message: "Server Error" }, { status: 502 })],
+	] as const)("a pick withdrawn during the client's %s is not merged by its resend", async (_, failure) => {
+		const { forge, pass, pauses, hooks, intercept } = setup();
+		const pull = forge.pull("Plain", { "plain.txt": "yes" });
+		await pass();
+		report(forge, 1, "SUCCESS");
+		const sent: number[] = [];
+		intercept.push((url, real) => {
+			if (!url.endsWith("/pulls/1/merge")) return;
+			sent.push(1);
+			return sent.length === 1 ? Promise.resolve(failure()) : real();
+		});
+		hooks.pause = () => {
+			pull.landing = false;
+			delete pull.autoMerge;
+		};
+		expect(await pass()).toEqual(["refused 1"]);
+		expect(pauses).toHaveLength(1);
+		expect(sent).toHaveLength(1);
+		expect(pull.merged).toBeFalsy();
+		expect(shown(forge)[1]).toBe("neutral Left the queue");
+		expect(forge.comment(1)).toBeUndefined();
+	});
+
+	test("a pick still armed after the client's 5xx pause is merged by its resend", async () => {
+		const { forge, pass, intercept } = setup();
+		const pull = forge.pull("Plain", { "plain.txt": "yes" });
+		await pass();
+		report(forge, 1, "SUCCESS");
+		let failed = false;
+		intercept.push((url) => {
+			if (!url.endsWith("/pulls/1/merge") || failed) return;
+			failed = true;
+			return Promise.resolve(Response.json({ message: "Server Error" }, { status: 502 }));
+		});
+		expect(await pass()).toEqual(["landed 1"]);
+		expect(pull.merged).toBe(true);
+	});
+
 	test("a pick re-armed during the backoff is another pick, and merges nothing more", async () => {
 		const context = setup();
 		const { forge, pass, hooks } = context;
