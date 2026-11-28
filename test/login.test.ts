@@ -178,6 +178,22 @@ test("a refused revoke fails logout, keeping the token and git's sign-in, and ru
 	expect(tokenFor(KIXEL, env)).toBeNull();
 });
 
+test("a sign-in saved while logout revokes survives it, and running logout again revokes that one", async () => {
+	const env = user();
+	const server = new FakeLogin();
+	await login(host(server, "n", env).deps);
+	const racing = (async (input: string | URL | Request, init?: RequestInit) => {
+		const answer = await server.fetch(input, init);
+		writeTokens(env, { [KIXEL]: "replacement" });
+		return answer;
+	}) as typeof fetch;
+	await expect(logout({ env, fetch: racing })).rejects.toThrow(`signed in to ${KIXEL} again while logging out`);
+	expect(tokenFor(KIXEL, env)).toBe("replacement");
+	expect(readFileSync(env.GIT_CONFIG_GLOBAL!, "utf8")).toContain(HELPER);
+	expect(await signOut(env, server)).toEqual({ url: KIXEL, removed: true });
+	expect(server.revoked).toEqual(["issued-1", "replacement"]);
+});
+
 test("a token file an earlier quest wrote is moved once, uploading no transcripts", async () => {
 	const env = user();
 	const old = join(dirname(tokensPath(env)), "records.json");

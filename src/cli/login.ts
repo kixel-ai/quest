@@ -71,6 +71,9 @@ export async function logout(
 				`${url}${answer.path} answered HTTP ${answer.status}: ${String(answer.body.error ?? "no error named")}`,
 			);
 	}
+	// A `quest login` that saved its token while the revoke was in flight holds one this did not revoke; keep it.
+	if (tokenFor(url, env) !== token)
+		throw new Error(`this host signed in to ${url} again while logging out; run \`quest logout\` again`);
 	signOutGit(url, env);
 	return { url, removed: removeLogin(url, env) };
 }
