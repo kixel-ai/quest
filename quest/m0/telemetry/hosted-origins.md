@@ -23,4 +23,3 @@ Tests: against a local Worker hosting a repository, a session stopped in its clo
 ## Related
 
 - [Sessions](/quest/m0/telemetry/sessions.md) - the record fields a hosted session's record also carries
-- [Git credential helper](/quest/m0/git-credential.md) - lets the same hosts clone and push hosted repositories

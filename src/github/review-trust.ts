@@ -2,6 +2,7 @@
 // repository, bound to that commit's diff from its merge base. The land gate and `quest status` read the review from
 // them alone, through one walk, so they cannot disagree.
 import {
+	BaseMerges,
 	type PullRequest,
 	type RecordedRisk,
 	RISK_FILE,
@@ -14,6 +15,7 @@ import {
 	riskFileId,
 } from "../core";
 import { GitHubDeadline, type GitHubReader, type ObjectValue, array, object, repositoryPath, string } from "./client";
+import { history } from "./history";
 
 /** The commit status context `quest review` sets on each head it records. */
 export const REVIEW_CONTEXT = "quest review";
@@ -67,10 +69,11 @@ export interface ReviewStatus {
 
 /**
  * Why `sha`, the head of `pr` about to land, must wait for a new `quest review` round, or null when it may land.
- * The newest `quest review` status a writer set on a commit of the PR whose diff is the head's decides it: the head
- * lands whatever its tier when that status passed, classified against the base's current risk file, so a round that
- * failed outweighs an earlier pass of the same diff, and any push after the last review that changes the diff, whoever
- * made it, and any change to the base's risk file since, waits for a new one. Otherwise it waits when it is high: when
+ * The newest `quest review` status a writer set on a commit of the PR whose diff is the head's, or that the head only
+ * cleanly merged the base since, decides it: the head lands whatever its tier when that status passed, classified
+ * against the base's current risk file, so a round that failed outweighs an earlier pass of the same diff, and any
+ * push after the last review that changes the diff other than a clean merge of the base, whoever made it, and any
+ * change to the base's risk file since, waits for a new one. Otherwise it waits when it is high: when
  * a `quest review` status on any of the PR's commits rates it high, or when its diff from its merge base with the base
  * touches a path the base's risk file holds high.
  */
@@ -82,11 +85,13 @@ export async function unreviewedHigh(
 	const head = sha.toLowerCase();
 	const risk = await baseRisk(github, pr);
 	const statuses = await reviewStatuses(github, pr);
-	const { counted } = await countedReview(github, pr, head, statuses, { report: false, merged: false });
+	const { counted, unread } = await countedReview(github, pr, head, statuses, { report: false, merged: false });
 	const covered = counted?.state === "current" || counted?.state === "diff-identical";
 	if (counted?.passed && covered && counted.attested.riskFile === riskFileId(risk?.blob ?? null)) return null;
 	const high = statusHigh(statuses) ?? (await pathHigh(github, pr, head, risk?.text ?? null));
-	return high === null ? null : `${sha} is high, since ${high}, and no quest review status covers it`;
+	if (high === null) return null;
+	const why = unread === undefined ? "" : ` (reading its merges of the base failed: ${unread})`;
+	return `${sha} is high, since ${high}, and no quest review status covers it${why}`;
 }
 
 /** The review that counts for a head: a writer's `quest review` status, and how its diff relates to the head's. */
@@ -116,8 +121,9 @@ export interface Reading {
 
 /**
  * The review that counts for `head` from `statuses`, the PR's `quest review` statuses newest first: the newest writer's
- * status bound to a diff equal to the head's, so a round that failed outweighs an earlier pass of the same diff.
- * `skipped` says why each status that counts for none does not.
+ * status bound to a diff equal to the head's, or on a commit the head only cleanly merged the base since, so a round
+ * that failed outweighs an earlier pass of the same diff. `skipped` says why each status that counts for none does not,
+ * and `unread` why reading the head's merges of the base failed, which leaves a status they might carry unknown.
  */
 export async function countedReview(
 	github: GitHubReader,
@@ -125,8 +131,23 @@ export async function countedReview(
 	head: string,
 	statuses: ReviewStatus[],
 	{ report, merged }: Reading,
-): Promise<{ counted: Counted | null; skipped: string[] }> {
+): Promise<{ counted: Counted | null; skipped: string[]; unread?: string }> {
 	const skipped: string[] = [];
+	const merges = new BaseMerges(history(github, pr), head);
+	let unread: string | undefined;
+	// Whether the head only merged the base since `sha`: another diff text, but no change of its own. It needs no diff,
+	// so it also settles one GitHub cannot send.
+	const carried = async (sha: string): Promise<boolean> => {
+		try {
+			return await merges.reaches(sha);
+		} catch (error) {
+			if (error instanceof GitHubDeadline || !(error instanceof Error)) throw error;
+			if (unread === undefined)
+				skipped.push(`cannot check whether ${head} only merged the base since ${sha}: ${error.message}`);
+			unread ??= error.message;
+			return false;
+		}
+	};
 	const rest: { each: ReviewStatus; known: boolean }[] = [];
 	const diffOf = async (sha: string): Promise<string | null> => {
 		try {
@@ -148,8 +169,9 @@ export async function countedReview(
 			diff ??= diffOf(head);
 			const own = await diff;
 			const theirs = own === null ? null : await diffOf(each.oid);
-			if (own === null || theirs !== own) {
-				rest.push({ each, known: own !== null && theirs !== null });
+			if ((own === null || theirs !== own) && !(await carried(each.oid))) {
+				// A walk that failed may have stopped short of this commit, so it leaves the relation unknown.
+				rest.push({ each, known: own !== null && theirs !== null && unread === undefined });
 				continue;
 			}
 		}
@@ -179,7 +201,11 @@ export async function countedReview(
 			}
 		}
 		const state = doubted ? "unknown" : each.oid === head ? "current" : "diff-identical";
-		return { counted: { oid: each.oid, state, passed: each.status.state === "SUCCESS", attested: bound }, skipped };
+		return {
+			counted: { oid: each.oid, state, passed: each.status.state === "SUCCESS", attested: bound },
+			skipped,
+			unread,
+		};
 	}
 	if (report)
 		for (const { each, known } of rest) {
@@ -190,9 +216,10 @@ export async function countedReview(
 				return {
 					counted: { oid: each.oid, state: known ? "stale" : "unknown", passed: true, attested: bound },
 					skipped,
+					unread,
 				};
 		}
-	return { counted: null, skipped };
+	return { counted: null, skipped, unread };
 }
 
 /**

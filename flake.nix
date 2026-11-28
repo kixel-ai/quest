@@ -154,11 +154,27 @@
                 fixture = lib.mkFlake {
                   inherit self nixpkgs;
                   systems = [ system ];
-                  perSystem = _: { quest = pkgs.hello; };
+                  # A hook that ends without a newline, which the identity's export must not join.
+                  perSystem = _: {
+                    quest = pkgs.hello;
+                    shell.shellHook = "HOOKED=1";
+                  };
                 };
                 shell = fixture.devShells.${system}.default;
+                # The same shell with only an environment attribute added: its identity must move with it.
+                changed =
+                  (lib.mkFlake {
+                    inherit self nixpkgs;
+                    systems = [ system ];
+                    perSystem = _: {
+                      quest = pkgs.hello;
+                      shell.shellHook = "HOOKED=1";
+                      shell.CHANGED = "1";
+                    };
+                  }).devShells.${system}.default;
               in
               assert fixture.checks.${system} ? quest;
+              assert shell.questShell != changed.questShell;
               pkgs.runCommand "mk-flake" { nativeBuildInputs = shell.nativeBuildInputs; } ''
                 hello --version >/dev/null
                 treefmt --version
@@ -168,6 +184,8 @@
                 cd repo/sub
                 ${shell.shellHook}
                 [ "$QUEST_DEV_SHELL" = "$(dirname "$PWD")" ]
+                [ "$HOOKED" = 1 ]
+                [ "$QUEST_DEV_SHELL_ID" = ${shell.questShell} ]
                 # Another flake's checkout, and none at all.
                 { cat ${self}/flake.nix; echo "# other"; } > ../../other/flake.nix
                 for dir in ../../other /; do

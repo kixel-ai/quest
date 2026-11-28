@@ -618,7 +618,7 @@ comes last, and a missing value prints as `-`:
 | --- | --- |
 | `url`, `state`, `draft`, `head` | The PR URL; `open`, `closed`, or `merged`; `true` or `false`; the head SHA. |
 | `mergeable`, `merge-state`, `review-decision` | GitHub's values, lowercased. |
-| `review-record` | Whether the review that counts still covers the head, and the head it reviewed: `current` when it is the head, `diff-identical` when `git diff <base>...<head>` prints the same as for it, `stale` otherwise, or `unknown` when the forge cannot compare them, such as a diff too large; then `local-review`, or `no-local-review` for an older run from before every tier ran a local reviewer. The review that counts is the newest passing run [`quest review` posted](#review-locally) to Kixel Quest from someone who can push to the repository, read through Kixel Quest; a run with findings open counts for none. `-` when none counts. Read from GitHub, as with `QUEST_FORGE=github`, it is the newest passing `quest review` commit status a user who can push set on a commit of the PR whose diff from the base is the head's, the walk the land gate reads, so no edit of the PR body drops it: `current` when the status is on the head, `diff-identical` when its commit's diff matches, `stale` when only an older diff passed, and `unknown` when GitHub cannot compare the diffs. A later failing status on the head's diff, a non-writer's status, one bound to another base, or one on a commit a force-push dropped from the PR counts for none, each with a warning saying why when the walk reaches it, and the record is `stale`, with a warning, once `RISK.md` at the base's tip is not the file the status names. |
+| `review-record` | Whether the review that counts still covers the head, and the head it reviewed: `current` when it is the head, `diff-identical` when `git diff <base>...<head>` prints the same as for it, or when the head only merged the base since, each merge the clean merge of its parents with quest link-list conflicts resolved as `quest resolve` does (as `quest` reads GitHub; Kixel Quest's read counts only a matching diff until it adopts this check), `stale` otherwise, or `unknown` when the forge cannot compare them, such as a diff too large; then `local-review`, or `no-local-review` for an older run from before every tier ran a local reviewer. The review that counts is the newest passing run [`quest review` posted](#review-locally) to Kixel Quest from someone who can push to the repository, read through Kixel Quest; a run with findings open counts for none. `-` when none counts. Read from GitHub, as with `QUEST_FORGE=github`, it is the newest passing `quest review` commit status a user who can push set on a commit of the PR whose diff from the base is the head's, or that the head only cleanly merged the base since, the walk the land gate reads, so no edit of the PR body drops it: `current` when the status is on the head, `diff-identical` on another such commit, `stale` when only an older diff passed, and `unknown` when GitHub cannot compare the diffs. A later failing status on the head's diff, a non-writer's status, one bound to another base, or one on a commit a force-push dropped from the PR counts for none, each with a warning saying why when the walk reaches it, and the record is `stale`, with a warning, once `RISK.md` at the base's tip is not the file the status names. |
 | `risk` | The counted review's [risk tier](#risk-tiers), `low`, `medium`, or `high`; the same state as `review-record`; the tier its classifier set; and the reason. `-` when none counts. Read from GitHub, the status carries the final tier after any reviewer raised it and its class, and not the classifier's own tier or its reason, which print `-`. |
 | `class` | The class, built in or from the base's `RISK.md` `## Automatic` list, the counted review's classifier found the change in, or `-`. |
 | `auto-merge` | Method, who enabled it, when, and the head it was enabled on. |
@@ -682,14 +682,32 @@ Upload this host's agent transcripts with its session records? A transcript hold
 Open https://kixel.quest/login, sign in with GitHub, and enter the code BCDF-GHJK.
 Waiting for its approval; the code expires in 10 minutes.
 signed in to https://kixel.quest as workstation; transcript uploads declined
+signed git in to https://kixel.quest's repositories: credential.https://kixel.quest/.helper = "", credential.https://kixel.quest/.helper = !quest git-credential
 ```
 
 Kixel Quest issues the host a token named after its hostname, which `quest`
 keeps in `$XDG_CONFIG_HOME/quest/login.json` (`~/.config`), readable only by
 the user, with the answer about transcripts, where only a `y` or `yes` agrees;
 the record sender uploads no transcripts yet.
-Signing in again replaces the host's token. `quest logout` removes it from the
-host; Kixel Quest takes it until it is revoked on its Tokens page. A
+Signing in again replaces the host's token.
+`quest login` also signs git in to the repositories Kixel Quest hosts, as
+`gh auth setup-git` does for GitHub: it writes two `credential.<url>/.helper`
+entries to the global git config for that Kixel Quest's URL alone, an empty one
+that masks any helper listed before it for that URL, such as `osxkeychain`,
+without deleting it, then `!quest git-credential`. That hidden command answers
+git with user `quest` and the token in `login.json`, read on every call, so
+signing in again rotates it; without a token it names `quest login` and git
+fails. Git finds `quest` on `PATH`, so an upgrade keeps working. A helper
+listed after quest's, such as a global `credential.helper` defined later in the
+file, still runs and may store the token. A global git config quest cannot
+write, such as one home-manager manages, fails the command naming both entries,
+to declare there instead; one that already holds just them is left alone.
+Git matches `<url>/` to the same remotes as `<url>`, but as a key of quest's
+own, so a helper the person lists under `<url>` is never moved or removed.
+`quest logout` removes those two entries, failing on a config it cannot write
+while they are there, then the token from the host; Kixel Quest takes the token
+until it is revoked on its Tokens page. `QUEST_KIXEL_URL` must be a bare origin,
+since git's credential requests name only the protocol and host. A
 `records.json` beside it, where earlier versions read a pasted token, is moved
 into `login.json` on the first read, uploading no transcripts.
 
@@ -714,7 +732,7 @@ person's own token, so they are made in their name.
 Its read API lives under `/forge`, with the token as a bearer token:
 `GET /forge` answers `{"login", "repositories"}`, the person the token names
 and the lowercase `owner/repo` of each repository served to them, and
-`POST /forge/<read>` takes one of `status`, `pulls`, `updated` (a hosted repository's recently updated PRs, which only Kixel Quest answers), `files`, `held`, `watch`, or `view` and
+`POST /forge/<read>` takes one of `status`, `pulls`, `updated` (a hosted repository's recently updated PRs, which only Kixel Quest answers), `files`, `held`, `watch`, `view`, or `writers` (a PR's writers, which only Kixel Quest answers) and
 answers `{"value", "asOf"}`, the read's value and the time of the newest
 webhook behind it. Kixel Quest and a repository's pinned `quest` may each be
 newer than the other, so a client ignores answer fields it does not know and
@@ -723,7 +741,7 @@ the least, such as no review record counting from a server too old to say
 whether a maintainer attested it; a request with a field the server
 does not know is refused. A 400 with `{"error"}` refuses a bad argument, such as a
 malformed `--since`, which `quest` reports as a usage error. `quest/core` exports each read's types and their parsers;
-`quest/github`'s `GitHubForge` answers the same reads from GitHub, other than `updated`.
+`quest/github`'s `GitHubForge` answers the same reads from GitHub, other than `updated` and `writers`.
 `quest review` posts each run to `POST /reviews` with the same token, its body
 `{"runs", "outcomes"}` as `parseReviews` in `quest/core` reads it.
 
@@ -734,7 +752,9 @@ remote is then a Kixel Quest URL, `https://kixel.quest/<owner>/<repo>.git`,
 and its PRs are `https://kixel.quest/<owner>/<repo>/pull/<number>`; that alone
 tells `quest` the repository lives there, so every read and write goes to
 Kixel Quest, with the token `quest login` stored for it, and never to GitHub;
-without one, they fail naming `quest login`.
+without one, they fail naming `quest login`. Git's own `clone`, `fetch`, and
+`push` there use the same token through the credential helper `quest login`
+configures.
 `QUEST_FORGE=github` cannot reach such a repository, and a failure there names
 no override. `quest start` claims with a draft PR there, `quest iterate`,
 `ready`, and `release` take and give back holds that Kixel Quest records rather
@@ -1618,11 +1638,15 @@ Each task runs through [`quest gate`](#gate-cpu-heavy-commands), so independent
 tasks start together and wait only for the host's room. A task that sets
 `nix = false` runs on the host's own tools; every other task needs the
 repository's `flake.nix`, a regular file, and runs in its dev shell: directly when `quest run`
-is already inside it, with no Nix evaluation, and through `nix develop
+is already inside it (with no Nix evaluation, unless it uses [the cache](#cached-passes)), and through `nix develop
 --command` otherwise. The dev shell says it is the repository's by setting
 `QUEST_DEV_SHELL` to the repository's root, as [`quest.lib.mkFlake`'s](#share-flake-boilerplate-with-questlibmkflake) does; a
 shell without it, such as another repository's, gets `nix develop` all the
-same. Each task gets `QUEST_TIER`, `QUEST_BASE` (the merge base, unless
+same. That shell may predate an edit to the flake, which the marker, checked as
+the shell is entered, cannot tell, so while [the cache](#cached-passes) is in
+use `quest run` also needs `QUEST_DEV_SHELL_ID`, which `mkFlake`'s shell sets. A
+nested `nix shell` keeps both variables, so a task runs with its tools while
+the outer shell's identity still matches. Each task gets `QUEST_TIER`, `QUEST_BASE` (the merge base, unless
 `--all`), and its `environment`, exported inside the dev shell, and every line
 it prints is prefixed with its name.
 
@@ -1680,10 +1704,15 @@ to the task's `junit` and `metrics` paths and under `--report`.
 - a task declaring `metrics`, which describe the run that wrote them
 
 A task without Nix is never cached, since nothing pins the host's toolchain.
-While the cache is in use, every Nix task runs through `nix develop` even
-inside the repository's dev shell, so it runs with the toolchain the digests
-name rather than one entered before an edit to the flake. `--no-cache` runs
-every task and records nothing.
+A Nix task runs with the toolchain its digest names, so inside the
+repository's dev shell, which may predate an edit to the flake, `quest run`
+still runs it directly only if the shell is `quest.lib.mkFlake`'s and built
+from the toolchain `nix develop` enters now: the shell's `QUEST_DEV_SHELL_ID`
+must equal the identity the same `nix eval` that fingerprints it prints. It
+covers everything the repository gave the shell, so an edit to an imported Nix
+file moves it. Any other shell, or a stale one, runs each Nix task, and
+`cargo metadata`, through `nix develop`. `--no-cache` runs every task and
+records nothing.
 
 The digest a pass is recorded under covers:
 
@@ -1777,7 +1806,11 @@ It adds to what `perSystem` returns, for each of `systems` (`x86_64-linux`,
   directory up holding `flake.nix` when that `flake.nix` and its `flake.lock`
   are the ones the shell was built from, so `quest run` and `quest fmt` run
   there without entering the shell again, and a shell entered from another
-  checkout names none. `perSystem`'s `quest` replaces the `quest` package.
+  checkout names none. It checks them only as the shell is entered. It also
+  sets `QUEST_DEV_SHELL_ID` to an identity of everything `shell` holds, which
+  `quest run` compares with the identity `nix develop` would enter now before
+  it runs cached Nix tasks directly. `perSystem`'s `quest` replaces the `quest`
+  package.
 - `formatter`, the same `treefmt`, which `nix fmt` runs.
 - `checks.quest`, which runs `quest check`, `quest.toml` and `nixConfig`
   included, on the flake's source; a `checks` entry of the same name replaces
@@ -2692,9 +2725,12 @@ would admit a gated command at once, as `quest gate` counts it, with one more
 command's budget taken for every agent admitted in the last 5 minutes: an agent
 adds no gated work until its first build, and three quarters of those that build
 at all reach it by then. An agent `start` or `resume` runs stops counting when it
-exits. CPU load and commands queued for the gate do not hold agents back: an
+exits. On Linux, where the gate runs commands in the user's `background.slice`, that
+slice counts too, as it does for the gate, so a slice at its cap holds agents back however much memory the host has
+free. CPU load and commands queued for the gate do not hold agents back: an
 agent mostly waits on its model, and its builds wait in the gate. On macOS,
-where the gate reads no memory, the host has room instead while `quest gate`
+where the gate reads no memory, and on Windows, where memory alone does not
+bound agents, the host has room instead while `quest gate`
 would admit a command at once, counting every command queued for it and each
 agent admitted in the last 5 minutes as one recent admission; as in the gate, a
 host loaded only by work no gate holds still starts one agent at a time.

@@ -123,6 +123,7 @@ import { SEND_INTERVAL, background, parseInstant, queue, reportIncident, runSend
 import { installSender, uninstallSender } from "./service";
 import { heal, init, stubFindings, uninstall } from "./setup";
 import { describe, notUpstream, releaseQuest, startQuest } from "./start";
+import { credential } from "./git-credential";
 import { login, logout } from "./login";
 import { KIXEL_QUEST_URL, kixelUrl, tokensPath } from "./tokens";
 import { CONTEXT, GUIDE, GUIDE_SECTIONS, SKILLS, guideSections, sectionHeading, skill } from "./skills";
@@ -290,7 +291,9 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"Each task runs its run script with bash -eo pipefail -c from the repository root, with QUEST_TIER, " +
 				"QUEST_BASE (the merge base, unless --all), and its environment table exported. A Nix task needs " +
 				"flake.nix there, a regular file; inside the repository's dev shell, where QUEST_DEV_SHELL names its " +
-				"root, it runs directly unless the run uses the cache, and otherwise through nix develop --command. " +
+				"root, it runs directly, while the run uses the cache only if QUEST_DEV_SHELL_ID, which " +
+				"quest.lib.mkFlake's shell exports, names the toolchain nix develop enters now; otherwise it runs " +
+				"through nix develop --command. " +
 				"quest and bash must be on PATH, env when a task run outside nix develop has an environment table, " +
 				"and nix outside that dev shell or while the run uses the cache.\n\n" +
 				"A task that passes must write the junit and metrics files it declares, and metrics must hold a JSON " +
@@ -860,11 +863,11 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				"Plain output prints one record per line, its type first and any free text (a check name or path) last: " +
 				"url, state, draft, head, mergeable, merge-state, review-decision, review-record, risk, class, auto-merge, merge-queue, " +
 				"landing-stopped, and checks, whose state and counts follow the checks that count, pending while an open PR's base requires a check or workflow nothing reports; review-record gives whether the review that counts " +
-				"covers the head, as current, diff-identical (git diff <base>...<head> prints the same as for the head it reviewed), " +
+				"covers the head, as current, diff-identical (git diff <base>...<head> prints the same as for the head it reviewed, or the head only merged the base since, each merge the clean merge of its parents, quest link-list conflicts resolved as quest resolve does), " +
 				"stale, or unknown when the forge cannot compare them, or - when none counts, then the head it reviewed, then local-review or no-local-review for whether a local reviewer's round passed it. " +
 				"The review that counts is the newest passing run quest review posted to Kixel Quest from someone who can push, which Kixel Quest answers; " +
-				"read from GitHub, it is the newest passing quest review commit status a user who can push set on a commit of the PR whose diff from the base is the head's, " +
-				"as the land gate reads it: current when it is on the head, diff-identical when its commit's diff matches the head's, stale when only an older diff passed, unknown when GitHub cannot compare them, " +
+				"read from GitHub, it is the newest passing quest review commit status a user who can push set on a commit of the PR whose diff from the base is the head's, or that the head only merged the base since, " +
+				"as the land gate reads it: current when it is on the head, diff-identical on another such commit, stale when only an older diff passed, unknown when GitHub cannot compare them, " +
 				"and - when a later failing status on the head's diff, a non-writer's status, or one bound to another base counts for none (with a warning saying why), " +
 				"and stale, with a warning, once the PR is open and RISK.md at the base's tip is not the file the status names; risk gives the review's risk " +
 				"tier, the same state for its head, the tier its classifier set, and the " +
@@ -1527,10 +1530,11 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		.description(
 			"Wait until this host can carry one more agent, for a coordinator to run before it starts or resumes " +
 				"an agent of its own, such as a sub-agent; start and resume do the same themselves. The host has room " +
-				"while its memory would admit a gated command at once, counting as one recent admission each every " +
+				"while its memory, including on Linux the cap of the user's background.slice where gated commands run " +
+				"in it, would admit a gated command at once, counting as one recent admission each every " +
 				`agent admitted in the last ${PENDING_MS / 60_000} minutes, since an agent adds no gated work until ` +
 				"its first build; an agent start or resume runs counts only until it exits. CPU load and commands " +
-				"queued for quest gate do not count, except on macOS, where the gate reads no memory: there the " +
+				"queued for quest gate do not count, except on macOS, where the gate reads no memory, and Windows: there the " +
 				"host has room while quest gate would admit a command at once, counting every queued command and " +
 				"each such agent as one recent admission. Agents already running are never paused.\n\n" +
 				"Exits 0 once admitted, 128 plus the signal number when interrupted, and 1 otherwise.",
@@ -1690,7 +1694,12 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				`then stores the token Kixel Quest issues, named after this host's hostname, in ${tokensPath()}, ` +
 				"readable only by this user. Signing in again replaces this host's earlier token there and on Kixel " +
 				"Quest. The record sender, quest review, forge reads, and quest records incident use the token, and a " +
-				"command that needs Kixel Quest fails without it, naming quest login.",
+				"command that needs Kixel Quest fails without it, naming quest login. It then signs git in to the " +
+				"repositories that Kixel Quest hosts, as gh auth setup-git does for GitHub: in the global git config, " +
+				"credential.<url>/.helper for its URL gets an empty entry, masking any helper listed before it for that " +
+				"URL, then `!quest git-credential`, which answers with the stored token. A git config whose " +
+				"credential.<url>/.helper already holds just both is left alone; one quest cannot write otherwise fails " +
+				"the command, naming both entries.",
 		)
 		.action(() => {
 			const ask = (question: string) =>
@@ -1716,10 +1725,12 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 					ask,
 					say: print,
 				}),
-				(signedIn) =>
+				(signedIn) => {
 					print(
 						`signed in to ${signedIn.url} as ${signedIn.label}; transcript uploads ${signedIn.transcripts ? "agreed" : "declined"}`,
-					),
+					);
+					print(`signed git in to ${signedIn.url}'s repositories: ${signedIn.git.join(", ")}`);
+				},
 			);
 		});
 	program
@@ -1727,7 +1738,9 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 		.summary("Remove this host's Kixel Quest token")
 		.description(
 			`Remove the token quest login stored for Kixel Quest (https://kixel.quest, or the one ${KIXEL_QUEST_URL} ` +
-				"names) from this host. Kixel Quest still takes it until it is revoked on its Tokens page.",
+				"names) from this host, after removing the two credential.<url>/.helper entries quest login wrote to the " +
+				"global git config; a git config it cannot write fails the command and keeps the token. Kixel Quest " +
+				"still takes the token until it is revoked on its Tokens page.",
 		)
 		.action(() => {
 			const { url, removed } = logout(process.env);
@@ -1736,6 +1749,16 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 					? `removed this host's token for ${url}; revoke it at ${url}/tokens`
 					: `this host held no token for ${url}`,
 			);
+		});
+
+	program
+		.command("git-credential", { hidden: true })
+		.argument("<operation>", "get, store, or erase")
+		.description(
+			"Answer git's credential helper protocol for the repositories Kixel Quest hosts, as quest login configures it.",
+		)
+		.action((operation: string) => {
+			out.stdout(credential(operation, readFileSync(0, "utf8"), process.env, warn));
 		});
 
 	const recordsCommand = program.command("records").summary("Send agent sessions' records to Kixel Quest");

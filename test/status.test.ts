@@ -5,7 +5,8 @@ import { GitHubReader } from "../src/github/client";
 import { main } from "../src/cli/main";
 import { statusLines } from "../src/cli/status";
 import { pullRequestStatus, requiredOf } from "../src/github/status";
-import { attestation } from "../src/github/review-trust";
+import { attestation, reviewTarget } from "../src/github/review-trust";
+import { commit, git, gitRoutes, repository } from "./git-history";
 import {
 	A,
 	baseTree,
@@ -1100,6 +1101,60 @@ describe("the review record", () => {
 		);
 		// A closed PR cannot land, and its base may be gone, so only its head is compared.
 		expect(await check(`Risk low, risk file ${old}: passed`, { baseRef: null }, "MERGED")).toEqual(current);
+	});
+	test("carries across clean merges of the base, whose diff text changed, read from GitHub's commits", async () => {
+		const text = (edits: Record<number, string>) =>
+			Array.from({ length: 20 }, (_, i) => `${edits[i + 1] ?? i + 1}\n`).join("");
+		const dir = repository();
+		commit(dir, { "a.txt": text({}) });
+		git(dir, "switch", "-q", "-c", "pr");
+		const reviewed = commit(dir, { "a.txt": text({ 5: "ours" }) });
+		const merge = () => {
+			git(dir, "switch", "-q", "main");
+			commit(dir, { "a.txt": git(dir, "show", "HEAD:a.txt").replace(/^(\d+)$/m, "$1 theirs") + "\n" });
+			git(dir, "switch", "-q", "pr");
+			git(dir, "merge", "-q", "--no-edit", "main");
+			return git(dir, "rev-parse", "HEAD");
+		};
+		const from = git(dir, "merge-base", "main", reviewed);
+		const statuses = { [reviewed]: { ...passed(reviewed), targetUrl: reviewTarget(pr, from, reviewed) } };
+		const routes = gitRoutes(dir);
+		const at = async (head: string, refuse: "diff" | "commit" | null = null) => {
+			const { record, warnings } = await read(
+				{
+					statuses,
+					git: (url, init) => {
+						// A diff too large for GitHub to send, or a commit GitHub fails to read.
+						if (
+							refuse === "diff" &&
+							new Headers(init?.headers).get("Accept") === "application/vnd.github.diff"
+						)
+							return Response.json({ message: "too large" }, { status: 406 });
+						if (refuse === "commit" && url.pathname.includes("/git/commits/"))
+							return Response.json({ message: "Not Found" }, { status: 404 });
+						return routes(url, init);
+					},
+				},
+				{ head },
+			);
+			return { record, warnings };
+		};
+		const carried = { record: `review-record diff-identical ${reviewed} local-review`, warnings: [] };
+		const once = merge();
+		expect(git(dir, "diff", `main...${once}`)).not.toBe(git(dir, "diff", `main...${reviewed}`));
+		expect(await at(once)).toEqual(carried);
+		expect(await at(once, "diff")).toEqual(carried);
+		const twice = merge();
+		expect(await at(twice)).toEqual(carried);
+		// A walk GitHub fails leaves the review unknown, with a warning, never carried or stale.
+		const failed = await at(twice, "commit");
+		expect(failed.record).toBe(`review-record unknown ${reviewed} local-review`);
+		expect(failed.warnings.join("\n")).toContain(
+			`cannot check whether ${twice} only merged the base since ${reviewed}`,
+		);
+		const pushed = commit(dir, { "b.txt": "b\n" });
+		expect(await at(pushed)).toEqual({ record: `review-record stale ${reviewed} local-review`, warnings: [] });
+		expect((await at(pushed, "diff")).record).toBe(`review-record unknown ${reviewed} local-review`);
 	});
 });
 

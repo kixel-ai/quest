@@ -36,7 +36,8 @@ function write(dir: string, files: Record<string, string>): void {
 
 /**
  * A PATH directory with a `quest` whose gate runs its command at once, a `nix` whose `develop <flake> --command`
- * runs its command in a dev shell and whose `eval` prints `$STUB_SHELL`, and a `cargo` whose `metadata` prints the
+ * runs its command in a dev shell and whose `eval` prints the derivation `$STUB_SHELL` and the JSON identity `$STUB_ID`
+ * (default null) of the shell it enters, and a `cargo` whose `metadata` prints the
  * file `$STUB_METADATA` names, each logging its arguments.
  */
 function stubs(): { bin: string; log: string } {
@@ -48,7 +49,7 @@ function stubs(): { bin: string; log: string } {
 		join(bin, "nix"),
 		script(
 			[
-				'if [ "$1" = eval ]; then printf %s "${STUB_SHELL:-/nix/store/stub-shell.drv}"; exit 0; fi',
+				`if [ "$1" = eval ]; then printf '{"drv":"%s","id":%s}' "\${STUB_SHELL:-/nix/store/stub-shell.drv}" "\${STUB_ID:-null}"; exit 0; fi`,
 				'[ "$1" = develop ] && [ "$3" = --command ] || exit 98',
 				"shift 3",
 				'IN_NIX_SHELL=impure exec "$@"',
@@ -605,6 +606,24 @@ test.runIf(posix)("a Cargo task runs once per crate, and reruns only the crates 
 	expect(ran(await go())).toHaveLength(3);
 	// Another dev shell reruns every crate.
 	expect(ran(await go({ STUB_SHELL: "/nix/store/other-shell.drv" }))).toHaveLength(3);
+
+	// An entered shell with the identity of the one `nix develop` enters now runs cargo and each crate directly.
+	const entered = { IN_NIX_SHELL: "impure", QUEST_DEV_SHELL: dir, STUB_ID: '"toolchain-1"' };
+	const develops = (out: { log: string[] }) => out.log.filter((line) => line.startsWith("nix develop"));
+	write(dir, { "b/src/lib.rs": "fn b() { 1 }" });
+	const direct = await go({ ...entered, QUEST_DEV_SHELL_ID: "toolchain-1" });
+	expect(ran(direct)).toEqual(["test:b | testing b"]);
+	expect(develops(direct)).toEqual([]);
+	// One of another toolchain, as after an edit to a Nix file the flake imports, and one that is not
+	// `quest.lib.mkFlake`'s, which exports no identity, enter `nix develop` for cargo and each crate that runs.
+	const develop = [
+		`nix develop ${dir} --command cargo metadata --locked --all-features --format-version 1`,
+		`nix develop ${dir} --command bash -eo pipefail -c echo "testing $QUEST_CRATE"`,
+	];
+	write(dir, { "b/src/lib.rs": "fn b() { 2 }" });
+	expect(develops(await go({ ...entered, QUEST_DEV_SHELL_ID: "toolchain-0" }))).toEqual(develop);
+	write(dir, { "b/src/lib.rs": "fn b() { 3 }" });
+	expect(develops(await go({ ...entered, STUB_ID: "null" }))).toEqual(develop);
 });
 
 test.runIf(posix)(
@@ -635,8 +654,8 @@ test.runIf(posix)(
 		write(dir, { "src/a": "2" });
 		expect(ran(await go())).toContain("test  | built");
 		expect(ran(await go({ cache: false }))).toContain("test  | built");
-		// Inside the repository's dev shell, which may predate a flake edit, every Nix task, the build the cached task
-		// reads included, still runs in the shell the digests name.
+		// Inside a dev shell with no identity matching the flake's, every Nix task, the build the cached task reads
+		// included, still runs in the shell the digests name.
 		write(dir, { "src/a": "3" });
 		const inside = await runIn(
 			dir,

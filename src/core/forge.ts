@@ -66,8 +66,9 @@ export interface Thread {
 /**
  * The commit holding the review that counts, which a passing `quest review` status of a user who can push attests.
  * `current` is the PR's head; `diff-identical` an earlier commit whose diff from the base (`git diff <base>...<sha>`)
- * matches the head's; `stale` one whose diff differs; `unknown` one the forge cannot compare, such as a diff too
- * large to render.
+ * matches the head's, or that the head only merged the base since, each merge the clean merge of its parents as
+ * `BaseMerges` checks it; `stale` one whose diff differs otherwise; `unknown` one the forge cannot compare, such as a
+ * diff too large to render.
  */
 export interface ReviewRecord {
 	state: "current" | "diff-identical" | "stale" | "unknown";
@@ -244,6 +245,19 @@ export interface PullFiles {
 	url: string;
 	/** Every path the PR adds, changes, or removes; a rename lists its new path. */
 	files: string[];
+}
+
+/** One harness, model, and effort that wrote a PR, with what its sessions cost at API list price in USD. */
+export interface Writer {
+	harness: string;
+	/** Null for the cost no model was recorded for. */
+	model: string | null;
+	effort: string | null;
+	/** The writer A/B arm its quest drew, if any. */
+	arm: string | null;
+	cost: number;
+	/** False when the cost is a lower bound, as {@link ModelSpend}'s. */
+	complete: boolean;
 }
 
 /**
@@ -441,6 +455,8 @@ export interface ForgeCalls {
 	/** `from` is a `--since` point or a cursor; null starts at the head's push time. */
 	watch: { request: { pull: PullRequest; from: string | null }; value: WatchPoll };
 	view: { request: { pull: PullRequest }; value: PullView };
+	/** Who wrote a PR, largest cost first. Only Kixel Quest answers it, as GitHub records no writer. */
+	writers: { request: { pull: PullRequest }; value: Writer[] };
 	open: { request: { opening: Opening }; value: OpenPull };
 	close: { request: { pull: PullRequest }; value: null };
 	edit: { request: { pull: PullRequest; title: string | null; body: string | null }; value: null };
@@ -465,6 +481,7 @@ export const FORGE_READS = [
 	"held",
 	"watch",
 	"view",
+	"writers",
 ] as const satisfies readonly ForgeCall[];
 
 /** The writes, as their paths name them; Kixel Quest serves them only for a repository it hosts. */
@@ -535,6 +552,8 @@ const name: Parse<string> = (value, at) => (typeof value === "string" && value !
 const boolean: Parse<boolean> = (value, at) => (typeof value === "boolean" ? value : fail(at, "a boolean"));
 const count: Parse<number> = (value, at) =>
 	Number.isSafeInteger(value) && (value as number) >= 0 ? (value as number) : fail(at, "a count");
+const cost: Parse<number> = (value, at) =>
+	typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : fail(at, "a cost");
 const time: Parse<string> = (value, at) =>
 	typeof value === "string" &&
 	/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d+)?(?:Z|[+-]\d\d:\d\d)$/.test(value) &&
@@ -717,6 +736,15 @@ const openPull = shape<OpenPull>({
 	body: string,
 });
 
+const writer = shape<Writer>({
+	harness: name,
+	model: nullable(name),
+	effort: nullable(name),
+	arm: nullable(name),
+	cost,
+	complete: boolean,
+});
+
 const updatedPage = shape<UpdatedPage>({
 	pulls: list(
 		shape<UpdatedPull>({
@@ -803,6 +831,7 @@ const REQUESTS: { [C in ForgeCall]: Parse<ForgeCalls[C]["request"]> } = {
 	}),
 	watch: shape({ pull: pullRequest, from: nullable(name) }),
 	view: shape({ pull: pullRequest }),
+	writers: shape({ pull: pullRequest }),
 	open: shape({
 		opening: shape<Opening>({
 			repository,
@@ -832,6 +861,7 @@ const VALUES: { [C in ForgeCall]: Parse<ForgeCalls[C]["value"]> } = {
 	held: holdings,
 	watch: watchPoll,
 	view: pullView,
+	writers: list(writer),
 	open: openPull,
 	close: none,
 	edit: none,
