@@ -226,8 +226,11 @@ export function linuxMemory({
 	};
 	let total = bytes("MemTotal");
 	let available = bytes("MemAvailable");
-	/** Bound `total` and the headroom by the limits of the cgroup at `path` under `root` and of each ancestor. */
-	const bound = (root: string, path: string, unified: boolean) => {
+	/**
+	 * Bound `total` and the headroom by the limits of the cgroup at `path` under `root` and of each ancestor.
+	 * Returns whether it read the cgroup's own limits, which a missing cgroup has none of.
+	 */
+	const bound = (root: string, path: string, unified: boolean): boolean => {
 		const usage = unified ? "memory.current" : "memory.usage_in_bytes";
 		// Usage includes inactive file cache, which the kernel reclaims without
 		// swapping; subtract it, as container runtimes do for their working set.
@@ -242,18 +245,23 @@ export function linuxMemory({
 		const start = resolve(root, `.${path}`);
 		// A cgroup namespace shows a cgroup outside it as `/..`, which is not mounted.
 		const inside = relative(root, start);
-		if (inside === ".." || inside.startsWith(`..${sep}`)) return;
+		if (inside === ".." || inside.startsWith(`..${sep}`)) return false;
+		let own = false;
 		for (let group = start; ; group = dirname(group)) {
 			for (const file of limits) {
 				try {
 					const limit = Number(readFileSync(join(group, file), "utf8").trim());
-					if (!Number.isFinite(limit) || limit <= 0) continue; // "max", or an unset v1 soft limit.
+					if (!Number.isFinite(limit) || limit <= 0) {
+						own ||= group === start; // "max", or an unset v1 soft limit.
+						continue;
+					}
 					const current = Number(readFileSync(join(group, usage), "utf8").trim());
 					if (!Number.isFinite(current) || current < 0)
 						throw new Error("gate cannot read Linux cgroup memory usage");
 					const used = Math.max(0, current - cgroupStat(group, cache));
 					total = Math.min(total, limit);
 					available = Math.min(available, Math.max(0, limit - used));
+					own ||= group === start;
 				} catch (error) {
 					// The memory controller may not be enabled in every ancestor.
 					if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
@@ -261,6 +269,7 @@ export function linuxMemory({
 			}
 			if (group === root || group === dirname(group)) break;
 		}
+		return own;
 	};
 	for (const line of readFileSync(join(proc, "self/cgroup"), "utf8").trim().split("\n")) {
 		const [, controllers, path] = line.match(/^\d+:([^:]*):(.*)$/) ?? [];
@@ -274,13 +283,11 @@ export function linuxMemory({
 	if (uid !== undefined && existsSync(join(cgroups, "cgroup.controllers"))) {
 		const slice = `/user.slice/user-${uid}.slice/user@${uid}.service/${BACKGROUND_SLICE}`;
 		// The slice has no cgroup until a scope first runs in it, as after login, though systemd
-		// caps it from then: ask systemd. Nothing runs in it yet, so its cap is all its headroom.
-		// Once it exists its files answer, sparing every later poll the spawn. Decide before the
-		// walk, so a slice created during it is still capped.
-		const missing = !existsSync(join(cgroups, slice));
-		// A walk from a slice that does not exist still reads its ancestors' limits.
-		bound(resolve(cgroups), slice, true);
-		if (missing) {
+		// caps it from then, and it may vanish again: ask systemd whenever its own limits went
+		// unread. Nothing runs in it then, so its cap is all its headroom. Once it exists its
+		// files answer, sparing every later poll the spawn. A walk from a slice that does not
+		// exist still reads its ancestors' limits.
+		if (!bound(resolve(cgroups), slice, true)) {
 			const cap = sliceCap(show(uid));
 			total = Math.min(total, cap);
 			available = Math.min(available, cap);

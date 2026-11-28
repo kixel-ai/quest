@@ -8,6 +8,7 @@ import {
 	readdirSync,
 	readFileSync,
 	renameSync,
+	rmSync,
 	statSync,
 	symlinkSync,
 	utimesSync,
@@ -920,6 +921,10 @@ test("Linux memory asks systemd for the background slice's cap while its cgroup 
 	expect(memory(shown(8 * GiB, 30 * GiB))).toEqual({ total: 8 * GiB, available: 8 * GiB });
 	// An unset slice leaves the host's answer.
 	expect(memory(shown())).toEqual({ total: 64 * GiB, available: 24 * GiB });
+	// A slice that systemd is removing, its directory left without limit files, is as missing.
+	mkdirSync(join(manager, "background.slice"));
+	expect(memory(shown(8 * GiB))).toEqual({ total: 8 * GiB, available: 8 * GiB });
+	rmSync(join(manager, "background.slice"), { recursive: true });
 	// The slice's ancestors still bound it, though its own cgroup is missing.
 	writeFileSync(join(manager, "memory.max"), String(16 * GiB));
 	writeFileSync(join(manager, "memory.current"), String(4 * GiB));
