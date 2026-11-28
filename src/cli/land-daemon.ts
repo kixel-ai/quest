@@ -1,5 +1,4 @@
 // The host daemon's shared plumbing: App tokens, state, locks, and the retry loop.
-import { spawn } from "node:child_process";
 import { createPrivateKey, createSign } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -7,6 +6,7 @@ import { join, resolve } from "node:path";
 import { array, GitHub, type GitHubDependencies, object, string } from "../github/client";
 import type { Repository } from "../core";
 import { git } from "./land";
+import { lockFile } from "./lock";
 
 /** A request to GitHub's API as the App itself, signed with its key. */
 function appRequest(options: { appId: string }, deps: Pick<GitHubDependencies, "fetch" | "now">) {
@@ -158,17 +158,11 @@ export function excerpt(tail: string, limit = EXCERPT): string {
 	return cut.replaceAll("&", "&amp;").replaceAll("<", "&lt;");
 }
 
-/** An OS lock disappears even after SIGKILL. Its holder exits when our pipe closes. */
+/** An OS lock on `path`, which disappears even after SIGKILL; refuses while another daemon holds it. */
 export async function lockCheckout(path: string): Promise<() => void> {
-	const child = spawn("flock", ["--nonblock", path, "sh", "-c", "printf locked; cat >/dev/null"], {
-		stdio: ["pipe", "pipe", "pipe"],
-	});
-	await new Promise<void>((done, reject) => {
-		child.stdout.once("data", () => done());
-		child.once("error", reject);
-		child.once("exit", () => reject(new Error("another quest land daemon holds this checkout (or flock failed)")));
-	});
-	return () => child.stdin.end();
+	const release = await lockFile(path);
+	if (release === null) throw new Error("another quest land daemon holds this checkout");
+	return () => void release();
 }
 
 /** Every linked worktree resolves to the same lock per base in the common git directory. */

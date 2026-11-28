@@ -7,6 +7,7 @@ import { dirname, join } from "node:path";
 
 import { branchQuest } from "../core";
 import { git } from "./git";
+import { lockFile } from "./lock";
 import { ADVISORS, type AskHarness, type Asked } from "./models";
 import {
 	type Answer,
@@ -313,15 +314,11 @@ export async function advise(options: AdviseOptions, deps: AdviseDependencies): 
 	const base = await fetchBase(root, options.base);
 	const branch = sessionBranch(root, options.branch, parseBase(root, base.ref).branch);
 	const path = adviseFile(common, branch);
-	// One call at a time per branch, so two sessions cannot both pass the cap and pay for a turn.
-	const lock = `${path}.lock`;
-	mkdirSync(dirname(lock), { recursive: true });
-	try {
-		writeFileSync(lock, `${process.pid}\n`, { flag: "wx" });
-	} catch (error) {
-		if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-		throw new AdviseCapError(`another quest advise is running on ${branch}; if none is, delete ${lock}`);
-	}
+	// One call at a time per branch, so two sessions cannot both pass the cap and pay for a turn. An OS lock, which the
+	// kernel drops when this process dies, however it dies.
+	mkdirSync(dirname(path), { recursive: true });
+	const release = await lockFile(`${path}.lock`);
+	if (release === null) throw new AdviseCapError(`another quest advise is running on ${branch}`);
 	try {
 		return await adviseLocked(options, deps, {
 			root,
@@ -335,8 +332,20 @@ export async function advise(options: AdviseOptions, deps: AdviseDependencies): 
 			now,
 		});
 	} finally {
-		rmSync(lock, { force: true });
+		await release();
 	}
+}
+
+/** `promise`, or its rejection with `signal`'s reason once that aborts first. */
+function untilAborted<T>(promise: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
+	if (signal === undefined) return promise;
+	if (signal.aborted) return Promise.reject(signal.reason);
+	let stop!: () => void;
+	const aborted = new Promise<never>((_, reject) => {
+		stop = () => reject(signal.reason);
+		signal.addEventListener("abort", stop, { once: true });
+	});
+	return Promise.race([promise, aborted]).finally(() => signal.removeEventListener("abort", stop));
 }
 
 /** The rest of `advise`, holding the branch's lock. */
@@ -367,7 +376,8 @@ async function adviseLocked(
 ): Promise<Advised> {
 	const state = loadState(path, branch);
 	const head = git(root, ["rev-parse", "HEAD"]);
-	const pull = await deps.pull(root, base.ref, branch);
+	// An interrupt ends a lookup backing off from a rate limit at once, which releases the branch's lock.
+	const pull = await untilAborted(deps.pull(root, base.ref, branch), deps.signal);
 	// Only advice on this PR, or on this head's history where the PR is unknown, counts: a later PR reusing the
 	// branch's name, as a quest's remainder does, starts afresh, and a rebased one does not.
 	const prior = [...state.calls]

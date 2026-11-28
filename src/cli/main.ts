@@ -180,12 +180,28 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 			warn(line);
 		},
 	});
-	const claimDependencies = (): ClaimDependencies => ({
-		github: () => gitHubDependencies(warn),
-		forge: (repository) => forgeFor(repository, forgeDependencies()),
+	/** `deps` with its waits and requests ended by `signal`, so an interrupt stops a lookup backing off at once. */
+	const cancellable = <D extends { fetch: typeof fetch; sleep(milliseconds: number): Promise<unknown> }>(
+		deps: D,
+		signal: AbortSignal | undefined,
+	): D =>
+		signal === undefined
+			? deps
+			: {
+					...deps,
+					fetch: ((input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) =>
+						deps.fetch(input, {
+							...init,
+							signal: init?.signal ? AbortSignal.any([init.signal, signal]) : signal,
+						})) as typeof fetch,
+					sleep: (milliseconds: number) => sleep(milliseconds, undefined, { signal }),
+				};
+	const claimDependencies = (signal?: AbortSignal): ClaimDependencies => ({
+		github: () => cancellable(gitHubDependencies(warn), signal),
+		forge: (repository) => forgeFor(repository, cancellable(forgeDependencies(), signal)),
 		kixel: {
 			hosted: (url) => hostedRepository(kixelUrl(process.env), url),
-			forge: (repository) => hostedForge(repository, forgeDependencies()),
+			forge: (repository) => hostedForge(repository, cancellable(forgeDependencies(), signal)),
 		},
 		warn,
 	});
@@ -2351,12 +2367,12 @@ export function main(argv: string[], out: Output): number | Promise<number> {
 				},
 			) => {
 				const question = words.length === 1 && words[0] === "-" ? readFileSync(0, "utf8") : words.join(" ");
-				const github = claimDependencies();
-				// An interrupt stops the running advisor, whose CLI it also reaches, and asks no other.
+				// An interrupt stops the PR lookup and the running advisor, whose CLI it also reaches, and asks no other.
 				const interrupted = new AbortController();
 				const signals = ["SIGINT", "SIGTERM", "SIGHUP"] as const;
 				const stop = () => interrupted.abort(new Error("quest advise was interrupted"));
 				for (const name of signals) process.on(name, stop);
+				const github = claimDependencies(interrupted.signal);
 				pending = advise(
 					{ ...options, root: root(), question },
 					{

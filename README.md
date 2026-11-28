@@ -2418,7 +2418,9 @@ listed ones.
 Each PR gets one answered call, as does each line of history on a branch with
 no PR, so a later PR reusing the branch's name starts afresh and a rebased one
 does not; a second refuses before any advisor runs unless `--force`, and any
-call refuses while another runs on the branch. An advisor whose turn fails passes the question
+call refuses while another runs on the branch, which holds an OS lock (`flock`
+on Linux, `lockf` on macOS) that the kernel drops however the call ends. Ctrl-C
+stops the call at once, even mid PR lookup, and asks no further advisor. An advisor whose turn fails passes the question
 on, and Codex and Claude read the change from diff files written as a review's
 are. Calls are kept under the clone's common Git directory in
 `quest/advise/`, and each session is queued for Kixel Quest with the role

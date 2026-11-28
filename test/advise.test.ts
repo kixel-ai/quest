@@ -17,7 +17,9 @@ import {
 	savedAdvice,
 	unavailable,
 	untrackedSession,
+	type AdviseDependencies,
 } from "../src/cli/advise";
+import { lockFile } from "../src/cli/lock";
 import { ADVISORS } from "../src/cli/models";
 import { ReviewInputError, UnansweredError, UnrunError } from "../src/cli/review";
 import { type Pull, sessionRecords } from "../src/cli/usage";
@@ -39,14 +41,18 @@ const ADVICE: Advice = {
 async function asked(
 	s: Setup,
 	options: Partial<Parameters<typeof advise>[0]> = {},
-	{ url = "https://github.com/acme/proj/pull/7", signal }: { url?: string; signal?: AbortSignal } = {},
+	{
+		url = "https://github.com/acme/proj/pull/7",
+		signal,
+		pull = async () => ({ url, body: "PR-BODY text" }),
+	}: { url?: string; signal?: AbortSignal; pull?: AdviseDependencies["pull"] } = {},
 ) {
 	const queued: Advising[] = [];
 	const advised = await advise(
 		{ root: s.repo, question: "Three rounds keep finding off-by-ones.", ...options },
 		{
 			env: process.env,
-			pull: async () => ({ url, body: "PR-BODY text" }),
+			pull,
 			...(signal !== undefined && { signal }),
 			queue: (session) => queued.push(session),
 			now: () => Date.parse("2026-11-28T10:00:00Z"),
@@ -242,15 +248,27 @@ agyFakes("a second call on a branch refuses before any advisor runs, unless forc
 	expect(advised.forced?.advice).toEqual(ADVICE);
 	const state = JSON.parse(readFileSync(adviseFile(join(s.repo, ".git"), "feature"), "utf8"));
 	expect(state.calls).toHaveLength(2);
-	// A call still running on the branch holds its lock, which a finished one leaves behind for none.
-	const lock = `${adviseFile(join(s.repo, ".git"), "feature")}.lock`;
-	writeFileSync(lock, "1\n");
+	// A call still running on the branch holds its lock, so another refuses before any advisor runs.
+	const release = await lockFile(`${adviseFile(join(s.repo, ".git"), "feature")}.lock`);
 	const calls = s.calls().length;
 	await expect(asked(s, { force: true })).rejects.toThrow(/another quest advise is running on feature/);
 	expect(s.calls()).toHaveLength(calls);
-	rmSync(lock);
+	await release!();
 	await asked(s, { force: true });
-	expect(() => readFileSync(lock)).toThrow();
+});
+
+agyFakes("an interrupt during a stalled PR lookup ends the call at once and frees the branch", async () => {
+	const s = setup();
+	vi.stubEnv("FAKE_ASK", JSON.stringify(ADVICE));
+	const interrupted = new AbortController();
+	// A lookup backing off from a rate limit, which the interrupt arrives during.
+	const stalled = () => {
+		interrupted.abort(new Error("quest advise was interrupted"));
+		return new Promise<never>(() => {});
+	};
+	await expect(asked(s, {}, { signal: interrupted.signal, pull: stalled })).rejects.toThrow("interrupted");
+	expect(s.calls()).toHaveLength(0);
+	await asked(s);
 });
 
 agyFakes("agy offline, or on a host that cannot confine it, passes the question on", async () => {
@@ -318,9 +336,10 @@ agyFakes("a rebased PR keeps its advice cap, and an interrupted call asks no oth
 fakes("a missing, logged-out, or limited advisor passes the question on, each read-only", async () => {
 	const s = setup();
 	vi.stubEnv("FAKE_ASK", JSON.stringify(ADVICE));
-	// Only the fakes and Git are on PATH, so no installed agy answers in the fake's place.
+	// Only the fakes, Git, and the locker are on PATH, so no installed agy answers in the fake's place.
 	rmSync(join(s.bin, "agy"));
-	vi.stubEnv("PATH", `${s.bin}:${dirname(execFileSync("which", ["git"], { encoding: "utf8" }).trim())}`);
+	const dir = (tool: string) => dirname(execFileSync("which", [tool], { encoding: "utf8" }).trim());
+	vi.stubEnv("PATH", `${s.bin}:${dir("git")}:${dir(process.platform === "darwin" ? "lockf" : "flock")}`);
 	vi.stubEnv("FAKE_LIMITED", "1");
 	vi.stubEnv("FAKE_FAILS", "codex");
 	const { advised, queued } = await asked(s);
