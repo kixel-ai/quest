@@ -3,7 +3,6 @@
 import { execFileSync } from "node:child_process";
 
 import { chmodSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { describe, expect, test } from "vitest";
@@ -414,16 +413,29 @@ describe("quest merge's landing check", () => {
 
 	test("fails on a head the remote does not have, and leaves no scratch repository", async () => {
 		const tree = repo("quest/m0/epic/one");
-		const before = readdirSync(tmpdir()).filter((name) => name.startsWith("quest-merge-")).length;
-		const check = landingCheck(tempDir())({
-			remote: tree.path,
-			base: "main",
-			baseSha: git(tree, "rev-parse", "main").trim(),
-			branch: "quest/m0/epic/one",
-			sha: "c".repeat(40),
-			token: "token",
-		});
-		await expect(check).rejects.toThrow("git fetch failed");
-		expect(readdirSync(tmpdir()).filter((name) => name.startsWith("quest-merge-")).length).toBe(before);
+		// A temporary directory of its own, since other processes make and remove scratch repositories in the host's.
+		const scratch = tempDir();
+		const state = tempDir();
+		// os.tmpdir() reads TMPDIR on Unix and TEMP or TMP on Windows.
+		const names = ["TMPDIR", "TEMP", "TMP"] as const;
+		const host = names.map((name) => process.env[name]);
+		for (const name of names) process.env[name] = scratch;
+		try {
+			const check = landingCheck(state)({
+				remote: tree.path,
+				base: "main",
+				baseSha: git(tree, "rev-parse", "main").trim(),
+				branch: "quest/m0/epic/one",
+				sha: "c".repeat(40),
+				token: "token",
+			});
+			await expect(check).rejects.toThrow("git fetch failed");
+		} finally {
+			names.forEach((name, i) => {
+				if (host[i] === undefined) delete process.env[name];
+				else process.env[name] = host[i];
+			});
+		}
+		expect(readdirSync(scratch)).toEqual([]);
 	});
 });
