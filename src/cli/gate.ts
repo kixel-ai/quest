@@ -273,12 +273,14 @@ export function linuxMemory({
 	// Only the unified hierarchy has systemd's scopes.
 	if (uid !== undefined && existsSync(join(cgroups, "cgroup.controllers"))) {
 		const slice = `/user.slice/user-${uid}.slice/user@${uid}.service/${BACKGROUND_SLICE}`;
-		// A walk from a slice that does not exist still reads its ancestors' limits.
-		bound(resolve(cgroups), slice, true);
 		// The slice has no cgroup until a scope first runs in it, as after login, though systemd
 		// caps it from then: ask systemd. Nothing runs in it yet, so its cap is all its headroom.
-		// Once it exists its files answer, sparing every later poll the spawn.
-		if (!existsSync(join(cgroups, slice))) {
+		// Once it exists its files answer, sparing every later poll the spawn. Decide before the
+		// walk, so a slice created during it is still capped.
+		const missing = !existsSync(join(cgroups, slice));
+		// A walk from a slice that does not exist still reads its ancestors' limits.
+		bound(resolve(cgroups), slice, true);
+		if (missing) {
 			const cap = sliceCap(show(uid));
 			total = Math.min(total, cap);
 			available = Math.min(available, cap);
