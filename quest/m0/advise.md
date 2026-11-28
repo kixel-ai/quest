@@ -34,11 +34,23 @@ Decided 2026-11-26 (maintainer, `/quest-plan`):
 - After receiving advice? ✅ Standalone `/quest-advise` only returns its
   recommendation without editing code or writing to GitHub; when an enclosing
   task (`/quest-start`, `/quest-iterate`, `/quest-run`) already authorizes edits
-  and pushes, auto-iterate when the advice fits the quest's Goal and settled
-  decisions (record a `Design change:` PR comment and review with
-  `quest review --new`), and stop and ask the maintainer when the advisor
-  recommends changing scope/architecture or dropping the PR (rejected: always
-  stop and ask; split behavior between `/quest-afk` and interactive `/quest-run`).
+  and pushes, auto-iterate on the advice (record a `Design change:` PR comment
+  and review with `quest review --new`). Amended 2026-11-28 (maintainer,
+  `/quest-plan` of the agent audit's follow-ups: "I don't really want to be in
+  the loop; I just want to fix poor directions early"): ✅ the advisor's
+  verdict replaces the maintainer's pick at `next decide` for everything but
+  closing the PR, scope and architecture pivots included; only a recommendation
+  to drop the PR hands back, since closing one needs the maintainer's
+  confirmation (rejected: closing too; keeping pivots and drops for the
+  maintainer, as decided 2026-11-26; always stop and ask; split behavior
+  between `/quest-afk` and interactive `/quest-run`). Why: of 210 `next decide`
+  stops in fedora's transcripts from 2026-11-25 to 11-28, about 30 reached the
+  maintainer as a prompt. 124 were handed back under `## Waiting` by
+  `/quest-run`'s dispatched threads, which an afk coordinator answers itself;
+  37 ran another round anyway and 28 ran `--accept` without a pick, many under
+  `/quest-afk`, whose "take your recommendation" covers the stop.
+  [Advise stop](/quest/m0/advise-stop.md) makes `quest review` enforce it, and
+  [advise replay](/quest/m0/advise-replay.md) measures whether the advice helps.
 - Model order and harnesses? ✅ `gemini-4-neon` (`high`) via `agy` →
   `gpt-6.2-astra` (`high`) via `codex` → `claude-fable-5-2` (`medium`) via
   `claude`, restoring `agy` in `quest` solely for `quest advise` (rejected:
@@ -92,11 +104,10 @@ Recommended, for the implementer to confirm:
 - **Checkpoint contract & skills (`src/cli/review.ts`, `README.md`, `assets/skills/advise.md`, `assets/skills/review.md`, `assets/skills/iterate.md`, `assets/AGENTS.md`):**
   - Update `nextStep()`'s `next decide` output in `src/cli/review.ts`, its CLI
     help, and `README.md` alongside the skills so headless authors are told the
-    complete exception: they may run one `quest advise` escalation, and when the
-    enclosing task already authorizes PR edits and the advice fits the quest's
-    Goal and settled decisions, they may apply it, post a `Design change:` PR
-    comment, and run `quest review --new`; scope changes, architecture pivots,
-    and dropping the PR still stop for the maintainer's pick.
+    complete exception: they run one `quest advise` escalation, and when the
+    enclosing task already authorizes PR edits, they apply it, post a
+    `Design change:` PR comment, and run `quest review --new`; only advice to
+    drop the PR hands back for the maintainer's pick.
   - Ship `/quest-advise` (installed by `quest init` like the other skills) with
     generic guidance: call `quest advise` when stuck (such as failing review
     convergence, repeated findings, or non-converging implementation loops),
@@ -106,11 +117,11 @@ Recommended, for the implementer to confirm:
     a task (`/quest-start`, `/quest-iterate`, `/quest-run`) that already
     authorizes editing and pushing to the PR.
   - In `/quest-review` and `/quest-iterate`, note that at `next decide` (or
-    repeated findings across rounds) the agent may run `quest advise` once before
-    handing back to the user, auto-applying advice that stays within the quest's
-    Goal and settled decisions (`Design change:` PR comment + `quest review --new`)
-    and handing back with the advisor's options when it recommends a scope or
-    architecture pivot or dropping the PR.
+    repeated findings across rounds) the agent runs `quest advise` once instead
+    of handing back to the user, applying the advice (`Design change:` PR
+    comment + `quest review --new`) and handing back only when it recommends
+    dropping the PR. `/quest-afk` no longer takes its own recommendation at the
+    stop; the advisor's stands in for it.
 
 Tests: unit tests for `ADVISORS` fall-through (missing/logged-out/limited/sandbox-unsupported),
 hard 1-call-per-branch cap and `--force` override, read-only invocation flags

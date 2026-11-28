@@ -41,9 +41,9 @@ The implementer's choices, for the readout to revisit:
   host keeps them for 3,650 days (`cleanupPeriodDays`), and the session
   records sent to Kixel Quest keep each model's token counts too.
 - End each decided size's arms by deleting its `ARMS` entry from
-  `src/cli/models.ts`. Once none is left, delete `ARMS` and `COHORT`, as well as
-  `quest models --arm` and `--cohort`, and the `arm` and `cohort` fields of
-  `quest unblocked --json`. Also delete the arm notes in the README, guide, and
+  `src/cli/models.ts`. Keep `ARMS`, `COHORT`, and their flags and fields for
+  [M writer effort](/quest/m0/m-writer-effort.md), the next cohort (maintainer,
+  2026-11-28), and delete the advisor arm notes in the README, guide, and
   `/quest-run` and `/quest-iterate`. Keep `quest agent --advisor` only if a
   writer table then names an advisor.
 
