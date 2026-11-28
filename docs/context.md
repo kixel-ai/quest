@@ -47,8 +47,7 @@ Language and PR topic packs (`pr`, `rust`, `ts`, `uniffi`) load lazily via hooks
 ## Workspace
 
 - Work in your own worktree, reusing a suitable one you already own; read-only discovery needs no new checkout. Finish with a clean checkout (intended changes committed and pushed, incidental changes restored, unrelated changes preserved). Before ending a task, pausing, or handing off, commit a checkpoint and report what remains and which checks passed or did not run.
-- Gate by CPU, not run time: run builds, tests, and model checkers through `quest gate <command>` in the foreground, reading the exit code directly, never through a pipe. Leave `quest review`, servers, and formatters ungated. Never work around the queue by polling the load or capping agents (`quest agent admit`'s job); cancel a gated command only once its result is unneeded.
-- Never load the host's CPU to reproduce a flake, as with `stress-ng` or `yes > /dev/null`, even from a script: slow only the code under test, such as with `taskset` or injected delays.
+- Gate by CPU, not run time, and never intentionally over-load the host: run builds, tests, and model checkers through `quest gate <command>` in the foreground, reading the exit code directly, never through a pipe. Leave `quest review`, servers, and formatters ungated. Never work around the queue by polling the load or capping agents (`quest agent admit`'s job); cancel a gated command only once its result is unneeded.
 - Never end a turn with your background work running, and never poll with `sleep` or status loops: block on the harness's wait or `quest wait` (re-running on timeout with the `--since` it printed). A gate's queue or a long command still running is not a stall; back out only if progress genuinely stalls.
 - A sub-agent ends its turn only with a final result or a question, reporting only what its caller acts on (PR URL, state, head, open decisions with recommendations).
 
