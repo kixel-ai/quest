@@ -137,7 +137,7 @@ export const COMMAND_MEMORY = 4 * 2 ** 30;
 
 /** Usable memory: physical RAM, or a smaller cgroup/container limit. */
 export function usableMemory(uid?: number): number {
-	if (process.platform === "linux") return linuxMemory("/proc", "/sys/fs/cgroup", uid).total;
+	if (process.platform === "linux") return linuxMemory({ uid }).total;
 	const constrained = process.constrainedMemory?.() ?? 0;
 	return constrained > 0 ? Math.min(totalmem(), constrained) : totalmem();
 }
@@ -172,17 +172,52 @@ function cgroupStat(group: string, key: string): number {
 /** The user manager's slice that gate scopes run in (see `background`). */
 const BACKGROUND_SLICE = "background.slice";
 
+/** What `linuxMemory` reads: the roots, whose slice to count, and how to ask systemd for a missing slice's cap. */
+interface LinuxMemoryOptions {
+	proc?: string;
+	cgroups?: string;
+	uid?: number;
+	/** The output of `systemctl --user show background.slice -p MemoryMax,MemoryHigh` for `uid`'s user manager. */
+	show?: (uid: number) => string;
+}
+
+/** Asks the caller's own user manager, the only one a gated command's `uid` (see `sliceUser`) names, for the slice's caps. */
+function showSlice(uid: number): string {
+	if (uid !== process.getuid?.()) throw new Error(`gate can only ask systemd for its own user's ${BACKGROUND_SLICE}`);
+	const show = spawnSync("systemctl", ["--user", "show", BACKGROUND_SLICE, "-p", "MemoryMax,MemoryHigh"], {
+		encoding: "utf8",
+	});
+	if (show.error || show.status !== 0)
+		throw new Error(
+			`gate cannot read ${BACKGROUND_SLICE}'s memory cap: ${show.error?.message ?? show.stderr.trim()}`,
+		);
+	return show.stdout;
+}
+
+/** The smaller of `systemctl show`'s `MemoryMax` and `MemoryHigh` in bytes, or Infinity when both are unset. */
+function sliceCap(shown: string): number {
+	const caps = ["MemoryMax", "MemoryHigh"].map((key) => {
+		const value = shown.match(new RegExp(`^${key}=(.*)$`, "m"))?.[1]?.trim();
+		if (value === "infinity") return Infinity;
+		if (value === undefined || !/^\d+$/.test(value))
+			throw new Error(`gate cannot read ${BACKGROUND_SLICE}'s ${key} from systemd: ${value ?? "missing"}`);
+		return Number(value);
+	});
+	return Math.min(...caps);
+}
+
 /**
  * Count reclaimable host cache and the headroom of every enclosing memory cgroup. With `uid`,
  * a command that runs in that user's `background.slice` also counts the slice's headroom, so a
  * slice at its cap reads as full however much the host and the caller's own cgroups have free.
  * Its cap bounds `total` too, so a command's budget (see `hostLimits`) fits under it.
  */
-export function linuxMemory(
+export function linuxMemory({
 	proc = "/proc",
 	cgroups = "/sys/fs/cgroup",
-	uid?: number,
-): { total: number; available: number } {
+	uid,
+	show = showSlice,
+}: LinuxMemoryOptions = {}): { total: number; available: number } {
 	const meminfo = readFileSync(join(proc, "meminfo"), "utf8");
 	const bytes = (key: string) => {
 		const value = meminfo.match(new RegExp(`^${key}:\\s+(\\d+) kB$`, "m"))?.[1];
@@ -235,11 +270,20 @@ export function linuxMemory(
 		bound(resolve(cgroups, unified ? "" : "memory"), path, unified);
 	}
 	// The slice need not enclose the caller, as for a login session outside the user manager.
-	// Only the unified hierarchy has systemd's scopes, and the slice does not exist until one
-	// runs in it, when nothing counts against its cap.
-	const slice = `/user.slice/user-${uid}.slice/user@${uid}.service/${BACKGROUND_SLICE}`;
-	if (uid !== undefined && existsSync(join(cgroups, "cgroup.controllers")) && existsSync(join(cgroups, slice)))
+	// Only the unified hierarchy has systemd's scopes.
+	if (uid !== undefined && existsSync(join(cgroups, "cgroup.controllers"))) {
+		const slice = `/user.slice/user-${uid}.slice/user@${uid}.service/${BACKGROUND_SLICE}`;
+		// A walk from a slice that does not exist still reads its ancestors' limits.
 		bound(resolve(cgroups), slice, true);
+		// The slice has no cgroup until a scope first runs in it, as after login, though systemd
+		// caps it from then: ask systemd. Nothing runs in it yet, so its cap is all its headroom.
+		// Once it exists its files answer, sparing every later poll the spawn.
+		if (!existsSync(join(cgroups, slice))) {
+			const cap = sliceCap(show(uid));
+			total = Math.min(total, cap);
+			available = Math.min(available, cap);
+		}
+	}
 	return { total, available };
 }
 
@@ -539,7 +583,7 @@ export function fileHost(directory: string, now = Date.now, uid?: number): Host 
 			process.platform === "darwin"
 				? Infinity
 				: process.platform === "linux"
-					? linuxMemory("/proc", "/sys/fs/cgroup", uid).available
+					? linuxMemory({ uid }).available
 					: process.availableMemory(),
 		now,
 		running: (admission) =>
