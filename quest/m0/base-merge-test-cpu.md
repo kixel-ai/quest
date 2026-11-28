@@ -49,9 +49,10 @@ Levers, largest first (recommendations, not requirements):
 - Serve `gitHistory`'s object reads (`commit`, `tree`, `blob`) from one
   long-lived `git cat-file --batch` per repository instead of a spawn per
   read. That covers about 2,200 of the spawns and speeds up every test that
-  uses `gitHistory`. The core only compares object ids, so the helper can
-  parse commit and tree objects itself. Close the process when the test
-  ends.
+  uses `gitHistory`. The core never hashes objects, so the helper can
+  parse commit and tree objects itself. It must still return each tree
+  entry's name, type, mode, and id, and each blob's raw bytes, which the
+  core compares. Close the process when the test ends.
 - Write each seed's three commits with one `git fast-import` (or batched
   `hash-object --stdin-paths` and `mktree --batch`) instead of about 20
   spawns.
@@ -61,7 +62,8 @@ Levers, largest first (recommendations, not requirements):
 
 Count spawns with a `git` wrapper on `PATH` that logs `$3` (the subcommand
 after `-C <dir>`). Measure CPU with a scratch Vitest setup file that logs
-`spent()` from `test/budget.ts` per test. Record both, before and after, in
+each test's delta of `spent()` from `test/budget.ts`, sampled in
+`beforeEach` and `afterEach` as the budget hook does. Record both, before and after, in
 the PR's `## Validation`. Update the "1.9 s, 2026-11-11" figure in
 `test/budget.ts` if the heaviest test changes.
 
