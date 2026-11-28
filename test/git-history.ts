@@ -1,8 +1,11 @@
 // A real repository's history, as the core's base-merge check reads it and as GitHub's REST API serves it.
-import { execFileSync, spawnSync } from "node:child_process";
+import { type ChildProcessByStdio, execFileSync, spawn, spawnSync } from "node:child_process";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import type { Readable, Writable } from "node:stream";
 import { fileURLToPath } from "node:url";
+
+import { onTestFinished } from "vitest";
 
 import type { History, TreeEntry } from "../src/core";
 import { tempDir } from "./fixture";
@@ -47,28 +50,117 @@ export function commit(dir: string, files: Record<string, string | Uint8Array | 
 	return git(dir, "rev-parse", "HEAD");
 }
 
-/** `dir`'s history, with `base` as the PR's base branch. */
+/** One `git cat-file --batch` answering reads of a repository's objects in order. */
+class Objects {
+	readonly #child: ChildProcessByStdio<Writable, Readable, null>;
+	readonly #waiting: {
+		oid: string;
+		type: string;
+		resolve: (body: Buffer) => void;
+		reject: (error: Error) => void;
+	}[] = [];
+	readonly #exited: Promise<void>;
+	#buffer = Buffer.alloc(0);
+
+	constructor(dir: string) {
+		this.#child = spawn("git", ["-C", dir, "cat-file", "--batch"], { stdio: ["pipe", "pipe", "inherit"] });
+		this.#child.stdout.on("data", (chunk: Buffer) => {
+			this.#buffer = Buffer.concat([this.#buffer, chunk]);
+			this.#drain();
+		});
+		this.#exited = new Promise((resolve) => {
+			const fail = (error: Error) => {
+				for (const read of this.#waiting.splice(0)) read.reject(error);
+				resolve();
+			};
+			this.#child.on("error", fail);
+			this.#child.on("close", (code) => fail(new Error(`git cat-file --batch exited with ${code}`)));
+		});
+	}
+
+	/** The body of object `oid`, which must be a `type`. */
+	read(oid: string, type: string): Promise<Buffer> {
+		return new Promise((resolve, reject) => {
+			this.#waiting.push({ oid, type, resolve, reject });
+			this.#child.stdin.write(`${oid}\n`);
+		});
+	}
+
+	/** Ends the process and waits for it, so the test's CPU budget counts it. */
+	close(): Promise<void> {
+		this.#child.stdin.end();
+		return this.#exited;
+	}
+
+	#drain() {
+		while (this.#waiting.length > 0) {
+			const eol = this.#buffer.indexOf(10);
+			if (eol < 0) return;
+			// `<oid> <type> <size>`, the body, and a newline; or `<name> missing` or `<name> ambiguous`.
+			const header = this.#buffer.toString("latin1", 0, eol);
+			const [, type, size] = header.split(" ");
+			const end = eol + 1 + Number(size);
+			if (size !== undefined && this.#buffer.length < end + 1) return;
+			const read = this.#waiting.shift()!;
+			if (size === undefined || type !== read.type) {
+				this.#buffer = this.#buffer.subarray(size === undefined ? eol + 1 : end + 1);
+				read.reject(new Error(`${read.oid} is not a ${read.type}: ${header}`));
+				continue;
+			}
+			read.resolve(this.#buffer.subarray(eol + 1, end));
+			this.#buffer = this.#buffer.subarray(end + 1);
+		}
+	}
+}
+
+const readers = new Map<string, Objects>();
+
+/** `dir`'s object reader, started once per test and closed when the test ends. */
+function objects(dir: string): Objects {
+	let reader = readers.get(dir);
+	if (reader === undefined) {
+		const started = new Objects(dir);
+		readers.set(dir, started);
+		onTestFinished(() => {
+			readers.delete(dir);
+			return started.close();
+		});
+		reader = started;
+	}
+	return reader;
+}
+
+/** `dir`'s history, with `base` as the PR's base branch; call it within a test, whose end closes its reads. */
 export function gitHistory(dir: string, base = "main"): History {
+	const reader = objects(dir);
 	return {
 		async commit(sha) {
-			const [, ...parents] = git(dir, "rev-list", "--parents", "-n", "1", sha).split(" ");
-			return { tree: git(dir, "rev-parse", `${sha}^{tree}`), parents };
+			const body = (await reader.read(sha, "commit")).toString("utf8");
+			const headers = body.slice(0, body.indexOf("\n\n")).split("\n");
+			const field = (name: string) =>
+				headers.filter((line) => line.startsWith(`${name} `)).map((line) => line.slice(name.length + 1));
+			return { tree: field("tree")[0]!, parents: field("parent") };
 		},
 		async tree(oid) {
-			const out = execFileSync("git", ["-C", dir, "ls-tree", "-z", oid], { encoding: "utf8" });
-			return new Map(
-				out
-					.split("\0")
-					.filter(Boolean)
-					.map((line): [string, TreeEntry] => {
-						const [info, name] = line.split("\t") as [string, string];
-						const [mode, type, sha] = info.split(" ") as [string, TreeEntry["type"], string];
-						return [name, { mode, type, oid: sha }];
-					}),
-			);
+			// Each entry is `<mode> <name>\0` and a 20-byte id; git stores a directory's mode without its leading zero.
+			const body = await reader.read(oid, "tree");
+			const entries = new Map<string, TreeEntry>();
+			for (let at = 0; at < body.length;) {
+				const space = body.indexOf(32, at);
+				const nul = body.indexOf(0, space);
+				const mode = body.toString("latin1", at, space).padStart(6, "0");
+				const type = mode === "040000" ? "tree" : mode === "160000" ? "commit" : "blob";
+				entries.set(body.toString("utf8", space + 1, nul), {
+					mode,
+					type,
+					oid: body.toString("hex", nul + 1, nul + 21),
+				});
+				at = nul + 21;
+			}
+			return entries;
 		},
 		async blob(oid) {
-			return new Uint8Array(execFileSync("git", ["-C", dir, "cat-file", "blob", oid]));
+			return new Uint8Array(await reader.read(oid, "blob"));
 		},
 		async mergeBase(a, b) {
 			const bases = git(dir, "merge-base", "--all", a, b).split("\n").filter(Boolean);
