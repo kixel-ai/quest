@@ -11,7 +11,7 @@ Decided 2026-11-28 (maintainer, `/quest-plan` of the agent audit's follow-ups): 
 Agent's choices, for the implementer to revisit:
 
 - Pick the arms from the replay's readout. If round-3 advice mostly names directions the agent had already taken by round 2, test round 2 against round 3; if it mostly misleads, test round 3 against no automatic advice.
-- Draw the arm per PR from a hash of the repository and PR number, as the [second-seat ablation](/quest/m0/second-seat-ablation.md) does, and record it with the review.
+- Draw the arm per PR from a hash salted with this experiment's name, such as sha256(`advise-trigger:<owner/repo>#<n>`), as the [second-seat ablation](/quest/m0/second-seat-ablation.md) does, so its arms stay independent of the ablation's, and record it with the review.
 - Decide on 7-day escapes, as the 2026-11-28 decision on the audit's arms set, reporting rounds, `next decide` stops, and advisor spend beside them.
 
 ## Required

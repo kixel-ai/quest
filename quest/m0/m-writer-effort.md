@@ -18,9 +18,9 @@ Why: from 2026-11-09 to 11-21, M PRs written on Opus medium escaped within 7 day
 Agent's choices, for the implementer to revisit:
 
 - Start once the [advisor trial readout](/quest/m0/advisor-readout.md) has decided M. If it moves M off Opus high, rewrite this quest for M's new writer or delete it.
-- Reuse the `ARMS` and `COHORT` machinery under a new cohort name, so the advisor trial's rows never mix in.
+- Reuse the `ARMS` machinery, moving the cohort onto each size's entry, since `COHORT` in `src/cli/models.ts` is one constant for every size: only M takes the new cohort name, so the advisor trial's other sizes and this trial's rows never mix.
 - Read each PR's arm and effort from wherever the writer is recorded when it enrolls: its `Implementer:` lines today, or the session records Kixel Quest's `writers` read answers once [Implementer cutover](/quest/m0/telemetry/implementer-cutover.md) lands. If the cutover lands mid-trial, check that every enrolled PR still reaches the readout under its arm before counting it.
-- Sample: detecting a fall from 10% to 5% needs about 430 PRs per arm, three to four weeks at the audit's rate of about 265 merged M PRs a week across the eight repositories, fewer when only armed quests count.
+- Sample: the trial asks whether the cheaper Opus medium escapes more, and detecting a rise from 10% to 15% needs about 685 PRs per arm, about five weeks at the audit's rate of about 265 merged M PRs a week across the eight repositories, longer when only armed quests count.
 
 Tests: an M quest draws a stable arm under the new cohort, and the arm reaches `quest usage`'s readout through the writer record in use.
 

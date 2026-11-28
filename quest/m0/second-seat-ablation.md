@@ -16,7 +16,7 @@ Decided 2026-11-28 (maintainer, `/quest-plan` of the agent audit's follow-ups, r
 
 Agent's choices, for the implementer to revisit:
 
-- Draw the arm from a hash of the repository and PR number, enrolling the PR at its first run on rung 3 or 4 and counting it in that arm through the readout, whatever its later heads' rungs, so a tier the second seat raised does not drop the PR the seat affected. Later heads still get their own rung's seats.
+- Draw the arm from a hash of the experiment's name, the repository, and the PR number, such as sha256(`second-seat:<owner/repo>#<n>`), so experiments running at once draw independently, enrolling the PR at its first run on rung 3 or 4 and counting it in that arm through the readout, whatever its later heads' rungs, so a tier the second seat raised does not drop the PR the seat affected. Later heads still get their own rung's seats.
 - Record the arm where `quest review` records the review today (the `## Review` record or its successor post under the [telemetry epic](/quest/m0/telemetry/README.md)), so `quest usage` and Kixel Quest read it without a guess.
 - Count a finding as only Opus's when no Sol finding on the same head sits in the same file within 10 lines, the rule the routing evidence's shadow pairs used (15 of 15 sampled matches were the same defect).
 - Sample: at the audit's base rate of roughly 15% escapes on rungs 3-4, detecting a 5-point rise needs about 900 PRs per arm, about four weeks at the 2026-11-14 to 11-28 rate of about 445 rung 3-4 PRs a week. Read out then, and put the decision to the maintainer with the tally: keep the seat, drop it from rung 3, or drop it from both. Then end the draw.
