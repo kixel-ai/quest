@@ -131,12 +131,19 @@ export function nixSystem(platform: NodeJS.Platform = process.platform, arch: st
 	return `${cpu}-${os}`;
 }
 
+/** The shell `nix develop` enters for a flake. */
+export interface DevShell {
+	/** The store path of its derivation, which pins every tool a Nix task runs with. */
+	derivation: string;
+	/** What `quest.lib.mkFlake`'s shell of this toolchain exports as `QUEST_DEV_SHELL_ID`; null for any other shell. */
+	identity: string | null;
+}
+
 /**
- * The store path of the derivation of the shell `nix develop` enters for the flake at `top`, which pins every tool a
- * Nix task runs with, trying the outputs it tries in its order. Evaluating it costs a few seconds, which a run pays
- * once.
+ * The shell `nix develop` enters for the flake at `top`, trying the outputs it tries in its order. Evaluating it costs
+ * a few seconds, which a run pays once.
  */
-export function devShellDerivation(nix: string, top: string, env: NodeJS.ProcessEnv): string {
+export function devShell(nix: string, top: string, env: NodeJS.ProcessEnv): DevShell {
 	const system = nixSystem();
 	const outputs = [
 		`devShells.${system}.default`,
@@ -145,15 +152,19 @@ export function devShellDerivation(nix: string, top: string, env: NodeJS.Process
 		`defaultPackage.${system}`,
 	];
 	for (const output of outputs) {
-		const result = spawnSync(nix, ["eval", "--raw", `${top}#${output}.drvPath`], {
+		const apply = "d: { drv = d.drvPath; id = d.questShell or null; }";
+		const result = spawnSync(nix, ["eval", "--json", `${top}#${output}`, "--apply", apply], {
 			cwd: top,
 			env,
 			encoding: "utf8",
 			maxBuffer: 1 << 24,
 		});
 		if (result.error) throw result.error;
-		const path = result.stdout.trim();
-		if (result.status === 0 && /^\/\S+\.drv$/.test(path)) return path;
+		if (result.status === 0) {
+			const { drv, id } = JSON.parse(result.stdout) as { drv: unknown; id: unknown };
+			if (typeof drv === "string" && /^\/\S+\.drv$/.test(drv) && (id === null || typeof id === "string"))
+				return { derivation: drv, identity: id };
+		}
 		if (result.status !== 0 && /does not provide attribute/.test(result.stderr)) continue;
 		throw new Error(
 			`cannot evaluate ${output} to fingerprint the dev shell for the task cache; pass --no-cache to run without it:\n${result.stderr.trim()}`,

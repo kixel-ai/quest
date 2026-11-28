@@ -33,7 +33,7 @@ import {
 	type TaskResult,
 	type TreeFile,
 	cargoWorkspace,
-	devShellDerivation,
+	devShell,
 	digest,
 	inputFiles,
 	taskCache,
@@ -316,6 +316,12 @@ export function manifestProblems(read: (path: string) => RootFile): string[] {
  */
 export const DEV_SHELL = "QUEST_DEV_SHELL";
 
+/**
+ * The variable a `quest.lib.mkFlake` dev shell sets to its toolchain's identity, which `quest run` compares with the
+ * identity of the shell `nix develop` enters now, since `QUEST_DEV_SHELL` is checked only as the shell is entered.
+ */
+export const DEV_SHELL_ID = "QUEST_DEV_SHELL_ID";
+
 /** Whether `env` is a dev shell entered for the repository at `top`. */
 export function inDevShell(env: NodeJS.ProcessEnv, top: string): boolean {
 	const shell = env[DEV_SHELL];
@@ -388,14 +394,20 @@ export async function run(options: RunOptions, io: RunIO): Promise<number> {
 	const caching = options.cache && tasks.some((task) => task.cache);
 	// The cache fingerprints the flake's dev shell with Nix even from inside a dev shell.
 	const fingerprint = caching && tasks.some((task) => task.nix);
-	// This repository's dev shell, already entered, runs Nix tasks directly with no evaluation, except while the cache
-	// is in use: the entered shell may predate an edit to the flake, so every Nix task, a cached one's prerequisites
-	// included, runs in the shell the digests name.
-	const develop = (task: ManifestTask) => task.nix && (caching || !inDevShell(io.env, top));
+	const nix = fingerprint ? requireProgram("nix", io.env) : null;
+	const shell = nix === null ? null : devShell(nix, top, io.env);
+	// This repository's dev shell, already entered, runs Nix tasks directly. While the cache is in use, the entered
+	// shell may predate an edit to the flake, which `QUEST_DEV_SHELL`, checked as the shell was entered, cannot tell:
+	// every Nix task, a cached one's prerequisites included, runs in the shell the digests name, so the entered shell
+	// must carry the identity of the one `nix develop` enters now.
+	const direct =
+		inDevShell(io.env, top) &&
+		(shell === null || (shell.identity !== null && shell.identity === io.env[DEV_SHELL_ID]));
+	const develop = (task: ManifestTask) => task.nix && !direct;
 	const programs = {
 		quest: requireProgram("quest", io.env),
 		bash: requireProgram("bash", io.env),
-		nix: tasks.some(develop) || fingerprint ? requireProgram("nix", io.env) : null,
+		nix: nix ?? (tasks.some(develop) ? requireProgram("nix", io.env) : null),
 	};
 	// Sets the environment of a task run outside `nix develop`, whose dev shell has its own `env`. It runs by name,
 	// since a multi-call coreutils, which its resolved path can be, picks the tool by the name it runs as.
@@ -433,7 +445,6 @@ export async function run(options: RunOptions, io: RunIO): Promise<number> {
 	/** The digest of everything `unit` reads in `files`, or why no digest can name it, while the run uses the cache. */
 	let digestOf: ((unit: Unit, files: TreeFile[]) => { digest: string } | { uncached: string }) | null = null;
 	if (cache !== null) {
-		const shell = fingerprint ? devShellDerivation(programs.nix!, top, io.env) : null;
 		const cargoManifest = workspace === null ? null : readFileSync(join(top, "Cargo.toml"), "utf8");
 		digestOf = (unit, files) => {
 			const { task, crate } = unit;
@@ -459,7 +470,7 @@ export async function run(options: RunOptions, io: RunIO): Promise<number> {
 				// Raised whenever the digest's material changes meaning, so no earlier pass matches.
 				version: 2,
 				system: `${process.arch}-${process.platform}`,
-				shell: task.nix ? shell : null,
+				shell: task.nix ? shell!.derivation : null,
 				run: task.run,
 				environment: Object.entries(task.environment).sort(),
 				junit: task.junit,
