@@ -17,9 +17,11 @@ Decided 2026-11-23 (maintainer, `/quest-run`): "please stop doing evals",
 and drop only the quests' eval steps; drop only `AGENTS.md`'s eval rule).
 Reviewer routing is judged from real PRs instead: `quest usage`'s per-reviewer
 findings, share fixed, and cost, and the `## Caused by` escapes it lists
-against each culprit's reviewers. Excepted 2026-11-28 (maintainer,
-`/quest-plan`) for one replay of the stuck-agent advisor on merged PRs:
-[advise replay](/quest/m0/advise-replay.md).
+against each culprit's reviewers. Amended 2026-11-28 (maintainer, `/quest-plan`
+raising the bar): the `advise-replay.md` exception is deleted; instead, manual
+[post-hoc frontier PR audits](/quest/m0/audit-pr.md) rate real merged PRs'
+plans, decisions, and findings 0–10 as live production metrics (not synthetic
+evals).
 
 Decided 2026-11-22 (maintainer, `/quest-plan` in
 [kixel-ai/kixel.quest#104](https://github.com/kixel-ai/kixel.quest/pull/104)),
@@ -50,7 +52,8 @@ quorum runs. A high head waits for both: while either cannot run, its round
 fails as an outage (rejected: review with the one left). Excepted 2026-11-28
 (maintainer, `/quest-plan`): half of rung 3-4 PRs run Sol alone while the
 [second-seat ablation](/quest/m0/second-seat-ablation.md) measures what the
-second seat buys.
+second seat buys (parked later on 2026-11-28 while raising the review bar:
+"never lower rungs").
 Narrowed 2026-11-25 (maintainer, closing
 [kixel-ai/quest#898](https://github.com/kixel-ai/quest/pull/898) and
 [kixel-ai/quest#891](https://github.com/kixel-ai/quest/pull/891)): ✅ "keep it
@@ -70,7 +73,22 @@ risk-tier seating with one 7-rung `(size + risk)` reviewer ladder
 retired, and rungs `5`–`6` (`L high`, `XL med`, `XL high`) add `gemini-4-neon`
 via `agy` as a 3rd reviewer reusing `quest advise`'s
 read-only `agy` runner (rejected: a 15-cell 2D matrix; clamping `low`/`high`
-seats; keeping `low` unreviewed; 2 reviewers max without Neon). Planned in [Neon third reviewer](/quest/m0/review-third-seat.md) (the 7-rung Codex/Claude ladder landed first).
+seats; keeping `low` unreviewed; 2 reviewers max without Neon). Planned in [Neon and Astra top review rungs](/quest/m0/review-third-seat.md) (the 7-rung Codex/Claude ladder landed first).
+Amended 2026-11-28 (maintainer, `/quest-plan` raising the bar): ✅ Raise the
+decision and review bar across `quest` and `kixel.quest`: delete `afk merge`
+and stop `/quest-afk` from taking unilateral decisions or merges; block
+consequential choices in `## Waiting` and surface all minor local choices
+inline at merge pick with no numeric caps ([decision bar and afk](/quest/m0/decision-bar-and-afk.md));
+make writers adversarial in review and replace the fixed round-3 cap with
+cross-session score-progress and unresolved-dispute stalling that steps up `+1`
+rung on the unified ladder (including `gpt-6.2-astra` on rungs 6–7, never
+lowering a PR's rung mid-PR, parking [second-seat ablation](/quest/m0/second-seat-ablation.md))
+([stall detection and rung step-up](/quest/m0/advise-stop.md), [rung escalation A/B](/quest/m0/rung-escalation-ab.md));
+make `quest advise` strictly manual and offer `/quest-advise` in decision/pick
+prompts ([manual quest advise](/quest/m0/advise.md)); and post structured
+decision/agreement telemetry ([decision telemetry](/quest/m0/telemetry/decisions.md))
+and manual post-hoc 0–10 frontier PR audits ([audit-pr](/quest/m0/audit-pr.md))
+to Kixel Quest's R2 raw log.
 
 Decided 2026-11-21 (maintainer, `/quest-plan` in
 [kixel-ai/kixel.quest#85](https://github.com/kixel-ai/kixel.quest/pull/85)),
