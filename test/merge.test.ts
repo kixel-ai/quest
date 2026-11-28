@@ -1,6 +1,6 @@
-// The core's line merge against `git merge-file --diff3`, which it ports.
+// The core's line merge against `git merge-file --diff3`, which it ports, and against merge-ort itself.
 
-import { spawnSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -9,6 +9,7 @@ import { describe, expect, test } from "vitest";
 import { merge, render } from "../src/core";
 import { type Change, diff } from "../src/core/xdiff";
 import { tempDir } from "./fixture";
+import { gitHistory, repository } from "./git-history";
 
 /** Git's merge of the three texts, with the markers `render` writes by default. */
 function git(ours: string, base: string, theirs: string): string {
@@ -27,20 +28,44 @@ function git(ours: string, base: string, theirs: string): string {
 }
 
 /**
- * Git's histogram merge of the three texts, as merge-ort runs it: its clean text, or null when it conflicts. Its
- * conflict level is not merge-ort's, which shapes conflicts differently but leaves the same files clean.
+ * Git's merge of each case's ours, base, and theirs texts, as merge-ort runs it, all in one `git merge-tree`: each
+ * clean text, or null where it conflicts. Each case is a file in three trees one `git fast-import` writes, so the
+ * cases cost a few spawns, not a few each.
  */
-function histogram(ours: string, base: string, theirs: string): string | null {
-	const dir = tempDir();
-	const [o, b, t] = ["ours", "base", "theirs"].map((name) => join(dir, name));
-	writeFileSync(o, ours);
-	writeFileSync(b, base);
-	writeFileSync(t, theirs);
-	const merged = spawnSync("git", ["merge-file", "-p", "--diff-algorithm=histogram", o, b, t], {
-		encoding: "utf8",
-	});
-	if (merged.status === null || merged.status < 0 || merged.status > 127) throw new Error(merged.stderr);
-	return merged.status === 0 ? merged.stdout : null;
+async function ortMerges(cases: readonly (readonly [string, string, string])[]): Promise<(string | null)[]> {
+	const dir = repository();
+	const chunks: Buffer[] = [];
+	for (const [side, at] of [
+		["ours", 0],
+		["base", 1],
+		["theirs", 2],
+	] as const) {
+		chunks.push(
+			Buffer.from(`commit refs/heads/${side}\ncommitter Quest test <test@example.invalid> 0 +0000\ndata 0\n`),
+		);
+		cases.forEach((texts, i) => {
+			const body = Buffer.from(texts[at]);
+			chunks.push(Buffer.from(`M 100644 inline case-${i}\ndata ${body.length}\n`), body, Buffer.from("\n"));
+		});
+		chunks.push(Buffer.from("\n"));
+	}
+	execFileSync("git", ["-C", dir, "fast-import", "--quiet"], { input: Buffer.concat(chunks) });
+	// Renames off, since cases that share a text would otherwise pair up across paths.
+	const args = ["merge-tree", "--write-tree", "-z", "--name-only", "--no-messages", "-X", "no-renames"];
+	const merged = spawnSync("git", ["-C", dir, ...args, "--merge-base=base", "ours", "theirs"], { encoding: "utf8" });
+	if (merged.status !== 0 && merged.status !== 1) throw new Error(merged.stderr);
+	// The merged tree, then each conflicted path.
+	const [tree, ...paths] = merged.stdout.split("\0").filter(Boolean) as [string, ...string[]];
+	const conflicted = new Set(paths);
+	const history = gitHistory(dir);
+	const entries = await history.tree(tree);
+	return Promise.all(
+		cases.map(async (_, i) => {
+			const path = `case-${i}`;
+			if (conflicted.has(path)) return null;
+			return Buffer.from(await history.blob(entries.get(path)!.oid)).toString("utf8");
+		}),
+	);
 }
 
 /** Git's histogram diff of two texts, as the changes `diff` returns, read from its zero-context hunk headers. */
@@ -130,14 +155,17 @@ describe("merge", () => {
 		}
 	});
 
-	test("merges as git's histogram merge does on random edits, and differs from merge-file where git does", () => {
-		let differs = 0;
-		for (let seed = 1; seed <= 1500; seed++) {
-			const next = random(seed);
+	test("merges as git's histogram merge does on random edits, and differs from merge-file where git does", async () => {
+		const cases = Array.from({ length: 1500 }, (_, i) => {
+			const next = random(i + 1);
 			const base = Array.from({ length: next(25) }, () => word(next));
-			const [o, b, t] = [text(next, edit(next, base)), text(next, base), text(next, edit(next, base))];
-			const expected = histogram(o, b, t);
-			expect(ort(o, b, t), `seed ${seed}`).toBe(expected);
+			return [text(next, edit(next, base)), text(next, base), text(next, edit(next, base))] as const;
+		});
+		const merged = await ortMerges(cases);
+		let differs = 0;
+		for (const [i, [o, b, t]] of cases.entries()) {
+			const expected = merged[i];
+			expect(ort(o, b, t), `seed ${i + 1}`).toBe(expected);
 			const myers = merge(o, b, t);
 			if ((myers.every((chunk) => Array.isArray(chunk)) ? render(myers, 7, false) : null) !== expected) differs++;
 		}
@@ -160,7 +188,7 @@ describe("merge", () => {
 		}
 	});
 
-	test("settles a conflict whose sides end up the same, as merge-ort does and merge-file --diff3 does not", () => {
+	test("settles a conflict whose sides end up the same, as merge-ort does and merge-file --diff3 does not", async () => {
 		// Each found by search: the sides change overlapping base lines differently into the same lines.
 		const cases = [
 			["x\n\nc\nc\n}\nc\n", "x\nx\n\nb\nc\n}\n}\nc\n", "x\nx\n\nb\n}\nc\n}\nc\n"],
@@ -169,21 +197,19 @@ describe("merge", () => {
 			["x\nb\nb\nb\n\nb\nc\n", "}\na\nb\n\n\nb\nc\n", "}\na\nb\n\nb\nc\n"],
 			["c\nc\nc\n\n}\n}\n", "c\nc\n\n\n}\nx\n}\nx\n", "c\nc\nc\n\n}\nx\n}\nx\n"],
 		] as const;
-		for (const [o, b, t] of cases) {
-			expect(ort(o, b, t)).toBe(histogram(o, b, t));
-		}
+		expect(cases.map(([o, b, t]) => ort(o, b, t))).toEqual(await ortMerges(cases));
 	});
 
-	test("merges long, mostly rewritten files as git's histogram merge does", () => {
-		for (const seed of [7, 8]) {
+	test("merges long, mostly rewritten files as git's histogram merge does", async () => {
+		const cases = [7, 8].map((seed) => {
 			const next = random(seed);
 			// Few distinct lines, so many occur too often to anchor on and histogram falls back to Myers.
 			const base = Array.from({ length: 3000 }, () => String(next(seed === 7 ? 40 : 4)));
 			const side = () => base.map((line) => (next(3) === 0 ? String(next(40)) : line));
 			const join = (lines: string[]) => `${lines.join("\n")}\n`;
-			const [o, b, t] = [join(side()), join(base), join(side())];
-			expect(ort(o, b, t), `seed ${seed}`).toBe(histogram(o, b, t));
-		}
+			return [join(side()), join(base), join(side())] as const;
+		});
+		expect(cases.map(([o, b, t]) => ort(o, b, t))).toEqual(await ortMerges(cases));
 	});
 
 	test("matches git where its heuristics cut a costly diff", () => {
